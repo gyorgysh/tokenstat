@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Move one native terminal tree between viewers without duplicate parents.</summary>
 internal sealed class SharedTerminalTree
 {
     private readonly UIElement _content;

@@ -36,7 +36,6 @@ class ChatComposerSessionsTest {
         assertTrue(secondFiles.isEmpty())
         secondText = "unfinished second"
         secondFiles = listOf("report")
-        // A new screen acquires fresh delegates from the retained ViewModel store.
         var restored by store.text("account/host/project/chat-a")
         var restoredFiles by store.attachments("account/host/project/chat-a")
         assertEquals("unfinished first", restored)

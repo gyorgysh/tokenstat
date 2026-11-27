@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Read-only, short-lived previews shared by the sidebar and chat list.</summary>
 internal static class ChatPreviewCache
 {
     private static readonly ChatPreviewStore Store = new();
@@ -76,7 +75,7 @@ internal static class ChatPreviewCache
                 : await AppServices.Host.CallAsync("chat.eventPage", args);
             if (!token.IsCancellationRequested) Store.Store(workspace, chat, chunk, generation);
         }
-        catch { /* Speculation must never surface an error or start a turn. */ }
+        catch { }
         finally { Reading.Remove(key); }
     }
 }

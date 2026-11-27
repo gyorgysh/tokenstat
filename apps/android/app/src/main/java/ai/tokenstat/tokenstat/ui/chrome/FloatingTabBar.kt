@@ -50,29 +50,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/// One tab in the floating bar: label plus glyph.
 data class TabSpec(val label: String, val icon: ImageVector)
 
-/// The floating bar's share of the screen. The host draws the bar over the
-/// tab content, and every scrollable under it ends this far above the
-/// bottom edge, so the last row rests clear of the glass while scrolled
-/// rows pass behind it.
 object TabBarChrome {
-    /// Bar height plus its margins and breathing room.
     val contentBottomInset = 100.dp
 }
 
-/// The floating glass tab bar, matching the iOS 26 system bar the Apple
-/// client gets from `TabView`: a rounded translucent dock with a soft
-/// active pill, rather than the full-width Material strip. The wide layout
-/// keeps its rail; this is the phone bar.
-///
-/// Like iOS it minimises to a small pill on the left after a longer scroll
-/// down, and comes back at the top of the list or on a tap: `minimized` is
-/// driven by the screens through `TabBarMinimizeState` (see
-/// `TabBarMinimize.kt`), and tapping the pill asks the host to expand again
-/// through `onExpandRequest`. The height stays fixed so the content above
-/// never reflows mid-scroll.
 @Composable
 fun FloatingTabBar(
     selected: Int,
@@ -90,22 +73,11 @@ fun FloatingTabBar(
         animationSpec = if (reduceMotion) snap() else TsMotion.tunedSpring(0.45f, 0.8f),
         label = "tabMinimize",
     )
-    // A capsule at every width, so the minimise animation never passes
-    // through a rounded rectangle on its way to the pill.
     val barShape = RoundedCornerShape(percent = 50)
-    // Inset further than the old bar: what made the iOS dock read as a
-    // floating capsule was the margin around it, not the corner radius.
-    // The margin is what makes this read as a floating capsule rather than a
-    // strip, and on a narrow phone it is also the only width left to give the
-    // tabs. A 320dp display had "Projects" clipped to "Workspac" with both
-    // ends cut, so below that the inset gives some of itself back.
     val inset = if (LocalConfiguration.current.screenWidthDp < 400) 14.dp else 22.dp
     BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = inset).padding(bottom = 14.dp)) {
         val fullWidth = maxWidth
         val pillWidth = 64.dp
-        // What one tab gets, which decides whether the longest label fits.
-        // Scaled by the system font setting, so somebody who asked for large
-        // text gets the smaller step rather than a clipped word.
         val perTab = (fullWidth - 12.dp) / tabs.size.coerceAtLeast(1)
         val fontScale = LocalDensity.current.fontScale
         val labelSize = when {
@@ -114,19 +86,10 @@ fun FloatingTabBar(
             else -> 11.sp
         }
         val width = fullWidth - (fullWidth - pillWidth) * fraction
-        // Frosted, not see-through. The blur stops list rows being legible
-        // under the bar, but a blur alone still leaves the labels sitting on
-        // whatever happened to scroll past, so the tint has to give them a
-        // steady ground to read against. Legibility wins over the effect:
-        // you can still see colour and movement behind the glass, and you
-        // can always read the tabs.
         val glass = backdrop?.supported == true
         Surface(
             shape = barShape,
             color = colors.panel.copy(alpha = if (glass) 0.86f else 0.97f),
-            // A soft ambient shadow this large reads as a grey haze around
-            // the capsule and dirties the labels near its edge. Just enough
-            // lift to separate it from the list.
             shadowElevation = 3.dp,
             modifier = Modifier
                 .width(width)
@@ -137,9 +100,6 @@ fun FloatingTabBar(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.clip(barShape),
             ) {
-                // Fixed inner width from the left edge, so the tabs fade
-                // under the shrinking dock instead of being squashed into
-                // the pill or spilling past its rounded ends.
                 Row(
                     Modifier
                         .align(Alignment.CenterStart)
@@ -181,8 +141,6 @@ private fun MinimizedPill(
     onExpandRequest: () -> Unit,
 ) {
     val colors = LocalTsColors.current
-    // Fixed size: this box lives in the Scaffold's bottom bar, and a
-    // fillMaxSize here inflates the whole bar to full height.
     Box(
         Modifier
             .size(64.dp)
@@ -227,21 +185,10 @@ private fun RowScope.FloatingTab(
         animationSpec = if (reduceMotion) snap() else TsMotion.tunedSpring(0.45f, 0.7f),
         label = "tabIcon",
     )
-    // One capsule around the glyph and the label together. The old bar put
-    // the pill on the glyph alone and left the label outside it, which read
-    // as a highlighted icon with a caption rather than as a selected tab.
-    //
-    // The capsule is a layer behind the tab, not a clip on it. Clipped, its
-    // round ends cut the first and last letters of a long label such as
-    // "Repositories". The press ripple stays inside the capsule because it
-    // lives on that layer.
     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
         Box(
             Modifier
                 .matchParentSize()
-                // A rounded rectangle rather than a full capsule: the slot is
-                // nearly square, and a capsule's ends leave a long label
-                // sitting half outside the tint.
                 .clip(RoundedCornerShape(18.dp))
                 .background(colors.accentSoft.copy(alpha = pillAlpha))
                 .selectable(selected = selected, enabled = enabled, onClick = onClick, role = Role.Tab)

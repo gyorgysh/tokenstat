@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A saved revision has no repository actions. Closing returns to the exact
-/// query and selection that opened it, without contacting its host.
 struct WorkViewedChangeSheet: View {
     let change: WorkViewedChange
     var ownsSession: () -> Bool = { true }

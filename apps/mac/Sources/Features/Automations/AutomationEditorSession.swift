@@ -29,7 +29,6 @@ struct SavedAutomationDraft: Codable, Equatable, Sendable {
     }
 }
 
-/// One owner per account, computer, folder and job. A new job uses a folder key.
 @MainActor @Observable
 final class AutomationEditorSession {
     let target: AutomationEditorTarget
@@ -49,7 +48,6 @@ final class AutomationEditorSession {
     private(set) var errorMessage: String?
     private(set) var noticeMessage: String?
     private(set) var backends: [AgentBackend] = []
-    /// IANA name of the host scheduler clock. Empty until queue answers.
     private(set) var schedulerTimezone: String = ""
     private(set) var otherDraft: WorkbenchDraftFile<SavedAutomationDraft>.Record?
     private(set) var persistedFields: AutomationEditorDraft?
@@ -105,7 +103,6 @@ final class AutomationEditorSession {
             && saved.created == nil && fields.validation == nil
     }
 
-    /// A template never replaces writing restored from a previous visit.
     @discardableResult
     func applyTemplate(_ draft: AutomationEditorDraft) -> Bool {
         guard loaded, isCreate, !dirty, !creating, !working, otherDraft == nil,
@@ -278,7 +275,6 @@ final class AutomationEditorSession {
         await submitCreation(submission)
     }
 
-    /// Clears a finished create so the next New automation is a blank job.
     func finishCreated() async -> Automation? {
         guard let created = saved.created else { return nil }
         restoring = true

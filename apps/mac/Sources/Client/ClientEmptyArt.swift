@@ -8,11 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Which picture an empty screen draws.
-///
-/// One per surface, because "nothing here" is a different sentence in a folder
-/// with no sessions and a folder with no jobs. A shared tray glyph made all of
-/// them read as the same shrug.
 enum EmptyArtKind {
     case sessions
     case tasks
@@ -20,63 +15,26 @@ enum EmptyArtKind {
     case workflows
     case automations
     case changes
-    /// Previous commits, when the folder is a repository that has none yet.
     case history
-    /// The folder is not a git repository, so there is nothing to browse.
     case notGit
     case files
     case projects
-    /// The host has not answered yet. Deliberately not one of the others: a
-    /// question nobody replied to is not an empty answer.
     case waiting
-    /// A Mac has not answered a phone or iPad. The scene shows the outgoing
-    /// reach and the Remote Reach switch that must be changed on the Mac.
     case remoteReach
-    /// Cross-device SSH vault, shown when the plan does not include it.
     case vault
-    /// Remote screen, shown when the plan does not include Legend.
     case screen
-    /// Another computer has not let this device open its work yet.
     case workspaceAccess
-    /// A folder with no chats yet. Carries the face the next conversation in
-    /// it will have, so the character on the empty screen is the one that
-    /// actually turns up.
     case chat(seed: UInt64)
-    /// No machine has been connected yet, so there is nothing to work on. The
-    /// scene is a server waiting rather than an empty tray: the thing that is
-    /// missing is a machine, and the screen should look like the offer to get
-    /// one rather than like a shrug.
     case noMachine
-    /// A machine being set up. The bar fills because something is happening,
-    /// and it is the same shape as the one that ends up on the finished card.
     case provisioning
-    /// A machine that is set up, on, and reachable.
     case serverReady
-    /// This device reaching a machine. The handshake travels an arc from the
-    /// phone to the server and the server lights up as it arrives. For setup
-    /// doors and "nothing connected yet" states: the thing missing is the
-    /// connection being made, not a machine waiting.
     case connect
-    /// Door one: the computer. A laptop with the download coming down onto
-    /// it, because that is the whole job of the screen below it.
     case macDoor
-    /// Door three: a cloud machine. Servers are read out of the provider
-    /// into the rack, which is what importing means here.
     case cloudDoor
-    /// The renting guide. A price tag next to a rack: renting is the one
-    /// setup screen about money, so it is the one that draws it.
     case rentServer
-    /// The install line, run by hand. A terminal with a pasted command and
-    /// a caret, distinct from the empty terminal on the sessions screen.
     case byHand
-    /// Insights with nothing on the account yet. Bars rising, the last one
-    /// still a dashed slot: the first counters are arriving, not absent.
     case firstBars
-    /// Getting started. This device ready with its check, the machine still
-    /// a quiet outline beside it: step one done, step two pending.
     case getCounting
-    /// A paid gate. The phone reaches a folder and a lock sits on the path:
-    /// seeing usage is shared, opening work is not.
     case remoteGate
 }
 
@@ -91,8 +49,6 @@ struct ClientEmptyArt: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// One canvas for every scene, so a screen does not change height when its
-    /// picture changes.
     static let size = CGSize(width: 128, height: 84)
 
     var body: some View {
@@ -133,15 +89,7 @@ struct ClientEmptyArt: View {
     }
 }
 
-// MARK: - Shared parts
 
-/// The stroke every scene draws with. One weight, round joins, so the
-/// pictures read as one hand.
-/// The palette and the stroke every drawn scene in the client shares.
-///
-/// Internal rather than private to this file, because the setup wizard draws
-/// its own scenes and a second copy of these three values is a copy that
-/// disagrees the first time the accent moves.
 enum Ink {
     static let width: CGFloat = 1.7
     static var style: StrokeStyle {
@@ -153,7 +101,6 @@ enum Ink {
     static var second: Color { Theme.secondary }
 }
 
-/// A card outline, the shape most of these are built from.
 struct ArtFrame: View {
     var radius: CGFloat = 8
     var color: Color = Ink.quiet
@@ -164,7 +111,6 @@ struct ArtFrame: View {
     }
 }
 
-/// A line of text that is not there yet.
 struct Ghost: View {
     var width: CGFloat
     var color: Color = Ink.quiet
@@ -175,10 +121,6 @@ struct Ghost: View {
 }
 
 
-/// One drawing in three states, because they are three moments of the same
-/// thing: a server with nothing on it, a server being set up, and a server
-/// that answers. Three separate scenes would have drifted into three different
-/// machines, and somebody walking the wizard sees all three in a row.
 private struct ServerScene: View {
     enum State { case waiting, working, ready }
 
@@ -205,7 +147,6 @@ private struct ServerScene: View {
             .overlay { Ghost(width: 10, color: Ink.second) }
     }
 
-    /// Nothing, a signal, or a settled line. The link is the whole story here.
     private var link: some View {
         HStack(spacing: 4) {
             ForEach(0..<3, id: \.self) { index in
@@ -230,14 +171,10 @@ private struct ServerScene: View {
         case .waiting: 0.5
         case .ready: 1
         case .working:
-            // A wave rather than three blinking together, so it reads as
-            // something travelling rather than as three lights.
             reduceMotion ? 0.7 : 0.35 + 0.65 * max(0, 1 - abs(phase * 3 - CGFloat(index)))
         }
     }
 
-    /// A rack: three units, and a light on the top one that only comes on when
-    /// the machine actually answers.
     private var rack: some View {
         VStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { unit in
@@ -267,10 +204,7 @@ private struct ServerScene: View {
     }
 }
 
-// MARK: - Setup doors
 
-/// A four-point spark, the accent that makes a scene pop. Static by design:
-/// each scene already carries its one loop.
 private struct Sparkle: View {
     var size: CGFloat = 10
 
@@ -301,9 +235,6 @@ private struct Sparkle: View {
     }
 }
 
-/// Door one: the computer. A laptop with the download coming down onto it.
-///
-/// The arrow bobs above the screen. The app lands on the computer.
 private struct MacDoorScene: View {
     var reduceMotion: Bool
     @State private var lowered = false
@@ -336,11 +267,6 @@ private struct MacDoorScene: View {
     }
 }
 
-/// Door three: a cloud machine. Servers are read out of the provider into
-/// the rack below, which is what importing means on this screen.
-///
-/// Three drops fall in turn and the loop restarts as one arrives, so the
-/// movement reads as a steady intake.
 private struct CloudDoorScene: View {
     var reduceMotion: Bool
     @State private var fall: CGFloat = 0
@@ -385,9 +311,6 @@ private struct CloudDoorScene: View {
         }
     }
 
-    /// A cloud the drops fall out of: a round body with a bump on top. The
-    /// bump is filled, so it covers the body's line where the two meet and
-    /// the silhouette stays one shape.
     private var cloud: some View {
         Capsule()
             .fill(Theme.background)
@@ -406,8 +329,6 @@ private struct CloudDoorScene: View {
             }
     }
 
-    /// Each drop trails the one before by a third of the loop, so they fall
-    /// in turn. Reduce Motion parks them mid-fall.
     private func progress(_ drop: Int) -> CGFloat {
         guard !reduceMotion else { return 0.5 }
         return (fall + CGFloat(drop) / CGFloat(drops)).truncatingRemainder(dividingBy: 1)
@@ -417,18 +338,12 @@ private struct CloudDoorScene: View {
         progress(drop) * height
     }
 
-    /// A drop lands by fading, which is what keeps the loop restart from
-    /// reading as a blink.
     private func opacity(_ drop: Int) -> CGFloat {
         let progress = progress(drop)
         return progress > 0.8 ? max(0, 1 - (progress - 0.8) / 0.2) : 1
     }
 }
 
-/// The renting guide. A price tag next to a rack: renting is the one setup
-/// screen about money, so it is the one that draws it.
-///
-/// The tag hangs off upright and sways, the way a tag on a string does.
 private struct RentScene: View {
     var reduceMotion: Bool
     @State private var swayed = false
@@ -469,9 +384,6 @@ private struct RentScene: View {
     }
 }
 
-/// The install line, run by hand. A terminal holding a pasted command, with
-/// the caret blinking at its end. Two command lines and a paste badge tell
-/// it apart from the empty terminal on the sessions screen.
 private struct ByHandScene: View {
     var reduceMotion: Bool
     @State private var on = false
@@ -514,8 +426,6 @@ private struct ByHandScene: View {
     }
 }
 
-/// Insights with nothing on the account yet. Bars rising, the last one
-/// still a dashed slot: the first counters are arriving, not absent.
 private struct FirstBarsScene: View {
     var reduceMotion: Bool
     @State private var filling = false
@@ -553,9 +463,6 @@ private struct FirstBarsScene: View {
     }
 }
 
-/// Getting started. This device ready with its check, the machine still a
-/// quiet outline beside it: step one done, step two pending. The rack's
-/// light breathes while the machine is missing.
 private struct GetCountingScene: View {
     var reduceMotion: Bool
     @State private var waiting = false
@@ -601,8 +508,6 @@ private struct GetCountingScene: View {
     }
 }
 
-/// A paid gate. The phone reaches a folder and a lock sits on the path.
-/// The badge swells gently, so the closed gate still moves.
 private struct RemoteGateScene: View {
     var reduceMotion: Bool
     @State private var closed = false
@@ -646,8 +551,6 @@ private struct RemoteGateScene: View {
 }
 
 
-/// A terminal waiting for its first command: the frame, a prompt, a caret that
-/// blinks the way the real one does.
 private struct SessionsScene: View {
     var reduceMotion: Bool
     @State private var on = false
@@ -682,8 +585,6 @@ private struct SessionsScene: View {
 }
 
 
-/// Three lanes with one card in the first: the board before anybody has moved
-/// anything. The card leans toward the lane it would go to next.
 private struct TasksScene: View {
     var reduceMotion: Bool
     @State private var nudged = false
@@ -721,7 +622,6 @@ private struct TasksScene: View {
 }
 
 
-/// A sheet with a folded corner and one line still being written.
 private struct NotesScene: View {
     var reduceMotion: Bool
     @State private var written = false
@@ -756,7 +656,6 @@ private struct NotesScene: View {
         }
     }
 
-    /// The page, with the corner taken off rather than drawn over.
     private var sheet: Path {
         var path = Path()
         path.move(to: CGPoint(x: 0, y: 0))
@@ -770,9 +669,6 @@ private struct NotesScene: View {
 }
 
 
-/// Three nodes and the run that has not passed through them: the connectors are
-/// dashed and the dashes travel, so the graph reads as a route rather than a
-/// diagram.
 private struct WorkflowsScene: View {
     var reduceMotion: Bool
     @State private var travelled = false
@@ -817,8 +713,6 @@ private struct WorkflowsScene: View {
 }
 
 
-/// A clock with nothing on it: the face is drawn and the hand sweeps, and the
-/// row underneath where a job would sit is still an outline.
 private struct AutomationsScene: View {
     var reduceMotion: Bool
     @State private var swept = false
@@ -843,7 +737,6 @@ private struct AutomationsScene: View {
             }
             .frame(width: 46, height: 46)
 
-            // The empty slot. Dashed, because it is where something would be.
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(
                     Ink.quiet,
@@ -858,8 +751,6 @@ private struct AutomationsScene: View {
 }
 
 
-/// A clean working tree: the gutter is there, every line is unchanged, and the
-/// tick settles over it.
 private struct ChangesScene: View {
     var reduceMotion: Bool
     @State private var settled = false
@@ -898,9 +789,6 @@ private struct ChangesScene: View {
 }
 
 
-/// A commit list with nothing in it yet: the rail is there, the newest seat is
-/// still an outline, and it breathes so the screen reads as waiting rather
-/// than as a diagram.
 private struct HistoryScene: View {
     var reduceMotion: Bool
     @State private var lit = false
@@ -955,9 +843,6 @@ private struct HistoryScene: View {
 }
 
 
-/// A folder that has no history behind it: the branch is drawn and never
-/// meets the folder, so the picture is the missing connection rather than an
-/// empty list.
 private struct NotGitScene: View {
     var reduceMotion: Bool
     @State private var travelled = false
@@ -1052,8 +937,6 @@ private struct FilesScene: View {
         .frame(width: ClientEmptyArt.size.width, height: 78, alignment: .bottom)
     }
 
-    /// A tab along the top edge, then the body. One path, so the fill and the
-    /// stroke cannot disagree about where the folder is.
     private var folder: Path {
         var path = Path()
         path.move(to: CGPoint(x: 1, y: 41))
@@ -1068,8 +951,6 @@ private struct FilesScene: View {
 }
 
 
-/// The question went out and nothing has come back: arcs leaving a machine, and
-/// no answer drawn, because there is not one.
 private struct WaitingScene: View {
     var reduceMotion: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -1101,9 +982,6 @@ private struct WaitingScene: View {
 }
 
 
-/// A phone calling a Mac whose Remote Reach switch is still off. The pulse
-/// ends at the switch, making this an actionable setup state rather than a
-/// vague network failure. Reduce Motion gets its final, still frame.
 private struct RemoteReachScene: View {
     var reduceMotion: Bool
     @State private var sending = false
@@ -1164,8 +1042,6 @@ private struct RemoteReachScene: View {
 }
 
 
-/// Two devices drawing together around a lock: the vault before this plan
-/// includes it.
 private struct VaultScene: View {
     var reduceMotion: Bool
     @State private var together = false
@@ -1225,7 +1101,6 @@ private struct VaultScene: View {
 }
 
 
-/// A display with a scan line, the picture that is missing until Legend.
 private struct ScreenScene: View {
     var reduceMotion: Bool
     @State private var scan = false
@@ -1258,7 +1133,6 @@ private struct ScreenScene: View {
     }
 }
 
-/// One arc of a signal leaving something, opening to the right.
 private struct Arc: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -1274,12 +1148,6 @@ private struct Arc: Shape {
 }
 
 
-/// A folder waiting on a key.
-///
-/// The one empty state in the client that is about permission rather than
-/// about emptiness, so the picture is a closed thing and something that opens
-/// it, drifting in rather than turning: nothing is locked against this person,
-/// it simply has not been handed over yet.
 private struct WorkspaceAccessScene: View {
     let reduceMotion: Bool
     @State private var settled = false
@@ -1289,7 +1157,6 @@ private struct WorkspaceAccessScene: View {
             ArtFrame(radius: 10)
                 .frame(width: 74, height: 54)
                 .offset(x: -14, y: 6)
-            // The folder's tab, so the shape reads as a folder and not a card.
             RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .strokeBorder(Ink.quiet, style: Ink.style)
                 .frame(width: 26, height: 10)

@@ -8,13 +8,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/// What a push may carry, and nothing else.
-///
-/// Mirrors `tokenstat-sync::push::Reason` and the Apple client's
-/// `NotificationOpen.parse`: a fixed reason plus the id of the machine that
-/// triggered it. The sentence is composed on this device from the reason, so
-/// no folder name, prompt, path, or any other free text can travel in the
-/// payload. Anything off the allowlist is dropped, never rendered.
 object PushPayload {
     const val RUN_FINISHED = "run.finished"
     const val RUN_FAILED = "run.failed"
@@ -33,12 +26,6 @@ object PushPayload {
 
     data class Delivery(val reason: String, val machine: String?)
 
-    /// Read a delivery out of an FCM data map. Accepts the keys flat
-    /// (`reason`, `machine`) or nested under `ts`, including a JSON-encoded
-    /// `ts` string, the way the Apple client reads `userInfo["ts"]`.
-    /// Returns null for unknown reasons, missing reasons, and anything that
-    /// is not a string map, so a tap must not crash the app because a server
-    /// delivered something this client did not write.
     fun parse(data: Map<String, String>): Delivery? {
         val nested = data["ts"]?.let { raw ->
             runCatching {
@@ -56,10 +43,6 @@ object PushPayload {
         return Delivery(reason, machine)
     }
 
-    /// Whether tapping this delivery should resolve a destination after the
-    /// directory refreshes. Matches the Apple parse: chat reasons and a run
-    /// waiting on input name a conversation to find, everything else only
-    /// informs.
     fun opensWork(reason: String): Boolean = when (reason) {
         CHAT_FINISHED, CHAT_FAILED, RUN_NEEDS_INPUT -> true
         else -> false
@@ -67,8 +50,6 @@ object PushPayload {
 
     fun waiting(reason: String): Boolean = reason == RUN_NEEDS_INPUT
 
-    /// The banner text, composed here from the reason. The machine id is
-    /// never shown: it names a key, not a computer.
     fun title(reason: String): String = when (reason) {
         RUN_FINISHED -> L10n.text("android.pushpayload.run_finished.22488bd9")
         RUN_FAILED -> L10n.text("android.pushpayload.run_failed.97fddf2d")

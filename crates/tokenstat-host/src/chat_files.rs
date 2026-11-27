@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Bounded, resumable attachment transfers. All bytes stay in chat storage.
 use super::*;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom};
@@ -52,8 +51,7 @@ pub(super) fn open_regular(path: &Path) -> Result<fs::File, String> {
         options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
     }
     let file = options.open(path).map_err(|e| e.to_string())?;
-    // Validate the opened object too: the pathname can change after regular().
-    // In particular, a no-follow Windows handle can name a reparse point.
+
     let metadata = file.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err("invalid attachment file".into());
@@ -148,7 +146,7 @@ fn save_upload(path: &Path, upload: &Upload) -> Result<(), String> {
             &temporary,
             &serde_json::to_vec(upload).map_err(|e| e.to_string())?,
         )?;
-        // FlushFileBuffers on Windows requires a writable handle.
+
         OpenOptions::new()
             .write(true)
             .open(&temporary)
@@ -239,10 +237,7 @@ impl Store {
     }
     fn upload_directory(&self, id: &str) -> Result<PathBuf, String> {
         let chat = self.verified_append_directory(id)?;
-        // New chats exist in the index before their first turn creates a
-        // transcript. Attachments must be able to initialize storage first.
-        // The caller holds the lifecycle lock and verification above refuses
-        // conversations removed from the persisted index.
+
         fs::create_dir_all(&chat).map_err(|e| e.to_string())?;
         directory(&chat)?;
         let path = chat.join("transfers");
@@ -299,7 +294,7 @@ impl Store {
         let mut matching = None;
         let mut reserved = 0u64;
         let mut active = 0usize;
-        // Expired incomplete uploads never consume a permanent staging budget.
+
         for (index, entry) in fs::read_dir(&root).map_err(|e| e.to_string())?.enumerate() {
             if index >= 4096 {
                 return Err("this conversation has too many transfer records".into());
@@ -338,7 +333,7 @@ impl Store {
                 }
             }
         }
-        // A lost start acknowledgement must not consume another reservation.
+
         if let Some((transfer, offset)) = matching {
             return Ok(json!({"transferId":transfer,"offset":offset,"chunkBytes":CHUNK_BYTES}));
         }
@@ -436,7 +431,6 @@ impl Store {
                 return Err("the repeated file chunk changed".into());
             }
         } else {
-            // Bytes beyond the durable offset can be left by an interrupted save.
             file.set_len(upload.offset).map_err(|e| e.to_string())?;
             file.seek(SeekFrom::Start(offset))
                 .map_err(|e| e.to_string())?;
@@ -462,7 +456,7 @@ impl Store {
         }
         let destination = self.attachment_path(id, &upload.attachment.id, &upload.attachment.name);
         let part = path.with_extension("part");
-        // A helper can die after rename, before recording completion.
+
         let source = if part.exists() { &part } else { &destination };
         if hash_file(source)? != upload.sha256 {
             return Err("file integrity check failed; choose the file again".into());
@@ -621,8 +615,7 @@ mod tests {
     fn first_message_attachments_create_storage_before_a_turn_starts() {
         let (_temp, store) = fixture();
         let chat_directory = store.root.join("file-test");
-        // create() persists the conversation index only. A send held for
-        // sign-in has no transcript or per-conversation directory yet.
+
         fs::remove_dir(&chat_directory).unwrap();
         assert!(store.file_capabilities("file-test").is_ok());
         assert!(!chat_directory.exists());
@@ -653,8 +646,7 @@ mod tests {
         let (_temp, store) = fixture();
         let chat_directory = store.root.join("file-test");
         fs::remove_dir(&chat_directory).unwrap();
-        // Another host removes the persisted chat while this Store still
-        // has its old in-memory index.
+
         fs::write(
             store.root.join("conversations.json"),
             br#"{"conversations":[]}"#,

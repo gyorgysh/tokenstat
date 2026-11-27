@@ -132,7 +132,7 @@ internal sealed partial class ScreenPage
             if (opened && id is not null && _accountGeneration == AppServices.AccountGeneration)
             {
                 try { await RemoteWorkspaces.CallOnPeerAsync(_peer, "screen.transfer.cancel", new JsonObject { ["id"] = id }); }
-                catch { /* A lost cancel leaves the host's resumable partial file. */ }
+                catch { }
             }
         }
         catch (Exception error)

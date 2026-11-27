@@ -2,7 +2,6 @@
 import Darwin
 import Foundation
 
-// MARK: - The unix socket
 
 /// A daemon on this machine, over its unix socket.
 ///
@@ -17,43 +16,14 @@ import Foundation
 /// Framing is the daemon's: one JSON request per line, one response per line,
 /// with the request id echoed back.
 final class SocketTransport: Transport, @unchecked Sendable {
-    /// Idle connections, checked out for the length of one call.
-    ///
-    /// A connection is not shared between concurrent calls even though the ids
-    /// would allow it. Demultiplexing responses would mean a reader thread, a
-    /// pending table and a timeout policy, to save a file descriptor on a
-    /// machine that has thousands. The daemon already runs a thread per
-    /// connection, and a slow `scan` on one connection is exactly what must not
-    /// block a keystroke on another.
     private let lock = NSCondition()
     private var idle: [Connection] = []
     private var live = 0
 
-    /// Kept small. Terminal polling, the file watcher and a report can be in
-    /// flight together, and anything past that is a burst that can wait its
-    /// turn rather than a reason to hold more descriptors open forever.
     private static let maxIdle = 8
 
-    /// Hard ceiling on connections, idle or busy.
-    ///
-    /// Without one, a burst opens a connection per concurrent call and the
-    /// daemon spawns a thread for each, so a screen that polls hard turns into
-    /// steady thread churn on the host. Callers past the ceiling wait for one
-    /// to come back rather than opening the next.
     private static let maxLive = 16
 
-    /// How much of that ceiling calls to another machine may hold at once.
-    ///
-    /// A remote call is a different animal from a local one. It leaves the
-    /// daemon for the relay, and a machine that has gone to sleep with the
-    /// socket still open is not noticed until the relay's keepalive gives up,
-    /// so the call can hold its connection for the better part of a minute
-    /// while a local one takes milliseconds. Without a share of its own, a
-    /// handful of those took every connection in the pool and the local app
-    /// froze: terminals stopped drawing, screens stopped filling, all of it
-    /// waiting behind another computer that was not answering.
-    ///
-    /// Ten slots therefore always remain for work on this machine.
     private static let maxRemoteLive = 6
 
     private var remoteLive = 0
@@ -68,11 +38,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
         self.expectedProtocolVersion = expectedProtocolVersion
     }
 
-    /// Open a connection, or nil when nothing is listening.
-    ///
-    /// This is the probe as well as the constructor: a socket file left behind
-    /// by a killed daemon exists but refuses connections, so the only honest
-    /// test of "is a host running" is connecting to it.
     static func connecting(to path: String, expectedProtocolVersion: String? = nil) -> SocketTransport? {
         guard let probe = try? Connection(path: path) else { return nil }
         let transport = SocketTransport(path: path, expectedProtocolVersion: expectedProtocolVersion)
@@ -82,34 +47,18 @@ final class SocketTransport: Transport, @unchecked Sendable {
     }
 
     func call(method: String, params: String, patience: TimeInterval) throws -> String {
-        // Remote calls queue among themselves rather than against the whole
-        // pool. See `maxRemoteLive`.
         let remote = Self.isRemote(method, params)
         if remote { try beginRemote(patience: patience) }
         defer { if remote { endRemote() } }
 
         let request = Self.line(method: method, params: params)
 
-        // One retry, and only on a connection taken from the pool. A daemon
-        // that restarted leaves the pooled descriptors dead, and the first call
-        // after that is not a failure the user should ever see. A freshly
-        // opened connection failing is a real failure and is reported.
-        //
-        // A connection that timed out is **not** retried and **not** returned
-        // to the pool. The daemon may still be working on that request, and its
-        // answer would arrive on the wire in front of the next call's, so the
-        // socket is finished even though nothing about it failed.
 
-        // Whether a slot is already reserved for a fresh connection: `acquire`
-        // reserves one when it hands back no pooled connection.
         var reserved = false
         if let pooled = try acquire(patience: patience) {
             do {
                 pooled.patience = patience
                 let response = try roundTrip(request, method: method, on: pooled)
-                // A refusal at the daemon's ceiling is a well-formed answer on
-                // a socket the daemon has already closed. Keeping it would
-                // hand the next caller a dead connection to discover.
                 release(pooled, reusable: !Self.isBusyRefusal(response))
                 return response
             } catch let error as ProtocolMismatch {
@@ -126,9 +75,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
             reserved = true
         }
 
-        // A pooled attempt that failed released its slot; a retry on a fresh
-        // connection needs one of its own, or `release` would give back a slot
-        // that was never counted and the ceiling would erode.
         if !reserved {
             try reserve(patience: patience)
         }
@@ -154,20 +100,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
         } catch {
             release(fresh, reusable: false)
             if Self.isMutating(method, params), fresh.wroteRequestBytes { throw Self.uncertainSend() }
-            // A connection that was alive long enough to be opened and then
-            // died before answering is a daemon that went away mid-call. The
-            // same situation as a refused connect, and the bridge repairs it
-            // the same way. A raw transport error must never reach a screen
-            // as "The operation couldn't be completed".
             throw Self.unreachable(path: path)
         }
     }
 
-    /// One-shot calls a person is waiting on: opening a terminal is a click,
-    /// and it must not queue behind a dozen sessions polling for output when
-    /// the pool is saturated. A fresh connection is opened for the call and
-    /// closed afterwards, so the daemon's thread count only grows by the
-    /// number of people clicking, never by pollers.
     func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String {
         let request = Self.line(method: method, params: params)
         reserveUrgent()
@@ -196,14 +132,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
     }
 
-    /// Check the actual connection, including every replacement after a host
-    /// restart. A launch-time probe cannot authorize a later socket's writes.
     private func roundTrip(_ request: Data, method: String, on connection: Connection) throws -> String {
         if method != "protocol", !connection.verifiedProtocol,
            let expectedProtocolVersion, !expectedProtocolVersion.isEmpty {
             let response = try connection.probeProtocol(Self.line(method: "protocol", params: "{}"))
-            // A busy host has already closed this connection. Let the bridge
-            // apply its ordinary bounded backoff without claiming an upgrade.
             if Self.isBusyRefusal(response) { return response }
             struct Reply: Decodable {
                 struct Spoken: Decodable { let protocolVersion: String }
@@ -229,15 +161,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
         .core(code: "delivery_unknown", message: L10n.text("apple.sockettransport.the_connection_closed_before_message_deliv.f49363c3"))
     }
 
-    /// Methods whose re-delivery after a lost answer would apply the same work
-    /// a second time.
-    ///
-    /// A conservative list rather than a rule about verbs: anything not named
-    /// here retries on a fresh connection as before, which is what a read
-    /// needs and what a repeated idempotent write survives. A named method
-    /// whose request reached the wire but lost its answer throws
-    /// `delivery_unknown` instead, because sending it again could commit,
-    /// merge, delegate or type the same thing twice.
     private static let mutatingMethods: Set<String> = [
         "chat.send", "chat.compact", "chat.steerSend",
         "workspace.commit",
@@ -273,9 +196,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
         "ssh.vault.recovery.rotate",
     ]
 
-    /// Whether a lost answer for this call must be reported rather than
-    /// retried. `remote.call` carries the peer's method in its params, and a
-    /// peer's write is still a write.
     private static func isMutating(_ method: String, _ params: String) -> Bool {
         if mutatingMethods.contains(method) { return true }
         guard method == "remote.call", let data = params.data(using: .utf8),
@@ -290,11 +210,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
         )
     }
 
-    /// The host is gone: connection refused, or a fresh connection died before
-    /// answering. The bridge treats this as repairable and retries after
-    /// restarting the launch agent, so the words say what happened and that
-    /// the app is on it, not what the user should do. They only surface when
-    /// the repair also failed.
     private static func unreachable(path: String) -> BridgeError {
         BridgeError.core(
             code: "host_unreachable",
@@ -302,13 +217,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
         )
     }
 
-    /// Whether the daemon refused this call because it is at its ceiling.
-    ///
-    /// It answers and then closes, so the connection is spent whatever the
-    /// caller does about the answer itself. The substring is only a cheap
-    /// filter; the verdict comes from the decoded envelope, so a successful
-    /// result that happens to quote the code is not mistaken for a refusal and
-    /// sent again.
     private static func isBusyRefusal(_ response: String) -> Bool {
         guard response.contains("host_busy") else { return false }
         struct Failure: Decodable { let code: String }
@@ -322,29 +230,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
         return !refusal.ok && refusal.error?.code == "host_busy"
     }
 
-    /// Whether this call's work happens on another machine.
-    ///
-    /// Two ways for it to. `remote.call` says so in the method name, along
-    /// with `remote.nudge` and the rest of that family. The other way is
-    /// quieter: a session or folder that lives on a peer is addressed by a
-    /// namespaced id (`remote:<key>:<id>`), and `pty.info`, `pty.read` and
-    /// their neighbours forward those over the tunnel while looking exactly
-    /// like local calls from here. Those are the ones a terminal polls several
-    /// times a second, so missing them would leave the share this is for
-    /// mostly unused.
     private static func isRemote(_ method: String, _ params: String) -> Bool {
         if method.hasPrefix("remote.") { return true }
-        // A value that *starts* a JSON string, not the text `remote:`
-        // anywhere in one. Params are built by `JSONSerialization`, so a
-        // namespaced id always reads `"key":"remote:…"`, while a person
-        // typing `"remote:` into a terminal or saving a file that mentions it
-        // is an ordinary local call and must not spend the remote share.
         if params.contains(":\"remote:") { return true }
-        // A port forward names the machine instead of carrying its id.
         return params.contains("\"peer\":")
     }
 
-    /// Take one of the remote calls' share of the pool, or wait for one.
     private func beginRemote(patience: TimeInterval) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -360,23 +251,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
     private func endRemote() {
         lock.lock()
         remoteLive -= 1
-        // Broadcast rather than signal: the waiters are a mix of calls waiting
-        // for a connection and remote calls waiting for a share, and waking
-        // the wrong one would leave this slot unused until the next release.
         lock.broadcast()
         lock.unlock()
     }
 
-    /// A connection to use for one call: a pooled one, a new one's reserved
-    /// slot, or a wait for a free slot.
-    ///
-    /// Returns a pooled connection, or nil with a slot already reserved for a
-    /// fresh one. Reserving under the lock is what keeps a burst from opening
-    /// one connection per thread past the ceiling: the count moves before the
-    /// lock is released, not after the connect finishes.
-    ///
-    /// Throws only when the wait for a free slot ran out, which is the same
-    /// silence the call itself would have reported.
     private func acquire(patience: TimeInterval) throws -> Connection? {
         lock.lock()
         defer { lock.unlock() }
@@ -387,28 +265,16 @@ final class SocketTransport: Transport, @unchecked Sendable {
                 live += 1
                 return nil
             }
-            // Every connection is busy. Waiting is right: opening more is what
-            // turns a burst into a thread storm on the daemon.
             if !lock.wait(until: deadline) {
                 throw Self.silence(path: path, patience: patience)
             }
         }
     }
 
-    /// Open a connection for a slot reserved by `acquire`, `reserve` or
-    /// `reserveUrgent`. The caller owns the reservation: a failed connect must
-    /// call `abandonReservation`, a finished call must go through `release`.
     private func open() throws -> Connection {
         try Connection(path: path)
     }
 
-    /// Take a slot for a fresh connection, waiting for one when every
-    /// connection is busy.
-    ///
-    /// `acquire` reserves its own slot when it returns nil; this is for the
-    /// retry after a pooled connection failed, where the failed connection's
-    /// release already gave the pooled slot back. The caller owns the
-    /// reservation exactly as it would own `acquire`'s.
     private func reserve(patience: TimeInterval) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -421,17 +287,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
         live += 1
     }
 
-    /// Urgent calls bypass the ceiling but not the accounting: the daemon
-    /// still runs a thread per connection, so the slot is counted from before
-    /// the connect, exactly like `acquire`.
     private func reserveUrgent() {
         lock.lock()
         live += 1
         lock.unlock()
     }
 
-    /// Give back a reservation whose connect failed, before any connection
-    /// existed to release.
     private func abandonReservation() {
         lock.lock()
         live -= 1
@@ -442,9 +303,6 @@ final class SocketTransport: Transport, @unchecked Sendable {
     private func release(_ connection: Connection, reusable: Bool) {
         lock.lock()
         defer {
-            // Somebody may be waiting for this slot, whether it came back as a
-            // reusable connection or as a closed one. Broadcast, because the
-            // waiters are a mix: see `endRemote`.
             lock.broadcast()
             lock.unlock()
         }
@@ -455,19 +313,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
         }
     }
 
-    /// Build the request line.
-    ///
-    /// `params` is already JSON, so it is spliced rather than re-encoded: it can
-    /// hold an entire file's text, and round-tripping that through
-    /// `JSONSerialization` twice per keystroke is real work for no gain.
     private static func line(method: String, params: String) -> Data {
         let body = params.isEmpty ? "{}" : params
         let name = String(
             decoding: (try? JSONSerialization.data(withJSONObject: [method])) ?? Data(),
             as: UTF8.self
         )
-        // `["method"]` minus its brackets is the escaped string literal, which
-        // is cheaper than reaching for an encoder to quote one identifier.
         let quoted = name.dropFirst().dropLast()
         var line = Data("{\"id\":0,\"method\":\(quoted),\"params\":\(body)}".utf8)
         line.append(0x0A)
@@ -475,26 +326,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
     }
 }
 
-// MARK: - One connection
 
-/// A connected unix socket, with the leftovers of the last read.
-///
-/// Not thread safe. `SocketTransport` hands one to a single call at a time.
 private final class Connection {
     private let fd: Int32
     var verifiedProtocol = false
-    /// Bytes read past the end of a response line. There should never be any
-    /// while one call uses one connection, but a stream is a stream: keeping
-    /// them costs a few bytes and losing them would corrupt the next response.
     private var pending = Data()
 
-    /// How long a single read or write may find the socket silent.
-    ///
-    /// Per syscall rather than per call, which is the behaviour worth having:
-    /// an answer that keeps arriving is never cut off however large it is, and
-    /// a daemon that stopped answering is given up on. Applied lazily, because
-    /// a pooled connection carries the last caller's value and most calls in a
-    /// row want the same one.
     var patience: TimeInterval = 0 {
         didSet {
             guard patience != oldValue else { return }
@@ -527,9 +364,6 @@ private final class Connection {
             throw TransportFailure.system("fcntl", failure)
         }
 
-        // Without this, a daemon that exits between the write and the read
-        // raises SIGPIPE, and the default disposition kills the app. An error
-        // return is the whole point.
         var on: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
 
@@ -557,10 +391,8 @@ private final class Connection {
 
     deinit { close(fd) }
 
-    /// A lost answer after any write cannot be classified as a refused connect.
     private(set) var wroteRequestBytes = false
 
-    /// Handshake bytes are never evidence that a message was submitted.
     func probeProtocol(_ request: Data) throws -> String {
         defer { wroteRequestBytes = false }
         return try roundTrip(request)
@@ -583,8 +415,6 @@ private final class Connection {
                     sent += n
                     continue
                 }
-                // A short write is normal on a socket. Only EINTR is worth
-                // retrying; everything else means this connection is finished.
                 if n < 0 && errno == EINTR { continue }
                 if n < 0 && Self.isTimeout(errno) { throw TransportFailure.timedOut }
                 throw TransportFailure.system("write", errno)
@@ -592,17 +422,6 @@ private final class Connection {
         }
     }
 
-    /// Read until the newline that ends a response.
-    ///
-    /// The daemon never emits a bare newline inside a value, which is the
-    /// reason the protocol is line delimited in the first place, so a newline
-    /// is unambiguously the end of a frame.
-    ///
-    /// Only bytes that arrived since the last look are scanned. Scanning
-    /// from zero every 64 KB chunk turned a multi-megabyte frame (a screen
-    /// capture, a tool-heavy transcript page) into hundreds of megabytes of
-    /// re-scanning on a worker thread, which is what parked the bridge and
-    /// hung the app behind it.
     private func readLine() throws -> String {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         var scanned = 0
@@ -621,35 +440,19 @@ private final class Connection {
                 continue
             }
             if n < 0 && errno == EINTR { continue }
-            // The receive timeout expired. Distinct from a broken connection:
-            // the daemon is probably still there and still working, it just has
-            // not said anything for longer than the caller agreed to wait.
             if n < 0 && Self.isTimeout(errno) { throw TransportFailure.timedOut }
-            // Zero is the daemon closing the connection mid-answer, which is
-            // indistinguishable from a crash and is treated the same way.
             throw TransportFailure.system("read", n == 0 ? ECONNRESET : errno)
         }
     }
 
-    /// A socket timeout reports `EAGAIN`, and `EWOULDBLOCK` is the same value
-    /// on Darwin. Both are checked because the two names are not guaranteed to
-    /// stay equal and a missed one would read as a dead connection.
     private static func isTimeout(_ code: Int32) -> Bool {
         code == EAGAIN || code == EWOULDBLOCK
     }
 }
 
-/// Why a transport could not carry the call. Never surfaced directly: the
-/// pool turns these into a `BridgeError` with words a user can act on.
-///
-/// It still conforms to `LocalizedError`, so even a leaked instance reads as
-/// a sentence rather than "The operation couldn't be completed.
-/// (Tokenstat.TransportFailure …)". That raw default is what made a host
-/// going away look like an internal crash instead of a daemon that was down.
 private enum TransportFailure: LocalizedError {
     case path(String)
     case system(String, Int32)
-    /// The socket went quiet for longer than the call's patience.
     case timedOut
 
     var errorDescription: String? {

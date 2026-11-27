@@ -65,8 +65,6 @@ impl Peer {
     pub fn fingerprint(&self) -> String {
         match public_key_from_hex(&self.key) {
             Ok(key) => fingerprint(&key),
-            // A stored key that will not parse cannot be talked to anyway. The
-            // caller shows this, so it has to be readable rather than empty.
             Err(_) => "unreadable".into(),
         }
     }
@@ -148,13 +146,9 @@ impl PeerStore {
     }
 
     fn cached_at(path: &Path) -> Result<Arc<Self>, IdentityError> {
-        // Keep lookup and publication together, so an older read cannot
-        // publish after a newer one or after a local write invalidates it.
         let Ok(mut guard) = cache().lock() else {
             return Self::load_at(path).map(Arc::new);
         };
-        // A store that does not exist yet has no peers, and a clock that will
-        // not answer means re-reading, which is correct and merely slower.
         let stamp = FileStamp::read(path);
 
         if let Some(seen) = guard.as_ref()
@@ -188,10 +182,6 @@ impl PeerStore {
                 });
             }
         };
-        // A corrupt file must not lock the user out of their own machines, but
-        // it also must not silently discard approvals. Treated as empty here
-        // and left on disk, so an approval has to be given again and the
-        // evidence is still there to look at.
         Ok(serde_json::from_str(&text).unwrap_or_default())
     }
 
@@ -245,11 +235,6 @@ impl PeerStore {
             path: path.display().to_string(),
             source: std::io::Error::other(e),
         })?;
-        // Write beside the store and rename over it. Truncating in place left a
-        // window where a crash stored half a file, and the loader's fallback
-        // for an unreadable store is "no peers" — which would quietly discard
-        // approvals and revocations alike. A unique suffix keeps two savers
-        // from interleaving into the same temporary.
         static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
         let tmp = path.with_extension(format!(
             "json.tmp.{}.{}",
@@ -335,8 +320,6 @@ impl PeerStore {
                 if let Some(address) = address {
                     peer.address = Some(address.to_string());
                 }
-                // The label follows the peer, since a machine renamed on one
-                // side should not read as a different machine on the other.
                 if !label.is_empty() {
                     peer.label = label.to_string();
                 }
@@ -502,8 +485,6 @@ mod tests {
     use super::*;
 
     fn key(n: u8) -> PublicKey {
-        // Any 32 bytes: these never have to verify a signature, only be
-        // distinct and stable.
         [n; 32]
     }
 
@@ -573,7 +554,6 @@ mod tests {
         assert!(PeerStore::cached_at(&path).unwrap().is_approved(&key(0)));
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         store.revoke(&key(0));
-        // Bypass the in-process invalidation to model a second process.
         store.save_at(&path).unwrap();
         std::fs::File::options()
             .write(true)
@@ -670,8 +650,6 @@ mod tests {
 
         assert!(store.pin("laptop", &key(1)).is_ok());
         let failure = store.pin("laptop", &key(2)).expect_err("must refuse");
-        // The message is the product here: it has to tell somebody which of
-        // the two explanations to go and check.
         let words = failure.to_string();
         assert!(words.contains("reinstalled"), "{words}");
         assert!(words.contains("in its place"), "{words}");

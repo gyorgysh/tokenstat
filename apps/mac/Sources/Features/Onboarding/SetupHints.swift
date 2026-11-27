@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// What the Home checklist knows and can do. Built by the root, which owns
-/// the account and the machine models, so Home stays a view.
 struct SetupHintsState {
     let signedIn: Bool
     let remoteAllowed: Bool
@@ -15,12 +13,6 @@ struct SetupHintsState {
     let onLoad: () async -> Void
 }
 
-/// Three steps on Home, the same three the website's dashboard walks:
-/// an account, remote access, a second device.
-///
-/// Each step is done when its fact is true, not when somebody clicked it, so
-/// the card reflects the machine rather than a history of taps. It hides
-/// itself once everything is done, and "Hide" puts it away for good.
 struct SetupHintsCard: View {
     let state: SetupHintsState
     @AppStorage("setupHints.hidden") private var hidden = false

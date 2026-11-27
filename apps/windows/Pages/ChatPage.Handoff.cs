@@ -44,7 +44,7 @@ internal sealed partial class ChatPage
                 (_, _) => _handoffSlot.Content = null));
             _handoffSlot.Content = row;
         }
-        catch { /* The sheet is reachable even if the background offer failed. */ }
+        catch { }
     }
 
     private async Task ShowHandoffAsync()

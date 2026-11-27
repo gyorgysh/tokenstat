@@ -42,8 +42,6 @@ struct HarnessMark: View {
 }
 
 private extension Image {
-    /// Template-rendered and scaled to fit, which is what a monochrome mark
-    /// needs to sit on a tinted tile.
     func renderable(size: CGFloat) -> some View {
         self
             .renderingMode(.template)
@@ -53,12 +51,6 @@ private extension Image {
     }
 }
 
-/// Identity card shown while the pointer is on an author mark.
-///
-/// A row-level `.help` steals the tooltip from the mark inside it, so History
-/// (and any other list of people) needs its own overlay. The picture is the
-/// one the row already resolved, including a teammate's public forge picture.
-/// Someone with no picture stays a letter. The card does not fetch.
 struct AuthorHoverCard: View {
     var url: String?
     var name: String
@@ -100,10 +92,6 @@ struct AuthorHoverCard: View {
     }
 }
 
-/// Shows `AuthorHoverCard` after a short dwell on `content`.
-///
-/// The delay is so scrolling a commit list does not flash a card on every row
-/// the pointer crosses. The popover is what escapes a `ScrollView` clip.
 private struct AuthorHover: ViewModifier {
     var url: String?
     var name: String
@@ -145,7 +133,6 @@ private struct AuthorHover: ViewModifier {
 }
 
 extension View {
-    /// Dwell-hover identity card for a commit author mark.
     func authorHoverCard(
         url: String?,
         name: String,
@@ -158,51 +145,19 @@ extension View {
 }
 
 
-/// The tokenstat mark: three ascending bars on a shared baseline.
-///
-/// Drawn rather than shipped as an image. It is three rounded rectangles, so an
-/// asset catalogue would be a resource to keep in step with the website's SVG
-/// for no benefit, and a drawn mark is sharp at any size on any display.
-///
-/// The geometry is the website's, from `brand-assets/tokenstat/logo`: bars 12
-/// wide on a 15 pitch, sharing a baseline, drawn in a 64 unit artboard. **They
-/// share a baseline on purpose**, which is what makes them read as a chart
-/// instead of three floating shapes. The colours are the dark-context ramp the
-/// favicon badge uses, since this sits on the app's own dark chrome. Change
-/// these with the website, not on their own.
-///
-/// The view's frame is the *ink*, not the artboard. The artwork occupies
-/// x 11...53 and y 10...52 of that 64 unit square, so using the artboard as the
-/// frame padded the mark with a fifth of its own height in empty space and left
-/// it sitting visibly high next to any text beside it.
 struct LogoMark: View {
     var size: CGFloat = 18
-    /// The monochrome ramp: light, middle, full, the same order as the
-    /// brand bars, so the chart still rises left to right.
     private static let monochromeOpacity: [Double] = [0.4, 0.68, 1]
-    /// Draw the bars rising in turn, for a screen that is waiting on something.
-    ///
-    /// The mark's own bars and the mark's own colours, moving the only way a
-    /// bar chart can move. Anything else on a launch screen is a second logo
-    /// nobody chose.
     var animated: Bool = false
-    /// A repeating pulse for a screen that stays while it waits (the launch
-    /// splash), or one rise that lands and holds (an intro page).
     var loops: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var raised = false
-    /// One run of the same rise, for a refresh somebody pulled. Not the
-    /// repeating launch animation: a spinner already says "working", and the
-    /// mark's job here is only to acknowledge the pull.
     @State private var pulse = false
 
     var body: some View {
         if animated, loops, !reduceMotion {
-            // A clock rather than a repeating animation. A view being removed
-            // waits for its animations, and one that repeats for ever keeps it
-            // being drawn after the launch it was covering.
             TimelineView(.animation) { clock in
                 mark { Self.loopScale(bar: $0, at: clock.date) }
             }
@@ -211,7 +166,6 @@ struct LogoMark: View {
         }
     }
 
-    /// 0.62 seconds each way, each bar a beat after the one before it.
     private static func loopScale(bar: Int, at date: Date) -> CGFloat {
         let time = date.timeIntervalSinceReferenceDate - Double(bar) * 0.14
         let cycle = (time / 0.62).truncatingRemainder(dividingBy: 2)
@@ -219,16 +173,9 @@ struct LogoMark: View {
     }
 
     private func mark(scale: @escaping (Int) -> CGFloat) -> some View {
-        // One scale factor from the artboard, so every number above is the
-        // website's own and none of them are re-derived by hand.
         let unit = size / TokenstatLogoGeometry.inkSide
 
         return ZStack(alignment: .topLeading) {
-            // Offsets do not participate in layout, so without this the ZStack
-            // sizes to a single bar (12 units wide) and `.frame(width:size)`
-            // centres that box, sliding every bar 15 units to the right of the
-            // frame's centre. A full-size clear child sets the layout box to
-            // the whole frame so the offsets below land on the real origin.
             Color.clear
                 .frame(width: size, height: size)
                 .allowsHitTesting(false)
@@ -238,9 +185,6 @@ struct LogoMark: View {
                           ? AnyShapeStyle(bar.color)
                           : AnyShapeStyle(Color.primary.opacity(Self.monochromeOpacity[index])))
                     .frame(width: bar.rect.width * unit, height: bar.rect.height * unit)
-                    // Anchored at the foot, so a bar grows out of the baseline
-                    // it shares with the other two rather than shrinking in
-                    // place. Each starts a beat after the one before it.
                     .animation(
                         animated && !loops && !reduceMotion
                             ? .easeInOut(duration: 1.2).delay(Double(index) * 0.15) : nil
@@ -259,10 +203,6 @@ struct LogoMark: View {
         .frame(width: size, height: size)
         .accessibilityLabel(L10n.text("apple.marks.tokenstat.63d30539"))
         .onAppear { if animated { raised = true } }
-        // A refresh somebody asked for dips the bars and lets them back up,
-        // once. The mark sits in the sidebar on the Mac and in the top bar
-        // on the phone, so it is the one place both apps can acknowledge
-        // the same gesture.
         .onReceive(NotificationCenter.default.publisher(for: .clientRefreshing)) { _ in
             guard !reduceMotion, !animated, !pulse else { return }
             pulse = true
@@ -287,27 +227,12 @@ extension Notification.Name {
     static let clientRefreshing = Notification.Name("ai.tokenstat.client.refreshing")
 }
 
-/// The mark and the name, for the top of the sidebar.
 struct Wordmark: View {
-    /// Mark height. The text scales with it, so one number sizes the lockup.
-    ///
-    /// 17 on the Mac, where this sits at the top of a sidebar full of rows and
-    /// must not shout over them. The phone passes something larger: it has one
-    /// bar, one brand in it, and room to spend, and at sidebar size the mark
-    /// read as a caption rather than as the name of the app.
     var size: CGFloat = 17
     var fills = true
-    /// Draw the bars as well as the name. A lockup that already placed the
-    /// mark above the letters wants the word only, or the bars appear twice.
     var showsMark = true
 
     var body: some View {
-        // `.firstTextBaseline` would sit the mark on the text's baseline, which
-        // drops a square glyph below the descender line. Centring on the text's
-        // cap height is what actually looks aligned, and that is what a centred
-        // stack gives once the mark's frame is its ink.
-        // The website leaves a deliberate breath between the bars and the
-        // wordmark. A half-mark gap made the phone lockup look compressed.
         HStack(alignment: .center, spacing: size * 0.75) {
             if showsMark {
                 LogoMark(size: size)
@@ -315,15 +240,11 @@ struct Wordmark: View {
             HStack(spacing: 0) {
                 Text(L10n.text("apple.marks.token.3c469e9d"))
                     .foregroundStyle(.primary)
-                // Brand violet on the Default palette, and the quieter text
-                // colour on a chosen theme, so the two halves still read as
-                // two without borrowing the theme's accent for the logo.
                 Text(L10n.text("apple.marks.stat.40460da8"))
                     .foregroundStyle(Theme.showsBrandColours ? AnyShapeStyle(Theme.brandAccent)
                                                              : AnyShapeStyle(.secondary))
             }
             .font(Theme.fixed(size * 0.88, weight: .bold))
-            // Lowercase, always. It is the command you type.
             .textCase(.lowercase)
             if fills {
                 Spacer()
@@ -355,10 +276,6 @@ struct TierMark: View {
             shape
                 .fill(
                     LinearGradient(
-                        // The theme's own accent into its secondary. On the
-                        // Default palette that is the logo's violet into
-                        // fuchsia, and on a chosen theme the badge belongs to
-                        // the interface around it instead of standing apart.
                         colors: [Theme.accent, Theme.secondary],
                         startPoint: .top,
                         endPoint: .bottom
@@ -371,18 +288,11 @@ struct TierMark: View {
     }
 }
 
-/// The badge silhouettes, in the website's 24 unit square.
-///
-/// Transcribed from the SVG rather than approximated, so the two stay the same
-/// shape. Points are absolute here; the source mixes absolute and relative
-/// commands and the conversion is done once, here, instead of at every reader.
 struct BadgeShape: Shape {
     enum Kind {
         case crown
         case star
         case badge
-        /// A tier this build does not know. A new tier on the server must not
-        /// make an account look downgraded, so it still gets a mark.
         case seal
     }
 
@@ -411,7 +321,6 @@ struct BadgeShape: Shape {
         var path = Path()
         switch kind {
         case .crown:
-            // The band, and the bar under it, as two closed subpaths.
             path.move(to: point(3, 7.4))
             path.addLine(to: point(7.6, 10.6))
             path.addLine(to: point(12, 3.4))
@@ -440,10 +349,6 @@ struct BadgeShape: Shape {
             path.addLine(to: point(9.3, 8.5))
             path.closeSubpath()
         case .badge:
-            // Crest shield with a chevron cut out of it, same path as
-            // Profile.jsx BADGE_PATH.patron. The cut is wound against the
-            // shield, so it stays open under either fill rule, and at 12px it
-            // closes up and leaves a plain shield rather than mush.
             path.move(to: point(12, 2.1))
             path.addLine(to: point(20.4, 4.9))
             path.addLine(to: point(20.4, 11))

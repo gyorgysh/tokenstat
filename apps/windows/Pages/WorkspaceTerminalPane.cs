@@ -7,7 +7,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>A viewer of the project's one terminal tree, beside chat or in Terminals.</summary>
 internal sealed class WorkspaceTerminalPane : Page, IInspectorContent, IToolbarItems
 {
     private readonly WorkspaceTerminalController _controller;
@@ -24,7 +23,6 @@ internal sealed class WorkspaceTerminalPane : Page, IInspectorContent, IToolbarI
     public event Action? ToolbarChanged;
 }
 
-/// <summary>CLI and SSH share positions and one emulator per session across both viewers.</summary>
 internal sealed class WorkspaceTerminalController
 {
     private sealed record Entry(Page Page, Func<string> Title);
@@ -63,8 +61,6 @@ internal sealed class WorkspaceTerminalController
         if (_released) return;
         var associated = WorkspaceSshTabs.In(_workspaceId);
         var stale = _entries.Keys.Where(id => id.StartsWith("ssh:", StringComparison.Ordinal) && !associated.Contains(id[4..])).ToArray();
-        // Removal can notify other project controllers. Finish this snapshot
-        // without publishing another association event or rendering midway.
         foreach (var id in stale) Remove(id, forgetAssociation: false, render: false);
         if (stale.Length > 0) Render();
     }
@@ -86,8 +82,6 @@ internal sealed class WorkspaceTerminalController
     internal void Activate(WorkspaceTerminalPane owner)
     {
         if (_released) return;
-        // An empty wrapper claims the tree after loading, so switching from
-        // chat to the main tab never attaches a native page to two parents.
         _tree.Attach(owner);
         Render();
         _ = RestoreAsync();
@@ -114,14 +108,12 @@ internal sealed class WorkspaceTerminalController
             foreach (var remote in remotes.Where(item => Format.Flag(item, "alive") && WorkspaceSshTabs.In(_workspaceId).Contains(Format.Text(item, "id"))).OfType<JsonNode>())
                 AddSSH(remote, select: false);
         }
-        catch { _restored = false; /* The launcher remains available on a missed read. */ }
+        catch { _restored = false; }
         Render();
     }
     public void AddLocal(string id, bool select = true)
     {
         if (_released) return;
-        // Sidebar reads can discover a respawned host ID before the old
-        // page's queued metadata notification arrives.
         var retained = _entries.FirstOrDefault(pair => pair.Value.Page is TerminalPage page && page.SessionId == id);
         if (retained.Key is not null && retained.Key != id) RenameLocal(retained.Key, id, (TerminalPage)retained.Value.Page);
         if (!_entries.ContainsKey(id))
@@ -136,7 +128,7 @@ internal sealed class WorkspaceTerminalController
     {
         if (_released) return;
         var key = _entries.FirstOrDefault(pair => ReferenceEquals(pair.Value.Page, page)).Key;
-        if (key is null) return; // A late metadata read cannot revive a closed tab.
+        if (key is null) return;
         if (page.SessionId.Length > 0 && key != page.SessionId)
         {
             RenameLocal(key, page.SessionId, page);
@@ -195,8 +187,6 @@ internal sealed class WorkspaceTerminalController
     {
         try
         {
-            // Only attach to a live session belonging to this project's tree.
-            // A valid-looking identifier is not proof of that ownership.
             if (id.StartsWith("ssh:", StringComparison.Ordinal))
             {
                 if (!WorkspaceSshTabs.In(_workspaceId).Contains(id[4..])) {

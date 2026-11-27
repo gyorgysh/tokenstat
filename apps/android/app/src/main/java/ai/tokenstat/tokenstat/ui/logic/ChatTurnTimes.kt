@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.logic
 
-/** In-memory turn clocks, scoped to the account, host and conversation. */
 class ChatTurnTimes {
     private val starts = linkedMapOf<String, Long>()
     fun observe(owner: String?, running: Boolean, now: Long): Long? {

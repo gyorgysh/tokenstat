@@ -15,8 +15,6 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.platform.LocalContext
 
-/** One native target covers the transcript and composer. A drop only stages
- * files; the receiving visit owns both the imported bytes and URI permission. */
 @Composable
 internal fun chatAttachmentDrops(
     lease: ChatAttachmentInputLease,

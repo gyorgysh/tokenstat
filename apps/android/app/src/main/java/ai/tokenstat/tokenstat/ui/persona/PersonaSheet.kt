@@ -51,15 +51,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 
-/// Personas: a name, a brief, and a face, on one form. Port of the phone
-/// `PersonaEditor`.
-///
-/// There is no rail and no describe/draft/review wizard. The sheet opens on
-/// the folder default. New persona, Improve with agent, and Save as written
-/// all edit the same two fields. Generated text is a draft until Save.
-///
-/// Wiring into chat setup is intentionally not here: the caller owns that (see
-/// WIRING) and this sheet only needs the peer and the folder id.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismiss: () -> Unit) {
@@ -211,8 +202,6 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
             runCatching {
                 model.workspaceSection(peer, "chat.personaDefault", personaDefaultParams(workspaceId, persona?.id ?: ""))
             }.onSuccess { element ->
-                // An empty id means no persona, and comes back as null rather
-                // than as an error.
                 defaultId = if (element is JsonNull) null else parseChatPersona(element)?.id ?: persona?.id
             }.onFailure { failure = it.message ?: L10n.text("android.personasheet.the_request_failed.db4fb447") }
             saving = false
@@ -445,9 +434,6 @@ fun PersonaSheet(model: AppViewModel, peer: String, workspaceId: String, onDismi
                     )
                 }
                 HorizontalDivider(color = colors.border)
-                // Which persona new chats in this folder inherit, including
-                // none. A row rather than a button on whichever persona is
-                // open, so there is a way to say "none of them".
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(

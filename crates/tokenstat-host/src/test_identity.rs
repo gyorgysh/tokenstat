@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! One private identity directory at a time, for the tests that need one.
-//!
-//! `TOKENSTAT_IDENTITY_DIR` is process-wide, so two tests pointing it at their
-//! own temp directory at the same time would read each other's identity and
-//! grants, and the failure would look like a policy bug rather than a harness
-//! bug. Everything that sets it takes this lock for the whole test.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) static IDENTITY_LOCK: Mutex<()> = Mutex::new(());
 
-/// A clock alone is not unique enough: two tests entering within the same tick
-/// would build the same path and fight over one file.
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Run `body` against an identity directory nobody else can see.

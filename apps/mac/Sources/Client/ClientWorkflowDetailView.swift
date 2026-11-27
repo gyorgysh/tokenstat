@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One graph on a phone: the picture, a prompt, Run / Stop / Continue.
 struct ClientWorkflowDetailView: View {
     let peer: String
     let workspaceID: String

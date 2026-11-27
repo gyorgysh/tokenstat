@@ -7,14 +7,6 @@
 import OSLog
 import SwiftUI
 
-// Everything below is the desktop shell: a resizable window with two sidebars,
-// an inspector, a terminal stack and a menu bar. None of it is a phone, and a
-// phone-sized copy of it would be the wrong app rather than a smaller one, so
-// the client gets its own root in `ClientRootView`. See `docs/ios-client-ui.md`.
-//
-// `Route` and its sections live in `Route.swift`, outside this guard:
-// `AutomationsView` navigates by `NavigationRequest` and compiles for both
-// platforms.
 #if os(macOS)
 // Inside the guard: `Route` and its sections below compile for the phone too,
 // and an AppKit import at the top of the file breaks that build.
@@ -34,19 +26,10 @@ struct RootView: View {
     @State private var ecosystemSearchTerm = ""
     @State private var ecosystemNavigation = EcosystemNavigation.shared
     @State private var railAccountHovered = false
-    /// The folder whose chat pane is mounted, on macOS.
-    ///
-    /// Set on the first visit and kept. Chat is the one non-workspace screen
-    /// with a scroll position worth a person's place in it, and rebuilding it
-    /// on every visit meant reading the archive back and landing above the
-    /// latest turn, with the empty state's character on screen in between.
     @State private var mountedChatFolder: String?
     @State private var showingChatOverview = false
     @State private var chatStart = ChatStartDraft()
     @State private var chatStartAdd: (owner: ChatStartDraft.Owner, repositories: Set<String>)?
-    /// The folder whose pull requests are mounted, for the same reason. A
-    /// list that reloads from GitHub on every visit is a skeleton every visit,
-    /// and the filters and the open pull go back to their defaults with it.
     @State private var mountedPullsFolder: String?
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
@@ -60,20 +43,10 @@ struct RootView: View {
     @State private var machines = MachinesModel()
     @State private var showingSetupTour = false
     @State private var showingHandleOffer = false
-    /// The SSH library, owned by the shell rather than by a screen: the
-    /// sidebar draws folders and a host count from it, and the content and
-    /// inspector columns are two views over the same records.
     @State private var ssh = SSHLibraryModel()
     #if os(macOS)
-    /// Live SSH sessions, for the life of the app rather than the life of a
-    /// screen. The shells are the host's, so leaving the screen must not end
-    /// them and coming back must find them again.
     @State private var sshSessions = SSHSessionsModel()
-    /// Devices asking to see this screen, or to open the work on it. A shared
-    /// singleton rather than a fresh model, because the notification delegate
-    /// answers through the same object from outside any view.
     @State private var deviceRequests = DeviceAccessRequests.shared
-    /// A tap on a chat banner, same reason: the delegate is outside this view.
     @State private var notificationOpen = NotificationOpen.shared
     #endif
     @State private var automations = AutomationsModel()
@@ -85,9 +58,6 @@ struct RootView: View {
     #endif
     @State private var appUpdate = AppUpdateModel()
     @State private var connectivity = ConnectivityModel()
-    /// The service and the tunnel, alongside the internet. See
-    /// `ConnectionModel`: the Mac shows it in the sidebar's offline card
-    /// rather than as a chip, because it has the room.
     @State private var connection = ConnectionModel()
     @State private var isInspectorPresented = true
     @AppStorage(ChatBrowserPreferences.opensLinksKey) private var opensChatLinksInBrowser = true
@@ -108,45 +78,14 @@ struct RootView: View {
     @State private var desktopTurnReviews: [String: ChatTurnReview] = [:]
     @State private var desktopCommitReviews: [String: String] = [:]
     @State private var workspaceBrowserURLs: [String: String] = [:]
-    /// Explicit sidebar preference, preserved when a narrow window uses a peek.
     @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
-    /// The sidebar's width, dragged by the person and remembered. The live
-    /// value only exists while a drag is in flight; see `ColumnResizeHandle`.
     @State private var sidebarWidth = StoredWidth.read(StoredWidth.sidebar, default: ShellMetrics.sidebarDefault)
     @State private var columnDrag = ShellColumnDrag()
-    /// The inspector's width, same treatment.
     @State private var inspectorWidth = StoredWidth.read(StoredWidth.inspector, default: ShellMetrics.inspectorDefault)
-    /// Whether the window is wide enough to carry the inspector at all.
-    ///
-    /// Separate from `isInspectorPresented`, which is what the user asked for.
-    /// Conflating them would spend the user's choice on a window resize: narrow
-    /// the window once and the pane would stay shut after widening it again.
-    ///
-    /// Wait for the first width measurement before docking the inspector.
     @State private var inspectorFits = false
-    /// Whether the floating inspector overlay is on screen.
-    ///
-    /// Written by `watchPointer`, which opens it after a dwell at the edge and
-    /// closes it when the pointer has actually left, and by the toggle on a
-    /// window too narrow to dock into. Whether it stays
-    /// without the pointer is `isOverlayPinned`, which is derived from the
-    /// toggle rather than stored.
     @State private var isOverlayVisible = false
-    /// The float is up because the toolbar toggle was pressed on a window too
-    /// narrow to hold the column, and the pointer has not reached it yet.
-    ///
-    /// Cleared the moment the pointer arrives, after which the pane behaves
-    /// like every other peek and leaves when the pointer does. A press should
-    /// not have to be undone by a second press, and a pane should not vanish
-    /// while somebody is still moving towards it.
     @State private var overlayHeldByPress = false
-    /// Whether the leading sidebar column is collapsed and its left-edge peek
-    /// is available: hovering the leading edge floats the sidebar over the
-    /// detail, the same way the right inspector floats when it does not fit.
     @State private var isSidebarOverlayVisible = false
-    /// The user explicitly reopened the sidebar below the sidebar fit edge.
-    /// Honored until they close it; without the pin the fit would override
-    /// the reopen on the next read.
     @State private var isSidebarPinned = false
     /// Keep exact geometry available to actions without invalidating the whole
     /// shell for each pixel. Layout still receives AppKit's size proposals;
@@ -160,8 +99,6 @@ struct RootView: View {
         var inspectorFits: Bool
         var workbenchDocks: Bool
         var showsConversationActions: Bool
-        // Updates within the same fit mode only matter when the preferred
-        // tool width would squeeze the conversation.
         var clampedWorkbenchWidth: CGFloat?
     }
     @State private var windowWidthStorage = WindowWidthStorage()
@@ -190,11 +127,7 @@ struct RootView: View {
     @State private var isFullScreen = false
     @State private var isLiveResizing = false
     #endif
-    /// A run a delegated task asked to show: set when navigating from Tasks,
-    /// consumed by the Automations screen once its runs have loaded.
     @State private var pendingRunID: String?
-    /// The hovered heatmap cell's window-space frame, fed up from the grid by
-    /// preference. Nil means nothing is hovered and the popover hides.
     @State private var heatmapHover = HeatmapHoverState()
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -202,88 +135,46 @@ struct RootView: View {
     @State private var worktreeProject: WorkspaceFolder?
     @State private var sharingProject: WorkspaceFolder?
     @State private var stoppingSharing: TeamStopSharingRequest?
-    /// A section-level destructive action. Kept separate from removing the
-    /// workspace itself because this deletes transcripts, not the folder row.
     @State private var workspacePendingChatRemoval: WorkspaceFolder?
-    /// The session a right-click asked to close, held until it is confirmed.
     @State private var sessionPendingClose: TerminalSession?
-    /// Restore each folder's disclosure when it arrives, including peers
-    /// that temporarily disappear. New folders keep the expanded default.
     @State private var expandedWorkspaces: Set<String> = []
     @State private var knownSidebarProjects: Set<String> = []
     @State private var sidebarSectionOrder = SidebarPreferences.shared.sectionOrder
     @State private var expandedSidebarSections = Set(SidebarPreferences.defaultOrder.filter {
         SidebarPreferences.shared.isExpanded("section:" + $0, default: true)
     })
-    /// Chat transcripts are children of Chat, not a second global picker in
-    /// the title bar. Keep the longer list opt-in so a busy workspace does
-    /// not turn the sidebar into a transcript index.
     @State private var expandedChatHistories = SidebarPreferences.shared.expandedIDs("history:")
-    /// Filter over repository and chat names in the Repositories sidebar.
     @State private var projectsFilter = ""
-    /// Whether the filter field is open under the Repositories heading. It
-    /// stays shut until asked for, so the sidebar has one search, not two.
     @State private var showingProjectsFilter = false
     @State private var projectsDisplay = SidebarPreferences.shared.projectsDisplay
     @State private var projectsSort = SidebarPreferences.shared.projectsSort
-    /// How many chats the chat list draws before "Show more". Not saved:
-    /// every launch starts at one page.
     @State private var chatListLimit = SidebarProjectsLayout.chatPageSize
-    /// Day headings folded in the chat list, by `SidebarChatDay.id`.
     @State private var collapsedChatDays: Set<String> = []
-    /// Each folder's chat order as it stood when the pointer came over its
-    /// list. See `holdingOrder`. A plain reference, not observed state: the
-    /// pointer crossing a list must not redraw the whole window. The held
-    /// order only has to be in place for the next update that would move a
-    /// row, and that update draws it.
     @State private var chatOrderHold = ChatOrderHold()
-    /// The section each folder was last left on, so returning to a folder
-    /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
-    /// Observed, so pinning anywhere redraws every pin mark without leaving
-    /// the screen: sidebar rows, chat chrome and Home read the same shelf.
     @State private var pins = PinnedWorkStore.shared
     @State private var savedWorkCatalog = DesktopSavedWorkCatalog()
     @State private var savedConversation: DesktopSavedConversation.Destination?
     @State private var savedFolder: WorkFolderCacheSettings.Destination?
     #if os(macOS)
-    /// Servers whose session rows are showing.
     @State private var expandedSSHHosts = SidebarPreferences.shared.expandedIDs("server:")
-    /// The server whose sidebar menu asked to close every shell. Kept on the
-    /// sidebar rather than on an individual row so the confirmation survives
-    /// that row collapsing or disappearing while it is in front.
     @State private var sshHostPendingClose: SSHHost?
     #endif
-    /// The SSH section last left, so clicking the heading (or coming back from
-    /// Home) returns to what you were doing rather than resetting to Hosts.
     @State private var lastSSHSection: SSHSection = .hosts(folder: nil)
-    /// Workspace id the current drag would land before, or `workspaceDropEnd`.
     @State private var workspaceDropBeforeID: String?
     #endif
-    /// Logo splash until the host answers; then wireframes and data take over.
     @State private var launch = LaunchState()
-    /// Whether the launch route has been decided. The chrome waits for it, so
-    /// the window opens on the folder that was left open rather than jumping
-    /// to it once the folder list lands. See `settleLaunchPlace`.
     @State private var placeSettled = false
 
     var body: some View {
         #if DEBUG
-        // `TOKENSTAT_PRINT_CHANGES=1` prints what made the shell draw again,
-        // for measuring how often a background poll rebuilds the window.
         if DebugUIHooks.printsChanges { Self._printChanges() }
         #endif
-        // Split the modifier chain. A single expression here is too much
-        // for the Release type checker (it times out and fails the build).
         return ecosystemSession
-            // View menu shortcuts post here so a focused editor cannot swallow ⌘B
-            // as "bold". Each destination owns its chrome buttons.
             .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
                 guard launch.hostReady else { return }
                 toggleLeftSidebar()
             }
-            // ⌘K lives in the Edit menu, so it works whatever has focus and
-            // whichever panes are showing.
             .onReceive(NotificationCenter.default.publisher(for: .searchWorkRequested)) { _ in
                 guard launch.hostReady else { return }
                 showWorkSearch = true
@@ -292,11 +183,6 @@ struct RootView: View {
                 guard launch.hostReady, route.hasInspector else { return }
                 toggleRightSidebar()
             }
-            // A folder can leave the list from anywhere: Remove in this window,
-            // a peer going away, another machine dropping off the tunnel. The
-            // route must not keep naming it, or the sidebar lights no row while
-            // the pane shows a different folder, and a scoped board keeps a scope
-            // no `onChange(of: route)` will ever clear.
             .onChange(of: workspaces.folders.map(\.id), initial: true) { _, ids in
                 let incoming = Set(ids)
                 for id in incoming.subtracting(knownSidebarProjects) {
@@ -338,21 +224,12 @@ struct RootView: View {
                     overlayHeldByPress = true
                 }
             }
-            // The network came back: refresh what the offline stretch starved.
-            // A banner brought them back, or they came back on their own. Either
-            // way the terminal on screen has been seen, so its call for attention
-            // is answered and the notification goes with it.
             .onReceive(
                 NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             ) { _ in
                 terminals.acknowledgeVisibleAttention()
             }
-            // This is the connectionBack hook. Do it now, not on the next
-            // 30-second retry tick.
             .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-                // The counters were evidence about a network that no longer
-                // exists. Without this the warning card stays up after the
-                // internet is back, until some call happens to succeed.
                 connection.reset()
                 Task {
                     await BridgeLaunch.wait()
@@ -369,21 +246,12 @@ struct RootView: View {
                     await Bridge.nudgeTunnel(reconnect: true)
                 }
             }
-            // Waking from sleep is the same story as the network coming back: the
-            // machine's egress is only just arriving, so the tunnel supervisor
-            // should reconnect now rather than wait out a backoff sized for a
-            // laptop that was off.
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
                 Task {
                     await BridgeLaunch.wait()
                     await Bridge.nudgeTunnelOnForeground()
                 }
             }
-            // A tap on a banner is kept until it resolves. On a cold launch
-            // the folders and sessions it names are still loading, and taking
-            // it up front lost the destination with nothing to show for it.
-            // The load handlers below retry; a tap that never resolves goes
-            // stale rather than chasing a destination forever.
             .onChange(of: notificationOpen.request, initial: true) { _, request in
                 guard request != nil else { return }
                 openPendingNotification()
@@ -402,9 +270,6 @@ struct RootView: View {
             // adds the next one. The AppKit half of the same decision is the
             // AccentColor colorset in the asset catalogue.
             .tint(Theme.accent)
-            // Shared destinations (including Chat's handoff banner and sheet)
-            // read the same account as the desktop shell. Supply it above all
-            // presenters so both retained panes and modal content inherit it.
             .environment(account)
             #if DEBUG
             .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.routeRequested)) { note in
@@ -433,8 +298,6 @@ struct RootView: View {
                 openEcosystemDestination()
                 resolvePendingSimulatorAttach()
                 resolvePendingDesktopOpen()
-                // A new account's peer list must not populate the sidebar
-                // before this Mac's folders have been read for that account.
                 Task { await workspaces.load() }
             }
             .onChange(of: WorkSessionContext.shared.localHostIdentity) { _, _ in resolvePendingSimulatorAttach(); resolvePendingDesktopOpen() }
@@ -469,7 +332,7 @@ struct RootView: View {
                         simulatorRequests[id] = SimulatorAttachmentIntent(deviceID: device)
                         openWorkbench(.simulator, in: id)
                     }
-                } catch { /* A missing Xcode must not interrupt a conversation. */ }
+                } catch { }
             }
             do { try await Task.sleep(for: .seconds(4)) } catch { return }
         }
@@ -484,12 +347,8 @@ struct RootView: View {
         case "ssh":
             openSSH(lastSSHSection)
         case "newchat":
-            // The project menu's New chat, through the same function.
             startNewChat(in: debugFolder(parts.count > 1 ? parts[1] : "0"))
         case "chat":
-            // `chat:<folder>:<n>`, the nth conversation. Reliable across
-            // folders only: inside the folder already open, the pane's own
-            // reload selects its first chat again, so click a sidebar row.
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0") else { return }
             let index = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
             openSection(.chat, in: folder.id)
@@ -502,8 +361,6 @@ struct RootView: View {
                 await chat.select(chat.chats[index])
             }
         case "click":
-            // `click:<n>`, the nth row of the cross-folder chat list, opened
-            // exactly as a click on it opens it.
             let index = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
             let rows = Array(visibleChatEntries.prefix(chatListLimit))
             guard rows.indices.contains(index) else { return }
@@ -519,15 +376,12 @@ struct RootView: View {
                 selectWorkspace(folder.id)
             }
         case "inspector":
-            // `inspector:<files|changes|history>`, the inspector's own tabs.
             switch parts.count > 1 ? parts[1] : "" {
             case "changes": workspaces.inspectorTab = .changes
             case "history": workspaces.inspectorTab = .history
             default: workspaces.inspectorTab = .files
             }
         case "pull", "askpull":
-            // `pull:<folder>:<number>` opens the page. `askpull` follows the
-            // setting, as a chat's mark does.
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), parts.count > 2,
                   let number = UInt32(parts[2]),
                   let pull = chat.sidebarChats(in: folder.id).lazy.flatMap(\.pulls).first(where: { $0.number == number }) else { return }
@@ -537,7 +391,6 @@ struct RootView: View {
                 openPull(pull, from: folder)
             }
         case "review":
-            // `review:<folder>:<n>`, the nth changed file, as its row opens it.
             guard let folder = debugFolder(parts.count > 1 ? parts[1] : "0"), let files = folder.git?.files else { return }
             let index = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
             guard files.indices.contains(index) else { return }
@@ -550,7 +403,6 @@ struct RootView: View {
         }
     }
 
-    /// A folder by index or by name, for the route strings above.
     private func debugFolder(_ key: String) -> WorkspaceFolder? {
         Int(key).flatMap { workspaces.folders.indices.contains($0) ? workspaces.folders[$0] : nil }
             ?? workspaces.folders.first { $0.name == key }
@@ -558,8 +410,6 @@ struct RootView: View {
     #endif
 
     private var windowLayout: some View {
-        // Mount the chrome after the host is ready; the window keeps its
-        // traffic lights while the splash is visible.
         ZStack {
             if launch.hostReady, placeSettled {
                 mainChrome
@@ -593,8 +443,6 @@ struct RootView: View {
         #endif
         .task(id: TeamAppPresenceKey(owner: teams.owner, active: scenePhase == .active && teams.phase == .ready, supported: teams.capabilities?.supportsAppPresence == true)) {
             await teams.watchAppPresence(keepsWatching: true, active: {
-                // Present while a window of the app is on screen, not only while
-                // it is frontmost: a Mac user reads one app beside another.
                 !NSApp.isHidden && NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain }
             })
         }
@@ -605,20 +453,11 @@ struct RootView: View {
         }
         .task {
             await launch.prepare()
-            // Sidebar pins need the local identity even when launch restores Home.
             await WorkSessionContext.shared.resolveLocalHostIdentity()
         }
-        // Decided under the splash, not after it. A window that opens on Home
-        // and moves to last night's folder a beat later is a window that
-        // looks like it changed its mind.
         .task {
             await settleLaunchPlace()
         }
-        // Width may already be known from the splash observer. Apply it
-        // when the split view appears, because `onChange` of the width
-        // itself will not fire if the value did not move. Hop a turn so
-        // the first constraint pass of the new split view finishes
-        // before we consider adding an inspector column.
         .onChange(of: launch.hostReady) { _, ready in
             guard ready else { return }
             Task { @MainActor in
@@ -640,8 +479,6 @@ struct RootView: View {
         .onChange(of: windowWidthSignature) { _, _ in
             applyWidth(for: windowContentWidth)
         }
-        // The inspector's fit edge is made of the column widths, so a resize
-        // that ends or a sidebar that hides can bring the column back.
         .onChange(of: sidebarWidth) { _, width in
             StoredWidth.write(width, StoredWidth.sidebar)
             applyWidth(for: windowContentWidth)
@@ -656,8 +493,6 @@ struct RootView: View {
             StoredWidth.write(width, StoredWidth.browserPane)
             applyWidth(for: windowContentWidth)
         }
-        // Where the pointer is decides both peeks, and it is asked rather
-        // than waited for. See `watchPointer`.
         .onAppear { chat.sidebarStep = { stepChatList($0) } }
         .task(id: needsEdgeWatcher) {
             if needsEdgeWatcher { await watchPointer() }
@@ -675,8 +510,6 @@ struct RootView: View {
                     connection.note(plane: plane, peer: peer, failure: error)
                 }
             }
-            // Offline, a call that has to leave the device fails now rather
-            // than after its patience budget. See `BridgeObserver.precheck`.
             BridgeObserver.precheck = { method in
                 guard NetworkGate.isOffline, NetworkPlane.of(method: method) != nil else {
                     return nil
@@ -688,8 +521,6 @@ struct RootView: View {
             }
         }
         .onDisappear { connectivity.stop() }
-        // Track which screen the window is on so the display fit and the
-        // window frame follow it.
         .background {
             WindowScreenObserver(
                 contentWidth: windowContentWidthBinding,
@@ -698,15 +529,12 @@ struct RootView: View {
             )
         }
         .overlay {
-            // Popover placement is local layout data, not shell state. A
-            // resize should not invalidate every mounted destination for it.
             GeometryReader { proxy in
                 HeatmapPopoverOverlay(model: home, hover: heatmapHover, windowSize: proxy.size)
             }
             .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomTrailing) {
-            // Window-level notices share the bottom right, newest above.
             VStack(alignment: .trailing, spacing: 0) {
                 TransientToast(message: Bindable(AgentUpdateNotice.shared).message,
                                severity: AgentUpdateNotice.shared.severity)
@@ -788,17 +616,6 @@ struct RootView: View {
             AddWorkspaceSheet(model: workspaces, machines: account.account?.machines ?? [])
         }
         #if os(macOS)
-        // Connecting starts from four places: the list, the inspector, the
-        // sidebar and the tab strip above a running session. Only the first
-        // of those is on the SSH list screen, and the sheet used to hang off
-        // that screen alone. The route switch draws one destination at a time,
-        // so "New terminal" from the terminal pane set `connectRequest` on a
-        // model whose presenter was not in the hierarchy: the password prompt
-        // was asked for behind a screen nobody was looking at, and opening a
-        // second shell on a server looked like a button that did nothing.
-        //
-        // Here it is above the switch, so wherever a connection starts, the
-        // prompt is in front.
         .sheet(item: $ssh.connectRequest) { host in
             SSHConnectForm(host: host, model: ssh) { session in
                 sshSessions.adopt(
@@ -810,14 +627,9 @@ struct RootView: View {
                 }
             }
         }
-        // Above the route switch, because a device can ask while somebody is
-        // anywhere in the app. Raised when a request arrives, from the
-        // sidebar card, from a notification, or from Devices.
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
         }
-        // Once per tour revision, a beat after launch so the window has
-        // drawn first. Settings can open it again by hand.
         .sheet(isPresented: $showingSetupTour, onDismiss: { SetupTourPreferences.markSeen() }) {
             SetupTour(
                 signedIn: account.signedIn,
@@ -835,8 +647,6 @@ struct RootView: View {
             .modalFrame(width: 540, height: 600)
             .task { await machines.load() }
         }
-        // Offered on Home only, signed in, and never on the first run. It
-        // waits for Home if the app opened somewhere else.
         .task(id: "\(route.isGlobal(.home))-\(account.signedIn)") {
             SetupTourPreferences.noteLaunch()
             guard route.isGlobal(.home), account.signedIn else { return }
@@ -852,8 +662,6 @@ struct RootView: View {
                               ready: route.isGlobal(.home) && account.signedIn && !showingSetupTour,
                               showing: $showingHandleOffer))
         .gitSyncSheetHost()
-        // A grant made here is what the phone is waiting on, so look again the
-        // moment this window comes forward rather than on the next tick.
         .onReceive(
             NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
         ) { _ in Task { await deviceRequests.refresh() } }
@@ -861,24 +669,15 @@ struct RootView: View {
 
     }
 
-    /// Periodic loads and peer events. Kept off `body` so Release can type-check.
     private var liveSession: some View {
         sizedWindow
-            // Insights is not the first screen. Loading it at launch used to fire
-            // eight archive queries that all take the session lock and queue
-            // behind (and in front of) Home's own work. Load on first visit.
             .task(id: route) {
                 guard route.isGlobal(.insights) else { return }
                 await model.load()
             }
-            // Returning to Home after work elsewhere: quiet re-read if the last
-            // load is older than the stale window (see HomeModel.refreshIfStale).
             .onChange(of: route) { _, next in
                 DiagnosticsLog.note("screen \(next.diagnosticName)")
                 if case let .workspace(id: id, section: .chat) = next { desktopWorkbench.activate(in: id) }
-                // A float belongs to the screen it was opened over. Carrying one
-                // across a navigation is how somebody who clicked a workspace ends
-                // up with a pane over it that they never asked for.
                 isOverlayVisible = false
                 overlayHeldByPress = false
                 applyScope(from: next)
@@ -897,36 +696,21 @@ struct RootView: View {
             .onChange(of: workspaces.connectedRemotePeerKeys) { _, peers in
                 machines.syncConnectedPeers(peers)
             }
-            // A sync landed, so the archive underneath every reporting screen
-            // has moved. The counter is on AccountModel and the re-reads are
-            // here, which is what keeps that model from having to know Home
-            // and Insights exist.
             .onChange(of: account.syncGeneration) { _, _ in
                 refreshAfterSync()
             }
-            // The same, for a sync the in-process scheduler started. It has no
-            // model to bump, so it says so on the one channel the app already
-            // uses for facts that cross screens.
             .onReceive(NotificationCenter.default.publisher(for: .tokenstatDidSync)) { _ in
                 refreshAfterSync()
             }
             .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
                 model.reload()
             }
-            // After the heatmap is up, warm secondary surfaces so Machines /
-            // agent tiles are a cache hit on first click. The sidebar task
-            // loads remote work only after this Mac's folders are ready.
-            // Never starts before archive ready, so Home keeps the host first.
             .task(id: home.isArchiveReady) {
                 await BridgeLaunch.wait()
                 guard home.isArchiveReady else { return }
                 await warmSecondarySurfaces()
             }
             #if os(macOS)
-            // SSH sessions live in the host process, so this app finds what a
-            // relaunch left running instead of showing nothing over four live
-            // shells. For the life of the shell, not the life of a screen,
-            // because the sidebar draws them whichever screen is in front.
             .task(id: WorkSessionContext.shared.generation) {
                 ssh.deactivate()
                 sshSessions.deactivate()
@@ -940,20 +724,11 @@ struct RootView: View {
                 guard !Task.isCancelled else { return }
                 await sessions.watch()
             }
-            // Sign-in goes into a sheet over this window rather than into the
-            // whole browser, so the approval is the one-question page and not
-            // the marketing site. See `MacWebAuth`.
-            // Both halves, like the phone sets in `ClientRootView`. Without
-            // the dismisser the sheet is opened by the app and closed by
-            // nobody: cancelling on the Account screen stops the poll and
-            // leaves the window standing there.
             .onAppear {
                 account.signInPresenter = { MacWebAuth.shared.start($0) }
                 account.signInDismisser = { MacWebAuth.shared.cancel() }
             }
             #endif
-            // Live automations belong on the workspace sidebar, so the run list
-            // has to stay current even when the Automations screen is not open.
             .task {
                 await BridgeLaunch.wait()
                 await automations.load()
@@ -978,14 +753,6 @@ struct RootView: View {
                     await workflows.refreshList()
                 }
             }
-            // The board's counts, loaded whether or not anyone has opened it: a
-            // count that only appears after a visit to the screen it counts is not
-            // a count anybody can rely on.
-            //
-            // Cards only, and silent. The full load also fetches backends and the
-            // queue config, which the sidebar has no use for, and it reports its
-            // failures into the board's own error banner, where a background tick
-            // has no business writing.
             .task {
                 await BridgeLaunch.wait()
                 await todo.load()
@@ -995,30 +762,19 @@ struct RootView: View {
                     await todo.refreshCounts()
                 }
             }
-            // Sidebar footer needs the handle, but not on the first frame. A short
-            // yield lets Home's archive calls claim the host first.
             .task {
                 try? await Task.sleep(for: .milliseconds(400))
                 guard !Task.isCancelled else { return }
                 await BridgeLaunch.wait()
                 await account.load()
             }
-            // Update check talks to the network and is not part of first paint.
             .task {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
                 await appUpdate.checkAndInstall()
             }
             .task {
-                // Local folder names for the sidebar first. Git status is part of
-                // that call, but it is still cheaper than also dialling peers.
                 await BridgeLaunch.wait()
-                // The daemon can still be starting when the window opens (an
-                // update, a login item racing the app). One failed read used
-                // to leave the sidebar empty until something else reloaded it,
-                // which looks exactly like every project being gone. The retry
-                // runs beside the peers, so a host that never answers cannot
-                // keep other machines' folders out of the sidebar too.
                 let localLoaded = await workspaces.loadLocal()
                 await withTaskGroup(of: Void.self) { group in
                     if !localLoaded {
@@ -1032,28 +788,16 @@ struct RootView: View {
                         }
                     }
                     group.addTask { @MainActor in
-                        // Remote peers wait for the local read and a short yield
-                        // so a cold Home does not compete with dials.
                         try? await Task.sleep(for: .milliseconds(600))
                         guard !Task.isCancelled else { return }
                         await workspaces.loadRemote()
-                        // Other machines on their own slow schedule. Local folders
-                        // refresh from the file watcher, which must not dial anybody.
                         await workspaces.watchPeers()
                     }
                 }
             }
-            // A machine that just connected should not wait for the 60-second peer
-            // sweep to show its folders.
             .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
                 if let key = note.object as? String {
-                    // Devices is usually closed during the startup sweep. Its
-                    // row still needs to reflect the live sidebar connection
-                    // when the user opens it later.
                     machines.markConnected(key)
-                    // A sweep has already published this peer's folders.
-                    // Reconnecting it here would restart the whole sweep and
-                    // cancel the slower peers still in flight.
                     if note.userInfo?["workspaceFoldersReady"] as? Bool != true {
                         workspaces.reconnect(peer: key)
                     }
@@ -1064,8 +808,6 @@ struct RootView: View {
                     }
                 }
             }
-            // An explicit Disconnect drops the peer's folders now instead of
-            // waiting for the failure sweep to notice.
             .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
                 if let key = note.object as? String {
                     machines.markDisconnected(key)
@@ -1078,26 +820,17 @@ struct RootView: View {
                 }
             }
             .task {
-                // Terminals are not on the first screen. A short yield keeps the
-                // host free for Home's archive answers.
                 try? await Task.sleep(for: .milliseconds(350))
                 guard !Task.isCancelled else { return }
                 await BridgeLaunch.wait()
                 await terminals.load()
-                // Sessions can start on this machine from a remote window or an
-                // automation; the sidebar has to learn about them without an app
-                // restart.
                 await terminals.watch()
             }
-            // The File menu's Add Project. The menu has no model, so it posts and
-            // this acts.
             .task {
                 for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
                     workspaces.requestAdd()
                 }
             }
-            // Host bring-up lives in `LaunchState.prepare` (splash). No second
-            // ensureHosted here: that would race the splash and reinstall thrash.
     }
 
     private var detailUsesTitlebar: Bool {
@@ -1120,11 +853,8 @@ struct RootView: View {
         windowContentWidth <= 0 || windowContentWidth - leftChromeWidth >= 600
     }
 
-    /// Keep both columns in one layout so a resize updates the split together.
     private var mainChrome: some View {
         HStack(spacing: 0) {
-            // Above the detail, so the half of the edge handle that reaches
-            // over the content still takes the pointer.
             leftChrome.zIndex(1)
             LiveSteppedDetail(drag: columnDrag) { detailColumn }
                 .environment(\.detailChromeToggles, detailChromeToggles)
@@ -1244,8 +974,6 @@ struct RootView: View {
         }
         guard let id = pending.request.workspaceID ?? route.workspaceID else { return }
         guard workspaces.folders.contains(where: { $0.id == id }) else {
-            // A link naming a project this account lacks must not linger and
-            // fire later, when that project happens to appear.
             guard pending.request.workspaceID != nil, workspaces.hasLoadedDirectory, !workspaces.isLoading else { return }
             pendingSimulatorAttach = nil
             desktopActionError = L10n.text("apple.desktop_actions.project_missing")
@@ -1253,7 +981,6 @@ struct RootView: View {
         }
         guard WorkViewedChange.owner(folderID: id) != nil else { return }
         pendingSimulatorAttach = nil
-        // Simulators are local hardware. A remote project can never take one.
         guard WorkDestinationResolver.route(folderID: id).peer == nil else { return }
         simulatorRequests[id] = SimulatorAttachmentIntent(deviceID: pending.request.deviceID)
         if route.workspaceID != id { navigate(to: .workspace(id: id, section: .chat)) }
@@ -1282,14 +1009,11 @@ struct RootView: View {
         }
         .overlay(alignment: .trailing) {
             if showsSidebar {
-                // In the gutter beside the glass, or straddling the hairline
-                // where the surface is flat.
                 ColumnResizeHandle(
                     side: .leading,
                     width: $sidebarWidth,
                     liveWidth: { columnDrag.sidebar }, setLiveWidth: { columnDrag.sidebar = $0 },
                     range: sidebarDragRange,
-                    // The joined shell draws its own rim along this edge.
                     showsLine: !usesUnifiedChrome,
                     help: L10n.text("apple.rootview.drag_to_resize_the_sidebar_double_click_to.8259cca6")
                 )
@@ -1306,8 +1030,6 @@ struct RootView: View {
         "sidebar-chat-\(conversationID)"
     }
 
-    /// The stored width. A drag in progress lives in `columnDrag`, read only
-    /// by the leaves that draw it, so the root view does not rebuild per event.
     private var currentSidebarWidth: CGFloat {
         CGFloat(sidebarWidth)
     }
@@ -1321,11 +1043,6 @@ struct RootView: View {
         CGFloat(inspectorWidth)
     }
 
-    /// The machine-wide places, and the account at the foot.
-    ///
-    /// Always on screen, whatever the sidebar is doing, so Home is never more
-    /// than one click away and hiding the sidebar costs nothing but the list
-    /// of projects.
     private var rail: some View {
         VStack(spacing: 3) {
             ForEach(RailPlace.allCases) { place in
@@ -1338,7 +1055,6 @@ struct RootView: View {
             Spacer(minLength: Theme.Space.s)
             railAccount
         }
-        // Keep the first destination clear of the window controls.
         .padding(.top, isFullScreen ? 0 : ShellMetrics.titleBand - ShellMetrics.panelInset + 4)
         .padding(.bottom, Theme.Space.m)
         .frame(width: ShellMetrics.railWidth + (ShellMetrics.usesGlass ? 0 : 6))
@@ -1359,8 +1075,6 @@ struct RootView: View {
         }
     }
 
-    /// Go to a rail place. Projects opens the all-projects overview; a
-    /// project itself is picked in the sidebar.
     private func openRail(_ place: RailPlace) {
         switch place {
         case .home: navigate(to: .global(.home))
@@ -1368,7 +1082,6 @@ struct RootView: View {
         case .tasks: navigate(to: .global(.todo))
         case .notes: navigate(to: .global(.notes))
         case .automations:
-            // Workflows share the place. Coming back lands where it was left.
             if !route.isGlobal(.workflows) { navigate(to: .global(.automations)) }
         case .insights: navigate(to: .global(.insights))
         case .devices: navigate(to: .global(.machines))
@@ -1474,8 +1187,6 @@ struct RootView: View {
         )
     }
 
-    /// The bar's title on a machine-wide screen. Home greets by name and
-    /// carries its own device picker, so it goes without.
     private var pageTitle: String? {
         switch route {
         case .global(.home), .global(.insights), .global(.automations), .global(.workflows), .global(.account):
@@ -1490,7 +1201,6 @@ struct RootView: View {
         if let projectHeader { return AnyView(projectHeader) }
         switch route {
         case .global(.automations), .global(.workflows):
-            // One place on the rail, two kinds of unattended work.
             return AnyView(ChromeTabStrip(
                 tabs: [
                     ChromeTab(id: GlobalSection.automations.rawValue, label: L10n.text("common.automations"), symbol: "bolt"),
@@ -1523,8 +1233,6 @@ struct RootView: View {
               let folder = workspaces.folders.first(where: { $0.id == id }) else { return nil }
         var branch: AnyView?
         if let git = folder.git, git.isRepo {
-            // Worktrees open from the foot of the branch picker, where the
-            // branches are, rather than from a button of their own here.
             #if os(macOS)
             let openWorktrees: (() -> Void)? = { worktreeProject = folder }
             #else
@@ -1547,8 +1255,6 @@ struct RootView: View {
             folder: folder,
             selected: route.workspaceSection,
             branch: branch,
-            // Numbers only where they ask for attention: what is running,
-            // what is uncommitted, what is waiting for review or to be done.
             count: { section in
                 switch section {
                 case .sessions, .changes, .pulls, .todo: return count(of: section, in: folder)
@@ -1556,8 +1262,6 @@ struct RootView: View {
                 }
             }
         ) { section in
-            // Chat opens on its conversation, not on the list of them: the
-            // sidebar is the list now.
             openSection(section, in: folder.id) {
                 if section == .chat { showingChatOverview = false }
             }
@@ -1627,19 +1331,12 @@ struct RootView: View {
         openWorkbench(.changes, in: id)
     }
 
-    /// Whether the leading sidebar column is on screen.
-    ///
-    /// Does **not** count a hover-peek float as open: that is temporary
-    /// chrome (narrow windows, or a hidden column on a wide one), not the
-    /// user's expanded preference.
     private var isLeftSidebarOpen: Bool {
         if windowContentWidth <= 0 { return true }
         if !sidebarColumnFits { return isSidebarPinned }
         return columnVisibilityChoice == .all
     }
 
-    /// Whether the inspector is on screen, as a column, a docked float or a
-    /// peek. What the toolbar mark lights up for.
     private var isRightSidebarOpen: Bool {
         guard route.hasInspector else { return false }
         if !inspectorFits {
@@ -1648,19 +1345,10 @@ struct RootView: View {
         return isInspectorPresented || isOverlayVisible
     }
 
-    /// Toggle the leading sidebar. Same action as ⌘B and the toolbar mark.
-    ///
-    /// On a wide window this flips the split column. The hover peek is never
-    /// entered by a press. Below the fit edge the column cannot be laid out,
-    /// so the press pins the floating popup instead. Asking the split view
-    /// for a column there is what crashed a narrow window on ⌘B.
     private func toggleLeftSidebar() {
-        // Always clear float state first so a hide never leaves a peek up.
         isSidebarOverlayVisible = false
 
         if windowContentWidth > 0, !sidebarColumnFits {
-            // Narrow: the sidebar is a floating popup only. Pin it open or
-            // close it. The split column stays shut below the fit edge.
             isSidebarPinned.toggle()
             if isSidebarPinned {
                 isSidebarOverlayVisible = true
@@ -1677,7 +1365,6 @@ struct RootView: View {
         }
     }
 
-    /// Review beside the running conversation without changing its route.
     private func revealChanges(in folderID: String, path: String?) {
         if route == .workspace(id: folderID, section: .chat) {
             desktopTurnReviews[folderID] = nil
@@ -1693,18 +1380,6 @@ struct RootView: View {
         Task { await workspaces.refresh() }
     }
 
-    /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.
-    ///
-    /// The button means docked or not docked, and nothing else. It is not a
-    /// show/hide for whatever happens to be on screen: pressing it while a peek
-    /// is open docks that peek, which is what somebody who has just hovered
-    /// their way to the pane and reached for the button wants. Pressing it
-    /// again undocks, and the pane goes back to appearing under the pointer and
-    /// leaving with it.
-    ///
-    /// Where "docked" puts the pane is the window's business rather than the
-    /// user's: a column where there is room, a float that stays where there is
-    /// not.
     private func toggleRightSidebar() {
         guard route.hasInspector else { return }
         if supportsWorkspaceBrowser {
@@ -1723,74 +1398,28 @@ struct RootView: View {
         }
     }
 
-    /// How long the pointer has to rest on an edge strip before the pane
-    /// behind it opens.
-    ///
-    /// Long enough that crossing the edge does nothing, short enough that
-    /// somebody who meant it does not think the strip is broken. A second is
-    /// the number people describe when they ask for this, and it matches what
-    /// the system's own edge reveals feel like.
     static let edgeDwell: TimeInterval = 0.4
-    /// How long the pointer has to be away before an undocked peek closes.
-    /// Short enough to feel like it follows the pointer, long enough that a
-    /// trip to a scrollbar or across a corner is not a dismissal.
     static let edgeGrace: TimeInterval = 0.28
-    /// How close to the edge counts as asking for the pane, while it is shut.
-    ///
-    /// Wider than a hairline, and deliberately reaching **inward**. The last
-    /// few points of a window belong to the resize cursor, so a narrow strip
-    /// meant aiming at the one band of pixels that is also the window's handle:
-    /// overshoot and you are dragging the window instead of opening a pane.
-    /// Half an inch in is a place a pointer can arrive at without care, while
-    /// still being somewhere nobody rests by accident.
     static let edgeStrip: CGFloat = 32
 
-    /// The narrowest the detail column may be. The window minimum is this
-    /// alone: below `widthForSidebar` the sidebar overlays, so requiring
-    /// both columns overflows a tiled half-screen.
     static var detailMinimumWidth: CGFloat { DisplayFit.box(480) }
 
-    /// The narrowest the window may get.
-    ///
-    /// Detail only. A content minimum larger than the window does not shrink
-    /// the window, it overflows it: the layout is built at the minimum and the
-    /// trailing edge is cut off. Half-screen tile on a 1440-wide display is
-    /// about 720, which is less than sidebar + detail (760 at factor 1).
     static var minimumContentWidth: CGFloat {
         detailMinimumWidth + ShellMetrics.railWidth + ShellMetrics.panelInset * 2
     }
 
     static var minimumContentHeight: CGFloat { DisplayFit.box(620) }
 
-    /// Below this the sidebar collapses instead of being squeezed. Above it,
-    /// the user's choice stands; below it the collapse is the default, but an
-    /// explicit reopen is honored (`isSidebarPinned`). Same separation as
-    /// `inspectorFits` and `isInspectorPresented`: a resize must not be
-    /// recorded as a decision. 1000 is where a full sidebar plus the detail
-    /// minimum stops being comfortable, so the menu gets out of the way below
-    /// it rather than being pushed.
     private static var widthForSidebar: CGFloat { DisplayFit.box(1000) }
 
-    /// Whether the inspector docks as a column at this window width, given
-    /// the columns as they are sized now.
-    ///
-    /// The left chrome and the inspector are both the person's own widths
-    /// now, so the edge follows them: narrowing the sidebar or the inspector
-    /// is a way to make room for the column, and hiding the sidebar is too.
-    /// Stored widths only, never a drag in flight, so the mode flips when a
-    /// drag ends rather than under the pointer.
     private func inspectorFits(at width: CGFloat) -> Bool {
         let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
         let sidebar = showsSidebarColumn(at: width) ? CGFloat(sidebarWidth) : 0
         return width >= rail + sidebar + DisplayFit.box(Self.comfortDetail) + CGFloat(inspectorWidth)
     }
 
-    /// The detail column's comfortable width beside a docked inspector.
     private static let comfortDetail: CGFloat = 720
 
-    /// How far the docked inspector may be dragged. Past the fit edge it
-    /// would stop docking the moment the drag ended and vanish into a peek,
-    /// so the edge stops where the column still fits.
     private var inspectorDragRange: ClosedRange<Double> {
         let range = ShellMetrics.inspectorRange
         guard windowContentWidth > 0 else { return range }
@@ -1800,8 +1429,6 @@ struct RootView: View {
         return range.lowerBound...max(range.lowerBound, min(range.upperBound, room))
     }
 
-    /// The same rule for the sidebar while an inspector is docked beside it:
-    /// widening one column must not push the other out of the window.
     private var sidebarDragRange: ClosedRange<Double> {
         let range = ShellMetrics.sidebarRange
         guard windowContentWidth > 0, showsInspector, !supportsWorkspaceBrowser else { return range }
@@ -1817,10 +1444,6 @@ struct RootView: View {
             ))
     }
 
-    /// Whether the sidebar keeps its column at this width.
-    ///
-    /// Keep chat and the chosen tool beside one another before making room
-    /// for the project sidebar. Use the person's saved widths for each pane.
     private func sidebarColumnFits(width: Double, browserOpen: Bool, persistedBrowser: Double) -> Bool {
         if browserOpen {
             let rail = ShellMetrics.railWidth + (ShellMetrics.usesGlass ? ShellMetrics.panelInset * 2 : 6)
@@ -1838,18 +1461,7 @@ struct RootView: View {
             )
     }
 
-    /// Applies a measured width to the decisions that depend on it: the
-    /// inspector fit below, and (through `showsSidebar`, which reads the
-    /// same width) whether the sidebar keeps its column. Out of the layout pass
-    /// that produced it; the width itself arrives from a resize notification,
-    /// so the hop below is belt and braces rather than the whole fix.
-    ///
-    /// Keep presentation updates outside the geometry notification cycle.
     private func applyWidth(for width: CGFloat) {
-        // Above the sidebar fit edge the popup is moot. The column can exist
-        // again. A popup pinned below the edge is the user saying "keep the
-        // sidebar", so hand it to the column. Otherwise the collapsed choice
-        // stands, and the next narrowing auto-closes again.
         if sidebarColumnFits(width: width, browserOpen: showsWorkspaceCompanion, persistedBrowser: browserPaneWidth) {
             if isSidebarPinned {
                 columnVisibilityChoice = .all
@@ -1863,8 +1475,6 @@ struct RootView: View {
             if inspectorFits != next {
                 inspectorFits = next
                 if next {
-                    // Column mode is back; the floating pane has nothing to
-                    // float over any more.
                     isOverlayVisible = false
                     overlayHeldByPress = false
                 }
@@ -1872,7 +1482,6 @@ struct RootView: View {
         }
     }
 
-    /// Window fit affects presentation without changing the user's preference.
     private var showsSidebar: Bool {
         columnVisibilityChoice != .detailOnly &&
             (windowContentWidth <= 0 || sidebarColumnFits)
@@ -1998,8 +1607,6 @@ struct RootView: View {
         }
     }
 
-    /// Shared by the global board and a folder's, which differ only in what
-    /// the board is showing.
     private var todoInspector: some View {
         TodoInspector(
             model: todo,
@@ -2017,43 +1624,16 @@ struct RootView: View {
         ) { closeInspector() }
     }
 
-    /// The selected note, beside the list it was picked from. The global list
-    /// and a folder's differ only in what the list is showing.
     private var notesInspector: some View {
         NotesInspector(model: todo, folders: workspaces.folders) { closeInspector() }
     }
 
-    /// Whether the inspector is a floating overlay rather than a column:
-    /// either the window is too narrow for the column, or the user closed the
-    /// column and the pane becomes a peek that opens on hover instead of a
-    /// door that stays shut.
     private var usesOverlayInspector: Bool {
         route.hasInspector && !supportsWorkspaceBrowser && (!isInspectorPresented || !inspectorFits)
     }
 
-    /// Whether the floating inspector stays put without the pointer.
-    ///
-    /// **Only ever true because somebody just pressed the button.** Docked is a
-    /// column, and a window with no room for a column has no docked state to
-    /// be in: deriving one from the toggle meant that on a narrow window every
-    /// arrival at a destination with an inspector threw a pane across the
-    /// content nobody had asked to cover.
-    ///
-    /// So the toggle records a preference for when there is room, and on a
-    /// narrow window a press means "show it now". That reveal waits for the
-    /// pointer to arrive rather than closing under a hand that is still on its
-    /// way, and once the pointer has been on the pane it leaves with it like
-    /// any other peek. See `overlayHeldByPress`.
     private var isOverlayPinned: Bool { overlayHeldByPress }
 
-    /// Whether the left-edge float is allowed.
-    ///
-    /// The sidebar column is off screen in three situations: the window is
-    /// too narrow to hold it, the user hid it on a wide window, or the
-    /// browser is open with no room for the column beside comfortable
-    /// detail. All three get the same hover peek the right inspector has:
-    /// the sidebar comes back as a floating pane while the pointer is near
-    /// the leading edge.
     private var usesOverlaySidebar: Bool {
         guard windowContentWidth > 0 else { return false }
         return !showsSidebar
@@ -2063,13 +1643,6 @@ struct RootView: View {
         usesOverlaySidebar && (isSidebarPinned || isSidebarOverlayVisible)
     }
 
-    /// Whether a confirmation presented from the sidebar float is on screen.
-    ///
-    /// These dialogs are presented from inside the `sidebar` view, so hiding
-    /// the float unmounts their presenter and takes the dialog with it: pick
-    /// Close on a running session, move the pointer away, and the peek leaves
-    /// with the confirmation still in front of it. The pointer watcher and the
-    /// tap scrim must leave the float up while one is showing.
     private var isSidebarModalVisible: Bool {
         sessionPendingClose != nil
             || workspacePendingRemove != nil
@@ -2106,16 +1679,6 @@ struct RootView: View {
                     }
             }
         }
-            // Below the fit edge the inspector stops being a column and floats
-            // instead: a thin hover strip at the trailing edge, the pane
-            // sliding in over the detail. It pushes nothing, so the sidebar
-            // can never be squeezed for its sake.
-            //
-            // Hit testing is the point of the HStack layout: the dismiss
-            // scrim and the panel must not share the same rectangle. A full-
-            // size clear scrim under the panel (ZStack) still won taps from
-            // workspace file rows and the account menu. Side-by-side means
-            // the panel's frame is exclusively the panel's.
             .overlay(alignment: .leading) { sidebarFloatLayer.padding(.top, chromeHeaderInset) }
             .overlay(alignment: .trailing) {
                 inspectorFloatLayer
@@ -2151,8 +1714,6 @@ struct RootView: View {
             )
     }
 
-    /// Chats only. Terminals carry their own browser beside the sessions,
-    /// and two globes on one screen opened two different browsers.
     private var supportsWorkspaceBrowser: Bool {
         route.workspaceSection == .chat
     }
@@ -2205,8 +1766,6 @@ struct RootView: View {
                         let active = showsWorkspaceCompanion && state.selected == tool
                         workbenchContent(tool, folder: folder, active: active)
                             .environment(\.desktopChromeJoined, false)
-                            // The inspector already scopes its settings to the
-                            // selected chat. Keep its shell across repositories.
                             .id(tool == .inspector ? nil : id)
                             .retainedPane(isActive: active)
                             .opacity(active ? 1 : 0)
@@ -2259,7 +1818,6 @@ struct RootView: View {
         }
     }
 
-    /// A workbench keeps at least 480 points of chat visible beside its tool.
     private var browserFitsBesideWorkspace: Bool {
         DesktopWorkbenchLayout.fitsBeside(available: windowContentWidth - leftChromeWidth)
     }
@@ -2271,8 +1829,6 @@ struct RootView: View {
             : ChromeFit.overlayMax(width: available)
     }
 
-    /// Floated sidebar: panel on the leading edge, dismiss region to its right.
-    /// Flush to the window edge like a column, not a floating card with inset.
     @ViewBuilder
     private var sidebarFloatLayer: some View {
         if showsSidebarOverlay {
@@ -2292,8 +1848,6 @@ struct RootView: View {
         }
     }
 
-    /// Floated inspector: panel on the trailing edge, dismiss region to its
-    /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
     private var inspectorFloatLayer: some View {
         if showsOverlayInspector && !supportsWorkspaceBrowser {
@@ -2359,9 +1913,6 @@ struct RootView: View {
                 let inside = Self.pointerIsNear(.trailing, within: width)
                 if inside {
                     trailingLeftAt = nil
-                    // The pointer has arrived at a pane a press put there, so
-                    // the press has done its job and the pane goes back to
-                    // following the pointer.
                     if overlayHeldByPress { overlayHeldByPress = false }
                     if showsOverlayInspector {
                         trailingSince = nil
@@ -2378,8 +1929,6 @@ struct RootView: View {
                     if isOverlayVisible, !isOverlayPinned {
                         let left = trailingLeftAt ?? now()
                         trailingLeftAt = left
-                        // A short trip out, to a scrollbar or across a corner,
-                        // is not a dismissal.
                         if now().timeIntervalSince(left) >= Self.edgeGrace {
                             isOverlayVisible = false
                             trailingLeftAt = nil
@@ -2415,12 +1964,6 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    /// Whether the pointer is inside `width` points of one edge of this app's
-    /// window.
-    ///
-    /// Screen coordinates on both sides, so no view has to publish a frame and
-    /// no layout pass is involved. A pointer over another app's window is not
-    /// near anything: `frame.contains` is what rules that out.
     private static func pointerIsNear(_ edge: HorizontalEdge, within width: CGFloat) -> Bool {
         guard let window = NSApp.keyWindow ?? NSApp.mainWindow, window.isVisible else {
             return false
@@ -2435,21 +1978,12 @@ struct RootView: View {
     }
     #endif
 
-    /// Hides the floating pane.
-    ///
-    /// A pinned pane is pinned because the toggle is on, so dismissing one is
-    /// turning the toggle off. Anything less would leave a pane that comes
-    /// straight back on the next pointer move.
     private func dismissOverlay() {
         isInspectorPresented = false
         isOverlayVisible = false
         overlayHeldByPress = false
     }
 
-    /// Hides the floated sidebar, whether it was hover-revealed or pinned.
-    ///
-    /// Refuses while a sidebar confirmation is up, for the same reason the
-    /// pointer watcher does: the dialog's presenter lives in the float.
     private func dismissSidebarOverlay() {
         guard !isSidebarModalVisible else { return }
         isSidebarPinned = false
@@ -2462,14 +1996,8 @@ struct RootView: View {
         overlayHeldByPress = false
     }
 
-    // MARK: - Sidebar
 
     #if os(macOS)
-    /// Servers with a session this app is holding, plus the starred ones.
-    ///
-    /// Not the whole library: a sidebar that lists forty servers under Hosts
-    /// and forty again under it is a sidebar nobody scrolls. A star is the
-    /// person saying which few they want one click away.
     private var sshLiveHosts: [SSHHost] {
         let ids = Set(sshSessions.sessions.compactMap(\.hostID))
         return ssh.hosts
@@ -2519,10 +2047,6 @@ struct RootView: View {
                 label: host.label,
                 symbol: "terminal",
                 trailing: "\(sshSessions.liveCount(for: host.id))",
-                // Collapsed, the row carries the lit state of whatever is
-                // inside it. Expanded, one of the session rows is the lit one,
-                // and two accent bars in one group is the bug the workspace
-                // rows already avoid.
                 isSelected: isCurrent && !isExpanded,
                 folderMetrics: true
             ) { navigate(to: .sshTerminals(host: host.id)) }
@@ -2564,15 +2088,7 @@ struct RootView: View {
 
     #endif
 
-    /// The projects, and what is live inside each one.
-    ///
-    /// The machine-wide places moved to the rail, and a project's sections
-    /// moved to the tab strip over its content, so this column answers one
-    /// question: which project, and which chat or session in it.
     private var sidebar: some View {
-        // Header, list and footer stacked rather than inset: over the glass
-        // an inset header has nothing behind it to hide the rows, so they
-        // scrolled up through the wordmark and the search row.
         VStack(spacing: 0) {
             sidebarHeader
             ScrollViewReader { proxy in
@@ -2586,9 +2102,6 @@ struct RootView: View {
                     .padding(.bottom, Theme.Space.m)
                 }
                 .scrollContentBackground(.hidden)
-                // Keep the lit chat on screen when ⌥⌘↑ or ⌥⌘↓ steps past
-                // the edge. No anchor: the smallest scroll that shows it, so
-                // a click on a row already in view moves nothing.
                 .onChange(of: chat.selected?.id) { _, id in
                     guard let id, route.workspaceSection == .chat else { return }
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
@@ -2598,8 +2111,6 @@ struct RootView: View {
             }
             accountFooter
         }
-        // Confirm lives on the sidebar column, not RootView's outer body chain,
-        // so the type checker can still finish the main chrome expression.
         .background {
             RemoveWorkspaceConfirm(
                 folder: $workspacePendingRemove,
@@ -2617,8 +2128,6 @@ struct RootView: View {
             )
         }
         .background {
-            // The folder's badge comes from the host's folder list as well as
-            // the team store, so reread it once sharing has ended.
             Color.clear.frame(width: 0, height: 0)
                 .modifier(TeamAgentApprovalPrompt(store: teams) { publication in
                     workspaces.folders.first { $0.id == publication.workspaceId }?.name
@@ -2647,8 +2156,6 @@ struct RootView: View {
     }
 
 
-    /// The wordmark, level with the content bar, then the two ways in that do
-    /// not start from a project: a new chat and a search.
     private var sidebarHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Theme.Space.s) {
@@ -2677,8 +2184,6 @@ struct RootView: View {
         .padding(.bottom, Theme.Space.xs)
     }
 
-    /// Opening and repository selection are local. A conversation is created
-    /// only after Send or Open chat captures the landing page's account and draft.
     private func startNewChat(in chosen: WorkspaceFolder? = nil) {
         if let chosen, !chosen.isRemote, !teams.localProjects(for: chosen.id).isEmpty {
             openSharedProject(chosen)
@@ -2753,8 +2258,6 @@ struct RootView: View {
             chatStart.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
-        // The host conversation exists now. Leave, a failed draft, or a failed
-        // fast-mode change has to delete it or the sidebar keeps an empty chat.
         func abandon(_ message: String?) async {
             let preserved = message ?? reader.error
             if submission.owner.scope == WorkSessionContext.shared.scope {
@@ -2762,8 +2265,6 @@ struct RootView: View {
             }
             chatStart.failed(submission, message: preserved)
         }
-        // Persist to this new conversation before exposing it to navigation.
-        // Existing conversation drafts are owned by the previous model.
         guard current(), reader.selected?.id == created.id,
               await reader.installLandingDraft(submission, permits: current) else {
             await abandon(reader.error)
@@ -2786,7 +2287,6 @@ struct RootView: View {
               workspaces.folders.contains(where: { $0.id == submission.repositoryID }),
               chatStart.ownsPresentation(submission, scope: WorkSessionContext.shared.scope,
                                         session: WorkSessionContext.shared.generation) else { return }
-        // Fold the first rows while the prism still covers the page.
         reader.prepareInitialPresentation()
         chat.saveDraftNow()
         chat = reader
@@ -2795,10 +2295,6 @@ struct RootView: View {
 
     @ViewBuilder
     private var projectsSection: some View {
-        // Folders the user chose. Nothing to do with the archive: its
-        // `project` is a lossy label recovered from a slug and cannot name a
-        // directory, and a folder an agent touched once is not somewhere
-        // anyone wants a terminal.
         SidebarGroupHeader(
             title: projectsDisplay == .byChat ? L10n.text("common.chats") : L10n.text("common.projects"),
             count: projectsDisplay == .byChat ? nil : projectsSectionCount,
@@ -2830,8 +2326,6 @@ struct RootView: View {
             if projectsDisplay == .byChat && !workspaces.folders.isEmpty {
                 projectsAddMenu()
             } else {
-                // A folder with a plus, not a bare plus: in the folder view
-                // this only ever adds a repository.
                 SidebarHeaderIconButton(
                     systemImage: "folder.badge.plus",
                     help: L10n.text("apple.rootview.add_a_project_folder.1fb6a975")
@@ -2872,8 +2366,6 @@ struct RootView: View {
                     .task(id: workspaces.folders.map(\.id) + [String(describing: ObjectIdentifier(chat)), projectsDisplay.rawValue]) {
                         await warmAllProjectChatLists()
                     }
-                    // Here, not inside the list: an empty result unmounts the
-                    // list, and a change made then must still reset the page.
                     .onChange(of: projectsFilter) { _, _ in
                         chatListLimit = SidebarProjectsLayout.chatPageSize
                     }
@@ -2881,9 +2373,6 @@ struct RootView: View {
                 ForEach(visibleProjectFolders) { folder in
                     projectRow(folder)
                 }
-                // The filter and the recent sort read every folder's chats.
-                // Closing the filter needs no read, and a folder already
-                // read is not asked again just because the filter opened.
                 .task(id: workspaces.folders.map(\.id) + [projectsSort.rawValue, showingProjectsFilter ? "filter" : "", String(describing: ObjectIdentifier(chat))]) {
                     #if os(macOS)
                     if projectsSort == .recent {
@@ -2902,13 +2391,6 @@ struct RootView: View {
                 #endif
             }
             #if os(macOS)
-            // A row, always there, under whatever folders exist.
-            //
-            // The centre pane has a prominent Add Project button, but it
-            // is only reachable with no folders at all: the first folder
-            // added selects itself and the empty state is never seen again.
-            // That left one 9pt `+` in a section header as the only way to
-            // add a second folder, which is not somewhere anyone looks.
             Button {
                 workspaces.requestAdd()
             } label: {
@@ -2963,9 +2445,6 @@ struct RootView: View {
         return visibleProjectFolders.count
     }
 
-    /// Every chat across folders that survives the filter, newest first.
-    /// The chat list is a timeline, so it always reads by recency and the
-    /// repository sort does not apply to it.
     private var visibleChatEntries: [SidebarChatEntry] {
         SidebarProjectsLayout.chatEntries(
             folders: workspaces.folders,
@@ -3036,10 +2515,6 @@ struct RootView: View {
         }
     }
 
-    /// The arrows in the cross-folder chat list walk the rows as drawn:
-    /// newest first across every folder, skipping folded days and the rows
-    /// behind Show more. In the folder view they stay inside the folder,
-    /// which is what that view lists.
     private func stepChatList(_ step: Int) -> Bool {
         guard projectsDisplay == .byChat, step == -1 || step == 1 else { return false }
         let shown = Array(visibleChatEntries.prefix(chatListLimit))
@@ -3059,8 +2534,6 @@ struct RootView: View {
         return true
     }
 
-    /// A chat in the cross-folder list. The same row as under a folder, with
-    /// the folder named where the age would be.
     private func chatListRow(_ entry: SidebarChatEntry) -> some View {
         let folder = entry.folder
         let conversation = entry.conversation
@@ -3102,8 +2575,6 @@ struct RootView: View {
         case .today: return L10n.text("common.today")
         case .yesterday: return L10n.text("common.yesterday")
         case .older: return L10n.text("common.sidebar.older")
-        // A date reads better than a weekday nobody remembers. Use the
-        // language alone, not the region, so "Nov 7" does not gain a period.
         case .day(let date):
             let language = Locale(identifier: Locale.preferredLanguages.first ?? "en")
             return date.formatted(.dateTime.month(.abbreviated).day().locale(language))
@@ -3117,29 +2588,15 @@ struct RootView: View {
             workspaceInsertionLine
         }
         let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
-        // The open workspace, and whether a terminal inside it
-        // is what the centre pane is actually showing. Only one
-        // of the two rows lights up: the folder when you are
-        // looking at the folder, the session when you are
-        // looking at a shell.
         let isCurrent = route.workspaceID == folder.id
-        // The launcher is its own surface, so a folder sitting
-        // on the launch grid is not showing a terminal and no
-        // session row may claim to be what you are looking at.
         let showingLauncher = isCurrent
             && workspaces.isShowingLauncher(in: folder.id)
-        // The surface remembers its terminal while another section is in
-        // front, so the route has to agree before a session row may light.
         let showingTerminal = isCurrent
             && route.workspaceSection == .sessions
             && workspaces.isShowingTerminal(in: folder.id)
             && terminals.activeTerminal(in: folder.id) != nil
-        // A non-empty filter opens matching folders for the search, without
-        // writing that temporary disclosure into preferences.
         let filterOpen = !projectsFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let isExpanded = expandedWorkspaces.contains(folder.id) || filterOpen
-        // A chat row under this folder is the lit one while that chat is in
-        // front, the same test the conversation row itself makes.
         let showingChat = isCurrent
             && route.workspaceSection == .chat
             && !showingChatOverview
@@ -3165,11 +2622,6 @@ struct RootView: View {
 
             WorkspaceRow(
                 folder: folder,
-                // Collapsed, the card carries the lit state of whatever
-                // is inside it, because none of it is on screen to carry
-                // its own. Expanded, a chat or session row lights instead
-                // when one is in front; every other section of the folder
-                // is the folder's own surface and lights the folder.
                 isSelected: isCurrent
                     && (!isExpanded || showingLauncher || !(showingTerminal || showingChat)),
                 isCurrent: isCurrent,
@@ -3218,7 +2670,6 @@ struct RootView: View {
         .help(folder.path)
         .contextMenu {
             ThemeRule()
-            // "Remove" and not "Delete": the folder stays.
             Button(L10n.text("apple.rootview.remove_from_tokenstat.24f9beb7"), .delete, role: .destructive) {
                 workspacePendingRemove = folder
             }
@@ -3233,21 +2684,12 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    /// A project's chats, its live sessions, and whatever is running for it.
-    ///
-    /// Live things sit directly under the project that owns them. The
-    /// sections themselves are the tab strip over the content, so the list
-    /// here is only ever things a person can open.
     private func projectChildren(
         _ folder: WorkspaceFolder,
         sessions: [TerminalSession],
         showingTerminal: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Running terminals, then chats, each a row of its own directly
-            // under the project. Headings over them repeated themselves under
-            // every project; a terminal carries a small terminal badge on its
-            // mark instead, and the Terminals tab in the bar opens the rest.
             sessionRows(sessions, in: folder, showingTerminal: showingTerminal)
             ForEach(terminals.workspaceTerminals(in: folder.id).filter { $0.ssh != nil && $0.alive }) { session in
                 SidebarRow(label: session.label, symbol: "server.rack",
@@ -3314,9 +2756,6 @@ struct RootView: View {
                 .padding(.vertical, 5)
             }
         }
-        // A folder that has not been opened this session has no chat list
-        // in the model yet. Opening it in the sidebar is the moment to read
-        // one, the same read opening its sessions already does.
         .task(id: SidebarChatReadIdentity(folderID: folder.id, model: ObjectIdentifier(chat),
                                          session: WorkSessionContext.shared.generation)) {
             guard chat.sidebarChats(in: folder.id).isEmpty, chat.folderID != folder.id else { return }
@@ -3325,8 +2764,6 @@ struct RootView: View {
         }
     }
 
-    /// Servers with a shell open, and the shells, plus starred servers ready
-    /// to connect. The whole library is one click away on the rail.
     @ViewBuilder
     private var liveServersSection: some View {
         let hosts = sshLiveHosts
@@ -3370,8 +2807,6 @@ struct RootView: View {
 
     private func projectsSectionMenu() -> some View {
         ToolbarMenuButton(help: L10n.text("common.sidebar.section_options"), diameter: Theme.Control.sidebarIcon, glyphSize: 12) {
-            // The chat list is a timeline by day, so sorting is a folder
-            // view choice only.
             if projectsDisplay == .byRepository {
                 Section(L10n.text("common.sidebar.sort_section")) {
                     Picker(L10n.text("common.sidebar.sort_section"), selection: Binding(
@@ -3389,7 +2824,6 @@ struct RootView: View {
                     .labelsHidden()
                 }
             }
-            // A section of its own: the menu draws the separator.
             Section {
                 if sidebarSectionOrder.first == "projects" {
                     Button(L10n.text("common.sidebar.move_servers_above_projects"), .move) { moveSidebarSection("servers", before: "projects") }
@@ -3400,10 +2834,6 @@ struct RootView: View {
         }
     }
 
-    /// The chat view's add button. A list of chats is where a new chat is
-    /// most often wanted, so it leads, with a repository to start it in.
-    /// Adding a repository (a folder here or a clone on another machine)
-    /// stays one choice away.
     private func projectsAddMenu() -> some View {
         ToolbarMenuButton(
             systemImage: "plus",
@@ -3431,9 +2861,6 @@ struct RootView: View {
     }
 
     private func setProjectsDisplay(_ display: SidebarProjectsDisplay) {
-        // The chat list's own task reads every folder as it appears. Keep
-        // Manual stored while chat mode is up: that view cannot drag folders,
-        // so it reads as Recent without overwriting the preference.
         projectsDisplay = display
         SidebarPreferences.shared.projectsDisplay = display
     }
@@ -3443,9 +2870,6 @@ struct RootView: View {
         SidebarPreferences.shared.projectsSort = sort
     }
 
-    /// Open a chat's pull request where this person wants them, asking
-    /// until an answer is kept. One whose repository is not a folder here only has the
-    /// browser.
     private func openPull(_ pull: ChatPull, from folder: WorkspaceFolder) {
         guard pullFolder(pull, from: folder) != nil else {
             if let url = pull.webURL { openURL(url) }
@@ -3454,7 +2878,6 @@ struct RootView: View {
         switch PullOpenPreference.shared.choice {
         case .ask:
             Task {
-                // The card this came from has to be gone before a sheet.
                 try? await Task.sleep(for: .milliseconds(200))
                 pullToOpen = PendingPullOpen(pull: pull, folder: folder)
             }
@@ -3480,10 +2903,6 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    /// A folder's list answers from what the host knew, and the host looks at
-    /// the pull requests that had aged only after answering. Read the lists
-    /// already on screen again to show what it found. Folders on this Mac
-    /// only: a mark is no reason to dial a computer.
     private func refreshSidebarPullMarks() async {
         var wait: Duration = .seconds(6)
         while !Task.isCancelled {
@@ -3532,17 +2951,9 @@ struct RootView: View {
 
     private var accountFooter: some View {
         VStack(spacing: 0) {
-            // Offline is the same card language as sync and update, so the
-            // footer reads as one place for "what is the network doing".
             OfflineCard(connectivity: connectivity, connection: connection)
             HostStatusCard()
-            // Sync feedback is a card in the same slot and the same language
-            // as the update card: success is the accent, rate limiting is
-            // amber, a failure is red. A plain caption made a successful sync
-            // read as a footnote.
             SyncCard(account: account)
-            // Above the update card, because a device waiting on an answer is
-            // the only thing in this footer that somebody else is blocked on.
             #if os(macOS)
             DeviceAccessCard(model: deviceRequests)
             #endif
@@ -3599,13 +3010,7 @@ struct RootView: View {
     }
     #endif
 
-    // MARK: - Detail
 
-    /// Whether the centre pane is the workspace surface itself.
-    ///
-    /// Tasks, Workflows and Automations are the same screens as their global
-    /// versions with a folder's worth of rows in them, so they are drawn where
-    /// those are drawn rather than as a fourth thing inside the terminal pane.
     private var showsWorkspaceSurface: Bool {
         switch route.workspaceSection {
         case .sessions, .changes, .files, .browser: return true
@@ -3615,10 +3020,6 @@ struct RootView: View {
 
     private var showsChat: Bool { route.workspaceSection == .chat }
 
-    /// The folder the mounted chat pane is for.
-    ///
-    /// The route wins while Chat is in front, so this pane can never be the
-    /// wrong folder's, and the remembered one keeps it alive after leaving.
     private var chatFolder: String? {
         if case let .workspace(id: id, section: .chat) = route { return id }
         return mountedChatFolder
@@ -3634,14 +3035,6 @@ struct RootView: View {
     @ViewBuilder
     private var detail: some View {
         #if os(macOS)
-        // Keep WorkspacesView mounted for the life of the window. Destination
-        // used to be a switch that destroyed the whole tree on every leave:
-        // Home (or Insights, Account, …) then back left every TerminalView
-        // re-parented into a fresh TerminalStack, and SwiftTerm does not
-        // reliably redraw its buffer after that (blank pane, only a caret,
-        // until the process prints again). Switching sessions *inside*
-        // workspaces stayed solid because TerminalStack never tore them
-        // down. Same rule at this level: hide the surface, do not destroy it.
         ZStack {
             WorkspacesView(
                 model: workspaces,
@@ -3664,8 +3057,6 @@ struct RootView: View {
             .accessibilityHidden(!showsWorkspaceSurface)
             .zIndex(showsWorkspaceSurface ? 1 : 0)
 
-            // Same rule as the surface above, for the same reason: hide the
-            // chat pane, do not destroy it.
             if let id = chatFolder {
                 let folder = workspaces.folders.first { $0.id == id }
                 ChatView(
@@ -3708,8 +3099,6 @@ struct RootView: View {
                     workspaceIsRemote: folder?.isRemote == true,
                     isActive: showsPulls
                 )
-                // A PR number is only unique inside its repository. Do not
-                // carry selected detail or pending actions into another folder.
                 .id(id)
                 .retainedPane(isActive: showsPulls)
                 .opacity(showsPulls ? 1 : 0)
@@ -3741,12 +3130,9 @@ struct RootView: View {
              .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
         case .workspace(_, .history):
-            // History is an inspector tab on Mac. iPhone and iPad draw it
-            // as a folder section in the client root, not here.
             EmptyView()
         case let .workspace(id: id, section: .chat):
             #if os(macOS)
-            // Drawn by the mounted pane above, which outlives this switch.
             EmptyView()
             #else
             let folder = workspaces.folders.first { $0.id == id }
@@ -3761,7 +3147,6 @@ struct RootView: View {
             #endif
         case let .workspace(id, .pulls):
             #if os(macOS)
-            // Drawn by the mounted pane above, which outlives this switch.
             EmptyView()
             #else
             let folder = workspaces.folders.first { $0.id == id }
@@ -3788,10 +3173,6 @@ struct RootView: View {
                 model: home,
                 account: account,
                 onShowAccount: { navigate(to: .global(.account)) },
-                // Getting started runs the first scan from the card it asks
-                // on, rather than sending somebody to Insights to find the
-                // button. Same model as that screen's own scan, so the two
-                // cannot be running at once.
                 scanner: model,
                 onOpenPin: openPin,
                 pinAvailability: pinAvailability,
@@ -3895,9 +3276,6 @@ struct RootView: View {
             if let host = ssh.hosts.first(where: { $0.id == hostID }) {
                 SSHTerminalPane(sessions: sshSessions, library: ssh, host: host)
             } else {
-                // The saved record was deleted while its sessions were in
-                // front. The shells are still the host's, so this says so
-                // rather than pretending the screen is empty.
                 EmptyState(
                     symbol: "server.rack",
                     title: L10n.text("apple.rootview.that_server_is_no_longer_saved.eb00734a"),
@@ -3912,47 +3290,28 @@ struct RootView: View {
             #endif
         case .global(.insights):
             InsightsView(model: model, accountIdentity: (account.account?.host ?? "") + ":" + (account.account?.accountId ?? account.account?.handle ?? "signed-out")) {
-                // The back arrow exists only for a day that came from Home, so
-                // the round trip has to end there too: clear the day filter
-                // and put Home back in front.
                 model.clearFocusedDay()
                 navigate(to: .global(.home))
             }
         }
     }
 
-    /// Background fill of secondary screens after Home's heatmap is up.
-    ///
-    /// Machines, remote workspaces and the launch catalog used to load on
-    /// first click (or on a delayed timer that still raced Home). Warm them
-    /// here at low urgency so a later click paints from model state. Never
-    /// blocks Home, and is cancelable when the root view goes away.
     private func warmSecondarySurfaces() async {
-        // Yield once so the main actor can finish painting the heatmap before
-        // we issue more host calls.
         await Task.yield()
         guard !Task.isCancelled else { return }
 
-        // Machines: identity, peers, account directory. Parallel inside load().
         if !machines.isWarmed {
             await machines.load()
-            // So the connection card can name a machine rather than saying
-            // "computer" to somebody with four of them.
             connection.setPeerNames(machines.peers)
         }
         guard !Task.isCancelled else { return }
 
         #if os(macOS)
-        // The SSH library, because the sidebar draws its folders and counts
-        // and a sidebar that fills in after the first click is a sidebar that
-        // moves under the pointer. After Machines, which is where the tier
-        // that may write the vault comes from.
         await ssh.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
         guard !Task.isCancelled else { return }
         #endif
 
         #if os(macOS)
-        // Agent tiles: absolute paths from the host's login PATH.
         await LaunchCatalog.shared.resolve()
         #endif
 
@@ -3971,9 +3330,6 @@ struct RootView: View {
         }
     }
 
-    /// Open the exact task run. A known folder keeps the run on that folder's
-    /// automations board instead of dumping it into a generic chat or the
-    /// machine-wide list.
     private func openTaskRun(runID: String, workspaceID: String) {
         let route = TaskResultRoute(
             runID: runID, workspaceID: workspaceID, folders: workspaces.folders, hostName: "This computer"
@@ -3988,9 +3344,6 @@ struct RootView: View {
         isInspectorPresented = true
     }
 
-    /// Review the folder that produced a task result. History is an inspector
-    /// tab on Mac, so both doors land on Changes with the matching tab. The
-    /// automations selection is left alone, so returning still shows this run.
     private func openTaskWorkspaceReview(workspaceID: String, surface: TaskResultWorkspaceSurface) {
         let route = TaskResultRoute(
             runID: pendingRunID ?? automations.selectedRun?.id ?? "",
@@ -4016,8 +3369,6 @@ struct RootView: View {
         }
     }
 
-    /// Interactive TTY for a task. Not an automation run: no transcript, no
-    /// delegate badge. Opens the workspace terminal so the person can watch.
     private func launchTaskInFront(_ launch: InteractiveTaskLaunch) {
         #if os(macOS)
         guard let folder = workspaces.folders.first(where: { $0.id == launch.workspaceID }) else {
@@ -4053,8 +3404,6 @@ struct RootView: View {
                         ?? L10n.text("apple.rootview.could_not_start_a_terminal.6e9cc764")
                     return
                 }
-                // Older hosts return a root TUI command that only seeds the
-                // prompt. New hosts use mini, which submits it directly.
                 if ["opencode", "opencode2"].contains(launch.backend),
                    argv.dropFirst().first == "--auto", argv.contains("--prompt"), let session {
                     let deadline = Date().addingTimeInterval(5)
@@ -4175,7 +3524,6 @@ struct RootView: View {
             .padding(.horizontal, Theme.Space.m)
     }
 
-    /// The live sessions of a folder, under its Sessions row.
     #if os(macOS)
     @ViewBuilder
     private func sessionRows(
@@ -4188,14 +3536,8 @@ struct RootView: View {
                 session: session,
                 folder: folder,
                 duplicate: { duplicateTerminal(session, in: folder) },
-                // Selected only when this session is the one actually on
-                // screen. `showingTerminal` carries the whole test, launcher
-                // included: with the launch grid up, the pane is showing a
-                // grid of tools and no session at all.
                 isSelected: showingTerminal
                     && terminals.active(in: folder.id)?.id == session.id,
-                // A session that has already exited has nothing to kill, so
-                // it closes on the spot. A live one asks first.
                 close: {
                     if session.alive {
                         sessionPendingClose = session
@@ -4215,8 +3557,6 @@ struct RootView: View {
     @ViewBuilder
     private func chatHistoryRows(for folder: WorkspaceFolder) -> some View {
         let all = chat.sidebarChats(in: folder.id).filter { !chat.isUntouched($0, in: folder.id) }
-        // A hit on the folder name keeps every chat under it; otherwise the
-        // query narrows to matching titles and branches.
         let list = SidebarProjectsLayout.matches(projectsFilter, folder: folder, chats: [])
             ? all
             : SidebarProjectsLayout.filteredChats(all, query: projectsFilter)
@@ -4230,18 +3570,8 @@ struct RootView: View {
     @ViewBuilder
     private func chatHistoryList(for folder: WorkspaceFolder, conversations incoming: [ChatConversation]) -> some View {
         let conversations = Self.holdingOrder(incoming, held: chatOrderHold.order[folder.id])
-        // Whether this folder's list is the live one. Rows under another
-        // folder open through a reveal, so their transcript is read from the
-        // owning host: selecting directly would fetch it against the folder
-        // on screen and its peer.
         let isCurrent = chat.folderID == folder.id
-        // Five rows fit without pushing the sections below off screen, ten
-        // is the warm set. Past ten the inline list stops growing: the full
-        // chat window owns search, so it owns the archive too.
         let expanded = expandedChatHistories.contains(folder.id)
-        // Arrows loop the warm ten; a selection from search or the
-        // overview can sit anywhere, and the window follows it so the lit
-        // row is always drawn. At most ten rows stay warm either way.
         let selectedIndex = conversations.firstIndex { $0.id == chat.selected?.id }
         let window = ChatHistoryWindow.visible(
             count: conversations.count, selected: selectedIndex, expanded: expanded
@@ -4263,17 +3593,8 @@ struct RootView: View {
                             openSection(.chat, in: folder.id)
                         }
                     },
-                    // The reference, not the answer. The mark reads the store
-                    // itself, so a draft coming or going does not lay this
-                    // window out again. See `ChatDraftMark`.
                     draft: chat.draftReference(for: conversation.id, in: folder.id),
-                    // The stamp, not the flag: the row's clock reads the same
-                    // start the composer does, so the two never disagree.
                     runningSince: chat.turnStartedAt(for: conversation.id),
-                    // A chat is the lit row only while the chat screen is the one
-                    // in front. The model keeps its selection when you leave, so
-                    // without the route test a conversation stayed marked under
-                    // Notes, Home or a server, beside whatever row you did pick.
                     isSelected: chat.selected?.id == conversation.id
                         && !showingChatOverview
                         && route == .workspace(id: folder.id, section: .chat),
@@ -4297,12 +3618,8 @@ struct RootView: View {
                 .equatable()
                 .id(Self.sidebarChatRowID(conversation.id))
             }
-            // One quiet footer row instead of stacked loud ones: the
-            // expander on the left, the archive on the right.
             if conversations.count > ChatHistoryWindow.collapsedLimit {
                 HStack {
-                    // Count only the rows this expander reveals. The rest
-                    // of the archive belongs to See all chats.
                     Button(expanded ? L10n.text("apple.rootview.show_less.94ea9b1d") : L10n.text("apple.rootview.show_0_more.b91c3640", "\(min(conversations.count, ChatHistoryWindow.inlineLimit) - window.count)")) {
                         if expanded {
                             setHistoryExpanded(folder.id, false)
@@ -4316,8 +3633,6 @@ struct RootView: View {
                     .contentShape(.rect)
                     .foregroundStyle(.secondary)
                     Spacer(minLength: Theme.Space.s)
-                    // Past the warm ten the rest live in the full chat
-                    // window, where search, filters and sorting exist.
                     if conversations.count > ChatHistoryWindow.inlineLimit {
                         Button(L10n.text("apple.rootview.see_all_chats.e705024a"), .search) {
                             openSection(.chat, in: folder.id) {
@@ -4333,24 +3648,14 @@ struct RootView: View {
                 }
                 .padding(.leading, ChatSidebarConversationRow.titleInset)
                 .padding(.trailing, Theme.Space.m)
-                // Text links, but a full row's height to hit by pointer or touch.
                 .frame(height: DisplayFit.dp(Theme.Control.sidebarRow))
             }
         }
-        // Hold the order while the pointer is over the list. Two running
-        // chats trade places on every reply, and the row under the pointer
-        // went with them: its card flashed open and shut, and a click could
-        // land on the chat that had just slid into its place.
         .onHover { inside in
             chatOrderHold.order[folder.id] = inside ? conversations.map(\.id) : nil
         }
-        // A list that goes while the pointer is still on it (the folder
-        // collapsed from the keyboard, its last chat removed) never hears
-        // the pointer leave. Let go here, or the order stays frozen.
         .onDisappear { chatOrderHold.order[folder.id] = nil }
         .onChange(of: chat.selected?.id) { _, selectedID in
-            // Persist the auto-expansion above, so the footer still says
-            // what the list is doing after the selection moves on.
             guard let selectedID,
                   let index = conversations.firstIndex(where: { $0.id == selectedID }),
                   index >= ChatHistoryWindow.collapsedLimit
@@ -4359,16 +3664,10 @@ struct RootView: View {
         }
     }
 
-    /// Unobserved on purpose. See `chatOrderHold`.
     final class ChatOrderHold {
         var order: [String: [String]] = [:]
     }
 
-    /// The list in the order it had when the pointer arrived.
-    ///
-    /// Rows already on screen keep their places. A chat that appears
-    /// meanwhile goes to the end, where it moves nothing, and the list takes
-    /// its live order again once the pointer leaves.
     static func holdingOrder(_ list: [ChatConversation], held: [String]?) -> [ChatConversation] {
         guard let held else { return list }
         let rank = Dictionary(held.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
@@ -4377,14 +3676,7 @@ struct RootView: View {
         return known + list.filter { rank[$0.id] == nil }
     }
 
-    /// What a section's badge says. Nil draws nothing: a zero is not news, and
-    /// a column of greyed zeroes under every folder is a wall of them.
     private func count(of section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
-        // Cards, graphs and jobs on another machine are not in this app's
-        // models, so a remote folder used to draw no badge for any of them.
-        // Its owner counts them and says so in one call. Local folders keep
-        // the in-memory count: it is instant, it is free, and it moves the
-        // moment somebody adds a card rather than on the next poll.
         let remote = folder.isRemote ? workspaces.summary(for: folder.id) : nil
         let value: Int
         switch section {
@@ -4400,8 +3692,6 @@ struct RootView: View {
         case .pulls: value = remote?.pulls ?? pullCounts.count(key: folder.id) ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
         case .notes:
-            // No remote count for notes yet, and a folder on another machine
-            // would otherwise borrow this one's number.
             value = folder.isRemote ? 0 : todo.noteCount(in: folder.id)
         case .workflows:
             if let remote {
@@ -4417,15 +3707,8 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    /// Go to an SSH section, and remember it as where SSH was left.
-    /// The heading returns to this section after visiting another destination.
     private func openSSH(_ section: SSHSection) {
         navigate(to: .ssh(section)) {
-            // A selection belongs to the section it was made in. Carrying it
-            // across left a host editor open in the inspector under a sidebar
-            // that had moved to Keys, and saving from there edited a host from
-            // a screen that said Keys. Moving inside Hosts, folder to folder,
-            // is the one case that keeps it.
             if route.sshSection?.row != section.row { ssh.selection = nil }
             lastSSHSection = section
         }
@@ -4433,10 +3716,6 @@ struct RootView: View {
 
     #endif
 
-    /// Open one of a folder's sections, and put the centre pane on it.
-    /// The scoped screens (Tasks, Workflows, Automations) need nothing here:
-    /// their scope is set in `navigate(to:)` with the route, so a screen
-    /// cannot be showing one folder's cards under another folder's row.
     private func openSection(
         _ section: WorkspaceSection,
         in folderID: String,
@@ -4456,8 +3735,6 @@ struct RootView: View {
             case .changes: workspaces.reviewWorkingTree(in: folderID)
             case .files: workspaces.showFiles(in: folderID)
             case .browser:
-                // Back to the page you had open, rather than a second blank
-                // tab every time the row is clicked.
                 let existing = workspaces.tabs(in: folderID).last {
                     if case .browser = $0 { return true }
                     return false
@@ -4468,8 +3745,6 @@ struct RootView: View {
                     workspaces.showBrowser(in: folderID)
                 }
             case .chat, .history, .pulls, .todo, .notes, .workflows, .automations:
-                // Not a tab in the terminal pane. These are drawn where their
-                // global versions are, so there is nothing to bring forward.
                 break
             }
             #endif
@@ -4477,10 +3752,6 @@ struct RootView: View {
         }
     }
 
-    /// What a pin files a folder under. Same resolution the place record
-    /// uses, so a pin and the relaunch record never disagree about which
-    /// machine owns the folder. Signed-out work uses its local scope; it
-    /// never joins the next account that signs in.
     private func pinReference(for folder: WorkspaceFolder) -> WorkReference? {
         guard let scope = WorkSessionContext.shared.scope else { return nil }
         let resolved = WorkDestinationResolver.route(folderID: folder.id)
@@ -4496,9 +3767,6 @@ struct RootView: View {
         guard let scope = WorkSessionContext.shared.scope else { return [] }
         let folderIDs = workspaces.folders.map(\.id)
         return WorkContinuityStore.shared.recentConversations(scope: scope).compactMap { reference in
-            // Work that can never open again is not something to continue.
-            // A machine that is reconnecting or waiting for access stays:
-            // those come back.
             switch desktopAvailability(reference) {
             case .hostRemoved, .itemDeleted: return nil
             default: break
@@ -4535,8 +3803,6 @@ struct RootView: View {
         guard let folderID = WorkPlaceRestoration.folderID(for: reference, among: workspaces.folders.map(\.id),
                                                           localHostIdentity: local) else { return false }
         if reference.kind == .conversation {
-            // Search closes only after a destination can actually open. Home's
-            // availability gate may otherwise decline this request silently.
             guard workAvailabilityMessage(reference) == nil else { return false }
             if let anchor = reference.anchor, ChatReadingMark.isStable(eventID: anchor) {
                 ChatReadingStore.shared.request(.init(eventID: anchor, offset: 0, updatedAt: Date(), revealTarget: true), for: reference)
@@ -4577,7 +3843,6 @@ struct RootView: View {
         return pin.reference.kind == .workspace ? machine : "\(pin.folderName) · \(machine)"
     }
 
-    /// Availability is resolved without opening a peer connection from Home.
     private func desktopAvailability(_ reference: WorkReference) -> WorkDestinationResolver.Availability {
         let local = reference.hostIdentity == WorkSessionContext.shared.localHostIdentity
         let machine = account.account?.machines.first { $0.publicIdentity == reference.hostIdentity }
@@ -4656,17 +3921,7 @@ struct RootView: View {
         }
     }
 
-    /// The folder card is the way back to its launcher. Section rows remember
-    /// and open their own destinations; making the parent repeat the last one
-    /// left no route back after somebody had opened Chat or Tasks.
-    ///
-    /// Always Launch, never the last terminal or the last section. Going
-    /// through `openSection(.sessions)` used to call `showTerminal` first, so
-    /// a second click on the same folder while Sessions was already the route
-    /// could leave the terminal in front and only light the Sessions row.
     #if os(macOS)
-    /// Where the repositories page and its peek lead, through the same
-    /// functions the sidebar rows use.
     private var repositoryActions: RepositoryActions {
         RepositoryActions(
             open: { selectWorkspace($0) },
@@ -4721,22 +3976,12 @@ struct RootView: View {
         }
     }
 
-    /// Where the shell was left, in identifiers the next launch can resolve.
-    ///
-    /// Two shapes are remembered and the rest clear the record. A folder and
-    /// a machine-wide screen are places to come back to. The SSH library and
-    /// the all-folders overview are places people go deliberately, and a
-    /// terminal screen restored days later is a screen of shells that have
-    /// since ended, so those launch on Home instead of half a memory.
     private func rememberPlace(_ next: Route) {
         let store = WorkContinuityStore.shared
         switch next {
         case let .global(section):
             store.rememberPlace(.global(section.rawValue))
         case let .workspace(id, section):
-            // No scope yet means the account has not finished loading, which
-            // is the first moments of a launch. Skipping the write there keeps
-            // an unowned folder out of the record; the next navigation writes.
             guard let scope = WorkSessionContext.shared.scope else { return }
             let resolved = WorkDestinationResolver.route(folderID: id)
             guard let host = resolved.peer ?? WorkSessionContext.shared.localHostIdentity,
@@ -4752,17 +3997,8 @@ struct RootView: View {
         }
     }
 
-    /// Open the place the shell was left, once per launch.
-    ///
-    /// Bounded on purpose. The folder list is the host's answer and the splash
-    /// is already waiting for the host, so in practice this costs nothing; a
-    /// machine slow enough to miss the deadline opens on Home rather than
-    /// holding a logo while it thinks. Nothing jumps afterwards either: a
-    /// window that is already up stays where it is.
     private func settleLaunchPlace() async {
         defer { placeSettled = true }
-        // The route this reads is built from identifiers a call has to fetch:
-        // wait for the transport before asking who owns what.
         await BridgeLaunch.wait()
         guard !ecosystemNavigation.hasRequestedNavigation, WorkPlaceLaunch.claim(), LaunchPreferences.restoresLocation, let stored = WorkContinuityStore.shared.place() else { return }
         if let section = stored.globalSection {
@@ -4773,13 +4009,6 @@ struct RootView: View {
         }
         await WorkSessionContext.shared.resolveLocalHostIdentity()
         let deadline = ContinuousClock.now + Self.placeDeadline
-        // Only a folder on another machine waits for the account. That one is
-        // account content and the scope that stored it is what proves it may
-        // reopen: a screen mounted before the answer arrives asks for its
-        // contents under one owner and is handed them under another (the chat
-        // pane opened that way rejects its own answer and selects nothing). A
-        // folder on this machine is this machine's own registration, visible
-        // to whoever is at the keyboard, and never waits for a sign-in.
         let folderIsRemote = stored.folder?.hostIdentity != WorkSessionContext.shared.localHostIdentity
         if folderIsRemote {
             while WorkSessionContext.shared.scope == nil {
@@ -4787,10 +4016,6 @@ struct RootView: View {
                 try? await Task.sleep(for: .milliseconds(40))
                 guard !Task.isCancelled else { return }
             }
-            // A folder on another machine is not in the list yet: the peer
-            // sweep is deliberately behind Home's first paint. Ask now,
-            // because the place being on that machine is the reason to dial
-            // it at all.
             Task { await workspaces.loadRemote() }
         }
         while ContinuousClock.now < deadline {
@@ -4804,8 +4029,6 @@ struct RootView: View {
                let section = WorkspaceSection(rawValue: name) {
                 Logger(subsystem: "ai.tokenstat.tokenstat", category: "chatload")
                     .error("restoring section=\(name) folder=\(folderID)")
-                // Restoring the location must not unfold a project the user
-                // deliberately left collapsed while its content was open.
                 openSection(section, in: folderID, revealInSidebar: false)
                 return
             }
@@ -4814,8 +4037,6 @@ struct RootView: View {
         }
     }
 
-    /// How long the splash may wait for the folder list before giving up on
-    /// reopening a folder.
     private static let placeDeadline: Duration = .milliseconds(1400)
 
     /// Go somewhere, and apply the state that arrival needs, in one
@@ -4831,9 +4052,6 @@ struct RootView: View {
             route = next
             rememberPlace(next)
             #if os(macOS)
-            // The chat pane is mounted for the life of the window once a
-            // folder's chat has been opened, so claim the folder here rather
-            // than letting the view claim it as it appears.
             if case let .workspace(id: id, section: .chat) = next { mountedChatFolder = id }
             if case let .workspace(id, .pulls) = next { mountedPullsFolder = id }
             #endif
@@ -4842,8 +4060,6 @@ struct RootView: View {
         }
     }
 
-    /// Scope follows the route in the same transaction, not on the next
-    /// paint. `onChange(of: route)` runs after the first frame.
     private func applyScope(from next: Route) {
         let previous = todo.scope
         let nextID = next.workspaceID
@@ -4857,18 +4073,11 @@ struct RootView: View {
         }
     }
 
-    /// Re-read everything a sync can have moved.
-    ///
-    /// Home drops its per-day caches and pulls the grid again past the host's
-    /// ten-minute series cache; Insights reloads its own period. The account
-    /// card is already reloaded by whoever ran the sync.
     private func refreshAfterSync() {
         Task { await home.reloadAfterSync() }
         model.reload()
     }
 
-    /// Closing a Files, Changes or Browser chip puts sessions in front. The
-    /// route has to follow or the sidebar stays on the section just closed.
     private func syncRouteToFront(_ front: WorkspaceSurface) {
         guard let id = route.workspaceID, let section = route.workspaceSection else { return }
         switch section {
@@ -4893,8 +4102,6 @@ struct RootView: View {
         if target.projectID != nil {
             guard WorkSessionContext.shared.scope != nil, !workspaces.isLoading else { return }
         }
-        // Consume screen routes immediately; a named project uses the existing
-        // availability flow and a fresh account scope before it is opened.
         ecosystemNavigation.pending = nil
         if target.screen != .search { showWorkSearch = false }
         switch target.screen {
@@ -4918,13 +4125,6 @@ struct RootView: View {
         }
     }
 
-    /// Try the waiting notification tap, and consume it only once it lands.
-    ///
-    /// A cold launch gets the tap before the folders and sessions it names
-    /// have loaded, so a miss keeps the request for the next load trigger
-    /// rather than dropping it. Once `NotificationOpen.patience` runs out the
-    /// tap is stale, and the browser lands on a usable screen instead of
-    /// chasing a destination that is not coming.
     private func openPendingNotification() {
         guard let request = notificationOpen.request else { return }
         if openFromNotification(request) {
@@ -4934,13 +4134,6 @@ struct RootView: View {
         if notificationOpen.dropIfStale() { landAfterFailedTap() }
     }
 
-    /// A tap on a notification. A named session opens it; a named
-    /// conversation opens that thread. Only a push naming neither falls back
-    /// to whatever session is currently waiting.
-    ///
-    /// `true` once the tap has a destination, `false` while the lists it needs
-    /// are still missing. The caller keeps a false tap and retries when they
-    /// arrive.
     private func openFromNotification(_ request: NotificationOpen.Request) -> Bool {
         if let session = sessionMatching(request) {
             openSection(.sessions, in: session.workspaceID) {
@@ -4949,16 +4142,11 @@ struct RootView: View {
             return true
         }
         guard request.kind == .chat, let conversationID = request.conversationID, !conversationID.isEmpty else {
-            // A session banner whose terminal is not in the list (or has since
-            // closed), or a payload naming nothing this build understands.
-            // Sessions may still be arriving, so this is not an answer yet.
             return false
         }
         let folderID = request.workspaceID.flatMap { workspaceID in
             workspaces.folders.first { $0.id == workspaceID }?.id
         } ?? chat.folderID ?? workspaces.selectedID ?? workspaces.folders.first?.id
-        // No folder at all means the folders have not loaded (or the app has
-        // none), and there is no screen to land on yet.
         guard let folderID, !folderID.isEmpty else { return false }
         if chat.selected?.id == conversationID, showsChat, chatFolder == folderID {
             return true
@@ -4978,12 +4166,6 @@ struct RootView: View {
         return true
     }
 
-    /// Where a tap ends up when what it named cannot be found. The sessions
-    /// of the folder already selected, which is this window's own main screen.
-    ///
-    /// The conversation case needs nothing here: `openSection(.chat, in:)`
-    /// runs before the lookup, so a banner for a deleted thread still lands on
-    /// that folder's chat list.
     private func landAfterFailedTap() {
         guard let id = workspaces.selectedID ?? workspaces.folders.first?.id,
               !id.isEmpty
@@ -4991,12 +4173,6 @@ struct RootView: View {
         openSection(.sessions, in: id)
     }
 
-    /// The session a banner is about, or the one currently waiting.
-    ///
-    /// A named session always wins. The any-attention fallback applies to
-    /// session banners and to pushes that name nothing: a chat banner naming
-    /// a conversation must reach that conversation rather than diverting to
-    /// an unrelated waiting terminal (whose request was already taken).
     private func sessionMatching(_ request: NotificationOpen.Request) -> TerminalSession? {
         if let id = request.sessionID, !id.isEmpty {
             return terminals.sessions.first(where: { $0.id == id })
@@ -5028,8 +4204,6 @@ struct RootView: View {
     }
 }
 
-/// Workspace remove confirm, kept off RootView's main modifier chain so the
-/// type checker can still finish the root body.
 private struct RemoveWorkspaceConfirm: View {
     @Binding var folder: WorkspaceFolder?
     var remove: (WorkspaceFolder) -> Void
@@ -5089,7 +4263,6 @@ private struct RemoveAllChatsConfirm: View {
 }
 
 #if os(macOS)
-/// Same words as the session strip's own close, because it is the same act.
 private struct CloseSessionConfirm: View {
     @Binding var session: TerminalSession?
     var close: (TerminalSession) -> Void
@@ -5118,10 +4291,6 @@ private struct CloseSessionConfirm: View {
     }
 }
 
-/// One confirmation for a host row's destructive action. A host remains in
-/// the live group while ended sessions are still held for their scrollback,
-/// so the count deliberately includes both running and ended tabs: all of
-/// them disappear, and every running process among them is stopped.
 private struct CloseSSHSessionsConfirm: View {
     @Binding var host: SSHHost?
     var sessionCount: (SSHHost) -> Int
@@ -5161,19 +4330,12 @@ private struct CloseSSHSessionsConfirm: View {
 
 #endif
 
-/// One row in the sidebar.
-///
-/// Hand rolled rather than a `List` row: the reference layout puts a stat on
-/// the trailing edge of every row, and `List` selection styling fights that
-/// with its own capsule.
 private struct SidebarRow: View {
     var label: String
     var symbol: String
     var symbolSize: CGFloat = 13
     var trailing: String?
     var isSelected: Bool
-    /// How many steps in from the group's own rows this one sits. Nested SSH
-    /// folders use it; everything else is flat and leaves it at zero.
     var indent: Int = 0
     var folderMetrics = false
     var action: () -> Void
@@ -5229,9 +4391,6 @@ private struct SidebarRowLabel: View {
         .contentShape(.rect)
     }
 
-    /// Selection is tinted and carries a bar down its leading edge. Hover is a
-    /// plain grey wash. They have to look like different things: with both as
-    /// shades of grey, which workspace you were actually in was a guess.
     private var background: some View {
         SidebarRowSeat(isSelected: isSelected, isHovering: isHovering, radius: 6, barInset: 3)
         .padding(.horizontal, Theme.Space.xs)
@@ -5261,17 +4420,6 @@ private struct SidebarMenuRow<Items: View>: View {
 }
 
 #if os(macOS)
-/// Sizing shared by the workspace row and the session rows nested under it.
-///
-/// One place, because the two are read as a single surface: a folder and the
-/// sessions inside it must share a leading tile size, a type scale and a
-/// vertical rhythm, or the indent reads as a different list rather than as
-/// the inside of this one.
-///
-/// The type scale is the platform's, not a chosen one. 13pt is the macOS
-/// source list size, and the two lines under it step down to 11pt, which is
-/// as small as text is allowed to go here. Larger reads as a settings pane
-/// rather than a sidebar, and that is what a 14/12/11 stack looked like.
 private enum RowMetrics {
     static let mark: CGFloat = 26
     static let title: CGFloat = 13
@@ -5281,20 +4429,8 @@ private enum RowMetrics {
     static let dot: CGFloat = 7
 }
 
-/// Dot plus word: what a session is doing right now.
-///
-/// Working is the accent in both the dot and the label, so the one row that
-/// matters is the one carrying colour. Everything else is grey, because a
-/// sidebar where four states all shout is a sidebar with no state at all.
 private struct StateBadge: View {
     let state: SessionState
-    /// When the session last produced output.
-    ///
-    /// Shown for an idle session and nowhere else. "Idle" alone leaves the
-    /// one question it raises unanswered, which is *how long*: an agent quiet
-    /// for eight seconds is thinking, one quiet for an hour is waiting for
-    /// you. On a working session the answer is always "just now", so the
-    /// clock would be noise that redraws every second.
     var since: Date?
     var statusLabel: String?
 
@@ -5341,12 +4477,6 @@ private struct StateBadge: View {
                 Circle()
                     .fill(tint)
                     .frame(width: RowMetrics.dot, height: RowMetrics.dot)
-                    // Only the live state breathes, and only when the system
-                    // allows motion. A pulsing dot on an idle row would be
-                    // movement that means nothing.
-                    // Scoped to the opacity. Started with `withAnimation`, a
-                    // forever animation also caught whatever else changed in
-                    // that frame, and kept drawing it for the whole session.
                     .animation(pulsing ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : nil) {
                         $0.opacity(pulsing ? 0.45 : 1)
                     }
@@ -5382,7 +4512,6 @@ private struct StateBadge: View {
     }
 }
 
-/// Prefix so a Finder path drop cannot be mistaken for a sidebar move.
 private enum WorkspaceDrag {
     static let prefix = "tokenstat.workspace:"
     static let end = "__end__"
@@ -5432,31 +4561,9 @@ private struct WorkspaceReorder: ViewModifier {
     }
 }
 
-/// A workspace in the sidebar: a folder mark, its name, and where its
-/// checkout stands.
-///
-/// The folder mark is deliberate. This row names a workspace, and the sessions
-/// underneath it carry the harness marks, so the folder reads as the container
-/// it is rather than pretending to be an agent.
-///
-/// Two lines, and no working state. A folder does not work, the shells inside
-/// it do, and each of those says so on its own row. Folding their states into
-/// one word here only restated what was already visible one row below, and it
-/// put a live indicator on something that is really just a place.
-///
-/// No path line either. It made every row taller than the thing it described
-/// and pushed the second workspace off the top of a short sidebar. The path is
-/// in the tooltip, where it belongs: it is what you check once when adding a
-/// folder, not what you read every time you switch to one.
 private struct WorkspaceRow: View {
     let folder: WorkspaceFolder
-    /// This row is what the centre pane is showing: the workspace itself,
-    /// with no terminal in front of it. Only then does the row take the fill
-    /// and the accent bar.
     let isSelected: Bool
-    /// The workspace is the open one, whatever is in front of it. Carries a
-    /// tinted mark and a heavier name, and nothing louder, so that a selected
-    /// session below can be the only lit row.
     let isCurrent: Bool
     let summary: WorkspaceSummary?
     let activeTerminals: Int
@@ -5595,10 +4702,6 @@ private struct WorkspaceRow: View {
         return fields
     }
 
-    /// What is uncommitted, and what is not pushed, at the row's end.
-    ///
-    /// Nothing at all when the tree is clean and level with its upstream:
-    /// a quiet row says there is nothing to look at.
     @ViewBuilder
     private var changeCounts: some View {
         let font = Theme.numeric(11)
@@ -5629,23 +4732,13 @@ private struct WorkspaceRow: View {
     private var background: some View {
         SidebarRowSeat(isSelected: isSelected, isHovering: isHovering)
         .padding(.horizontal, Theme.Space.xs)
-        // A hairline between adjacent rows. Without it two selected cards, or
-        // a card and the session under it, share an edge and read as one tall
-        // shape rather than as two things.
         .padding(.vertical, 1)
     }
 }
 
-/// A sidebar group heading, with an optional disclosure and trailing control.
-///
-/// One component for both headings, because they are the same object: a
-/// tertiary uppercase label at the sidebar's own rhythm. Two hand-rolled
-/// `HStack`s is how the second one ends up 2pt off the first.
 private struct SidebarGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int?
-    /// Nil for a heading that does not fold. The chevron is then absent
-    /// rather than drawn and inert.
     let isExpanded: Bool?
     let toggle: () -> Void
     @ViewBuilder var trailing: Trailing
@@ -5660,8 +4753,6 @@ private struct SidebarGroupHeader<Trailing: View>: View {
                 HStack(spacing: Theme.Space.xs) { trailing }
                     .fixedSize(horizontal: true, vertical: false)
             }
-            // At the minimum sidebar width, keep the label readable and move
-            // the controls below it instead of wrapping one letter per line.
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 heading.frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: Theme.Space.xs) {
@@ -5740,8 +4831,6 @@ private struct SidebarHeaderIconButton: View {
     }
 }
 
-/// Folder or chat list, as two glyphs in one quiet pill. The choice is
-/// visible at a glance instead of hiding in the options menu.
 private struct SidebarViewSwitch: View {
     let display: SidebarProjectsDisplay
     let select: (SidebarProjectsDisplay) -> Void
@@ -5782,8 +4871,6 @@ private struct SidebarViewSwitch: View {
     }
 }
 
-/// The filter under the Repositories heading. Opens focused, and Escape
-/// clears and closes it, so it costs nothing while it is not in use.
 private struct SidebarFilterField: View {
     @Binding var text: String
     let prompt: String
@@ -5851,8 +4938,6 @@ private struct SidebarShowMoreRow: View {
     }
 }
 
-/// A day in the chat list: Today, Yesterday, a date, or Older. Quiet text
-/// with the fold chevron after it, so the titles below stay the loudest thing.
 private struct SidebarChatDayHeader: View {
     let title: String
     let isWorking: Bool
@@ -5883,7 +4968,6 @@ private struct SidebarChatDayHeader: View {
             }
             .padding(.leading, ChatSidebarConversationRow.markInset)
             .padding(.trailing, Theme.Space.m)
-            // The whole heading row folds the day, so it gets a full target.
             .frame(minHeight: DisplayFit.dp(24), alignment: .bottom)
             .padding(.top, Theme.Space.xs)
             .contentShape(.rect)
@@ -5898,11 +4982,6 @@ private struct SidebarChatDayHeader: View {
     }
 }
 
-/// Rows compare by what they draw. Every sidebar update handed each row new
-/// closures, so all of them re-evaluated on a chat switch even though only
-/// the two whose selection changed draw anything different. The closures
-/// capture the conversation, the folder and the open-folder flag, all
-/// compared here, and the shell's state, which they read live.
 extension ChatSidebarConversationRow: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated {
@@ -5916,15 +4995,12 @@ extension ChatSidebarConversationRow: Equatable {
 
 private struct ChatSidebarConversationRow: View {
     static let markInset: CGFloat = Theme.Space.m + 1
-    /// Where the title starts, so the list's footer can line up with it.
     static var titleInset: CGFloat { markInset + DisplayFit.dp(16) + Theme.Space.s }
 
     let conversation: ChatConversation
     let folder: WorkspaceFolder
     let rename: (String) async throws -> Void
     let fork: () async throws -> Void
-    /// How the mark names this conversation to the draft store. Nil while
-    /// the folder's owner is unknown, which draws nothing.
     let draft: WorkReference?
     let runningSince: Date?
     let isSelected: Bool
@@ -5932,11 +5008,7 @@ private struct ChatSidebarConversationRow: View {
     let remove: () -> Void
     let openPull: (ChatPull) -> Void
     let warmPreview: () async -> Void
-    /// The folder's name, for the chat list where rows from every folder
-    /// share one list. Takes the age's seat: the day heading already says when.
     var caption: String? = nil
-    /// Whether this row's folder is the one the chat model has open. The
-    /// select closure branches on it, so it takes part in equality.
     var folderIsOpen = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -5972,14 +5044,11 @@ private struct ChatSidebarConversationRow: View {
                     ChatDraftMark(reference: draft)
                     Spacer(minLength: 0)
 
-                    // Hover actions occupy this slot without changing the title width.
                     trailingState
                         .opacity(isHovering ? 0 : 1)
                         .frame(minWidth: Theme.Control.sidebarIcon, alignment: .trailing)
                         .padding(.leading, Theme.Space.s)
                 }
-                // Padding belongs to the label: every part of the highlighted
-                // row opens the chat, including its age and right-hand edge.
                 .padding(.leading, Self.markInset)
                 .padding(.trailing, Theme.Space.s + 2 + Theme.Control.sidebarIcon + 4)
                 .frame(maxWidth: .infinity)
@@ -5988,8 +5057,6 @@ private struct ChatSidebarConversationRow: View {
             }
             .buttonStyle(ControlFeedbackStyle(highlights: false, pressScale: 0.98))
             .accessibilityLabel(accessibilityTitle)
-            // Reserve the info button's seat even before hover, so neither
-            // the title nor its status moves when the actions appear.
             HStack(spacing: 4) {
                 SidebarRowActions(name: conversation.title, visible: isHovering,
                                   canDelete: conversation.teamShare == nil && !conversation.running && !copying,
@@ -6074,8 +5141,6 @@ private struct ChatSidebarConversationRow: View {
 }
 
 extension ChatSidebarConversationRow {
-    /// Working and its clock while a turn runs, otherwise how long since the
-    /// last message, in the fewest characters that still read.
     @ViewBuilder
     fileprivate var trailingState: some View {
         if conversation.running {
@@ -6154,11 +5219,6 @@ private struct ActiveWorkflowRow: View {
     }
 }
 
-/// A live automation, drawn under the workspace it is running in.
-///
-/// Automation ptys are hidden from the terminal list on purpose. This row is
-/// how a job that is already going (Auto commit especially) stays visible
-/// without opening the Automations screen first.
 private struct ActiveAutomationRow: View {
     let job: Automation
     let backendLabel: String
@@ -6206,21 +5266,11 @@ private struct ActiveAutomationRow: View {
     }
 }
 
-/// A running session, drawn inside the workspace it belongs to.
-///
-/// Three lines: what it is, what it is costing, and whether it is working.
-/// This is the row that carries the live state, because this is the thing that
-/// is alive. The folder above it is a place, and a place is never busy.
-///
-/// The folder name and the path are both absent on purpose. The row sits
-/// directly beneath its folder, so repeating either says nothing and costs a
-/// line.
 private struct ActiveSessionRow: View {
     let session: TerminalSession
     let folder: WorkspaceFolder
     let duplicate: () -> Void
     let isSelected: Bool
-    /// Every removal path asks before it stops a live session.
     let close: () -> Void
     let action: () -> Void
 
@@ -6229,25 +5279,12 @@ private struct ActiveSessionRow: View {
     @State private var renaming = false
 
 
-    /// Line one: what was launched.
-    ///
-    /// The harness name, not the shell title. A harness rewrites its title as
-    /// it works ("✳ Claude Code", then whatever it is thinking about), so a
-    /// row keyed on it renamed itself every few seconds and the list you were
-    /// reading moved under you. What you picked from the launcher does not
-    /// change, so that is what names the row.
     private var title: String {
         if let name = session.customName { return name }
         if let harnessID = session.harnessID { return harnessName(harnessID) }
         return (session.command as NSString).lastPathComponent
     }
 
-    /// The harness's own title, when it is saying something the row does not
-    /// already say. This is where a session that is called something else
-    /// gets to be called that.
-    /// Containment tested both ways. A harness whose title is "grok" under a
-    /// row named "Grok Build" passes a one-way test and then prints a word
-    /// the row above it already said.
     private var dynamicTitle: String? {
         guard let reported = session.title?.trimmingCharacters(in: .whitespaces),
               !reported.isEmpty,
@@ -6257,12 +5294,6 @@ private struct ActiveSessionRow: View {
         return reported
     }
 
-    /// Line two: what this session is costing.
-    ///
-    /// Once the host can meter this harness, the three parts stay in the same
-    /// places even at zero: `0% ctx · $0.00 · 0k`. A lone `$0.00` looked like
-    /// a missing reading rather than a start. CPU · RAM stay the fallback
-    /// before any meter exists.
     private var stats: String? {
         if let meter = session.meter {
             let money = Money(
@@ -6276,9 +5307,6 @@ private struct ActiveSessionRow: View {
         return resourceStats
     }
 
-    /// The context reading: a percentage when a window is known, otherwise
-    /// what the last turn sent. `~` when the window came from siblings.
-    /// A missing report stays unknown, including before the first turn.
     private var contextText: String {
         guard let meter = session.meter, let used = meter.contextUsed else {
             return "— ctx"
@@ -6290,16 +5318,12 @@ private struct ActiveSessionRow: View {
         return L10n.text("apple.rootview.0_1_ctx.a6e7a82e", "\(meter.contextEstimated ? "~" : "")", "\(pct)")
     }
 
-    /// CPU and RAM, for the tooltip and as the line-two fallback.
     private var resourceStats: String? {
         var parts: [String] = []
         if let cpu = session.cpuPercent {
             parts.append(L10n.text("apple.rootview.cpu_0.bc621b54", "\(Int(cpu.rounded()))"))
         }
         if let memory = session.memoryMb, memory >= 1 {
-            // Gigabytes past a thousand: an agent with a language server and
-            // a test run under it reaches four digits, and "3.4 GB" is read
-            // at a glance where "3421 MB" is counted.
             parts.append(
                 memory >= 1000
                     ? String(format: "%.1f GB", memory / 1024)
@@ -6406,8 +5430,6 @@ private struct ActiveSessionRow: View {
         return items
     }
 
-    /// The agent's mark with a small terminal badge, so a terminal running
-    /// Claude Code does not read as a chat with Claude Code beside it.
     @ViewBuilder
     private var leadingMark: some View {
         if let harnessID = session.harnessID {
@@ -6429,8 +5451,6 @@ private struct ActiveSessionRow: View {
         }
     }
 
-    /// The same nested treatment as a chat row: these are the two things
-    /// that live inside a project, and they should look like siblings.
     private var background: some View {
         SidebarRowSeat(isSelected: isSelected, isHovering: isHovering,
                        selectedFill: Theme.rowSelectedNested, hoverOpacity: 0.45, barInset: nil)
@@ -6441,7 +5461,6 @@ private struct ActiveSessionRow: View {
 
 #endif
 
-/// A pull request waiting for the answer about where to open it.
 private struct PendingPullOpen: Identifiable {
     let pull: ChatPull
     let folder: WorkspaceFolder

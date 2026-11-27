@@ -40,7 +40,6 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/// The Legal pane's licenses card: what the sheet holds and the way in.
 @Composable
 fun LicensesCard(onOpen: () -> Unit) {
     val colors = LocalTsColors.current
@@ -69,8 +68,6 @@ fun LicensesCard(onOpen: () -> Unit) {
     }
 }
 
-/// The generated notices file, read lazily in a monospaced selectable view.
-/// A port of iOS `ClientLicensesSheet`, including its missing-file copy.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LicensesSheet(onDismiss: () -> Unit) {

@@ -18,13 +18,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 
-/// A distribution's own mark on a tinted tile, or a neutral server glyph.
-///
-/// Port of `SSHHostPlatformMark`. Vendor marks, not ours: the drawables are
-/// the same Simple Icons renditions (CC0) the Apple client ships, used only to
-/// identify the OS the host itself reported. Anything without a bundled mark
-/// gets the server glyph, because a wrong logo is worse than no logo. Never
-/// an invented initial.
 @Composable
 fun SshHostMark(platformLabel: String?) {
     val colors = LocalTsColors.current

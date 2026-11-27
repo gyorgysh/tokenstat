@@ -7,7 +7,6 @@ enum ChatBrowserPreferences {
 
     enum Destination: Equatable { case tokenstat, system }
 
-    /// An existing default is only a suggestion until a person remembers it.
     static func savedDestination(defaults: UserDefaults = .standard) -> Destination? {
         guard defaults.bool(forKey: remembersDestinationKey) else { return nil }
         let inside = defaults.object(forKey: opensLinksKey) as? Bool ?? true

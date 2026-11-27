@@ -7,9 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One launcher tile on the phone: mark, name, the same panel the Mac uses.
-///
-/// No path badge. That control is hover and a 300pt bubble.
 struct ClientLaunchTile: View {
     let profile: RemoteLaunchProfile
     var isLaunching: Bool = false
@@ -71,10 +68,6 @@ struct ClientLaunchTile: View {
     }
 }
 
-/// A project destination in the launcher's Open row.
-///
-/// It deliberately shares the agent tile's measurements, panel and border so
-/// opening Chat does not look like a second launcher bolted above the first.
 struct ClientLauncherDestinationTile: View {
     let section: WorkspaceSection
     var count: Int = 0
@@ -127,7 +120,6 @@ struct ClientLauncherDestinationTile: View {
     }
 }
 
-/// The + tile that opens the rest of the catalog.
 struct ClientMoreTile: View {
     let showing: Bool
     let action: () -> Void
@@ -158,11 +150,6 @@ struct ClientMoreTile: View {
     }
 }
 
-/// A launch tile before the host has said which tiles it has.
-///
-/// Same box, same corner radius, same height as the real one, so the grid is
-/// already the right shape when the catalog lands and the tiles fill in where
-/// the placeholders were rather than growing the row under a thumb.
 struct ClientLaunchTilePlaceholder: View {
     var phase: Double = 0
 

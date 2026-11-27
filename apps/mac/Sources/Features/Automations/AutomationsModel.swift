@@ -16,22 +16,14 @@ enum AutomationFocus: Sendable {
     case run
 }
 
-/// The agent automations this machine runs, and the runs they have produced.
-///
-/// Everything lives in the daemon, so a job keeps its schedule with the window
-/// closed. The app is a viewer and a form: it lists jobs and runs, edits a
-/// job, starts a run, and tails the transcript of whichever run is live.
 @MainActor
 @Observable
 final class AutomationsModel {
     private(set) var jobs: [Automation] = []
-    /// Which workspace this screen is showing. Nil is every workspace.
     var scope: String?
     private(set) var runs: [RunRecord] = []
     private(set) var backends: [AgentBackend] = []
 
-    /// True once the daemon has been read at least once. "No automations yet"
-    /// and "not asked yet" are different answers and must not look the same.
     private(set) var hasLoaded = false
 
     var errorMessage: String?
@@ -39,18 +31,13 @@ final class AutomationsModel {
     private var pendingCreate: (operationID: String, job: Automation)?
     private var pendingLaunches: [String: String] = [:]
 
-    /// Scheduler settings, edited on the Automations screen.
     var queueBudgetMinutes = "180"
     var queueNoLimit = false
     var queueMaxConcurrent = "2"
-    /// Last values the daemon accepted. The Save button is only live when
-    /// the fields differ, so a tap that did nothing cannot look like a save.
     private var savedQueueBudgetSeconds: UInt64 = 10_800
     private(set) var savedQueueBudgetMinutes = "180"
     private(set) var savedQueueNoLimit = false
     private(set) var savedQueueMaxConcurrent = "2"
-    /// IANA name of the host scheduler clock. Local Mac falls back to this
-    /// process because it is the host.
     private(set) var schedulerTimezone: String = TimeZone.current.identifier
 
     var queueDirty: Bool {
@@ -59,56 +46,36 @@ final class AutomationsModel {
             || queueMaxConcurrent != savedQueueMaxConcurrent
     }
 
-    /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
     private(set) var selectedRunID: String?
-    /// The job the inspector is showing. Separate from the run so picking a
-    /// job does not have to invent a run for it.
     private(set) var selectedJobID: String?
-    /// Which of the two the inspector should prefer when both are set.
     private(set) var selectedFocus: AutomationFocus = .none
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     private var catchUpTask: Task<Void, Never>?
-    /// The run id the poll task is actually tailing. Distinct from
-    /// `watchingRunID` so switching runs restarts the loop.
     private var pollingID: String?
-    /// The screen left while a tail was in flight. The host can compact the
-    /// readable file meanwhile, so the next poll has to start from zero rather
-    /// than append at an offset that now points at different bytes.
     private var transcriptNeedsReset = false
     private var noticeGeneration = 0
 
-    /// True while the screen is on show.
-    ///
-    /// The transcript poll is a live tail, at four hundred milliseconds. Its
-    /// only reader is a text view on this screen, so with the screen gone it is
-    /// a bridge round trip twice a second producing text nobody will read. The
-    /// model outlives the view, so this has to be said out loud.
     private var isVisible = false
 
-    /// The screen appeared: load, and tail whatever is running.
     func appeared() async {
         isVisible = true
         await load()
         syncWatching()
     }
 
-    /// The screen went away. The run carries on in the daemon, which is the
-    /// whole point of it living there, so only the tail stops.
     func disappeared() {
         isVisible = false
         stopPolling()
         transcriptNeedsReset = true
     }
 
-    /// Picker list: hidden workspace tiles stay out, except the current pick.
     func pickerBackends(keeping id: String? = nil) -> [AgentBackend] {
         backends.visibleForPicker(keeping: id)
     }
 
-    /// What a new job starts on. See `defaultForPicker`.
     func defaultBackend(keeping id: String? = nil) -> AgentBackend? {
         backends.defaultForPicker(keeping: id)
     }
@@ -150,10 +117,6 @@ final class AutomationsModel {
 
     static var autoCommitName: String { AutoCommitJob.name }
 
-    /// The reusable Auto commit job for a folder, if one exists.
-    ///
-    /// Name plus workspace, not schedule: one folder gets one Auto commit
-    /// job. A later start with a different agent edits that job.
     func autoCommitJobs(in workspaceID: String) -> [Automation] {
         jobs.filter {
             $0.workspaceID == workspaceID && AutoCommitJob.isName($0.name)
@@ -172,31 +135,20 @@ final class AutomationsModel {
         AutoCommitJob.isName(name)
     }
 
-    /// True while this folder's Auto commit run is queued or live.
     func isAutoCommitRunning(in workspaceID: String) -> Bool {
         autoCommitJobs(in: workspaceID).contains { lastRun(for: $0)?.isRunning == true }
     }
 
-    /// Jobs in this folder whose last run is still going. The workspace
-    /// sidebar lists these so a hidden automation pty is still visible.
-    /// The jobs of the current scope. Nil scope is every folder.
     var scoped: [Automation] {
         guard let scope else { return jobs }
         return jobs.filter { $0.workspaceID == scope }
     }
 
-    /// The runs of the current scope.
-    ///
-    /// Recent runs sits under a scoped list of jobs, so it has to answer the
-    /// same question they do. Unscoped it listed every folder's runs under a
-    /// chip naming one folder, and the rows carry no folder of their own to
-    /// correct the impression.
     var scopedRuns: [RunRecord] {
         guard let scope else { return runs }
         return runs.filter { $0.workspaceID == scope }
     }
 
-    /// Jobs set up in a folder, running or not: the sidebar count.
     func count(in workspaceID: String) -> Int {
         jobs.filter { $0.workspaceID == workspaceID }.count
     }
@@ -207,41 +159,26 @@ final class AutomationsModel {
         }
     }
 
-    /// Reload jobs and runs without touching the transcript tail.
-    ///
-    /// The Automations screen is not the only reader: the workspace sidebar
-    /// and the Auto commit button need a live status while that screen is off.
     func refreshList() async {
         do {
             async let j = Bridge.automations()
             async let r = Bridge.automationRuns()
             jobs = try await j
             runs = try await r
-            // Every path that replaces the run list feeds the notifier, so
-            // there is one answer to "did something just finish" rather than
-            // one per screen that happens to be open.
             #if os(macOS)
             RunNotifications.shared.settle(automations: runs)
             #endif
         } catch {
-            // The next tick tries again.
         }
     }
 
-    /// How a job last got on. The row carries this rather than the run list,
-    /// because "did my nightly check pass" is a question about the automation
-    /// and answering it should not mean reading a run history to find out which
-    /// entry belonged to which job.
     func lastRun(for job: Automation) -> RunRecord? {
         if let id = job.lastRunID, let run = runs.first(where: { $0.id == id }) {
             return run
         }
-        // A job whose last run predates the retained history still has an id
-        // that resolves to nothing. Fall back to the newest run it owns.
         return runs.first { $0.jobId == job.id }
     }
 
-    /// The runs a job produced, newest first.
     func runs(of job: Automation) -> [RunRecord] {
         runs.filter { $0.jobId == job.id }
     }
@@ -251,7 +188,6 @@ final class AutomationsModel {
         return runs.first { $0.id == selectedRunID }
     }
 
-    /// Drop a job or run the new scope would hide.
     func dropOutOfScopeSelection() {
         if let scope, let id = selectedJobID,
            let job = jobs.first(where: { $0.id == id }),
@@ -299,8 +235,6 @@ final class AutomationsModel {
         budget: UInt64
     ) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        // One Auto commit per folder. The Changes button and this form
-        // share that job, so a second create is an edit.
         if Self.isAutoCommitName(trimmed), var existing = autoCommitJob(in: workspaceID) {
             existing.backend = backend
             existing.model = model
@@ -495,8 +429,6 @@ final class AutomationsModel {
         }
     }
 
-    /// Kill a live run now. Same host path as a budget stop: the pty dies
-    /// and the drain records the run as stopped.
     func stop(_ run: RunRecord) async {
         do {
             try await Bridge.automationKill(runID: run.id)
@@ -508,11 +440,6 @@ final class AutomationsModel {
         }
     }
 
-    /// Start a one-time Auto commit job in this folder and run it now.
-    ///
-    /// Reuses the existing automation runner: same backends, same pty, same
-    /// budget. The scheduler never calls gitwrite. The agent commits with its
-    /// own tools because the user pressed the button.
     func startAutoCommit(
         workspaceID: String,
         workspaceName: String,
@@ -608,8 +535,6 @@ final class AutomationsModel {
         AutoCommitJob.prompt(workspaceName: workspaceName)
     }
 
-    /// Ship a version: bump, push, wait for CI, then tag. A once-job you run
-    /// by hand, so the prompt can be long and the budget can cover the wait.
     static func releasePrompt() -> String { AutomationTemplate.releasePrompt }
 
     func remove(_ job: Automation) async {
@@ -649,8 +574,6 @@ final class AutomationsModel {
             startPolling(live.id)
         } else {
             stopPolling()
-            // Each reply is 64 KiB. A finished run is not growing, so pull
-            // until we have the display window or the host has no more.
             let id = live.id
             startCatchUp(id: id)
         }
@@ -667,9 +590,6 @@ final class AutomationsModel {
                 guard let self else { return }
                 await self.fetchTranscript(id: id)
                 ticks += 1
-                // Status lives on the run list, not in the transcript. Refresh
-                // it often enough that a finished job flips off Running
-                // without switching screens.
                 if ticks % 3 == 0 {
                     await self.refreshRuns()
                 }
@@ -705,7 +625,6 @@ final class AutomationsModel {
                 startCatchUp(id: after.id)
             }
         } catch {
-            // The next tick tries again.
         }
     }
 
@@ -719,15 +638,12 @@ final class AutomationsModel {
     }
 
     private func fetchTranscript(id: String) async {
-        // The run being watched may have changed between ticks.
         guard !Task.isCancelled, isVisible, watchingRunID == id else { return }
         do {
             let offset = transcriptOffset
             let chunk = try await Bridge.automationTranscript(id: id, offset: offset)
             guard !Task.isCancelled, isVisible, watchingRunID == id, transcriptOffset == offset else { return }
             if chunk.nextOffset < transcriptOffset {
-                // The host compacted the readable file. Start again from the
-                // window it kept rather than appending onto dropped bytes.
                 transcriptText = ""
                 transcriptOffset = 0
                 let again = try await Bridge.automationTranscript(id: id, offset: 0)
@@ -741,8 +657,6 @@ final class AutomationsModel {
             }
             transcriptOffset = chunk.nextOffset
         } catch {
-            // A just-finished run may still have its file in flight; the next
-            // load() refreshes runs and the poll stops then.
         }
     }
 

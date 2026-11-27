@@ -8,17 +8,6 @@
 import Foundation
 import os
 
-/// Where a held row actually was on each frame that reached the screen.
-///
-/// A page or a slide that lands right on the second frame still looks like a
-/// jump if the first frame drew the rows at the old offset. Row reports and
-/// scroll callbacks happen during layout, so neither can say what was drawn.
-/// A run loop observer after Core Animation's commit can: what the held row
-/// last reported at that point is what the frame showed.
-///
-/// Debug builds only. Read it with:
-/// `log stream --predicate 'subsystem == "ai.tokenstat.tokenstat" && category == "hold"' --level debug`
-/// Main thread only, like `TranscriptWindow`, which is its only caller.
 @MainActor
 final class TranscriptHoldTrace {
     static let shared = TranscriptHoldTrace()
@@ -50,7 +39,6 @@ final class TranscriptHoldTrace {
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
     }
 
-    /// How far the held row is from where it has to be, nil when unbuilt.
     func reported(drift: CGFloat?) {
         guard observer != nil else { return }
         self.drift = drift
@@ -68,7 +56,6 @@ final class TranscriptHoldTrace {
         finish()
     }
 
-    /// Each distinct value once, with how many drawn turns it held for.
     private func sample() {
         let value = drift.map { String(format: "%.0f", $0) } ?? "gone"
         if let last = frames.last, last.hasPrefix(value + "x"),

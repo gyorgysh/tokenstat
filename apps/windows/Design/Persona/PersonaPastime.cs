@@ -9,29 +9,12 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// A character left to get on with something. Two places do not know what mood
-/// to be in and must not hold a pose: an empty chat, where nobody has asked
-/// for anything yet, and a long wait, where one loop starts to read as a hang.
-/// So this picks. It holds a quiet mood for a while, does something for a
-/// while, and goes back to quiet, with the length of each drawn fresh every
-/// time. Nothing repeats the same activity twice in a row.
-/// </summary>
 internal sealed class PersonaPastime : Grid
 {
-    /// <summary>What a character has to choose from.</summary>
     internal enum Repertoire
     {
-        /// <summary>
-        /// Nobody has asked for anything. It reads, it plays, it bounces off
-        /// the walls, and every so often it gives up and has a nap.
-        /// </summary>
         Leisure,
 
-        /// <summary>
-        /// It is working on an answer. Turning it over on the spot, or walking
-        /// the floor, which is the same thought in a different shape.
-        /// </summary>
         Thought,
     }
 
@@ -120,10 +103,6 @@ internal sealed class PersonaPastime : Grid
         var doing = _doing;
         _mark.State = Quiet(doing);
         PersonaMood? last = null;
-        // An empty screen should be interesting the moment it appears, so
-        // leisure opens on something. A wait must not: thought starts as
-        // thinking because that is what is actually true, and anything else
-        // would be the picture lying about the state of the turn.
         bool first = doing == Repertoire.Leisure;
         while (!token.IsCancellationRequested)
         {
@@ -143,8 +122,6 @@ internal sealed class PersonaPastime : Grid
                     return;
                 }
 
-                // A retained or inactive window must not change poses in the
-                // background, including when system animations are disabled.
                 if (!_mark.MotionAllowed) continue;
 
                 PersonaMood next;
@@ -154,8 +131,6 @@ internal sealed class PersonaPastime : Grid
                 }
                 else
                 {
-                    // Never the same thing twice running. One repeat is a
-                    // coincidence to a person watching, two is a loop.
                     var choices = Activities(doing).Where(m => m != last).ToList();
                     next = choices.Count > 0 ? choices[_random.Next(choices.Count)] : Quiet(doing);
                 }
@@ -196,23 +171,12 @@ internal sealed class PersonaPastime : Grid
     private static (double Lo, double Hi) QuietFor(Repertoire doing) =>
         doing == Repertoire.Leisure ? (2.6, 5.4) : (1.2, 2.4);
 
-    /// <summary>
-    /// How many tellings of an activity to sit through. Counted in the
-    /// activity's own cycles rather than in seconds, so a five second story is
-    /// not shown five times over and an eleven second one is not cut off
-    /// before its point.
-    /// </summary>
     private static (int Lo, int Hi) Tellings(Repertoire doing) =>
         doing == Repertoire.Leisure ? (1, 2) : (1, 1);
 
     private static (double Lo, double Hi) BusyFor(Repertoire doing) =>
         doing == Repertoire.Leisure ? (5.5, 20.0) : (5.0, 11.0);
 
-    /// <summary>
-    /// How long to hold one activity: a whole number of its own tellings, kept
-    /// inside the busy bounds so a three second story is not shown once and
-    /// gone, and an eleven second one does not outstay itself.
-    /// </summary>
     private double Span(Repertoire doing, PersonaMood mood)
     {
         double story = mood.StoryLength();
@@ -226,8 +190,6 @@ internal sealed class PersonaPastime : Grid
         int most = Math.Min(tellings.Hi, (int)Math.Floor(busy.Hi / story));
         if (least > most)
         {
-            // No whole telling can fit the category's bounds. Keep the story
-            // intact in preference to cutting its ending off.
             return story;
         }
         return story * _random.Next(least, most + 1);

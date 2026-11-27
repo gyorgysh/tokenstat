@@ -99,10 +99,6 @@ private struct ClientInAppWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        // Every sheet gets its own in-memory store. The default store shares
-        // tokenstat.ai cookies across the app and survives sign-out, so the
-        // next account could open these pages already signed in as the last
-        // one. Nothing here needs to outlive the sheet.
         configuration.websiteDataStore = .nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -144,7 +140,6 @@ private struct ClientInAppWebView: UIViewRepresentable {
             }
         }
 
-        // MARK: WKNavigationDelegate
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             onLoadingChange(true)
@@ -183,8 +178,6 @@ private struct ClientInAppWebView: UIViewRepresentable {
             }
         }
 
-        // A target=_blank link opens a new web view; load it here instead so
-        // it never escapes this sheet.
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, isWebURL(navigationAction.request.url) {
                 webView.load(navigationAction.request)

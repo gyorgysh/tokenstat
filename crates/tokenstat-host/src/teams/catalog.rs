@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Only approved display metadata crosses a broad checkout read connection.
-//! Active cloud refs, private mappings and canonical markers must all agree.
-
 use super::{
     AuthorizedTeamPrincipal, api_error,
     publications::{ChatTarget, Folder, Owner, Phase, Store},
@@ -61,8 +57,7 @@ pub(super) fn call(
         .filter(|row| row.phase == Phase::Active)
         .map(|row| (row.id.clone(), row))
         .collect();
-    // Exactly one bounded account request, with no private source/map locks.
-    // The guest's authority came from its verified principal, not this client.
+
     let page = client
         .shared_chats(target.organization, target.checkout, Page { limit, offset })
         .map_err(api_error)?;
@@ -122,8 +117,7 @@ pub(super) fn call(
         {
             return Err(changed());
         }
-        // Older local markers remain readable through their exact share, but
-        // have no approved catalog title. Never substitute a current title.
+
         rows.push(json!({"id":cloud.id,"checkoutId":cloud.checkout_id,"revision":cloud.revision,"createdAt":cloud.created_at,
             "title":marker.approved.as_ref().map(|approved| &approved.title),"backend":marker.approved.as_ref().map(|approved| &approved.backend),
             "lastMessageAtMs":entry.last_message_at_ms}));

@@ -6,7 +6,6 @@ using Windows.ApplicationModel.Activation;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Protocol launches reach the existing window, including during boot.</summary>
 internal static class DesktopActivation
 {
     private static readonly ConcurrentQueue<DesktopOpenRequest> Pending = new();
@@ -21,7 +20,6 @@ internal static class DesktopActivation
         var instance = AppInstance.FindOrRegisterForKey("desktop");
         if (!instance.IsCurrent)
         {
-            // No window or XAML initialization in the forwarding process.
             Redirect(instance, activation);
             return false;
         }

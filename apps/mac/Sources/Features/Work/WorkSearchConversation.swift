@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Search exactly the readable transcript blocks. Coalescing is shared with
-/// the transcript, so a match in streamed assistant text opens the same row
-/// the reader sees rather than an individual transport delta.
 enum WorkSearchConversation {
     static func documents(reference: WorkReference, payload: CachedRecordPayload,
                           folderName: String, machineName: String) -> [WorkSearchIndex.Document] {

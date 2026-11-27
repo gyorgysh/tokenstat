@@ -2,8 +2,6 @@
 #if os(macOS)
 import Foundation
 
-/// Reusable silhouettes, selected from CoreSimulator's stable type identifier.
-/// These are recognizable hardware families, not manufacturer CAD assets.
 enum SimulatorHardware: CaseIterable {
     case phone, tablet
     case iPhoneSingle, iPhoneHome, iPhoneHomeDual

@@ -8,9 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Queued messages are somebody's own writing, so the rules that decide what
-/// may be edited, resent or dropped are pinned here. Twin of the behaviour in
-/// `ChatOutboxStore.swift` and `ChatQueueStrip.title`.
 class ChatOutboxTest {
     private fun message(
         id: String,
@@ -35,9 +32,6 @@ class ChatOutboxTest {
         assertTrue(message("a", ChatDelivery.Waiting).canEdit)
     }
 
-    /// The point of `accept`: the host took one message and moved the
-    /// conversation on by one, so its siblings are still aimed at something
-    /// that exists and do not need reviewing.
     @Test
     fun `accepting one message carries its siblings to the new revision`() {
         val items = listOf(message("a"), message("b"), message("c"))
@@ -46,8 +40,6 @@ class ChatOutboxTest {
         assertEquals(listOf(8L, 8L), rest.map { it.expectedRevision })
     }
 
-    /// Anything other than exactly one step means somebody else changed the
-    /// conversation too, and those messages have to be looked at.
     @Test
     fun `a revision that jumped leaves the siblings where they were`() {
         val items = listOf(message("a"), message("b"))
@@ -85,8 +77,6 @@ class ChatOutboxTest {
         assertEquals(listOf("a", "b", "c"), ChatOutboxRules.moved(items, 0, 9).map { it.id })
     }
 
-    /// An unconfirmed delivery outranks every other line, because it is the
-    /// one state where doing nothing is the right move.
     @Test
     fun `the strip says what is actually true`() {
         val waiting = listOf(message("a"))
@@ -117,9 +107,6 @@ class ChatOutboxTest {
         )
     }
 
-    /// The strip hides the composer's own in-flight send: on a healthy send
-    /// that record exists for one round trip, and drawing it made the strip
-    /// open and shut on every message. Twin of `ChatModel.pendingQueue`.
     @Test
     fun `the strip hides the send that is in flight right now`() {
         val items = listOf(message("a"), message("b"))
@@ -175,7 +162,6 @@ class ChatOutboxTest {
         assertEquals(1, store.items("k").size)
     }
 
-    /// One send per conversation at a time, so two taps cannot both deliver.
     @Test
     fun `only one delivery runs per conversation`() {
         val store = InMemoryChatOutbox()
@@ -193,8 +179,6 @@ class ChatOutboxTest {
         assertEquals(ChatDelivery.NeedsReview, ChatDelivery.of("nonsense"))
     }
 
-    /// The distinction that decides whether somebody is told to check a
-    /// delivery or simply to try again.
     @Test
     fun `a request that never left the device is a refusal, not an unknown`() {
         assertFalse(ChatOutboxRules.deliveryUnknown(null, "peer is not on the tunnel"))

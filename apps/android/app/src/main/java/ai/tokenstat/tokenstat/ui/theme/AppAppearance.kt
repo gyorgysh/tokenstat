@@ -24,7 +24,6 @@ enum class AppearanceMode(val key: String) {
             Oled -> L10n.text("common.appearance.oled")
         }
 
-    /// Null follows the system.
     val dark: Boolean?
         get() = when (this) {
             Auto -> null
@@ -37,7 +36,6 @@ enum class AppearanceMode(val key: String) {
     }
 }
 
-/// One side of a theme. The seven colours every client names the same way.
 data class AppearanceColors(
     val background: Color,
     val sidebar: Color,
@@ -49,17 +47,13 @@ data class AppearanceColors(
 )
 
 data class AppearancePalette(val id: String, val name: String, val light: AppearanceColors, val dark: AppearanceColors) {
-    /// Theme names are names. Only the plain one is a word.
     val label: String get() = if (id == "default") L10n.text("common.appearance.default_theme") else name
 }
 
 private fun paletteSide(vararg hex: Long) =
     hex.map { Color(0xFF000000L or it) }.let { AppearanceColors(it[0], it[1], it[2], it[3], it[4], it[5], it[6]) }
 
-/// How the app looks on this phone. Port of the Apple `AppAppearance`, with
-/// the built-in themes. Writing and importing a theme file is desktop work.
 object AppAppearance {
-    /// The same values as the Apple and Windows apps.
     val palettes = listOf(
         AppearancePalette(
             "default", "Default",
@@ -90,7 +84,6 @@ object AppAppearance {
 
     private fun prefs(context: Context) = context.getSharedPreferences("tokenstat.appearance.v1", Context.MODE_PRIVATE)
 
-    /// Read before the first frame, so a chosen theme never flashes the other.
     fun load(context: Context) {
         val prefs = prefs(context)
         mode = AppearanceMode.of(prefs.getString("mode", null))
@@ -111,8 +104,6 @@ object AppAppearance {
 
     fun palette(id: String?) = palettes.firstOrNull { it.id == id } ?: palettes.first()
 
-    /// Tells the system too, so the launch splash and its own dialogs match.
-    /// Older systems have no such call. The app's own screens do not need it.
     private fun applyNightMode(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         context.getSystemService(UiModeManager::class.java)?.setApplicationNightMode(
@@ -149,8 +140,6 @@ object AppAppearance {
             )
         }
         if (oled) {
-            // A card is a step off black rather than black in a drawn frame,
-            // which is how depth works where there is no light.
             colors = colors.copy(
                 background = Color.Black,
                 sidebar = Color.Black,
@@ -160,8 +149,6 @@ object AppAppearance {
             )
         }
         if (themed || oled) {
-            // Step 0 is the border tone, never a surface: on black a black
-            // cell would vanish and a quiet day would read as a hole.
             colors = colors.copy(
                 heat = listOf(
                     colors.border,

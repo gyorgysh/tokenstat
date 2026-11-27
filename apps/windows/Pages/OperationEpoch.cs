@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>Capture before queueing work. Recheck after each asynchronous boundary.</summary>
 internal sealed class OperationEpoch
 {
     private long _revision;

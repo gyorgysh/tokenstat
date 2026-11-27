@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{api_error, serialize};
 use crate::error::DispatchError;
 use serde::Deserialize;
@@ -40,7 +39,7 @@ pub(super) fn parse(method: &str, params: &str) -> Result<Request, DispatchError
     }
     let mut body: Value = serde_json::from_str(params).map_err(|_| invalid())?;
     let object = body.as_object_mut().ok_or_else(invalid)?;
-    // These are verified by AccountSnapshot before any network operation.
+
     object.remove("_accountScope");
     object.remove("_accountSession");
     #[cfg(feature = "local-host")]

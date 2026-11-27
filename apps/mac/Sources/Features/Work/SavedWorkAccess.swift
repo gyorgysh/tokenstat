@@ -37,8 +37,6 @@ final class SavedWorkAccess {
         return envelope.owner
     }
 
-    /// A definitive account answer ends local reading. Signed out erases the
-    /// offer; a different account replaces it rather than exposing a chooser.
     func verified(_ owner: SavedWorkOwner?) {
         endReading()
         accountAnswered = true
@@ -55,7 +53,6 @@ final class SavedWorkAccess {
         accountAnswered = false
     }
 
-    /// Called only by an explicit user action at the account-retry door.
     @discardableResult
     func beginReading(_ owner: SavedWorkOwner) -> Bool {
         guard offeredOwner == owner else { return false }

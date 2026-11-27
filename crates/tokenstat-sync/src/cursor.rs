@@ -194,8 +194,6 @@ pub fn limits() -> ProviderLimits {
     if windows.is_empty() {
         return unavailable_limits("Cursor reported no subscription usage windows.".to_string());
     }
-    // The usage answer does not name the plan. A second, smaller call does,
-    // and a failure there costs only the label, never the reading.
     let plan = string_value(&body, &["plan", "membershipType", "planName", "planType"])
         .or_else(|| cached_plan_name(&client, &token));
     ProviderLimits {
@@ -412,7 +410,6 @@ pub fn fetch_into(
             parse_csv(raw)
         }
     };
-    // A corrupt cache is disposable; do not make somebody wait for its TTL.
     let cached = (!force && cache_is_fresh(&cache, FETCH_TTL))
         .then(|| {
             fs::read_to_string(&cache)
@@ -443,8 +440,6 @@ pub fn fetch_into(
         TokenSource::Stored => "stored",
         TokenSource::Discovered => "cursor keychain",
     };
-    // After the request list, so the hourly totals only fill what it left
-    // out. A failure here costs the totals, never the requests just stored.
     let hourly = match crate::cursor_daily::fetch_into(store, tz, &token, &account, force) {
         Ok(outcome) => {
             let note = format!(", {} hourly totals added", outcome.rows);
@@ -704,7 +699,6 @@ fn billing_from_kind(kind: Option<&str>) -> BillingMode {
         | "USAGE_EVENT_KIND_ON_DEMAND"
         | "USAGE_EVENT_KIND_USER_API_KEY" => BillingMode::Metered,
         "USAGE_EVENT_KIND_ERRORED_NOT_CHARGED" => BillingMode::Unknown,
-        // Included in Pro / custom subscription: plan usage, not a cash charge.
         _ if kind
             .map(|k| k.contains("INCLUDED") || k.contains("SUBSCRIPTION"))
             .unwrap_or(false) =>
@@ -836,9 +830,6 @@ pub fn parse_csv(text: &str) -> anyhow::Result<Vec<UsageEvent>> {
             &cache_write.to_string(),
         ])
         .to_string();
-        // Identical real requests are a multiset, not one request. The ordinal
-        // is within identical content, so unrelated prepends/reorders do not
-        // change an existing request's identity.
         let occurrence = occurrences.entry(fingerprint.clone()).or_default();
         let id = EventId::derive(&[&fingerprint, &occurrence.to_string()]);
         *occurrence += 1;
@@ -916,8 +907,6 @@ fn date_to_ms(date: &str) -> Option<i64> {
                 .as_millisecond(),
         );
     }
-    // A date-only export has no time of day. Retain the historical noon
-    // convention rather than inventing a precise midnight request.
     let day = date.parse::<jiff::civil::Date>().ok()?;
     Some(
         day.at(12, 0, 0, 0)
@@ -1029,8 +1018,6 @@ fn reuse_archived_csv_ids(
                 aliases.aliases.insert(canonical_text, old);
             }
         }
-        // New rows have explicit account provenance; reused legacy IDs retain
-        // their original archive record under normal max-counter insertion.
         event.session = format!("cursor:csv:{account}:{}", event.session);
     }
     store.set_meta(KEY, &serde_json::to_string(&aliases)?)?;
@@ -1104,7 +1091,6 @@ mod tests {
         for bad in ["-1", "1.5", "1e3", "1,23", "12 junk", ",123", "1,"] {
             assert_eq!(parse_number(bad), None, "{bad}");
         }
-        // Exercise literal CSV escaping independently of the model's contents.
         assert_eq!(
             split_csv_line(r#""model ""quoted""",12"#).unwrap(),
             vec!["model \"quoted\"", "12"]
@@ -1144,8 +1130,6 @@ mod tests {
         assert_ne!(other_account[0].id, old.id);
         store.insert_events(&other_account, &tz).unwrap();
         assert_eq!(store.events(&Default::default()).unwrap().len(), 2);
-        // No unmatched historical row is deleted, including inflated old IDs
-        // whose original account/ordinal cannot be recovered safely.
     }
 
     #[test]

@@ -15,9 +15,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushRegistrarTest {
-    /// A SharedPreferences over a map. The core and FCM are absent in unit
-    /// tests, so every account call here fails: that is the offline path,
-    /// which is exactly what these tests are about.
     private class FakePrefs : SharedPreferences {
         val map = mutableMapOf<String, Any?>()
 
@@ -103,7 +100,6 @@ class PushRegistrarTest {
         PushRegistrar.enable()
         PushRegistrar.persist("fcm-token")
 
-        // The core is absent here, so the removal cannot land.
         PushRegistrar.unregister()
 
         assertEquals("fcm-token", prefs.map["pendingRemoval"])

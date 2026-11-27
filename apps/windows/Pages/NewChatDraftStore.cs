@@ -6,8 +6,6 @@ internal sealed record NewChatDraft(string Text, NewChatFile[] Files, NewChatSet
     internal static NewChatDraft Empty => new("", [], null);
 }
 
-/// A page owns one account generation; repository IDs include the remote host.
-/// Unbound writing follows the first explicit repository selection once only.
 internal sealed class NewChatDraftStore
 {
     private readonly Dictionary<string, NewChatDraft> _drafts = new();
@@ -31,8 +29,6 @@ internal sealed class NewChatDraftStore
     {
         Remember(current);
         if (Repository == repository) return current;
-        // A folder shown before anyone chooses one is not a selection. The
-        // unbound draft stays unbound, and the first explicit choice adopts it.
         if (!adoptUnbound) return current;
         if (repository is not null && !_hasSelectedRepository && Repository is null && !_drafts.ContainsKey(repository))
         {

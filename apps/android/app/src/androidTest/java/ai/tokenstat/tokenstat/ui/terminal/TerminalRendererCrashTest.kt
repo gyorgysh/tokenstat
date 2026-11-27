@@ -19,7 +19,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
 
-/** The production terminal view and bridge, without a PTY or SSH connection. */
 @RunWith(AndroidJUnit4::class)
 class TerminalRendererCrashTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -85,7 +84,6 @@ class TerminalRendererCrashTest {
         val old = views.toList()
         compose.runOnIdle { old.first().loadUrl("chrome://crash") }
         compose.waitUntil(10_000) { failed.first().value }
-        // A second terminal may share the renderer or own another process.
         compose.runOnIdle { if (!failed[1].value) old[1].loadUrl("chrome://crash") }
         compose.waitUntil(10_000) { failed.all { it.value } }
         compose.onNodeWithText("Sessions remain available").assertIsDisplayed()
@@ -93,7 +91,7 @@ class TerminalRendererCrashTest {
         compose.runOnIdle {
             assertTrue(old.none { it.isAttachedToWindow })
             assertTrue(bridges.all { it.webView == null && !it.alive && !it.killed })
-            old.forEach { it.shutdown() } // Release after renderer death is idempotent.
+            old.forEach { it.shutdown() }
             failed.forEach { it.value = false }
             generation.value++
         }

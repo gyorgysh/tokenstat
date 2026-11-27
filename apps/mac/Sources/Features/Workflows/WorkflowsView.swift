@@ -4,11 +4,6 @@
 
 import SwiftUI
 
-/// The workflow library. Global graphs, then one section per workspace.
-///
-/// Opening a row on the Mac opens the canvas. Empty state is the design
-/// prompt, not an empty form. The inspector stays the outline and the
-/// selected-node form.
 struct WorkflowsView: View {
     @Bindable var model: WorkflowsModel
     var folders: [WorkspaceFolder]
@@ -21,7 +16,6 @@ struct WorkflowsView: View {
     @State private var designModel = ""
     @State private var designEffort = ""
     @State private var designWorkspaceID = ""
-    /// "1", "0", or empty for "nobody has said yet".
     @AppStorage("workflows.examplesExpanded") private var examplesExpandedStored = ""
     @State private var running: WorkflowGraph?
     @State private var confirmingDelete: WorkflowGraph?
@@ -142,9 +136,6 @@ struct WorkflowsView: View {
         !model.hasLoaded && model.errorMessage == nil
     }
 
-    /// A new graph belongs where you are standing. Inside a folder that is
-    /// this folder, and with one folder registered there is nowhere else it
-    /// could sensibly go.
     private var defaultScope: WorkflowScope {
         defaultWorkspaceID == nil ? .global : .workspace
     }
@@ -153,8 +144,6 @@ struct WorkflowsView: View {
         model.scope ?? (folders.count == 1 ? folders.first?.id : nil)
     }
 
-    /// Design binds to the folder whose board this is, not the first
-    /// registered folder. Empty until a folder exists.
     private func syncDesignWorkspace() {
         designWorkspaceID = model.scope ?? folders.first?.id ?? ""
     }
@@ -170,13 +159,6 @@ struct WorkflowsView: View {
         )
     }
 
-    /// Whether the examples are open.
-    ///
-    /// Only the examples collapse. The builder itself is the point of the
-    /// screen and hiding the field somebody came to type in behind a chevron
-    /// costs a click every time. The examples are the part that is read once
-    /// and then in the way, so they are the part that folds, and the choice is
-    /// remembered. Until one is made, an empty library shows them.
     private var examplesExpanded: Bool {
         switch examplesExpandedStored {
         case "1": return true
@@ -312,9 +294,6 @@ struct WorkflowsView: View {
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                // Steps first, then the outline that spells each one out. A
-                // draft is reviewed before it is saved, and the run in one line
-                // is what tells you the model understood the description.
                 WorkflowStepStrip(nodes: draft.nodes, edges: draft.edges)
                 WorkflowOutline(nodes: draft.nodes, edges: draft.edges)
                 HStack(spacing: Theme.Space.s) {
@@ -433,8 +412,6 @@ struct WorkflowsView: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            // Against the longest run on screen, so the list answers "which of
-            // these was the long one" without anybody doing subtraction.
             DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
             Text(run.startedAt.formatted(date: .omitted, time: .shortened))
                 .font(Theme.caption)
@@ -465,9 +442,6 @@ struct WorkflowsView: View {
 
 private struct WorkflowRow: View {
     let graph: WorkflowGraph
-    /// A narrow window. The name and the state stay, the detail beside them
-    /// goes, rather than every element keeping a share of a width none of them
-    /// can use.
     var compact: Bool = false
     let last: WorkflowRunRecord?
     let history: [WorkflowRunRecord]
@@ -535,14 +509,11 @@ private struct WorkflowRow: View {
         return last
     }
 
-    /// Where it lives. The outcome is a pill and the shape is a strip, so this
-    /// is down to the one fact neither of those carries.
     private var caption: String {
         if let folder { return folder.name }
         return graph.scope.label
     }
 
-    /// Oldest first, which is the direction the strip reads.
     private var ticks: [RunHistoryStrip.Tick] {
         history.reversed().map { run in
             RunHistoryStrip.Tick(
@@ -610,7 +581,6 @@ struct WorkflowOutline: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Input first, then the rest in saved order. Positions are canvas metadata.
     private var ordered: [WorkflowNode] {
         let inputs = nodes.filter { $0.kind == .input }
         let rest = nodes.filter { $0.kind != .input }

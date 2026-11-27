@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The top of the profile window: the person and the address, over the grid
-/// the product draws days on. The grid lights when the page is public.
 struct ProfilePlate: View {
     let avatar: String?
     let name: String
     let handle: String?
-    /// The address as it stands, or as it is being typed.
     let address: String
-    /// Nothing has been chosen yet, so the address is an example.
     let isExample: Bool
     let isPublic: Bool
-    /// Nil while the address is only a draft: a link to nowhere is not worth
-    /// copying.
     let copy: (() -> Void)?
     let copied: Bool
 
@@ -70,8 +64,6 @@ struct ProfilePlate: View {
             .truncationMode(.middle)
     }
 
-    /// The day grid, as texture. Every cell is the same colour and only fades
-    /// with distance, so it never reads as somebody's activity.
     private var grid: some View {
         ZStack {
             LinearGradient(colors: [Theme.accentSoft, Theme.accentSoft.opacity(0)],
@@ -92,8 +84,6 @@ struct ProfilePlate: View {
             for column in 0..<columns {
                 for row in 0..<rows {
                     let x = inset + CGFloat(column) * step, y = CGFloat(row) * step
-                    // Below the picture it fades faster, so the name and the
-                    // address sit on a plain ground.
                     let drop = y - center.y
                     let distance = hypot(x - center.x, drop * (drop > 0 ? 2.6 : 1.3))
                     let fade = pow(max(0, 1 - distance / reach), 1.5)

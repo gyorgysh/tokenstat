@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Only the conversation in front asks its own host about shared work.
-/// An offer is a doorway to review, never an automatic draft or scroll change.
 struct WorkHandoffOffer: View {
     @Bindable var chat: ChatModel
     let onOpen: () -> Void
@@ -43,8 +41,6 @@ struct WorkHandoffOffer: View {
             let model = connection.makeModel()
             await model.load()
             guard connection.isCurrent, let record = model.shared else { return }
-            // The authenticated identity, not the device's editable label,
-            // decides whether this came from somewhere else.
             guard let identity = try? await Bridge.machineIdentity(),
                   connection.isCurrent, record.deviceID != identity.key else { return }
             offered = record

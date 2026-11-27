@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Disposable producer for native desktop/phone history verification.
-
 use super::*;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -48,8 +46,7 @@ fn serve_fixture() {
     ] {
         private_directory(&root.join(name));
     }
-    // The controlled provider has no login. An empty store keeps readiness
-    // unknown so the ordinary composer remains available in layout tests.
+
     private_directory(&root.join("home/.grok"));
     private_file(&root.join("home/.grok/auth.json"), b"{}\n");
     private_file(&root.join("provider.ndjson"), b"");
@@ -77,8 +74,7 @@ fn serve_fixture() {
             .as_bytes(),
         );
     }
-    // The controller configures the child before launch. Refuse to use a
-    // normal identity or shell environment if started by hand incorrectly.
+
     assert_eq!(
         std::env::var_os("TOKENSTAT_IDENTITY_DIR"),
         Some(root.join("host-identity").into_os_string())
@@ -92,8 +88,7 @@ fn serve_fixture() {
         Some(root.join("home").into_os_string())
     );
     tokenstat_paths::configure_mobile(root.join("host-data"), root.join("host-cache")).unwrap();
-    // A fictional quota belongs only to this disposable host. It lets native
-    // composer tests see a dated reading through the real encrypted endpoint.
+
     tokenstat_core::limits::cache::store(&[tokenstat_core::limits::ProviderLimits {
         profile_id: None,
         source: "grok".into(),
@@ -150,8 +145,7 @@ fn serve_fixture() {
             &client.join("identity/peers.json"),
             &serde_json::to_vec(&peers).unwrap(),
         );
-        // Only relay runs may use the owned loopback account service.
-        // Direct runs have no fallback, and relay peers have no direct address.
+
         private_file(
             &client.join("identity/remote.json"),
             &serde_json::to_vec(&RemoteSettings {
@@ -239,8 +233,7 @@ fn serve_fixture() {
                     return;
                 };
                 let mut output = stream;
-                // Same production responder; no runtime startup, discovery or
-                // additional listeners are needed for this private fixture.
+
                 for line in BufReader::new(input).lines() {
                     let Ok(line) = line else { break };
                     let response = crate::server::respond(&line, &session);

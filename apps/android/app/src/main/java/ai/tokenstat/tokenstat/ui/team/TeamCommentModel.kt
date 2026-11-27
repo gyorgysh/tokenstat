@@ -21,8 +21,6 @@ internal class TeamCommentModel(private val storage: TeamCommentDraftStore, priv
     val pending get() = draft?.attempt != null
     val tooLong get() = text.isNotBlank() && !TeamCommentDraft("", text, draft?.attempt, label).canSend
     val canSend get() = loaded && !busy && recoveredText == null && TeamCommentDraft("", text, draft?.attempt, label).canSend
-    // An app-owned save finishes when its view leaves. It has no network
-    // retry loop; send/check are always explicit actions.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var autosave: Job? = null
     private val saving = Mutex()
@@ -54,7 +52,7 @@ internal class TeamCommentModel(private val storage: TeamCommentDraftStore, priv
     fun leave() {
         autosave?.cancel()
         scope.launch {
-            try { flush() } catch (_: Exception) { /* Storage retains the unsaved copy. */ }
+            try { flush() } catch (_: Exception) { }
         }
     }
     private suspend fun flush() = saving.withLock {
@@ -62,8 +60,6 @@ internal class TeamCommentModel(private val storage: TeamCommentDraftStore, priv
         if (recoveredText != null) throw TeamDraftFailure("comment_draft_changed")
         while (draft?.text != text && !(draft == null && text.isEmpty())) {
             val words = text; val expected = draft
-            // Once a local write starts it settles before another flush uses
-            // its expected revision, even if the debounce is cancelled.
             withContext(NonCancellable) {
                 draft = withContext(Dispatchers.IO) { storage.save(target, words, expected, label) }
             }

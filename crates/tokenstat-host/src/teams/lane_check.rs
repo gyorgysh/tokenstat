@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Repository checks use the same owned groups/Jobs as agents. Permission
-//! and Stop are checked while they run, and descendants must finish before
-//! a landing can continue. Check output stays on this computer.
-
 use crate::team_process::{Owned, Poll, Program};
 use std::{
     io::{self, Read, Seek, SeekFrom},
@@ -226,8 +221,7 @@ mod tests {
             unrelated.claim_run(&claim),
             Err(tokenstat_workspace::writer::Error::RecoveryRequired)
         );
-        // No child was born in this fixture. Record the same durable completed
-        // step used after a real owned-process completion, then restart cleanup.
+
         let mut record = record;
         record.completed = true;
         record.save(&lane).unwrap();

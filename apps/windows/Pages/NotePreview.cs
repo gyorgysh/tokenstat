@@ -11,7 +11,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Read a note with native selectable text and no browser surface.</summary>
 internal static class NotePreview
 {
     public static UIElement Create(string text)
@@ -107,8 +106,6 @@ internal static class NotePreview
                     }
                     else
                     {
-                        // Image descriptions remain readable without making
-                        // background network requests while opening a note.
                         Append(link, output);
                     }
                     break;

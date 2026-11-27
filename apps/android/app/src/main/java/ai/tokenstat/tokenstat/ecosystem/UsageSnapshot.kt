@@ -37,14 +37,11 @@ data class UsageSnapshot(
             val identity = (account["accountId"] as? JsonPrimitive)?.contentOrNull
                 ?: (account["handle"] as? JsonPrimitive)?.contentOrNull ?: return null
             if (host.isBlank() || identity.isBlank()) return null
-            // Length delimiters avoid ambiguous identities, and the widget
-            // never stores an account name, URL, credential or workspace path.
             return MessageDigest.getInstance("SHA-256").digest("${host.length}:$host${identity.length}:$identity".toByteArray())
                 .joinToString("") { "%02x".format(it.toInt() and 255) }
         }
 
         fun calendar(owner: String, calendar: JsonObject): UsageSnapshot? = runCatching {
-            // This widget promises all-device usage, never silently local data.
             require(calendar["scope"]?.jsonPrimitive?.content == "account")
             val days = (calendar["rows"] as JsonArray).flatMap { (it as JsonArray).filter { cell -> cell !is JsonNull } }
                 .map { row ->
@@ -56,14 +53,12 @@ data class UsageSnapshot(
                 }
             require(days.map { it.date }.distinct().size == days.size)
             require(days.all { LocalDate.parse(it.date).toString() == it.date })
-            // Missing cache age must never turn a remembered grid into a fresh fetch.
             val fetchedAt = calendar["fetchedAtMs"]?.jsonPrimitive?.longOrNull ?: return null
             UsageSnapshot(owner, fetchedAt, days.sortedBy { it.date }.takeLast(35), calendar["noticeCode"]?.jsonPrimitive?.contentOrNull == "stale").takeIf { it.valid }
         }.getOrNull()
     }
 }
 
-/** An epoch also distinguishes signing back into the same account. */
 data class UsageLease(val owner: String, val epoch: Long)
 
 class UsageSession {
@@ -85,7 +80,6 @@ class UsageSession {
     fun current(lease: UsageLease): Boolean = lease == lease()
 }
 
-/** A dated provider observation, never a prediction of what a reset will contain. */
 @Serializable
 data class QuotaWindow(val label: String, val percent: Double, val resetsAt: Long? = null, val scope: String? = null) {
     val id: String get() = "$label|${scope.orEmpty()}"
@@ -145,8 +139,6 @@ data class QuotaProvider(val source: String, val observedAt: Long, val windows: 
                 require(source.matches(Regex("[a-z0-9_-]{1,64}")))
                 val observed = (provider["observedAtMs"] ?: provider["observed_at_ms"])!!.jsonPrimitive.long
                 val windows = provider["windows"] as JsonArray
-                // The host includes unavailable providers with an explicit zero date.
-                // They must not discard usable readings from the other providers.
                 if (observed == 0L && windows.isEmpty()) return@mapNotNull null
                 QuotaProvider(source, observed,
                     windows.map { element ->

@@ -8,17 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// How much of each plan is left, on Home rather than in a tab of its own.
-///
-/// It had a tab, and a tab was too much furniture for it. The phone exists to
-/// answer two questions, and both belong on the screen that opens: what did I
-/// spend, and what have I got left. A person who wants the second one should
-/// not have to know it lives one tap away under a gauge icon.
-///
-/// **Never a bare percentage.** Every reading carries when it was taken, and a
-/// stale one says so. `limits.rs` makes the argument in the core and it holds
-/// hardest here: a number with no date, on the screen where somebody decides
-/// whether to keep working, is a quiet lie about their quota.
 struct ClientLimitsCard: View {
     let providers: [ProviderLimits]
     let isLoading: Bool
@@ -37,20 +26,11 @@ struct ClientLimitsCard: View {
             if isLoading && readable.isEmpty {
                 ClientWireframe.Rows(count: 2)
             } else if readable.isEmpty && errorMessage == nil {
-                // Not an error. A computer posts readings only when "Share with
-                // my devices" is on under Plan limits, and only after a limits
-                // refresh or sync. Until then the honest line is empty, not zero.
                 Text(L10n.text("apple.clientlimitscard.no_readings_yet_on_a_mac_open_plan_limits.467d1c76"))
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                // Dealt into rows the way the Mac Home panels are: every row
-                // divides the full width between the cards it has, so a
-                // trailing row with an odd card out stretches it across the
-                // window instead of leaving a hole beside it. An adaptive grid
-                // keeps a short last row at column width, which is exactly the
-                // iPad shape this card takes.
                 WidthReader { width in
                     VStack(spacing: Theme.Space.m) {
                         ForEach(Array(rows(for: width).enumerated()), id: \.offset) { _, row in
@@ -62,8 +42,6 @@ struct ClientLimitsCard: View {
                                         .cardSurface()
                                 }
                             }
-                            // The row takes the tallest card's own height, and
-                            // the cards in it fill that.
                             .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -72,9 +50,6 @@ struct ClientLimitsCard: View {
         }
     }
 
-    /// The providers dealt into rows of as many as the width fits, keeping the
-    /// column width the adaptive grid used: one column on phones, roomier
-    /// grids on iPad.
     private func rows(for width: CGFloat) -> [[ProviderLimits]] {
         let all = sorted
         let count = columnCount(for: width)
@@ -84,7 +59,6 @@ struct ClientLimitsCard: View {
         }
     }
 
-    /// How many cards share a row: as many minimum-width columns as fit.
     private func columnCount(for width: CGFloat) -> Int {
         let available = width > 0 ? width : 320
         let minimum = min(available, typeSize.isAccessibilitySize ? 600 : 320)
@@ -92,15 +66,10 @@ struct ClientLimitsCard: View {
         return max(1, fits)
     }
 
-    /// Only providers with an actual reading.
-    ///
-    /// On the phone, `usage.limits` is the account plane (P2): readings hosts
-    /// posted. Local vendor notes from a Mac-shaped refresh never appear here.
     private var readable: [ProviderLimits] {
         providers.filter(\.hasWindows)
     }
 
-    /// Match the desktop's stable provider order during refreshes.
     private var sorted: [ProviderLimits] {
         PlanLimitsOrder.ordered(readable, source: \.source)
     }
@@ -140,8 +109,6 @@ private struct ProviderRow: View {
                     WindowGauge(window: window)
                 }
             } else if let note = provider.note {
-                // "We could not look" is a different answer from "nothing is
-                // used", and the two must not render alike.
                 Text(note)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -151,7 +118,6 @@ private struct ProviderRow: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// When this was read, in words. A reading with no date is not a reading.
     private var observed: String {
         guard let at = provider.observedAt else { return L10n.text("apple.clientlimitscard.no_date.89be6303") }
         let ago = at.formatted(.relative(presentation: .numeric))
@@ -193,8 +159,6 @@ private struct WindowGauge: View {
         .accessibilityLabel(L10n.text("apple.clientlimitscard.0_1_percent_used.bae57146", "\(window.displayLabel)", "\(window.percent.formatted(.number.precision(.fractionLength(0))))"))
     }
 
-    /// Severity is the renderer's decision, taken from the core's thresholds
-    /// rather than reinvented here, and deliberately never stored server side.
     private var colour: Color {
         switch window.severity {
         case .critical: return Theme.danger

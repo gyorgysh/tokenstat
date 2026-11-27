@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A directory card loads real, permission-filtered people and projects.
-/// Counts remain explicit lower bounds when another page is available.
 struct TeamOrganizationCard: View {
     @Bindable var store: TeamStore
     let organization: TeamOrganization
@@ -110,8 +108,6 @@ struct TeamOrganizationOverview: View {
     var body: some View {
         TeamPage {
             if !textSize.isAccessibilitySize {
-                // One row, equal widths, equal heights: the tallest tile sets
-                // the row and every other tile fills it.
                 HStack(spacing: Theme.Space.m) {
                     TeamMetricTile(title: L10n.text("common.teams.members"), value: count(directory.members.members.count, more: directory.members.nextOffset != nil), symbol: "person.2") {
                         store.show(.members)

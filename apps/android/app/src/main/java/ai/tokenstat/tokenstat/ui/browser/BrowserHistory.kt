@@ -5,7 +5,6 @@ import ai.tokenstat.tokenstat.ui.logic.ProjectOwner
 import java.net.URI
 import kotlinx.serialization.Serializable
 
-/// The endpoint on the paired computer, independent of a temporary listener.
 @ConsistentCopyVisibility
 data class BrowserTarget private constructor(
     val scheme: String,
@@ -39,8 +38,6 @@ data class BrowserTarget private constructor(
 }
 
 data class BrowserBridge(val target: BrowserTarget, val listenerUrl: String) {
-    /// Browser redirects contain the local proxy address. Translate them back
-    /// before displaying or remembering the page on the paired computer.
     fun original(url: String?): BrowserTarget? {
         val parsed = parseUri(url) ?: return null
         val listener = parseUri(listenerUrl) ?: return null
@@ -51,8 +48,6 @@ data class BrowserBridge(val target: BrowserTarget, val listenerUrl: String) {
     }
 }
 
-/// One pushed browser owns its listeners and retains its opening context even
-/// if the project selection behind it changes.
 data class BrowserOpenRequest(
     val peer: String,
     val workspace: String,
@@ -79,8 +74,6 @@ object BrowserHistory {
     fun record(state: State, target: BrowserTarget): State =
         clean(State(target.url, listOf(target.port) + state.recentPorts))
 
-    /// Legacy global state is only an initial field suggestion. Reading it
-    /// never copies another project's history into this project's store.
     fun initial(state: State, legacyPort: Int?): BrowserTarget =
         BrowserTarget.parse(state.lastTarget) ?: BrowserTarget.port(legacyPort ?: 3000)
         ?: BrowserTarget.port(3000)!!

@@ -16,7 +16,6 @@ import SwiftUI
 /// three things a person actually wants from About here (what this is, who
 /// stands behind it, how to reach them) are exactly what it has no room for.
 struct AboutView: View {
-    /// The author photo ships as a loose PNG resource next to the assets.
     private static let avatar = Bundle.main.image(forResource: "AuthorAvatar")
 
     var body: some View {
@@ -61,7 +60,6 @@ struct AboutView: View {
         .background(Theme.background)
     }
 
-    /// Photo, credit line, name, and what the author does.
     private var author: some View {
         HStack(spacing: Theme.Space.m) {
             if let avatar = Self.avatar {
@@ -107,9 +105,6 @@ struct AboutView: View {
     }
 
     private func linkItem(_ title: String, symbol: String, destination: URL) -> some View {
-        // The brand accent rather than the system link blue. A window this
-        // small is nearly all links, and three runs of system blue in it read
-        // as a web page rather than as part of the app.
         Link(destination: destination) {
             Label(title, systemImage: symbol)
                 .labelStyle(.titleAndIcon)

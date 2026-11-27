@@ -55,8 +55,6 @@ final class LiveWorkController {
         }
     }
 
-    /// One foreground-created activity across every reachable authorized
-    /// computer. Each host continues publishing when this app is suspended.
     func refreshOverview(peers: [String], names: [String: String] = [:], force: Bool = false) async {
         guard owner != nil, ActivityAuthorizationInfo().areActivitiesEnabled,
               UIApplication.shared.applicationState == .active,
@@ -72,9 +70,6 @@ final class LiveWorkController {
             let available = await serverSupportsOverview(generation: observed)
             guard generation == observed, !Task.isCancelled else { return }
             if !available {
-                // An older website still supports the individual-activity
-                // endpoints. Do not trade that background path for a card
-                // the server cannot update.
                 let current = Activity<LiveWorkAttributes>.activities.filter {
                     $0.attributes.owner == owner && $0.attributes.overviewPeers != nil
                         && ($0.activityState == .active || $0.activityState == .stale)
@@ -130,8 +125,6 @@ final class LiveWorkController {
             $0.attributes.owner == owner && $0.attributes.overviewPeers != nil
                 && ($0.activityState == .active || $0.activityState == .stale)
         }
-        // Restore the subscription set after relaunch. An unreachable computer
-        // must remain offline rather than disappear from the totals.
         let restored = activities.flatMap { $0.attributes.overviewPeers ?? [] }.filter { overviewCandidates.contains($0) }
         let peers = Set(overviewCache.keys).union(restored).filter(EcosystemPublisher.isAuthorizedPeer).sorted()
         guard let first = peers.first else { return }
@@ -167,8 +160,6 @@ final class LiveWorkController {
             key: LiveWorkAttributes.overviewKey, revision: "0", projectName: "All your work",
             route: EcosystemRoute(screen: .workspaces, owner: owner).url.absoluteString,
             overviewPeers: peers, overviewHints: hints)
-        // Keep attributes and state comfortably inside Apple's combined 4 KB
-        // budget. Long routes can still use the card's workspace overview.
         var bounded = attributes
         while let data = try? JSONEncoder().encode(bounded), let content = try? JSONEncoder().encode(state),
               data.count + content.count > 3800, let key = bounded.overviewHints?.keys.sorted().last {
@@ -203,8 +194,6 @@ final class LiveWorkController {
     func track(terminal: PtySessionInfo, peer: String, projectName: String, observedAt: Date, stopped: Bool = false,
                mayStart: () -> Bool) async {
         guard let workspaceID = terminal.workspaceID, !workspaceID.isEmpty, terminal.hidden != true else { return }
-        // The process can die just before its wait thread publishes the exit
-        // code. Do not end a successful run as Stopped during that gap.
         guard terminal.alive || terminal.exitCode != nil || stopped else { return }
         let startedAt = terminal.startedAtMs.flatMap { $0 > 0 ? Date(timeIntervalSince1970: Double($0) / 1000) : nil } ?? observedAt
         await track(kind: .terminal, id: terminal.id, revision: "0", running: terminal.alive,
@@ -219,8 +208,6 @@ final class LiveWorkController {
         guard let owner, owner == EcosystemPublisher.ownerKey(WorkSessionContext.shared.scope),
               EcosystemPublisher.isAuthorizedPeer(peer),
               ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        // A turn can start from a chat or terminal while the workspace list is
-        // off-screen. Seed the same overview rather than starting a second card.
         let hasOverview = Activity<LiveWorkAttributes>.activities.contains(where: {
             $0.attributes.owner == owner && $0.attributes.overviewPeers?.contains(peer) == true
                 && ($0.activityState == .active || $0.activityState == .stale)
@@ -237,14 +224,10 @@ final class LiveWorkController {
             $0.attributes.owner == owner && $0.attributes.overviewPeers?.contains(peer) == true
                 && ($0.activityState == .active || $0.activityState == .stale)
         }) { return }
-        // A modern host uses the overview even when the person dismissed it.
-        // Falling back here would recreate the same work as a single-run card.
         if overviewServer?.available == true && overviewCache[peer] != nil { return }
         let overviewIdentity = "\(owner):overview:\(Int(Date().timeIntervalSince1970 / (8 * 3600)))"
         if overviewServer?.available == true, seen.contains(overviewIdentity) {
             let observed = generation
-            // Dismissing the overview does not dismiss work on older hosts,
-            // which still need the individual-activity integration.
             if await RemoteHostFeature.workOverview.isSupported(peer: peer) { return }
             guard generation == observed, owner == self.owner, !Task.isCancelled,
                   EcosystemPublisher.isAuthorizedPeer(peer) else { return }
@@ -273,13 +256,11 @@ final class LiveWorkController {
               owner == self.owner, !Task.isCancelled, mayStart(), !seen.contains(identity),
               UIApplication.shared.applicationState == .active,
               EcosystemPublisher.isAuthorizedPeer(peer) else { return }
-        // One foreground-observed run per activity; a user's dismissal is respected.
         for old in Activity<LiveWorkAttributes>.activities where old.attributes.owner == owner && old.attributes.peer == peer && old.attributes.key == key {
             await old.end(nil, dismissalPolicy: .immediate); release(old.id)
         }
         guard generation == observed, !Task.isCancelled, owner == self.owner,
               mayStart(), EcosystemPublisher.isAuthorizedPeer(peer), UIApplication.shared.applicationState == .active else { return }
-        // A computer's clock can be ahead of the phone; elapsed time must never start in the future.
         let start = min(Date().timeIntervalSince1970, max(0, startedAt.timeIntervalSince1970))
         let attributes = LiveWorkAttributes(startedAt: start, owner: owner, peer: peer, key: key, revision: revision,
             projectName: String(projectName.prefix(100)),
@@ -349,7 +330,6 @@ final class LiveWorkController {
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    // Registration must recover after an offline launch without waiting for token rotation.
                     let delays = [1, 2, 5, 15, 30, 60]
                     let delay = delays[min(attempt, delays.count - 1)]
                     attempt = min(attempt + 1, delays.count - 1)

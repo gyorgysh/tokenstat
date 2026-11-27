@@ -5,24 +5,14 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 
 import ai.tokenstat.tokenstat.ui.components.ActionIcon
 
-/// A screen or setting inside the app, offered by search beside folders.
-///
-/// Ported from `WorkSearchPlaces.swift` and `ClientAppPlaces.swift`. One
-/// catalogue, kept next to the destinations it names: a place nobody can be
-/// sent to reads as a search result that does nothing. The identifier says
-/// where the place goes (`"tab:home"`, `"account:thisDevice:tabs"`).
 data class SearchPlace(
     val id: String,
     val title: String,
-    /// Where it lives, said the way a person would: "Account · This device".
     val detail: String,
     val icon: ActionIcon,
-    /// Words somebody might type for this that the title does not contain.
     val keywords: List<String> = emptyList(),
 )
 
-/// Where a place goes. Parsed from the identifier, so the sheet can hand a
-/// place back without knowing what a tab is.
 sealed interface SearchOpen {
     data class Tab(val name: String) : SearchOpen
     data class Device(val machineId: String) : SearchOpen
@@ -84,9 +74,6 @@ object SearchPlaces {
         )
     }
 
-    /// The screens and settings that are not tabs. Written out rather than
-    /// derived, because what somebody would type for a setting is rarely its
-    /// heading: nobody searches for "This device", they search for "traffic".
     private fun screens(): List<SearchPlace> = listOf(
         SearchPlace(
             "home:editor", L10n.text("android.worksearch.customize_home.642cec6e"), L10n.text("common.home"),
@@ -130,12 +117,6 @@ object SearchPlaces {
         ),
     )
 
-    /// Every word typed has to start a word in the place, so "not" finds
-    /// Notifications and "tab bar" finds Tabs, while a word from nowhere in
-    /// it removes the place rather than ranking it last.
-    ///
-    /// Ranked by where the match landed: the title first, then the words
-    /// kept for searching, then the trail that says where it lives.
     private val wordBoundary = Regex("[^\\p{L}\\p{Nd}]+")
 
     fun rank(query: String, places: List<SearchPlace>, limit: Int = 6): List<SearchPlace> {

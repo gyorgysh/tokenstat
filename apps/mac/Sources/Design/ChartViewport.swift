@@ -7,9 +7,6 @@ import UIKit
 typealias ChartViewportContent = UIView
 #endif
 
-/// Keep the chart's measured seat in the document, but only retain an
-/// expensive browser while that seat intersects its native scroll viewport.
-/// A message's plain VStack may contain any number of chart seats.
 final class ChartViewportView: ChartViewportContent {
     var makeContent: (() -> ChartViewportContent?)?
     var releaseContent: ((ChartViewportContent) -> Void)?

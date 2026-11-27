@@ -10,11 +10,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Whether the first-run tour has been seen. A file under the per-user app
-/// data rather than a registry key, so it survives reinstalls of the
-/// per-user folder layout and reads the same from any window.
-/// </summary>
 internal static class OnboardingState
 {
     private static string FlagPath => Path.Combine(
@@ -48,19 +43,11 @@ internal static class OnboardingState
             }
             catch
             {
-                // The tour simply shows again next launch.
             }
         }
     }
 }
 
-/// <summary>
-/// The first thing a new install sees. The pitch before the sign-in: what
-/// the app does, where the work lives, and the privacy boundary, then a
-/// deliberate next step. One scrolling desktop page rather than phone
-/// swipe pages, with the same words as the Mac client tour. First-run only,
-/// skippable, and re-openable from About.
-/// </summary>
 internal sealed class OnboardingPage : Page
 {
     private readonly Action _done;

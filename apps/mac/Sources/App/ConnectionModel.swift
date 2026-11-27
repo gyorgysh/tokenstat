@@ -7,24 +7,12 @@
 import Foundation
 import Observation
 
-/// Why a call failed, decided once instead of by each screen.
-///
-/// Every screen used to read a sentence and guess. The sentence is still what
-/// gets shown, and `FriendlyError` still writes it, but what the app *believes*
-/// about the network is decided here, from the error code where there is one.
 enum NetworkFailureKind: Equatable {
     case offline
     case timedOut
-    /// Name resolution, TLS, or a refused connection: the service is not
-    /// answering the way it should.
     case service
-    /// The machine is not on the tunnel right now.
     case peerAbsent
-    /// The account is not signed in, or is not allowed to do this. Not a
-    /// network problem, and must not be reported as one.
     case account
-    /// Something else entirely. Never moves the indicator: a folder that does
-    /// not exist is not a network fault.
     case other
 
     var isNetwork: Bool {
@@ -35,39 +23,20 @@ enum NetworkFailureKind: Equatable {
     }
 }
 
-/// Which plane a call was on, because the two fail independently.
 enum NetworkPlane: Equatable {
-    /// The account: usage, plan, machines. Needs the internet.
     case account
-    /// A machine over the tunnel. Needs the internet **and** the machine.
     case peer
 }
 
 extension NetworkPlane {
-    /// Which plane a bridge method is on, or nil for one that says nothing
-    /// about the network.
-    ///
-    /// A local call that fails is a bug or a missing file, not a connection
-    /// fault, and letting one move the indicator would teach people to ignore
-    /// it. Only the calls that actually leave the device count.
     static func of(method: String) -> NetworkPlane? {
         if method == "remote.call" { return .peer }
-        // Sign-out must always reach local credential cleanup, even when its
-        // best-effort server revocation cannot connect. The other two calls
-        // only change/read local state and cannot prove service connectivity.
         if ["account.logout", "account.cancelLogin", "sync.scheduleStatus"].contains(method) { return nil }
         if method.hasPrefix("account.") || method.hasPrefix("sync") { return .account }
         return nil
     }
 }
 
-/// Classify a failure from a call.
-///
-/// Codes first, sentences second. `{"ok": false, "error": {"code", "message"}}`
-/// already crosses the boundary and `BridgeError.core` already keeps the code,
-/// so the robust half of this carries as much as it can. A phrasing that falls
-/// through lands in `.other`, which moves nothing, rather than being mapped to
-/// the wrong advice.
 enum NetworkClassifier {
     static func kind(of error: Error) -> NetworkFailureKind {
         if let urlError = error as? URLError {
@@ -133,17 +102,6 @@ enum NetworkClassifier {
     }
 }
 
-/// One honest answer about the network, folded from three places that can each
-/// break on their own.
-///
-/// - **Internet**: `ConnectivityModel`, which already has a path monitor and an
-///   egress probe that a captive portal cannot fool.
-/// - **Service**: whether tokenstat.ai is answering. Derived from the calls the
-///   app is already making rather than from a poll, because a poll would ask a
-///   question the app asks anyway.
-/// - **Peer**: whether the machine being addressed is on the tunnel.
-///
-/// One model so two screens cannot say different things about one failure.
 @MainActor
 @Observable
 final class ConnectionModel {
@@ -155,40 +113,16 @@ final class ConnectionModel {
         static func < (lhs: Severity, rhs: Severity) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
-    /// How many failures in a row before a plane is called unwell.
-    ///
-    /// One failure is a request, not a state. Two in a row with nothing
-    /// succeeding in between is a pattern, and a pattern is worth a word on
-    /// screen.
     static let failuresBeforeUnwell = 2
 
     private(set) var serviceFailing = false
     private(set) var lastServiceSuccess: Date?
     private(set) var lastPeerSuccess: Date?
     private var serviceFailures = 0
-    /// Failures in a row, per machine.
-    ///
-    /// Per machine and not one number, because a machine asleep in a bag was
-    /// speaking for the one being worked on: the sidebar dials every approved
-    /// peer on a loop, so a laptop that is off failed every thirty seconds and
-    /// kept a single shared counter above the threshold for good.
     private var peerFailures: [String: Int] = [:]
-    /// Machines that have answered at least once since this window opened.
-    ///
-    /// A machine is only worth a warning if it *was* reachable and stopped.
-    /// One that has never answered is not news, it is a machine that is off,
-    /// and Machines says so in the place somebody goes to ask.
     private var peersSeenWorking: Set<String> = []
     private(set) var unreachablePeers: Set<String> = []
-    /// Key to the name its owner gave it, so the card can say which machine.
-    /// Empty until something that lists peers hands them over.
     private var peerNames: [String: String] = [:]
-    /// The warning the person already waved away, as the signature below.
-    ///
-    /// A machine asleep in a bag is not news twice. Dismissing hides this
-    /// warning until something changes (another machine stops, this one
-    /// answers and stops again, the service flips), rather than until the
-    /// next scheduled dial re-raises the same set.
     private var dismissedSignature: String?
     private weak var connectivity: ConnectivityModel?
 
@@ -200,8 +134,6 @@ final class ConnectionModel {
 
     var peerFailing: Bool { !unreachablePeers.isEmpty }
 
-    /// What is currently unwell, as one string. Two warnings with the same
-    /// signature are the same news.
     private var signature: String {
         "\(serviceFailing ? 1 : 0)|\(unreachablePeers.sorted().joined(separator: ","))"
     }
@@ -211,8 +143,6 @@ final class ConnectionModel {
         return dismissed == signature
     }
 
-    /// Hide the current warning until something changes. A new failure set
-    /// re-arms it on its own, and `reset()` re-arms it as well.
     func dismiss() {
         dismissedSignature = signature
     }
@@ -224,18 +154,12 @@ final class ConnectionModel {
         return .ok
     }
 
-    /// Names for the machines this app knows about. Cheap to hand over on
-    /// every peer load, and it is what lets the card say "Studio" rather than
-    /// "Computer", which is the difference between news and a puzzle when an
-    /// account has four machines.
     func setPeerNames(_ peers: [Peer]) {
         for peer in peers where !peer.label.isEmpty {
             peerNames[peer.key] = peer.label
         }
     }
 
-    /// The machine this card is about, when exactly one is unreachable and its
-    /// name is known.
     private var unreachableName: String? {
         guard unreachablePeers.count == 1, let key = unreachablePeers.first else { return nil }
         return peerNames[key]
@@ -265,8 +189,6 @@ final class ConnectionModel {
         return L10n.text("apple.connectionmodel.everything_is_answering.0be29a29")
     }
 
-    /// A call came back. Success clears what it proves and nothing else: one
-    /// good answer from a machine proves that machine, not the next one.
     func note(plane: NetworkPlane, peer: String?, failure: Error?) {
         guard let failure else {
             switch plane {
@@ -287,15 +209,10 @@ final class ConnectionModel {
         }
         let kind = NetworkClassifier.kind(of: failure)
         guard kind.isNetwork else { return }
-        // A peer that is absent says nothing about the service, and a service
-        // that is down says nothing about that one machine.
         if plane == .peer || kind == .peerAbsent {
             guard let peer else { return }
             let failures = (peerFailures[peer] ?? 0) + 1
             peerFailures[peer] = failures
-            // Never seen working: it is off, not unreachable. Raising this for
-            // a machine that has been asleep all along is how an ambient
-            // warning becomes something people learn to ignore.
             guard peersSeenWorking.contains(peer) else { return }
             if failures >= Self.failuresBeforeUnwell {
                 unreachablePeers.insert(peer)
@@ -308,26 +225,17 @@ final class ConnectionModel {
         }
     }
 
-    /// A warning that fully cleared is not the same warning when it comes
-    /// back. Forgetting the dismissal is what lets it show again.
     private func clearDismissalIfWell() {
         if !serviceFailing && unreachablePeers.isEmpty {
             dismissedSignature = nil
         }
     }
 
-    /// The network came back, or the person pressed Try now. Nothing is known
-    /// again until the next call answers, which is honest: the counters were
-    /// evidence about a network that no longer exists.
     func reset() {
         serviceFailures = 0
         peerFailures.removeAll()
         serviceFailing = false
         unreachablePeers.removeAll()
         dismissedSignature = nil
-        // What each machine had proved is kept: a machine that answered five
-        // minutes ago is still one this app has seen working, and forgetting
-        // that would put every peer back behind the never-seen rule after any
-        // press of Try now.
     }
 }

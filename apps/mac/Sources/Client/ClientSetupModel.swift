@@ -7,36 +7,17 @@
 import Observation
 import SwiftUI
 
-/// Setting up a machine from this device, one step at a time.
-///
-/// This is the provisioning plane, and it has one rule: **it may install and
-/// enroll, and it may not do work.** Cloning a folder, installing an agent and
-/// opening a terminal all happen afterwards, over the tunnel, through the same
-/// methods every other machine uses. The moment the server is a peer, this
-/// model is finished and hands over.
-///
-/// Nothing here is a second copy of anything. The saved servers, the keys and
-/// the vault are `SSHLibraryModel`'s, the install line is composed by the host
-/// so every surface shows the same one, and the check is the host's verdict
-/// rather than this screen's reading of raw facts.
 @MainActor
 @Observable
 final class ClientSetupModel {
-    // MARK: - Door 2, the six steps
 
-    /// Where. A draft record, saved to the library only once it is trusted:
-    /// a half-typed address is not a server somebody owns.
     var host = SSHHost(
         id: "", label: "", hostname: "", port: 22, username: "root",
         initialDirectory: "~", credentialID: nil, jumpHostID: nil,
         tags: [], provider: nil, hostKeys: []
     )
-    /// A saved server picked instead of typing one.
     var pickedHostID: String?
-    /// How to sign in. Resolved into an auth payload once, here, because the
-    /// private key lives in this device's vault and nowhere else.
     var credential: SetupCredential = .none
-    /// Typed once, used once, never stored. See `SetupCredential.password`.
     var password = ""
 
     var fingerprint: String?
@@ -49,8 +30,6 @@ final class ClientSetupModel {
 
     var line: InstallLine?
     var terminal: SSHLiveTerminal?
-    /// The machine's own answer, once it is a peer. The wizard's last step
-    /// reads this rather than believing what scrolled past in the terminal.
     var finished: ProvisionStatus?
     var expectedPeer: String?
     var manualInstall = false
@@ -68,7 +47,6 @@ final class ClientSetupModel {
         get { coordinator.failure }
         set { coordinator.failure = newValue }
     }
-    /// The explanation alone, for the screens that only print one.
     var error: String? {
         get { coordinator.failure?.explanation }
         set {
@@ -84,13 +62,9 @@ final class ClientSetupModel {
     var activeScope: ClientSetupScope? { prepared ? scope : nil }
     @ObservationIgnored private var draftID = UUID()
 
-    /// This device's public key, which is what `--allow` grants.
     private(set) var myKey: String?
 
-    // MARK: - Loading
 
-    /// Nil means this attempt was superseded or cancelled, so its caller must
-    /// not navigate or show an entry failure on its behalf.
     @discardableResult
     func prepare(library: SSHLibraryModel) async -> Bool? {
         guard let owner = ownership.claim() else { return nil }
@@ -107,10 +81,6 @@ final class ClientSetupModel {
             guard account.signedIn else {
                 throw BridgeError.core(code: "signed_out", message: L10n.text("apple.clientsetupmodel.sign_in_before_setting_up_a_machine.31774d13"))
             }
-            // A new account has no handle. The scope falls back to the server
-            // id for the account. When that is missing too, the draft goes
-            // unpersisted: an empty scope is shared, so it must never be
-            // written (see checkpoint).
             let identity = ClientSetupScope.accountIdentity(handle: account.handle, id: account.accountId)
             let scope = ClientSetupScope(origin: account.host, account: identity, deviceKey: key)
             guard WorkReference.Scope.account(origin: account.host, handle: identity) == owner.scope else { throw CancellationError() }
@@ -129,9 +99,6 @@ final class ClientSetupModel {
         }
     }
 
-    /// True when this is a different account and everything held for the old
-    /// one has been dropped. One account can never see another's draft, and a
-    /// password typed for one server never survives the switch.
     @discardableResult
     func accountChanged(_ account: Account?) -> Bool {
         let preparing = coordinator.preparation != nil
@@ -170,23 +137,12 @@ final class ClientSetupModel {
         draftID = UUID()
         expectedPeer = nil
         finished = nil
-        // An account retirement releases this window's reader. The remote
-        // shell stays alive; only an explicit Reset/End closes it.
         terminal?.detachPoll()
         terminal = nil
         resetServer()
         return true
     }
 
-    /// Whether a fresh account is worth another prepare.
-    ///
-    /// prepare() runs once when the wizard opens. When it fails for sign-in
-    /// reasons the wizard stays unprepared and nothing retries it. The device
-    /// identity can still have been arriving, since it trails sign-in by
-    /// moments, so a newly signed-in account gets one more attempt. Anything
-    /// else stays put. Each attempt either succeeds, which ends this, or
-    /// fails without touching the account, so a change of account is the only
-    /// thing that can run it again.
     func shouldReprepare(for account: Account?) -> Bool {
         if accountChanged(account) { return true }
         guard !prepared, failure?.action == .signInToAccount,
@@ -194,7 +150,6 @@ final class ClientSetupModel {
         return true
     }
 
-    /// Start a different draft without changing anything on a remote server.
     func startNewSetup() -> Bool {
         guard prepared else { return false }
         do { try coordinator.discard() }
@@ -234,20 +189,9 @@ final class ClientSetupModel {
         return .credential
     }
 
-    /// Record how far setup got, and never fail a step for it.
-    ///
-    /// Every call is the last line of a step that has already happened: the
-    /// host key is in the library, the installer is running on the server.
-    /// Throwing here would report a step that worked as a step that failed,
-    /// and would do it with a message about a saved file, which is not what
-    /// the person was doing. The draft is a convenience for coming back. Not
-    /// being able to write it costs the resume, and nothing else.
     func checkpoint(_ milestone: ClientSetupMilestone) {
         guard let owner = preparedOwner, ownership.permits(owner) else { return }
         resumingInstallation = milestone.needsReconciliation
-        // An empty scope is shared by every account without one, so it is
-        // never written. Setup proceeds without a saved draft, which only
-        // costs coming back to it.
         guard let scope, !scope.account.isEmpty else { return }
         try? coordinator.save(ClientSetupDraft(
             id: draftID, scope: scope, hostID: pickedHostID, fingerprint: fingerprint,
@@ -267,8 +211,6 @@ final class ClientSetupModel {
         catch { self.error = Self.readable(error); return false }
     }
 
-    /// Typing another server must stop referring to a saved record. Clear
-    /// its identity too, so confirming the new fingerprint creates a new row.
     func editServer(_ field: WritableKeyPath<SSHHost, String>, value: String) {
         if pickedHostID != nil || !host.id.isEmpty {
             pickedHostID = nil
@@ -284,7 +226,6 @@ final class ClientSetupModel {
         host[keyPath: field] = value
     }
 
-    /// The host record as it stands, whether picked or typed.
     func resolvedHost(library: SSHLibraryModel) -> SSHHost {
         if let pickedHostID, let saved = library.hosts.first(where: { $0.id == pickedHostID }) {
             return saved
@@ -292,12 +233,6 @@ final class ClientSetupModel {
         return host
     }
 
-    /// One auth payload, built once and used by every step.
-    ///
-    /// Built on this device because only this device can open the vault. A
-    /// password is used for the connection and never written anywhere: that is
-    /// what "used once and not stored" means, and it is the whole difference
-    /// between this and saving a credential.
     func authPayload(library: SSHLibraryModel) async throws -> [String: Any] {
         guard let owner = ownership.claim(), preparedOwner == owner else { throw CancellationError() }
         switch credential {
@@ -337,7 +272,6 @@ final class ClientSetupModel {
         }
     }
 
-    /// Re-entering the address step invalidates every result tied to it.
     func resetServer() {
         cancelWork()
         fingerprint = nil
@@ -374,12 +308,7 @@ final class ClientSetupModel {
         machineName = candidate
     }
 
-    // MARK: - Steps
 
-    /// Ask the server for its host key, before any credential is offered.
-    ///
-    /// The one screen in this wizard where a mistake is permanent, which is
-    /// why it is a step of its own rather than a line in another one.
     func probe(library: SSHLibraryModel) async {
         fingerprint = nil
         trusted = false
@@ -393,10 +322,6 @@ final class ClientSetupModel {
         }
     }
 
-    /// Keep the fingerprint, and the server with it.
-    ///
-    /// This is where a typed address becomes a saved one: trusting a host key
-    /// is the moment somebody says this server is theirs.
     func trust(library: SSHLibraryModel) async {
         guard let fingerprint else { return }
         await run { owner, operation in
@@ -426,18 +351,12 @@ final class ClientSetupModel {
             self.check = check
             self.checkpoint(.checked)
             if self.machineName == "server", let distro = check.distro {
-                // A name somebody would recognise, offered rather than imposed.
                 self.machineName = distro.split(separator: " ").first.map(String.init)?
                     .lowercased() ?? "server"
             }
         }
     }
 
-    /// Mint a code, put it on the server as a private file, and type the line.
-    ///
-    /// The code never reaches the command line: there it would land in the
-    /// shell history and, briefly, in `/proc`. It goes down its own channel
-    /// into a `0600` file, and the line the person watches names that file.
     func install(library: SSHLibraryModel) async {
         await run { owner, operation in
             let host = self.resolvedHost(library: library)
@@ -449,8 +368,6 @@ final class ClientSetupModel {
             }
             try await self.chooseAvailableMachineName()
             try self.checkOwnership(owner, operation: operation)
-            // Save before starting any remote mutation. Resume checks what
-            // happened; it never assumes an interrupted install should rerun.
             self.checkpoint(.installRequested)
             let code = try await Bridge.mintPairingCode().code
             try self.checkOwnership(owner, operation: operation)
@@ -474,8 +391,6 @@ final class ClientSetupModel {
                 let terminal = SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id)
                 openedTerminal = terminal
                 self.terminal = terminal
-                // A moment for the shell to draw its prompt. Typing into a shell
-                // that has not started echoing yet loses the first characters.
                 try await Task.sleep(for: .milliseconds(700))
                 try self.checkOwnership(owner, operation: operation)
                 terminal.sendBytes(Array((line.oneLine + "\n").utf8))
@@ -494,10 +409,6 @@ final class ClientSetupModel {
         }
     }
 
-    /// Ask the machine itself whether it is set up, over the tunnel it now has.
-    ///
-    /// Polled rather than assumed: the installer's output scrolling past is
-    /// not the same as a machine that answers.
     func waitForMachine(library: SSHLibraryModel, account: AccountModel) async {
         await run { owner, operation in
             if self.expectedPeer == nil {
@@ -517,16 +428,12 @@ final class ClientSetupModel {
                 }
             }
             guard let peer = self.expectedPeer else { return }
-            // The key arrived over the verified SSH session, which is the same
-            // consent as typing it by hand. Approve it here so the tunnel calls
-            // below are not refused as "not approved on this device".
             _ = try? await Bridge.pair(key: peer, label: self.machineName, address: "")
             try self.checkOwnership(owner, operation: operation)
             self.checkpoint(.verifying)
             let deadline = Date().addingTimeInterval(180)
             while Date() < deadline {
                 try self.checkOwnership(owner, operation: operation)
-                // Use a fresh response, not AccountModel's retained offline snapshot.
                 let fresh = try await Bridge.account()
                 try self.checkOwnership(owner, operation: operation)
                 guard fresh.signedIn, fresh.host == self.scope?.origin,
@@ -562,8 +469,6 @@ final class ClientSetupModel {
 
     func cancelWork() { coordinator.cancel() }
 
-    /// Explicit dismissal/account retirement releases local work and secrets.
-    /// A layout replacement does neither, and never ends the remote shell.
     func retire() {
         ownership.retire()
         coordinator.cancel()
@@ -572,11 +477,6 @@ final class ClientSetupModel {
         terminal = nil
     }
 
-    /// A message about this machine, rather than about the protocol.
-    ///
-    /// One classification, shared with the screens that show a recovery
-    /// action: see `ClientSetupFailure`. This is the shape for the places that
-    /// have room for a sentence and nothing else.
     static func readable(_ error: Error) -> String {
         ClientSetupFailure.from(error).explanation
     }
@@ -602,8 +502,6 @@ final class ClientSetupModel {
 
 enum SetupCredential: Equatable {
     case none
-    /// A key already in the vault, on every device that shares the account.
     case key(String)
-    /// Typed once, used for this connection, and never written down.
     case password
 }

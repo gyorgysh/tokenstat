@@ -29,7 +29,6 @@ struct MemoizedSizeLayout: Layout {
 
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
-    // Kept across updates on purpose. `key` is what says the answers expired.
     func updateCache(_ cache: inout Cache, subviews: Subviews) {}
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {

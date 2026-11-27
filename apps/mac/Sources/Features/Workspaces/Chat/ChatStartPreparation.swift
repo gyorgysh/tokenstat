@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Give the first send time to populate the retained reader before revealing
-/// it. This is a ceiling on waiting, never a minimum animation duration.
 @MainActor enum ChatStartPreparation {
     static let budget: Duration = .milliseconds(1600)
     private final class Completion { var finished = false }
@@ -10,8 +8,6 @@ import Foundation
     static func preload(until deadline: ContinuousClock.Instant,
                         send: @escaping @MainActor () async -> Void) async {
         let completion = Completion()
-        // A presentation timeout or navigation away must not cancel an
-        // authorized send, lose its receipt or start another copy of it.
         Task {
             await send()
             completion.finished = true

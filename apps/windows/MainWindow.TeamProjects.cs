@@ -33,7 +33,7 @@ public sealed partial class MainWindow
                 && prior.Zip(pair.Value).All(pair => JsonNode.DeepEquals(pair.First, pair.Second)));
             if (!same) { _teamFolderLinks = links; RebuildFolderItems(); }
         }
-        catch { /* An offline read keeps the current account's local markers. */ }
+        catch { }
     }
     private static async Task<TeamDirectoryClient?> TeamFolderClientAsync()
     {
@@ -42,8 +42,6 @@ public sealed partial class MainWindow
         return scope is null ? null
             : new TeamDirectoryClient(scope, Format.Text(account, "accountSession"), Format.Text(account, "accountId"), (method, fields) => AppServices.Host.CallAsync(method, fields));
     }
-    /// Ends every team publication of one folder on this computer. Only the
-    /// sharing ends: the folder, its chats and its history stay as they are.
     private async Task StopSharingTeamFolderAsync(string id, string name, UIElement owner)
     {
         if (_teamFolderLinks.GetValueOrDefault(id) is not { Count: > 0 } publications) return;
@@ -67,7 +65,6 @@ public sealed partial class MainWindow
         {
             await Chrome.ShowDialog(owner, new ContentDialog { Title = L10n.Text("common.teams.stop_sharing_failed"), Content = ex.Message, CloseButtonText = L10n.Text("common.close") });
         }
-        // Some may have stopped before a failure. Show what is true now.
         AppServices.NotifyTeamProjectsChanged();
         await TryLoadFoldersAsync(refresh: true);
     }

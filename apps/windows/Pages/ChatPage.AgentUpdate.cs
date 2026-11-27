@@ -7,10 +7,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Updating an agent from the chat's picker, with a toast that says it is
-/// running and then what changed, from which version to which.
-/// </summary>
 internal sealed partial class ChatPage
 {
     private FrameworkElement? _agentToast;
@@ -34,7 +30,6 @@ internal sealed partial class ChatPage
         }));
     }
 
-    /// <summary>Updates the agent and says whether it worked.</summary>
     private async Task<bool> UpdateAgentAsync(JsonNode backend)
     {
         var id = Format.Text(backend, "launcherId");
@@ -42,8 +37,6 @@ internal sealed partial class ChatPage
         var label = Format.Text(backend, "label", id);
         _updatingAgent = true;
         AgentToast(L10n.Text("common.agent_updates.toast_updating", label), BannerSeverity.Info);
-        // The reload repaints the conversation, which clears the root, so the
-        // closing toast goes up after it.
         string message;
         var severity = BannerSeverity.Success;
         try
@@ -74,21 +67,14 @@ internal sealed partial class ChatPage
         }
         catch (Exception)
         {
-            // The toast still says what happened. The list catches up on the next reload.
         }
         AgentToast(message, severity);
         _updatingAgent = false;
         return severity == BannerSeverity.Success;
     }
 
-    /// <summary>
-    /// Before a message goes to an agent that is behind, offer the update,
-    /// once per version and host, as on the Mac. True when the message should
-    /// go now, false when it should wait in the composer.
-    /// </summary>
     private async Task<bool> OfferAgentUpdateAsync(JsonNode backend, Func<bool> current)
     {
-        // An update already running from the picker: send, as the Mac does.
         if (_updatingAgent) return true;
         if (_offeringAgentUpdate) return false;
         var host = ChatHostKey();
@@ -129,7 +115,6 @@ internal sealed partial class ChatPage
         finally { _offeringAgentUpdate = false; }
     }
 
-    /// <summary>Which machine the chat's agents run on, for per-host skips.</summary>
     private string ChatHostKey() =>
         RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out _) ? peer : "local";
 }
@@ -171,7 +156,6 @@ internal static class AgentUpdateSkips
             }
             catch
             {
-                // Not remembered: the offer comes back next time, which is safe.
             }
         }
     }

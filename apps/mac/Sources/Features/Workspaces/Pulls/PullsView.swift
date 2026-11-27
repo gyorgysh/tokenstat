@@ -3,8 +3,6 @@
 import Observation
 import SwiftUI
 
-/// Open-list counts already seen by this app process. Sidebar badges read this
-/// synchronously; writing it never performs a request.
 @MainActor @Observable
 final class PullCountStore {
     static let shared = PullCountStore()
@@ -38,7 +36,6 @@ final class PullCountStore {
     }
 }
 
-/// A small, memory-only working set owned by one pull-request workspace.
 @MainActor
 final class PullDetailCache {
     struct Owner: Hashable {
@@ -72,21 +69,12 @@ final class PullDetailCache {
     }
 }
 
-/// Connection boundary for the pull-request workspace.
-///
-/// The same view ships on Mac, iPhone and iPad. A phone reads availability
-/// through its host, but authorization itself stays on that computer so a
-/// paired client can never retrieve the secret half of a login.
 struct PullsView: View {
     let workspaceID: String
     var peer: String? = nil
     var connectionHostName: String? = nil
-    /// The folder named in the shared Mac chrome. Clients already name it in
-    /// their navigation stack, so this stays optional for those call sites.
     var workspaceName: String? = nil
     var workspaceIsRemote = false
-    /// Root keeps this pane mounted after a visit so a return is instant.
-    /// When false, skip loading and heavy layout; opacity alone still measures.
     var isActive: Bool = true
 
     @Environment(\.openURL) private var openURL
@@ -145,12 +133,6 @@ struct PullsView: View {
                         }
                         .frame(maxWidth: ReadingRoom.listWidth, alignment: .leading)
                         .padding(Theme.Space.xl)
-                        // Top as well as leading. `ReadingRoom.alignment` is
-                        // `.topLeading`, but a frame only honours the vertical
-                        // half of an alignment when it is also given a height,
-                        // so without `maxHeight` this was a leading alignment
-                        // and nothing held the screen to the top of the
-                        // column. A short list sat in the middle of the page.
                         .frame(
                             maxWidth: .infinity,
                             maxHeight: .infinity,
@@ -162,16 +144,9 @@ struct PullsView: View {
             }
             }
             #if !os(macOS)
-            // Restore after the host gate mounts its content, so the new
-            // view's selection is observed by the active presentation.
             .onAppear { restorePullHandoff() }
             #endif
             .desktopPaneBackground()
-            // What every other section gets from `ClientCardList`, which this
-            // screen does not use because it is shared with the Mac. Without
-            // it the bar keeps the default large-title mode with no title in
-            // it, and reserves the height of one: the empty strip that pushed
-            // this screen down the page while Tasks and Notes sat at the top.
             #if !os(macOS)
             .navigationTitle(L10n.text("apple.pullsview.pull_requests.d9e3f260"))
             .navigationBarTitleDisplayMode(.inline)
@@ -219,7 +194,6 @@ struct PullsView: View {
         .onChange(of: isActive) { _, active in
             if !active {
                 selectedDetail?.prepareForCache()
-                // Left before it could be shown, so it is not shown later.
                 if PullOpenRequest.shared.pending?.folderID == workspaceID { PullOpenRequest.shared.pending = nil }
             }
         }
@@ -258,8 +232,6 @@ struct PullsView: View {
         #endif
     }
 
-    /// A pull request opened from a chat. Waits for the connection answer,
-    /// which clears whatever was selected before it.
     private func takeOpenRequest() {
         guard isActive, model.availability?.state == "ready",
               let pending = PullOpenRequest.shared.pending, pending.folderID == workspaceID else { return }
@@ -341,10 +313,6 @@ struct PullsView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
-                // The mark and the name are the screen's own on the Mac, where
-                // there is no navigation bar to carry them. On a phone or an
-                // iPad the bar has the name, so repeating it here would be the
-                // title twice with a gap between.
                 #if os(macOS)
                 Image(systemName: "arrow.triangle.merge")
                     .font(Theme.fixed(17, weight: .semibold))
@@ -447,11 +415,6 @@ struct PullsView: View {
         }
     }
 
-    /// Where GitHub keeps the repository selection for tokenstat's app.
-    ///
-    /// `installUrl` comes back on the states that need it and is absent once a
-    /// repository works, which is exactly when somebody wants to add another
-    /// one. The fallback is the same address the Account screen uses.
     private var installationURL: URL? {
         if let raw = model.availability?.installUrl, let url = URL(string: raw) {
             return url
@@ -461,9 +424,6 @@ struct PullsView: View {
 
     private func connectionCard(_ availability: PullAvailability) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            // Centred across the card. Concentric rings around a glyph read as
-            // a centred mark wherever else they appear, so left-aligning this
-            // one against a column of text looked like a layout mistake.
             ZStack {
                 Circle().fill(Theme.accent.opacity(0.08)).frame(width: 104, height: 104)
                 Circle().stroke(Theme.accent.opacity(0.18), lineWidth: 1).frame(width: 78, height: 78)
@@ -548,11 +508,6 @@ struct PullsView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
-                // Choosing repositories existed only while the connection was
-                // incomplete, and the card offering it disappeared the moment
-                // this repository worked. Adding a second one then meant
-                // finding a card on the Account screen, which is not where
-                // anybody looks for it.
                 if canConnectHere, let url = installationURL {
                     Button(L10n.text("apple.pullsview.repositories.1e32af87"), .external) { openURL(url) }
                         .buttonStyle(SecondaryButtonStyle(comfortable: true))
@@ -759,8 +714,6 @@ struct PullsView: View {
     }
 }
 
-/// Keep the two independent filters visible, even on a narrow phone. Each
-/// menu names its current answer and the row scrolls instead of clipping it.
 private struct PullFilters: View {
     @Binding var scope: PullScope
     @Binding var state: PullStateFilter
@@ -1112,7 +1065,6 @@ private final class PullsModel {
         let requestedScope = scope
         let requestedState = state
         let query = Query(workspace: workspaceID, peer: peer, scope: requestedScope, state: requestedState)
-        // Never show one filter's results under another filter's heading.
         rows = cachedLists[query]?.rows ?? []
         lastLoadedAt = cachedLists[query]?.date
         nextCursor = cachedLists[query]?.cursor
@@ -1135,8 +1087,6 @@ private final class PullsModel {
                 peer: peer,
                 scope: requestedScope,
                 state: requestedState,
-                // Once this client knows its copy has aged out, do not
-                // relabel the host's longer-lived cached copy as fresh.
                 refresh: refresh || cachedLists[query] != nil
             )
             guard generation == listGeneration, scope == requestedScope, state == requestedState,

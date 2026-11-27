@@ -171,8 +171,6 @@ pub fn fingerprint(public: &PublicKey) -> String {
 /// accidental lookalikes where two did not.
 pub fn key_words(public: &PublicKey) -> String {
     let mut hasher = blake3::Hasher::new();
-    // Separate domain from `fingerprint`, so the two displays of one key cannot
-    // be turned into each other.
     hasher.update(b"tokenstat machine words v2\0");
     hasher.update(public);
     let digest = hasher.finalize();
@@ -247,10 +245,6 @@ pub fn public_key_from_hex(text: &str) -> Result<PublicKey, IdentityError> {
 /// states that project paths, sessions, prompts and hostnames do not enter that
 /// path. This travels only to a machine the user explicitly paired with.
 pub fn machine_label() -> String {
-    // What the user called it, if they called it anything. A person naming
-    // their laptop "laptop" is doing the one thing that makes a peer list
-    // readable, and their answer outranks whatever the operating system thinks
-    // the computer is called.
     if let Ok(chosen) = read_chosen_label()
         && let Some(name) = chosen
     {
@@ -259,9 +253,6 @@ pub fn machine_label() -> String {
 
     #[cfg(target_os = "macos")]
     {
-        // The name in Sharing preferences, which is what the user recognises.
-        // `hostname` on a Mac often answers with a DHCP-assigned string that
-        // means nothing to anyone.
         if let Ok(out) = std::process::Command::new("scutil")
             .args(["--get", "ComputerName"])
             .output()
@@ -426,16 +417,12 @@ fn os_version() -> String {
     if release.is_empty() {
         String::new()
     } else {
-        // Named in full, because the rule above hands a version that starts
-        // with a word straight through: "kernel 6.8" alone would not say Linux.
         format!("Linux kernel {release}")
     }
 }
 
 #[cfg(target_os = "windows")]
 fn os_version() -> String {
-    // `ver` prints "Microsoft Windows [Version 10.0.22631.4317]". The build
-    // number is the only part that tells two of them apart.
     let raw = command_output("cmd", &["/c", "ver"]);
     match (raw.find('['), raw.find(']')) {
         (Some(open), Some(close)) if close > open => raw[open + 1..close]
@@ -546,8 +533,6 @@ fn read_seed(
         source,
     };
     let length = file.metadata().map_err(io_error)?.len();
-    // An interrupted first create may leave an empty file. All cooperating
-    // readers hold a lock, so an active writer cannot look like that case.
     if length == 0 {
         return Ok(None);
     }
@@ -592,8 +577,6 @@ fn load_or_create_key(path: &std::path::Path) -> Result<[u8; 32], IdentityError>
         options.mode(0o600);
     }
     let mut file = options.open(path).map_err(io_error)?;
-    // The app and helper can start together. Lock before deciding whether to
-    // generate a key, and never truncate an identity another process created.
     file.lock().map_err(io_error)?;
     if let Some(seed) = read_seed(&mut file, path)? {
         return Ok(seed);
@@ -685,8 +668,6 @@ mod tests {
             MachineIdentity::from_secret(varied).public_key_hex(),
             "bb50ff9e82a574cfbf820e97f60fb9c143ec7415cf514f8cfd98eff59e059614"
         );
-        // The handshake hands these bytes to snow, so the seed has to come
-        // back out exactly as it went in, unclamped.
         assert_eq!(MachineIdentity::from_secret(varied).secret_bytes(), varied);
     }
 

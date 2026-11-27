@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// A compact shelf with separate open and unpin targets. Unavailable folders
-/// remain visible so removing a workspace never silently removes its pin.
 struct DesktopPinnedWorkSection: View {
     let pins: [PinnedWorkStore.Pin]
     var availability: (PinnedWorkStore.Pin) -> String?

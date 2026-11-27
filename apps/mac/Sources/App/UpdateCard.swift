@@ -6,8 +6,6 @@
 
 import SwiftUI
 
-/// Sidebar activity for real updater stages. Download bytes are not exposed by
-/// the host, so progress is indeterminate rather than an invented percentage.
 struct UpdateCard: View {
     var update: AppUpdateModel
 
@@ -156,11 +154,6 @@ struct UpdateCard: View {
         .padding(.bottom, Theme.Space.s)
     }
 
-    /// The automatic install failed: retry it here, or go get it by hand.
-    ///
-    /// Two buttons rather than one "Update by hand" row, because a person who
-    /// pressed nothing and still got an update that failed deserves a way to
-    /// try the automatic path again without leaving the app.
     private var failedCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {

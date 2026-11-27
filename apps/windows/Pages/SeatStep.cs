@@ -75,10 +75,6 @@ internal static class SeatStep
         return L10n.Text("common.chat.seat.thinking");
     }
 
-    /// <summary>
-    /// Present while the step runs, past once it has finished.
-    /// An unknown name is returned unchanged, once trimmed.
-    /// </summary>
     public static string Word(string? verb, bool running)
     {
         switch (TrimVerb(verb))
@@ -104,20 +100,12 @@ internal static class SeatStep
         }
     }
 
-    /// <summary>
-    /// The running word already says what is happening, so a Running chip
-    /// beside it would repeat the same news.
-    /// </summary>
     public static bool Speaks(string? verb)
     {
         var name = TrimVerb(verb);
         return Word(name, true) != name;
     }
 
-    /// <summary>
-    /// The chip on a permission card. Pending is present tense, a decision
-    /// is past tense, and a blank name stays Approval.
-    /// </summary>
     public static string ApprovalWord(string? verb, bool pending)
     {
         var name = TrimVerb(verb);
@@ -125,12 +113,6 @@ internal static class SeatStep
         return Word(name, pending);
     }
 
-    /// <summary>
-    /// What Always allow will store for the rest of this chat.
-    /// A command prefix is that prefix. A plain tool is its own name.
-    /// A command with no safe prefix is not stored, so the line says so
-    /// instead of naming the tool.
-    /// </summary>
     public static string? AllowAlwaysNote(string? verb, string? shellPrefix)
     {
         var prefix = TrimVerb(shellPrefix);
@@ -147,9 +129,6 @@ internal static class SeatStep
         return L10n.Text("common.chat.approval.tool_scope", $"{name}");
     }
 
-    /// <summary>
-    /// Same rule as the host: a shell tool is never remembered by its name.
-    /// </summary>
     public static bool IsShell(string? verb)
     {
         var name = TrimVerb(verb).ToLowerInvariant();

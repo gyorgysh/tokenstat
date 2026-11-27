@@ -116,7 +116,6 @@ fn fetch_account(account: Option<StoredAccount>) -> ProviderLimits {
         .and_then(parse_iso_ms)
         .is_some_and(|ms| ms <= now_ms().saturating_add(60_000))
     {
-        // Refreshing is the CLI's own job and it holds the refresh token.
         return ProviderLimits::unavailable(
             "grok",
             "The stored Grok login has expired. Run any `grok` command to refresh it.",
@@ -138,8 +137,6 @@ fn fetch_account(account: Option<StoredAccount>) -> ProviderLimits {
         Err(note) => return ProviderLimits::unavailable("grok", note),
     };
 
-    // The weekly window is the one that actually bites, but it is a second
-    // call, so a failure there loses that window rather than the whole reading.
     let weekly = get(
         &client,
         &account.key,
@@ -235,7 +232,6 @@ fn weekly_window(config: &BillingConfig) -> Option<UsageWindow> {
     if kind != "USAGE_PERIOD_TYPE_WEEKLY" {
         return None;
     }
-    // Absent at the start of a fresh period rather than sent as zero.
     let percent = config.credit_usage_percent.unwrap_or(0.0).clamp(0.0, 100.0);
     Some(UsageWindow {
         label: "weekly".to_string(),
@@ -313,8 +309,6 @@ mod tests {
 
     #[test]
     fn the_entry_that_lasts_longest_is_the_one_used() {
-        // A machine signed in more than once holds several. Taking the first
-        // would report an expired login while a usable one sat beside it.
         let raw = r#"{
             "a": {"key": "old", "expires_at": "2026-08-01T00:00:00Z"},
             "b": {"key": "new", "expires_at": "2026-09-01T00:00:00Z"}

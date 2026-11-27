@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One automation run on a phone: status and a live transcript.
 struct ClientAutomationRunView: View {
     @Bindable var session: ClientAutomationSession
     let runID: String

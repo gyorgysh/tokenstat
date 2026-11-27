@@ -91,8 +91,6 @@ internal suspend fun uploadChatFile(
             digest(digest.digest())
         }
     var allowRelay = false
-    // Equal bytes can still be different attachments. Encode the identity
-    // as JSON so separators in names cannot collide with another field.
     val identity = JsonArray(listOf(owner, chat, hash, attachment.name, attachment.mediaType).map { JsonPrimitive(it) })
     val key = digest(MessageDigest.getInstance("SHA-256").digest(identity.toString().toByteArray()))
     check(fileTransferClaims.add(key)) { L10n.text("common.chat_files_busy") }
@@ -124,12 +122,8 @@ internal suspend fun uploadChatFile(
                         .getOrNull()
                 }
         if (previous?.get("finished")?.jsonPrimitive?.booleanOrNull == true) {
-            // Keep the completed receipt until the host's staging expiry:
-            // another attachment can fail before the message is queued.
             return previous["attachment"] as JsonObject
         }
-        // A saved upload may already contain every byte. Only a transfer
-        // that still needs file data should ask to use relay allowance.
         val previousOffset = previous?.number("offset")
         require(previousOffset == null || previousOffset in 0..size)
         val caps = if (previousOffset != size) {
@@ -309,8 +303,6 @@ internal suspend fun downloadChatFile(
                 }
             }
         } catch (error: Exception) {
-            // Legacy downloads cannot resume. This also handles cancellation
-            // after the write finishes but before its result reaches the UI.
             withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                 folder.deleteRecursively()
             }
@@ -371,9 +363,6 @@ internal suspend fun downloadChatFile(
             discardInvalidDownload(folder, error)
             throw error
         }
-        // Ask before starting the transfer: declining or dismissing consent
-        // keeps the downloaded prefix available for another route or retry.
-        // A completed file needs no relay allowance and is checked below.
         if (offset < size && (caps["relay"] as? JsonPrimitive)?.booleanOrNull == true) {
             check(confirm((caps["relayRemainingBytes"] as? JsonPrimitive)?.longOrNull))
             allowRelay = true

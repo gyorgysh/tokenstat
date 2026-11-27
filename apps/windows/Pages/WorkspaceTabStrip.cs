@@ -5,7 +5,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Stable surfaces: opening an existing tab selects its existing document.</summary>
 internal sealed class WorkspaceTabStrip
 {
     // WinUI must see an actual TabView when applying its native template.
@@ -24,8 +23,6 @@ internal sealed class WorkspaceTabStrip
         View.VerticalContentAlignment = VerticalAlignment.Stretch;
         View.Loaded += (_, _) => StretchContentPresenter();
         View.ActualThemeChanged += (_, _) => { _contentPresenter = null; StretchContentPresenter(); };
-        // Loaded can precede realization of the native content presenter.
-        // Finish the lookup on its first layout instead of leaving it at Top.
         View.LayoutUpdated += (_, _) =>
         {
             if (_contentPresenter is null || !_contentPresenter.IsLoaded) StretchContentPresenter();

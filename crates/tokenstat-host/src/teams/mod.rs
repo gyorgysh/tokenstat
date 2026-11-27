@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Organization management belongs to the person signed in on this device.
-//! Teammate chat requests use their own scoped entry point; they never borrow
-//! this machine's account credential or its personal workspace policy.
-
 #[cfg(feature = "local-host")]
 mod agent_access;
 mod authorization;
@@ -103,7 +98,6 @@ pub fn install_sync() {
     });
 }
 
-/// Whether this host lets a shared chat start its agent at all.
 fn agent_runs_ready() -> bool {
     #[cfg(feature = "local-host")]
     {
@@ -290,14 +284,7 @@ fn client(owner: &AccountSnapshot) -> Result<TeamClient, DispatchError> {
     owner.ensure_current().map_err(changed)?;
     Ok(client)
 }
-/// Teams for a signed-in device needs no setup step. A device the account
-/// server does not know yet is registered with its own key, and a server that
-/// supports it turns Teams on for this sign-in. Only a device the person
-/// removed from Teams still reports that it needs them.
 fn capabilities(owner: &AccountSnapshot, client: &TeamClient) -> Result<Value, DispatchError> {
-    // Why this device is not on Teams yet, when it should have turned itself
-    // on. Shown on the setup screen, so a failure names its step instead of
-    // looking like a request to approve the device by hand.
     let mut issue: Option<DispatchError> = None;
     let mut answer = client.capabilities();
     if matches!(&answer, Err(TeamError::Rejected { code, .. }) if code == "device_required") {

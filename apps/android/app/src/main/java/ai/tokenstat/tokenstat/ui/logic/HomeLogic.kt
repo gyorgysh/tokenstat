@@ -6,16 +6,7 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 import ai.tokenstat.tokenstat.ui.marks.formatServerDate
 import kotlin.math.roundToInt
 
-/// Home-plane pure logic ported 1:1 from the Apple client so both platforms
-/// answer identically: the recents ranking (`ClientRecentChatsRanking.swift`),
-/// the continue shelf (`ClientRecentPlaces.swift`), the pin shelf
-/// (`PinnedWork.swift`), the arrangement (`HomeLayout.swift`), the device
-/// sentences (`ClientDevicesView.swift` `DeviceCopy`), the limit ordering and
-/// gauge severity (`ClientLimitsCard.swift` over `limits.rs` thresholds), and
-/// the stats readings (`HostStatsBar.swift` `HostStatsFormat`).
 
-/// How the Recents row is chosen: three newest by time stay on top, five more
-/// follow ranked by what needs a look. Port of `ClientRecentChatsRanking`.
 object RecentChatsRanking {
     const val RECENT_BY_TIME = 3
     const val MORE_BY_PRIORITY = 5
@@ -43,8 +34,6 @@ object RecentChatsRanking {
         return head + rest.take(MORE_BY_PRIORITY)
     }
 
-    /// Host-owned approvals first, then this device's unread replies, active
-    /// work, and finally ordinary recency.
     fun priority(chat: Item): Int = when {
         chat.needsAttention -> 3
         chat.unread -> 2
@@ -53,8 +42,6 @@ object RecentChatsRanking {
     }
 }
 
-/// Device furniture only: the folders and conversations this device opened.
-/// Port of `ClientRecentPlaces`.
 object RecentPlaces {
     const val CAPACITY = 20
 
@@ -73,10 +60,6 @@ object RecentPlaces {
         val openedAtMs: Long,
     )
 
-    /// Length-prefixed rather than encoded: no throwing, and "ab"+"c" never
-    /// shares a key with "a"+"bc". The host and the account identity scope
-    /// one account's places away from another's after a sign-out, the same
-    /// key the Apple client reads and writes.
     fun scopeKey(host: String, handle: String): String =
         "client.recentPlaces.v1.${host.length}:$host${handle.length}:$handle"
 
@@ -86,8 +69,6 @@ object RecentPlaces {
             .sortedByDescending { it.openedAtMs }
             .take(CAPACITY)
 
-    /// Home is a shortcut to one project and one conversation, like iOS.
-    /// A terminal only fills the shelf when neither anchor has been opened.
     fun continuePlaces(stored: List<Place>): List<Place> {
         val recent = places(stored)
         val anchors = listOfNotNull(
@@ -119,8 +100,6 @@ object RecentPlaces {
     }
 
     fun valid(id: PlaceId): Boolean {
-        // Workspace IDs are host paths and must round-trip exactly. Only
-        // peer and item IDs are path-free identifiers.
         if (id.workspaceId != null && (id.workspaceId.isEmpty() || id.workspaceId.length > 4096 ||
                 id.workspaceId.any { it.isISOControl() })) return false
         if (!listOfNotNull(id.peer, id.itemId).all { validIdentifier(it) }) return false
@@ -152,16 +131,9 @@ object RecentPlaces {
         Kind.TERMINAL -> if (place.id.workspaceId == null) L10n.text("android.homelogic.terminal.e0926fda") else L10n.text("android.homelogic.terminal_in_0.9d87a81b", "${place.workspaceName}")
     }
 
-    /// What this device files the account under. Port of
-    /// `WorkReference.Scope.accountIdentity`: the display name is a label,
-    /// not an identity, and must never scope the store.
     fun accountIdentity(handle: String?, id: String?): String? = AccountIdentityPins.identity(handle, id)
 }
 
-/// The work worth keeping: pinned folders and conversations, at most eight.
-/// Port of `PinnedWork.swift`. Re-pinning updates the labels and moves the pin
-/// to the top; a full shelf refuses with words rather than silently dropping
-/// the oldest pin.
 object PinnedWork {
     const val CAPACITY = 8
 
@@ -178,9 +150,6 @@ object PinnedWork {
         val pinnedAtMs: Long,
     )
 
-    /// Stable identity for one piece of work. Workspace pins name the folder;
-    /// conversations name the item inside it. Segments are percent-encoded so
-    /// a separator inside an id cannot forge a second pin's key.
     fun pinKey(scope: String, hostIdentity: String, workspaceId: String, kind: Kind, itemId: String?): String? {
         if (scope.isEmpty() || hostIdentity.isEmpty() || workspaceId.isEmpty()) return null
         if (!validIdentifier(hostIdentity) || !validIdentifier(workspaceId)) return null
@@ -214,8 +183,6 @@ object PinnedWork {
         }
     }
 
-    /// False when the shelf is full and this is new: the caller says so
-    /// rather than the store choosing what goes.
     fun pin(
         stored: List<Pin>,
         scope: String,
@@ -280,9 +247,6 @@ object PinnedWork {
     }
 }
 
-/// How this device arranges Home. Port of `HomeLayout.swift`. The phone's
-/// balanced order leads with the two figures: they are one line deep and read
-/// at a glance, so they answer without pushing the work down a short screen.
 enum class HomeSection(val key: String, val label: String, val detail: String) {
     CONTINUE("continue", L10n.text("android.homelogic.continue.31fbef16"), L10n.text("android.homelogic.the_folders_and_conversations_you_were_las.611a8af7")),
     PINNED("pinned", L10n.text("android.homelogic.pinned_work.23dd8f45"), L10n.text("android.homelogic.shortcuts_to_the_folders_and_conversations.395d6781")),
@@ -312,10 +276,6 @@ enum class HomePreset(val label: String) {
         get() = emptySet()
 }
 
-/// Make a stored arrangement usable whatever is in it. A build that adds a
-/// section must not disturb an order somebody chose, so new ones join at the
-/// end. A name this build does not know is dropped, a name twice is kept
-/// once, and hiding something that is not in the order is not a thing.
 fun normalizeHomeLayout(stored: List<HomeSection>?, hidden: Set<HomeSection>): Pair<List<HomeSection>, Set<HomeSection>> {
     if (stored == null) return HomePreset.BALANCED.order to HomePreset.BALANCED.hidden
     val seen = mutableSetOf<HomeSection>()
@@ -324,15 +284,9 @@ fun normalizeHomeLayout(stored: List<HomeSection>?, hidden: Set<HomeSection>): P
     return order to (hidden intersect order.toSet())
 }
 
-/// Every sentence the devices screens say about a device, in one place so the
-/// list and the detail cannot describe the same machine differently. Port of
-/// `DeviceCopy` in `ClientDevicesView.swift`.
 object DeviceCopy {
     fun displayName(label: String?, platform: String?, isHost: Boolean): String {
         if (!label.isNullOrEmpty()) return label
-        // What the machine says it is, before giving up. A CLI-only install
-        // sends the platform at login, so "Linux computer" is usually
-        // available where a name is not.
         val family = platform?.split("·")?.firstOrNull()
             ?.split(" ")?.firstOrNull()
             ?.takeIf { it.isNotEmpty() }
@@ -340,10 +294,6 @@ object DeviceCopy {
         return L10n.text("android.homelogic.unnamed_device.6aba593f")
     }
 
-    /// The account directory does not publish Always-on host as a flag, so
-    /// "Always on" is not claimed here. Online hosts read as awake; hosts
-    /// with a connection key but offline read as asleep and ready; hosts
-    /// without a key say so in one line.
     fun statusLine(
         isThisDevice: Boolean,
         online: Boolean?,
@@ -361,15 +311,11 @@ object DeviceCopy {
         return if (lastSeenText != null) L10n.text("android.homelogic.last_seen_0.77ac00d1", "${lastSeenText}") else L10n.text("android.homelogic.has_not_reported_in_yet.88f189cb")
     }
 
-    /// `m_c982…872c`. Long enough to be unique in a list of five, short
-    /// enough to sit under a name.
     fun shortId(id: String): String {
         if (id.length <= 12) return id
         return "${id.take(6)}…${id.takeLast(4)}"
     }
 
-    /// The second line: status alone on named rows, with a short id on
-    /// unnamed ones so two "Linux computer" rows do not look identical.
     fun caption(label: String?, id: String?, status: String): String {
         if (!label.isNullOrEmpty() || id == null) return status
         return "${shortId(id)} · $status"
@@ -380,12 +326,6 @@ object DeviceCopy {
         return formatServerDate(lastSyncAt) ?: "never"
     }
 
-    /// Whether the account's platform string names a Linux host, port of
-    /// `isHeadlessPlatform`. Only a first guess: the host's own
-    /// `host.provisionStatus` answer wins once it arrives. Matched by whole
-    /// word, so "aarch64" is not Arch Linux, and a string naming macOS or
-    /// Windows is never Linux. Empty stays false, never hiding anything for a
-    /// machine that never said what it runs.
     fun isHeadlessPlatform(platform: String?): Boolean {
         val words = (platform ?: "").lowercase()
             .split(Regex("[^\\p{L}\\p{N}]+"))
@@ -396,9 +336,6 @@ object DeviceCopy {
         return words.any { it in LINUX_WORDS }
     }
 
-    /// Whether View screen can open on a host, from its `host.provisionStatus`
-    /// reply. A host older than the `screen` field answers by `headless`, and
-    /// null means it said neither.
     fun hostShowsScreen(screen: Boolean?, headless: Boolean?): Boolean? = screen ?: headless?.not()
 
     private val DESKTOP_WORDS = setOf("macos", "darwin", "osx", "windows", "win32")
@@ -419,10 +356,6 @@ object DeviceCopy {
     }
 }
 
-/// Plan-limit ordering and gauge severity. Port of `ClientLimitsCard` sorting
-/// over the `limits.rs` scale: thresholds are ours, not the vendor's, and are
-/// the same for everything so that two providers side by side mean the same
-/// thing by "warning".
 object LimitLogic {
     enum class Severity { NORMAL, WARNING, CRITICAL }
 
@@ -441,14 +374,10 @@ object LimitLogic {
 
     fun peakPercent(percents: List<Double>): Double = percents.maxOrNull() ?: -1.0
 
-    /// Closest to full first. The window about to stop somebody working is
-    /// the one worth the top of the card.
     fun <T> closestToFullFirst(rows: List<T>, peak: (T) -> Double): List<T> =
         rows.sortedByDescending(peak)
 }
 
-/// Stats readings in words. Port of `HostStatsFormat`. Missing readings stay
-/// missing: a figure nobody measured is not a machine that is idle.
 object HostStatsFormat {
     fun powerLabel(charging: Boolean, percent: Int?, power: String?, failed: Boolean, hadStats: Boolean): String {
         if (failed && !hadStats) return L10n.text("android.homelogic.n_a.a683c5c5")
@@ -470,8 +399,6 @@ object HostStatsFormat {
 
     fun cpuLabel(cpu: Double): String = "${(cpu * 100).roundToInt()}%"
 
-    /// Nil when this process has not yet observed a path, so a machine
-    /// screen can stay quiet rather than invent Encrypted relay.
     fun routeLabel(route: String?): String? = when (route) {
         "direct" -> L10n.text("android.homelogic.direct_connection.28d0ad54")
         "relay" -> L10n.text("android.homelogic.encrypted_relay.153d7b1c")

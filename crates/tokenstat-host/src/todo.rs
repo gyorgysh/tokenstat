@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! A kanban board of work, with cards that can be delegated to an agent.
-//!
-//! The board is a list of columns with cards in order. A card is work a person
-//! is tracking; delegating it hands it to the same agent runner automations
-//! use, as a one-shot job whose transcript lands in the runs history. Nothing
-//! here writes to a repository. It moves cards.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -20,13 +13,9 @@ use serde::{Deserialize, Serialize};
 /// The columns, in order. Archive is hidden from the default list.
 pub const COLUMNS: [&str; 4] = ["backlog", "doing", "done", "archive"];
 
-/// Done cards older than this move to archive on the next list/create/update.
 const ARCHIVE_AFTER_MS: i64 = 7 * 24 * 60 * 60 * 1000;
-/// Extra Done cards above this count are archived, oldest first.
 const DONE_CAP: usize = 20;
 
-/// Separates cards created in the same millisecond so a fast client cannot
-/// mint the same id twice and overwrite a card.
 static CARD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Whether a card is executable work or a private reminder.
@@ -118,15 +107,13 @@ pub struct CardUpdate {
 pub struct Board {
     path: PathBuf,
     cards: Mutex<Vec<Card>>,
-    // Always lock cards before receipts when both are needed.
+
     creations: Mutex<BTreeMap<String, creation::CreationReceipt>>,
     launches: Mutex<BTreeMap<String, execution::LaunchReceipt>>,
     load_error: Option<String>,
     persistence_error: Mutex<Option<String>>,
 }
 
-/// Same body the Mac In front path sends: notes, or the title if notes
-/// are empty. The inspector Prompt field is the notes.
 fn prompt_for_run(card: &Card) -> String {
     let body = card.notes.trim();
     if !body.is_empty() {
@@ -230,8 +217,6 @@ impl Board {
         self.save_cards(&cards)
     }
 
-    /// Keep the board lock through persistence so a slower old snapshot cannot
-    /// overwrite a newer save. Checked edits publish in memory only afterward.
     fn save_cards(&self, cards: &[Card]) -> Result<(), String> {
         let creations = self
             .creations
@@ -269,8 +254,6 @@ impl Board {
         temp.persist(&self.path).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         if let Err(error) = std::fs::File::open(parent).and_then(|dir| dir.sync_all()) {
-            // The rename already happened. Block further writes from this
-            // stale in-memory snapshot until the host reloads the saved file.
             let message = format!(
                 "The task board was written but its durability could not be confirmed. Restart the host before continuing: {error}"
             );
@@ -359,8 +342,6 @@ impl Board {
         cards
     }
 
-    /// Hide finished work: week-old Done cards, then the oldest extras
-    /// once Done is over the cap. Notes stay on the card.
     fn auto_archive(&self) {
         let now = Self::now_ms();
         let cutoff = now.saturating_sub(ARCHIVE_AFTER_MS);
@@ -405,8 +386,7 @@ impl Board {
         if !COLUMNS.contains(&card.column.as_str()) {
             card.column = "backlog".into();
         }
-        // Workspace and backend are chosen at delegate time. A card can be
-        // saved as a reminder of the work before anyone picks an agent.
+
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         if card.id.is_empty() {
             card.id = format!(
@@ -912,8 +892,6 @@ mod tests {
             board.create(c).unwrap();
         }
         {
-            // Recent stamps so the 7-day rule does not take them first.
-            // Older first so the cap picks a stable extra of 3.
             let now = Board::now_ms();
             let mut cards = board.cards.lock().unwrap();
             for (i, card) in cards.iter_mut().enumerate() {

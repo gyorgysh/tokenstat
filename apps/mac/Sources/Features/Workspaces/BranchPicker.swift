@@ -6,16 +6,10 @@
 
 import SwiftUI
 
-/// Owns branch-picker presentation while letting each platform supply the
-/// surface that opens it: a compact chip on Mac and a full-width card on iOS.
 struct BranchPickerPresentation<Label: View>: View {
     let workspaceID: String
     let currentBranch: String?
-    /// The model, when the caller has one: a switch has to know about open
-    /// editor buffers before it moves the branch under them.
     var model: WorkspacesModel? = nil
-    /// Opens the project's worktrees, from the foot of the picker. Nil where
-    /// the surface has no worktree screen to open.
     var onWorktrees: (() -> Void)? = nil
     let onChanged: () async -> Void
     @ViewBuilder let label: () -> Label
@@ -68,8 +62,6 @@ struct BranchChip: View {
     let workspaceID: String
     var git: GitStatus
     var compact = false
-    /// The model, when the caller has one, so a switch can check for unsaved
-    /// editor buffers first.
     var model: WorkspacesModel? = nil
     var onWorktrees: (() -> Void)? = nil
     let onChanged: () async -> Void
@@ -122,8 +114,6 @@ struct BranchChip: View {
 private struct BranchPickerContent: View {
     let workspaceID: String
     let currentBranch: String?
-    /// Nil on surfaces that have no model, where there is no buffer state to
-    /// check; those callers keep the old behaviour.
     var model: WorkspacesModel?
     let onChanged: () async -> Void
     let dismiss: () -> Void
@@ -221,13 +211,8 @@ private struct BranchPickerContent: View {
             createRow
             if let onWorktrees {
                 ThemeRule()
-                // Worktrees live here, beside the branches, because a
-                // worktree is a branch with a folder of its own. A toolbar
-                // button of their own put a word most people never need
-                // beside the project name.
                 Button(L10n.text("apple.branchpicker.work_on_a_branch_in_its_own_folder.0d37adc5"), .source) {
                     dismiss()
-                    // The popover has to be gone before a sheet can open.
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(200))
                         onWorktrees()
@@ -242,10 +227,6 @@ private struct BranchPickerContent: View {
         }
         .background(Theme.panel)
         .task { await load() }
-        // Three answers, because Cancel and Discard are different: one keeps
-        // the buffers, the other lets the switch drop them. Without this a
-        // branch move silently left editor buffers holding the old branch's
-        // text, one Save away from overwriting the new branch's file.
         .confirmationDialog(
             L10n.text("apple.branchpicker.save_changes_before_switching_branches.df86487d"),
             isPresented: $confirmingUnsaved,
@@ -361,8 +342,6 @@ private struct BranchPickerContent: View {
         await perform(.create(name), saveFirst: false, reloadAfter: false)
     }
 
-    /// Park the action and raise the prompt when this workspace has unsaved
-    /// buffers; true means the caller may go straight ahead.
     private func confirmUnsavedWork(_ action: PendingBranchAction) -> Bool {
         guard model?.hasUnsavedWork(in: workspaceID) == true else { return true }
         pendingAction = action
@@ -370,12 +349,6 @@ private struct BranchPickerContent: View {
         return false
     }
 
-    /// Switch branch or create one, with the user's answer about unsaved
-    /// buffers applied.
-    ///
-    /// `reloadAfter` is the discard path: the buffers are read back once the
-    /// branch has moved, so a later save cannot write the old branch's text
-    /// over the new branch's file.
     private func perform(
         _ action: PendingBranchAction, saveFirst: Bool, reloadAfter: Bool
     ) async {

@@ -7,9 +7,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/// The refresh debounce matches `ClientRefresh.swift`: the logo pulses on
-/// every pull, the fetch runs at most once per five-second window per
-/// screen, and the window is scoped to the signed-in account.
 class TsRefreshTest {
     @After
     fun restoreClock() {
@@ -28,8 +25,6 @@ class TsRefreshTest {
             TsRefresh.run("tsrefresh-first") { runs++ }
             TsRefresh.run("tsrefresh-first") { runs++ }
             assertEquals(1, runs)
-            // A pull inside the window is not ignored silently: the logo
-            // still acknowledges it, like the iPhone wordmark.
             assertEquals(2, pulses)
         } finally {
             drop()
@@ -53,8 +48,6 @@ class TsRefreshTest {
         TsRefresh.clock = { now }
         var runs = 0
         TsRefresh.run("tsrefresh-scope", "origin|alice") { runs++ }
-        // The first pull after an account switch is never swallowed by the
-        // outgoing account's timestamp.
         TsRefresh.run("tsrefresh-scope", "origin|bob") { runs++ }
         TsRefresh.run("tsrefresh-scope", null) { runs++ }
         assertEquals(3, runs)

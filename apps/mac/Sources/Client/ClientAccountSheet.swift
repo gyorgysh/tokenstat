@@ -14,20 +14,7 @@ import UIKit
 // have, so compiling them there would only break the desktop build.
 #if !os(macOS)
 
-/// The account, as a sheet over whatever screen the avatar was tapped on.
-///
-/// A sheet rather than a tab: signing in, checking a tier and signing out are
-/// things people do rarely and then leave, which is exactly the shape a sheet
-/// has and exactly the shape a tab does not. It also keeps the fourth tab for a
-/// screen someone opens the app to see.
-///
-/// The content is phone-native, not a port of the Mac Account pane. Fixed 13pt
-/// card chrome and a plain system "Sign out" looked like a desktop window
-/// squeezed onto a phone; this layout uses the client type scale and full-width
-/// actions that match the rest of the app.
 struct ClientAccountSheet: View {
-    /// Whether the window behind the sheet has room for a sidebar. Read by
-    /// the presenter: inside the sheet the size classes describe the sheet.
     let offersLayoutChoice: Bool
 
     @Environment(AccountModel.self) private var account
@@ -44,20 +31,12 @@ struct ClientAccountSheet: View {
                     }
                 }
         }
-        // Sign-out swaps the root to the login door. Leave the sheet with it,
-        // or the person stays looking at Account while the app under it has
-        // already moved on.
         .onChange(of: account.signedIn) { _, signedIn in
             if !signedIn { dismiss() }
         }
     }
 }
 
-/// Phone-sized account settings, split the same way the Mac pane is: who
-/// you are, what this device keeps, and the legal end.
-///
-/// Not private: search names these panes so it can send somebody to a setting
-/// by name rather than to the sheet's front page. See `ClientAppPlaces`.
 enum ClientAccountPane: String, CaseIterable, Hashable {
     case account
     case thisDevice
@@ -72,7 +51,6 @@ enum ClientAccountPane: String, CaseIterable, Hashable {
     }
 }
 
-/// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
     let offersLayoutChoice: Bool
 
@@ -89,7 +67,6 @@ private struct ClientAccountContent: View {
     @State private var webURL: URL?
     @State private var showReview = false
     @State private var confirmSignOut = false
-    /// Read by `ClientRootView`, written here. See `ClientLayoutPreference`.
     @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
     @AppStorage("client.accountPane") private var pane = ClientAccountPane.account
 
@@ -154,9 +131,6 @@ private struct ClientAccountContent: View {
         .sheet(isPresented: $showDeletionWeb) {
             ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
         }
-        // Deletion happens on the website, which the browser cannot report on.
-        // When the sheet closes, ask the account again: a gone account answers
-        // signed-out, which drops the session and tells the login door why.
         .onChange(of: showDeletionWeb) { _, shown in
             if !shown {
                 Task { await model.checkAfterAccountDeletion() }
@@ -173,8 +147,6 @@ private struct ClientAccountContent: View {
         .task {
             if model.account == nil { await model.load() }
         }
-        // Search sent somebody to a setting by name. Land on its pane, and
-        // open the screen it lives on when it is one screen deeper.
         .onChange(of: navigation.accountRequest, initial: true) { _, request in
             guard let request else { return }
             navigation.accountRequest = nil
@@ -266,10 +238,6 @@ private struct ClientAccountContent: View {
         SavedWorkSettings()
     }
 
-    /// This device's tab bar and sidebar, arranged by the person holding it.
-    /// Tabs are device furniture like the layout above: an iPad with a
-    /// keyboard lives in different tabs than a phone in hand, and neither
-    /// arrangement follows the account.
     private var tabsCard: some View {
         Button { showTabs = true } label: {
             HStack(spacing: Theme.Space.m) {
@@ -421,12 +389,6 @@ private struct ClientAccountContent: View {
         .cardSurface()
     }
 
-    /// Which shape the client draws itself in, when the window has room.
-    ///
-    /// Automatic is the answer for almost everybody and it is what the app
-    /// ships with. The card exists for the two cases a heuristic cannot see:
-    /// a keyboard used only for typing, and a person who prefers one shape.
-    /// It is absent on a phone-sized window, where there is only ever one shape.
     @ViewBuilder
     private var layoutCard: some View {
         if offersLayoutChoice {
@@ -662,15 +624,6 @@ private struct ClientAccountContent: View {
         .buttonStyle(.plain)
     }
 
-    /// Notifications for this phone or iPad.
-    ///
-    /// Work finishes on a Mac. With this app closed there is nothing here to
-    /// notice it, so the account asks Apple to wake the device. That is the
-    /// whole reason this needs an account when the Mac's own version does not.
-    ///
-    /// What arrives is composed on the server from a fixed list of reasons and
-    /// the machine's own label. No folder name, no prompt, no path is eligible,
-    /// which is the same boundary sync keeps.
     private var notificationsCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.notifications.78801183"), mark: "mark_device")
@@ -781,9 +734,6 @@ private struct ClientAccountContent: View {
     }
 
     private var privacyNote: some View {
-        // Client Legal, not a host's sync screen. This phone does not upload
-        // an archive; the boundary is what the computers put on the account
-        // and what a remote session carries. Same card chrome as Licenses.
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ClientSectionTitle(title: L10n.text("apple.clientaccountsheet.sync_privacy.9f408670"), mark: "mark_sync")
             Text(L10n.text("apple.clientaccountsheet.your_computers_put_aggregate_counts_on_the.4e5bcb48"))

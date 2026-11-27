@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Markdown authoring is a presentation action; the stored note stays plain text.
 enum NoteFormatting: CaseIterable {
     case heading, bold, italic, bullet, checklist, quote, code
 
@@ -42,7 +41,6 @@ enum NoteFormatting: CaseIterable {
         }
         if lines {
             range = source.lineRange(for: range)
-            // Keep the final line break outside the replacement/selection.
             while range.length > 0 && [10, 13].contains(source.character(at: NSMaxRange(range) - 1)) {
                 range.length -= 1
             }

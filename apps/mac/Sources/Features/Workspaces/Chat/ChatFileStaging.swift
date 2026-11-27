@@ -9,17 +9,11 @@ import CryptoKit
 /// neither is something Quick Look, the share sheet, Save to Files or Finder
 /// can be pointed at. This is the copy with the real name on it.
 enum ChatFileStaging {
-    /// Where staged copies go. The attachment cache prunes this directory on
-    /// the same budget as the downloads, so a copy can be gone by the next
-    /// time a row is tapped. Staging is therefore cheap and repeatable rather
-    /// than done once.
     static var directory: URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("tokenstat-chat-files", isDirectory: true)
     }
 
-    /// Hash and write off the UI actor, then check the caller's current
-    /// conversation and access before returning a file to open.
     @MainActor
     static func prepare(_ data: Data, id: String, name: String, into root: URL? = nil,
                         canUse: @MainActor () -> Bool) async throws -> URL {
@@ -36,14 +30,8 @@ enum ChatFileStaging {
         return url
     }
 
-    /// Write a staged copy under the file's real name.
-    ///
-    /// Throws rather than returning nil. A silent failure here is a card that
-    /// does nothing when tapped and says nothing about why.
     static func stage(_ data: Data, id: String, name: String, into root: URL? = nil) throws -> URL {
         try Task.checkCancellation()
-        // A different file with a reused host ID must not overwrite a copy
-        // already open in another application or account's window.
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let safeID = digest
         let safeName = sanitized(name)
@@ -67,10 +55,6 @@ enum ChatFileStaging {
         }
         let url = URL(fileURLWithPath: filePath, isDirectory: false)
         try Task.checkCancellation()
-        // No size shortcut here: two different files can share a length, and
-        // reusing the wrong bytes is a silent wrong-file. Staging is cheap
-        // and repeatable (the cache prunes these copies anyway), so always
-        // write.
         #if os(macOS)
         try data.write(to: url, options: .atomic)
         #else
@@ -84,7 +68,6 @@ enum ChatFileStaging {
         return url
     }
 
-    /// One path component, whatever the host called the file.
     static func sanitized(_ raw: String) -> String {
         let leaf = (raw as NSString).lastPathComponent
         let cleaned = leaf

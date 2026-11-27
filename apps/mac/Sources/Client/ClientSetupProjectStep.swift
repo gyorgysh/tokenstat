@@ -69,23 +69,14 @@ struct ClientSetupProjectStep: View {
                 }
             }
         }
-        // The two screens dismiss themselves on success, so the handoff waits
-        // for the pop rather than tearing the stack down underneath them.
         .onChange(of: opened) { _, id in
             guard let id, let peer else { return }
             finish(folderID: "remote:\(peer):\(id)")
         }
     }
 
-    /// Leave setup, on the project if there is one.
-    ///
-    /// The draft is forgotten here and nowhere earlier: this is the first
-    /// moment when nothing is left half done.
     private func finish(folderID: String?) {
         guard model.completeSetup() else {
-            // Forgetting the draft is the only thing that can fail here, and
-            // it is worth saying: leaving now would offer to continue a setup
-            // that is finished.
             failure = model.failure ?? ClientSetupFailure(
                 explanation: L10n.text("apple.clientsetupprojectstep.the_saved_setup_could_not_be_cleared_so_le.d09c532d"),
                 action: .retry,
@@ -103,10 +94,6 @@ struct ClientSetupProjectStep: View {
         onFinish()
     }
 
-    /// A first task that reads the project and changes nothing.
-    ///
-    /// Deliberately not "fix" or "add": the first thing somebody sends should
-    /// not be a change they have to review before they have seen the place.
     static let firstTask =
         L10n.text("apple.clientsetupprojectstep.give_me_a_short_tour_of_this_project_what.bd63b9e4")
 

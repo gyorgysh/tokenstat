@@ -8,9 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
-/// Unsent writing survives leaving a screen, for the life of the ViewModel.
-/// Its text also survives the app being closed, when `saved` keeps it.
-/// Capacity refuses a new edit visibly; it never evicts somebody's writing.
 class ChatComposerSessions<A>(
     private val attachmentCost: (A) -> Long,
     private val capacity: Int = 64,
@@ -44,7 +41,6 @@ class ChatComposerSessions<A>(
         return Snapshot()
     }
     fun capture(owner: String?) = Capture(owner, snapshot(owner), versions[owner] ?: 0)
-    /// Asked for every row of a list, so it never reads a file.
     fun hasWriting(owner: String?): Boolean = !owner.isNullOrBlank() &&
         (sessions[owner]?.empty == false || (owner !in restored && saved?.has(owner) == true))
     fun dismissFailure() { mutableFailure.value = null }
@@ -79,7 +75,6 @@ class ChatComposerSessions<A>(
         return true
     }
 
-    /// A delayed acknowledgement only clears the exact payload it accepted.
     fun clearIfUnchanged(owner: String?, sent: Capture<A>): Boolean =
         if (sent.owner == owner && (versions[owner] ?: 0) == sent.revision && snapshot(owner) == sent.snapshot) update(owner, Snapshot()) else false
 

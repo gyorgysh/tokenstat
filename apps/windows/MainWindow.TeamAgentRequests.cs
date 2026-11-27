@@ -7,12 +7,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat;
 
-/// <summary>
-/// Asks the person sharing a project, wherever they are in the app, when a
-/// teammate's Ask is waiting for them on this computer. The teammate's app
-/// keeps sending the same request, so an answer here starts it within a few
-/// seconds.
-/// </summary>
 public sealed partial class MainWindow
 {
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _teamAgentPoll;
@@ -29,7 +23,6 @@ public sealed partial class MainWindow
 
     private async Task PollTeamAgentRequestsAsync()
     {
-        // Nothing can be waiting unless this computer shares something.
         if (_teamAgentPrompting || _teamFolderLinks.Count == 0 || Content is not UIElement owner) return;
         JsonNode answer;
         try { answer = await AppServices.Host.CallAsync("teams.agentAccess.requests", new JsonObject()); }
@@ -54,7 +47,6 @@ public sealed partial class MainWindow
                 DefaultButton = ContentDialogButton.Close,
             };
             ContentDialogResult result;
-            // Another dialog may be open. Ask again on the next tick.
             try { result = await Chrome.ShowDialog(owner, dialog); }
             catch { return; }
             var decision = result switch { ContentDialogResult.Primary => "once", ContentDialogResult.Secondary => "always", _ => "deny" };

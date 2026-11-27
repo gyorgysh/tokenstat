@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 
 fn fixture() -> (tempfile::TempDir, Store, Owner, Checkout) {
@@ -290,8 +289,7 @@ fn physical_owner_recovery_is_revision_checked_and_cannot_revive_or_retire_a_rep
     store
         .withdraw(&owner, &checkout.id, checkout.revision)
         .unwrap();
-    // Revocation is still local and available after losing the parent or the
-    // account that originally published it. There is no activation operation.
+
     assert!(
         store
             .retire_source(

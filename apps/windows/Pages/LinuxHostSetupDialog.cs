@@ -8,11 +8,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Desktop counterpart of the Apple SSH setup flow. Every SSH operation is a
-/// local host RPC. The password/private key stays in this dialog, while the
-/// fingerprint, server check and final identity come from the remote server.
-/// </summary>
 internal static class LinuxHostSetupDialog
 {
     public static async Task<bool> ShowAsync(Page owner)
@@ -105,8 +100,6 @@ internal static class LinuxHostSetupDialog
             ? new JsonObject { ["kind"] = "password", ["password"] = password.Password }
             : new JsonObject { ["kind"] = "privateKey", ["pem"] = SelectedPem() };
         if (method.SelectedIndex != 0 && passphrase.Password.Length > 0) auth["passphrase"] = passphrase.Password;
-        // Probe sends no credential. A fresh host record is not stored until
-        // the user compares the server's fingerprint and confirms it.
         var endpoint = new JsonObject { ["hostname"] = hostname, ["username"] = username,
             ["port"] = sshPort, ["hostKeys"] = new JsonArray() };
         var probe = await AppServices.Host.CallAsync("ssh.host.probe", endpoint, TimeSpan.FromSeconds(20));
@@ -214,8 +207,6 @@ internal static class LinuxHostSetupDialog
         polling.Cancel();
         await poll;
         if (!next) return false;
-        // The install shell is left available for inspection. It is not
-        // silently killed when this dialog closes.
         await AppServices.Host.CallAsync("remote.serve", new JsonObject { ["tunnel"] = true });
         for (var attempt = 0; attempt < 20; attempt++)
         {
@@ -226,9 +217,6 @@ internal static class LinuxHostSetupDialog
                 if (peer.Length != 64) throw new InvalidOperationException("The server returned no machine identity.");
                 await AppServices.Host.CallAsync("machine.pair", new JsonObject
                 { ["key"] = peer, ["label"] = label, ["address"] = "" });
-                // Account publication can trail the remote service starting.
-                // Wait for the new host to appear in this account's directory
-                // before asking it for work access, as the Apple flow does.
                 var account = await AppServices.Host.CallAsync("account.status");
                 if (account["machines"] is not JsonArray machines || !machines.Any(machine =>
                     string.Equals(Format.Text(machine, "publicIdentity"), peer, StringComparison.OrdinalIgnoreCase)))

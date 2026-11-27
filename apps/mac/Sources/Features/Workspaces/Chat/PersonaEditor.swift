@@ -2,11 +2,6 @@
 
 import SwiftUI
 
-/// Personas: a name, a brief, and a face, on one form.
-///
-/// There is no rail and no describe/draft/review wizard. The sheet opens on
-/// the workspace default. New persona, Improve with agent, and Save as written
-/// all edit the same two fields. Generated text is a draft until Save.
 struct PersonaEditor: View {
     @Bindable var model: ChatModel
     var onClose: () -> Void
@@ -56,7 +51,6 @@ struct PersonaEditor: View {
         #endif
     }
 
-    // MARK: - Form
 
     private var form: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl) {
@@ -118,12 +112,6 @@ struct PersonaEditor: View {
         }
     }
 
-    /// Which persona new chats in this folder inherit, including none.
-    ///
-    /// A row rather than a "Make default" button on whichever persona happens
-    /// to be open. A button can only ever say yes to the persona in front of
-    /// it, so there was no way to say "none of them", and choosing no persona
-    /// in a conversation lasted exactly that conversation.
     private var workspaceDefaultRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
@@ -165,12 +153,6 @@ struct PersonaEditor: View {
         )
     }
 
-    /// Whether this persona belongs to this folder or to all of them.
-    ///
-    /// A persona with no folder of its own is visible in every one, which the
-    /// host has always supported and nothing ever surfaced. Starters made for
-    /// a folder belong to it; one written by hand is usually a way of working
-    /// rather than a fact about a project, so a new one starts shared.
     private var sharedBinding: Binding<Bool> {
         Binding(
             get: { draft.workspaceID == nil },
@@ -180,9 +162,6 @@ struct PersonaEditor: View {
 
     private var identityRow: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            // Pokeable here and nowhere else. This is the one screen where the
-            // character is the subject rather than a label on a row, so a
-            // click that shoves it is a click on the thing being edited.
             PersonaMark(
                 seed: faceSeed,
                 size: 36,
@@ -287,7 +266,6 @@ struct PersonaEditor: View {
         }
     }
 
-    // MARK: - Footers
 
     #if os(macOS)
     @ViewBuilder
@@ -336,7 +314,6 @@ struct PersonaEditor: View {
     }
     #endif
 
-    // MARK: - State
 
     private var editableContext: ChatModel.PersonaContext? {
         guard let current = model.personaContext, let editorOwner,
@@ -407,7 +384,6 @@ struct PersonaEditor: View {
         (L10n.text("apple.personaeditor.rubber_duck.6a174e81"), L10n.text("apple.personaeditor.asks_questions_rather_than_answering_them.bf150882")),
     ]
 
-    // MARK: - Behaviour
 
     private func openDefault() {
         if editorOwner == nil { editorOwner = model.personaContext }
@@ -433,8 +409,6 @@ struct PersonaEditor: View {
     }
 
     private func select(_ persona: ChatPersona) {
-        // A generated draft belongs to the editor selection that requested it.
-        // The picker remains available while the agent is working.
         draftGeneration &+= 1
         improving = false
         draft = persona
@@ -475,8 +449,6 @@ struct PersonaEditor: View {
         }, completion: { _ in reconcileSelection() })
     }
 
-    /// Capture ownership before scheduling, serialize writes, and keep errors
-    /// local to this sheet rather than consuming another chat operation's error.
     private func mutate<Value>(
         _ operation: @escaping (ChatModel.PersonaContext) async throws -> Value,
         completion: @escaping (Value) -> Void

@@ -2,7 +2,6 @@
 
 import SwiftUI
 
-/// This device's own connections, kept apart from the account relay allowance.
 struct LocalTrafficCard: View {
     let traffic: RemoteTraffic?
     var refresh: () async -> Void

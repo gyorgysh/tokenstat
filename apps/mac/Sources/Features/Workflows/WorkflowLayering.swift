@@ -2,11 +2,6 @@
 import Foundation
 
 enum WorkflowLayering {
-    /// Longest-path layers for acyclic edges. Wait for every predecessor
-    /// before visiting a join, so its successors inherit its final depth.
-    /// Cyclic components have no topological order: break the first remaining
-    /// node's incoming edges deterministically, keeping all nodes visible and
-    /// ignoring back edges to nodes already placed.
     static func depths(nodes: [WorkflowNode], edges: [WorkflowEdge]) -> [String: Int] {
         let known = Set(nodes.map(\.id))
         var incoming = Dictionary(uniqueKeysWithValues: known.map { ($0, 0) })

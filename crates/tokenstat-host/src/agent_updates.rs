@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Keeping agent CLIs current for people who only use them through chat.
-//!
-//! Chat runs an agent without its interactive screen, so the agent's own
-//! "update available" notice never reaches anyone, and an agent that only
-//! updates itself in that screen drifts behind. Each agent here has two
-//! entries: where its vendor publishes the latest version, and how it is
-//! updated. Both run only when a person presses a button.
 
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -14,12 +7,8 @@ use tokenstat_sync::agent_versions::{self, LatestSource};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Via {
-    /// The agent's own update command, with these arguments.
     Own(&'static [&'static str]),
-    /// A global package: reinstalled at `@latest` with whichever of npm or
-    /// bun put it on this machine.
     Package(&'static str),
-    /// The vendor's installer again, which always installs the latest.
     Installer,
 }
 
@@ -28,9 +17,6 @@ struct Plan {
     via: Via,
 }
 
-/// The table. Every latest-version address is the one the vendor's own
-/// installer reads, so a version that address names is one the update can
-/// actually install.
 fn plan(id: &str) -> Option<Plan> {
     let (latest, via) = match id {
         "claude_code" => (
@@ -63,8 +49,8 @@ fn plan(id: &str) -> Option<Plan> {
         ),
         "cline" => (Some(LatestSource::Npm("cline")), Via::Package("cline")),
         "openclaw" => (Some(LatestSource::Npm("openclaw")), Via::Package("openclaw")),
-        // The installer fetches a launcher script that carries no version, so
-        // there is nothing to compare. Update runs the installer again.
+
+
         "muse" => (None, Via::Installer),
         "omp" => (
             Some(LatestSource::Npm("@oh-my-pi/pi-coding-agent")),
@@ -122,8 +108,6 @@ fn plan(id: &str) -> Option<Plan> {
     Some(Plan { latest, via })
 }
 
-/// Antigravity publishes one manifest per platform, named the way its own
-/// installer names them.
 fn antigravity_platform() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("darwin_arm64"),
@@ -135,14 +119,10 @@ fn antigravity_platform() -> Option<&'static str> {
     }
 }
 
-/// The first `1.2.3`-shaped token in a version banner, with any `-suffix`.
-/// Banners differ ("codex-cli 0.167.2", "Hermes Agent v0.22.6 (2026.9.24)"),
-/// and the first dotted number is the version in every one checked.
 fn version_in(banner: &str) -> Option<String> {
     let bytes = banner.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        // A digit that starts a word, or follows a lone `v` ("v2.0.32").
         let starts = index == 0
             || !bytes[index - 1].is_ascii_alphanumeric()
             || (bytes[index - 1] == b'v'
@@ -176,9 +156,6 @@ fn numbers(version: &str) -> Vec<u64> {
         .collect()
 }
 
-/// Whether `latest` is newer than `installed`, comparing only the dotted
-/// numbers. A build suffix (Cursor's commit hash) is not an order, so two
-/// builds of the same dated version count as equal.
 fn newer(latest: &str, installed: &str) -> bool {
     let (a, b) = (numbers(latest), numbers(installed));
     for index in 0..a.len().max(b.len()) {
@@ -193,8 +170,6 @@ fn newer(latest: &str, installed: &str) -> bool {
     false
 }
 
-/// Ask the installed command for its version. Bounded, because a CLI that
-/// wants a terminal can wait on its input forever.
 fn installed_version(command: &str) -> Option<String> {
     let mut child = std::process::Command::new(command)
         .arg("--version")
@@ -224,8 +199,6 @@ fn installed_version(command: &str) -> Option<String> {
     version_in(&text)
 }
 
-/// The npm package an agent was installed from, when its latest version
-/// comes from the registry.
 fn package_of(plan: &Plan) -> Option<&'static str> {
     match (&plan.via, &plan.latest) {
         (Via::Package(package), _) => Some(package),
@@ -234,9 +207,6 @@ fn package_of(plan: &Plan) -> Option<&'static str> {
     }
 }
 
-/// A globally installed package's version, from the `package.json` above
-/// the real file its command links to. Some package CLIs wait for a
-/// terminal on `--version`, and this needs no process at all.
 fn package_version(command: &str, package: &str) -> Option<String> {
     let real = std::fs::canonicalize(command).ok()?;
     for directory in real.ancestors().skip(1).take(6) {
@@ -257,7 +227,6 @@ fn version_of(plan: &Plan, command: &str) -> Option<String> {
         .or_else(|| installed_version(command))
 }
 
-/// Every agent with an update plan, in the order lists show them.
 const IDS: &[&str] = &[
     "claude_code",
     "codex",
@@ -279,8 +248,6 @@ const IDS: &[&str] = &[
     "devin",
 ];
 
-/// Identifies the installed command file: its real path and modified time.
-/// Any update, by tokenstat or not, changes one or the other.
 fn stamp(command: &str) -> Option<String> {
     let real = std::fs::canonicalize(command).ok()?;
     let modified = std::fs::metadata(&real).ok()?.modified().ok()?;
@@ -319,8 +286,6 @@ fn row(id: &'static str, check: bool) -> Option<Value> {
     } else if plan.latest.is_some()
         && let Some(latest) = cached_latest(id)
     {
-        // The last daily or manual check, compared with what is installed
-        // now, so an update made outside tokenstat clears the mark.
         value["updateAvailable"] = json!(
             version
                 .as_deref()
@@ -363,8 +328,6 @@ fn rows(check: bool) -> Vec<Value> {
         .collect()
 }
 
-/// Ask every vendor, keep what was learned, and answer with the merged rows.
-/// The caller holds `FLIGHT`.
 fn check_now() -> Vec<Value> {
     let fresh = rows(true);
     let merged = with_cache(|cache| merged(&cache.rows, fresh));
@@ -372,21 +335,14 @@ fn check_now() -> Vec<Value> {
     merged
 }
 
-/// Held for the whole of a check, so a scheduled one and a button press
-/// never ask the vendors at the same time.
 static FLIGHT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const JUST_CHECKED_MS: i64 = 30 * 1000;
 
 fn just_checked(now: i64, checked_at: i64) -> bool {
-    // Saturating: `checked_at` comes from a file on disk, and a damaged one
-    // must not overflow the subtraction.
     checked_at <= now && now.saturating_sub(checked_at) < JUST_CHECKED_MS
 }
 
-/// A row whose vendor could not be reached keeps the latest version the
-/// previous check found, compared with what is installed now. One failed
-/// request must not clear a mark that was right an hour ago.
 fn merged(previous: &[Value], fresh: Vec<Value>) -> Vec<Value> {
     fresh
         .into_iter()
@@ -412,8 +368,6 @@ fn merged(previous: &[Value], fresh: Vec<Value>) -> Vec<Value> {
         .collect()
 }
 
-/// What a stored version may look like. The cache is a file on disk, and a
-/// damaged or edited one must not put arbitrary text in front of a person.
 fn plausible_version(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -422,9 +376,6 @@ fn plausible_version(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'))
 }
 
-/// What the last check found, kept so the agent picker can mark an agent
-/// that is behind without asking anyone. Rows are the same shape `list`
-/// returns: installed version, latest version, whether one is newer.
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Cache {
@@ -489,9 +440,7 @@ fn cached_latest(id: &str) -> Option<String> {
 /// `latest` and `version` from the last check. Cheap: no process, no request.
 pub(crate) fn cached(id: &str) -> Option<Value> {
     let mut row = with_cache(|cache| cache.rows.iter().find(|row| row["id"] == id).cloned())?;
-    // Updated since the check, by tokenstat or anything else: the old answer
-    // is about a binary that is gone. Clear the mark and read the new
-    // version in the background, against the latest the check found.
+
     let current = crate::launcher::resolved_command(id).and_then(|command| stamp(&command));
     if row["stamp"].as_str().is_some() && current.as_deref() != row["stamp"].as_str() {
         row["updateAvailable"] = json!(false);
@@ -500,8 +449,6 @@ pub(crate) fn cached(id: &str) -> Option<Value> {
     Some(row)
 }
 
-/// Re-read one agent's installed version and store it with the cached latest.
-/// At most one refresh per agent at a time.
 fn refresh_one(id: &str) {
     static RUNNING: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
     let Some(id) = IDS.iter().copied().find(|known| *known == id) else {
@@ -534,27 +481,16 @@ fn refresh_one(id: &str) {
         });
 }
 
-/// A check younger than this is fresh enough for anything but a button
-/// press. It is what keeps an app opened ten times an hour, or several
-/// phones connecting at once, from asking every vendor each time.
 const COOLDOWN_MS: i64 = 60 * 60 * 1000;
-/// While the host runs it checks again about this often, give or take
-/// `PERIOD_JITTER`, so machines that started together drift apart.
 const PERIOD: Duration = Duration::from_secs(6 * 60 * 60);
 const PERIOD_JITTER: Duration = Duration::from_secs(45 * 60);
-/// The first check waits this long after the host or an app starts, plus
-/// up to `START_JITTER`, so it never competes with startup work.
 const START_DELAY: Duration = Duration::from_secs(20);
 const START_JITTER: Duration = Duration::from_secs(70);
 
-/// Whether a check last made at `checked_at` should be made again. A time
-/// in the future means the clock moved back, and the cache cannot be
-/// trusted to say how old it is.
 fn due(now: i64, checked_at: i64) -> bool {
     checked_at > now || now.saturating_sub(checked_at) >= COOLDOWN_MS
 }
 
-/// A random length up to `span`. Spread, not secrecy, so the thread RNG is fine.
 fn jitter(span: Duration) -> Duration {
     let millis = span.as_millis() as u64;
     if millis == 0 {
@@ -567,13 +503,11 @@ fn next_period() -> Duration {
     PERIOD - PERIOD_JITTER + jitter(PERIOD_JITTER * 2)
 }
 
-/// Check now unless a check is running or one was made within the cooldown.
-/// Never waits: a busy flight means somebody else is already asking.
 fn check_if_due() {
     let _flight = match FLIGHT.try_lock() {
         Ok(flight) => flight,
         Err(std::sync::TryLockError::WouldBlock) => return,
-        // A panic during a check must not stop every later scheduled one.
+
         Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
     };
     let checked_at = with_cache(|cache| cache.checked_at_ms);
@@ -587,7 +521,7 @@ fn check_if_due() {
 /// Cheap and safe to call on every connection: at most one wait is pending.
 pub(crate) fn nudge() {
     static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    // Unit tests call `protocol` all the time. They must not reach vendors.
+
     if cfg!(test) {
         return;
     }
@@ -617,14 +551,12 @@ pub(crate) fn start_schedule() {
         .spawn(|| {
             std::thread::sleep(START_DELAY + jitter(START_JITTER));
             loop {
-                // A panic in one check must not end the schedule.
                 let _ = std::panic::catch_unwind(check_if_due);
                 std::thread::sleep(next_period());
             }
         });
 }
 
-/// Quote a path for the shell the installer runner uses.
 fn quoted(path: &str) -> String {
     if cfg!(windows) {
         format!("& '{}'", path.replace('\'', "''"))
@@ -650,8 +582,6 @@ pub(crate) fn update(id: &str) -> Result<Value, String> {
             args.join(" ")
         ))),
         Via::Package(package) => {
-            // bun's global packages live under ~/.bun. Anything else came
-            // from npm, which is also what every catalog entry installs with.
             let manager = if command.contains("/.bun/") {
                 "bun add -g"
             } else {
@@ -699,7 +629,7 @@ mod tests {
         assert!(due(now, now - COOLDOWN_MS));
         assert!(due(now, 0));
         assert!(due(now, now + 1));
-        // A damaged cache may hold any i64; none of it may overflow.
+
         assert!(due(now, i64::MIN));
         assert!(!just_checked(now, i64::MIN));
         assert!(just_checked(now, now - 1000));

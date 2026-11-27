@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! End-to-end encrypted, cross-device SSH vault.
-//!
-//! tokenstat.ai receives one authenticated ciphertext snapshot plus opaque key
-//! wraps. Recovery material and plaintext are consumed only in this module.
 
 use std::fs;
 use std::path::PathBuf;
@@ -26,26 +22,14 @@ use zeroize::Zeroizing;
 const SCHEMA: u32 = 4;
 const PASSWORD_ONLY: &str = "password-only-v4";
 
-/// Argon2id cost. 64 MiB, three passes, one lane.
-///
-/// The ciphertext is on a server, so somebody who takes a copy can guess
-/// offline for as long as they like. This is what makes each guess cost
-/// something. The numbers are the RustCrypto defaults, which are the OWASP
-/// recommendation, and they take well under a second on a phone.
 const KDF_MEMORY_KIB: u32 = 64 * 1024;
 const KDF_PASSES: u32 = 3;
 const KDF_LANES: u32 = 1;
 
-/// The KDF written down beside the wrap it produced.
-///
-/// Stored with the vault so a future change of cost can be read rather than
-/// guessed. A device that meets a descriptor it does not understand refuses
-/// rather than deriving the wrong key and reporting a bad password.
 fn kdf_descriptor() -> String {
     format!("argon2id$v=19$m={KDF_MEMORY_KIB},t={KDF_PASSES},p={KDF_LANES}")
 }
 
-/// Server-proven account identity. Handles are a fallback for older servers.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct VaultOwner {
@@ -68,8 +52,7 @@ impl VaultOwner {
                     .map(|s| format!("handle:{}", s.trim()))
             })
             .ok_or("the account server did not identify this account")?;
-        // The same spelling heartbeat accepts. The cache key must not split
-        // `https://Example:443/` from `https://example`.
+
         let origin = crate::account_session::canonical_origin(&status.host)
             .ok_or("the account origin is not a valid http(s) service")?;
         Ok(Self { origin, identity })
@@ -152,9 +135,6 @@ struct VaultStore {
     password_wrap: String,
     #[serde(default)]
     kdf: String,
-    /// Deliberate lock on this device. Survives a helper restart, because a
-    /// flag that lived only in this process was undone the moment the helper
-    /// started again and unwrapped the device wrap with nothing typed.
     #[serde(default)]
     locked: bool,
     #[serde(default)]
@@ -216,7 +196,6 @@ struct DeleteParams {
 struct PasswordParams {
     #[serde(default)]
     password: String,
-    /// Only set when resetting a forgotten password.
     #[serde(default)]
     recovery: String,
     #[serde(default)]
@@ -225,8 +204,6 @@ struct PasswordParams {
     migrate: bool,
 }
 
-// Logout retires requests immediately, including ones suspended in HTTP or
-// queued behind operation serialization. Tokens can never revive that epoch.
 pub(crate) static AUTH_EPOCH: AtomicU64 = AtomicU64::new(1);
 pub(crate) static SIGNOUTS: AtomicU64 = AtomicU64::new(0);
 static SESSION_IDS: AtomicU64 = AtomicU64::new(1);
@@ -236,11 +213,6 @@ fn next_session_id() -> String {
     format!("{nonce}:{}", SESSION_IDS.fetch_add(1, Ordering::SeqCst))
 }
 
-/// The vault key for this run of the daemon.
-///
-/// Held after a successful unlock so the password is typed once and not on
-/// every record read. In memory only: it is never written anywhere, and it
-/// goes when the process does.
 struct VaultSession {
     owner: Option<VaultOwner>,
     proof: Option<VaultStorage>,
@@ -266,8 +238,6 @@ fn vault_session() -> &'static Mutex<VaultSession> {
     })
 }
 
-/// Adopt only a server-proven current owner. Reading B retires A even if B
-/// never unlocks, so returning to A requires its password again.
 fn adopt_owner(storage: &VaultStorage) -> Result<(), String> {
     storage.ensure_current()?;
     let mut session = vault_session()
@@ -309,8 +279,6 @@ fn verify_stored_owner(params: &str, storage: &VaultStorage, required: bool) -> 
     }
 }
 
-/// Lock is local. It must clear its exact verified session before any disk or
-/// credential error, and must never wait for GET /me or use a new account.
 fn dispatch_local(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !matches!(method, "ssh.vault.lock" | "ssh.vault.retire") {
         return None;
@@ -365,8 +333,6 @@ fn retire_session_memory() -> Result<(), String> {
 struct SignoutLease;
 impl Drop for SignoutLease {
     fn drop(&mut self) {
-        // Also fence work that tried to begin while the credential was being
-        // revoked. The final retirement runs for success, failure and unwind.
         AUTH_EPOCH.fetch_add(1, Ordering::SeqCst);
         let _ = retire_session_memory();
         SIGNOUTS.fetch_sub(1, Ordering::SeqCst);
@@ -385,7 +351,6 @@ pub(crate) fn with_retired_session<T, E: std::fmt::Display>(
     action().map_err(|error| error.to_string())
 }
 
-/// Disk may lock a process, but can never unlock it. Only a password can.
 fn hydrate_locked(session: &mut VaultSession, storage: &VaultStorage) {
     match read(storage) {
         Ok(store) if !store.locked && store.lock_generation == session.lock_generation => {}
@@ -426,7 +391,7 @@ fn unlock_session(storage: &VaultStorage, vmk: [u8; 32]) -> Result<(), String> {
         .lock()
         .map_err(|_| "vault session lock poisoned")?;
     storage.ensure_current()?;
-    // Remain locked if writing fails, even when a key was already cached.
+
     session.owner = Some(storage.owner.clone());
     session.proof = Some(storage.clone());
     session.id = next_session_id();
@@ -507,8 +472,6 @@ fn clear_local(storage: &VaultStorage) -> Result<(), String> {
     Ok(())
 }
 
-/// An acknowledged remote reset retires only this owner's migration floor.
-/// An unowned or another account's legacy cache remains untouched.
 fn clear_legacy_for_owner(storage: &VaultStorage, path: &std::path::Path) -> Result<(), String> {
     storage.ensure_current()?;
     let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
@@ -566,19 +529,8 @@ fn random32() -> [u8; 32] {
     value
 }
 
-/// Crockford base32, which has no I, L, O or U.
-///
-/// A recovery code is read off a screen and typed back, sometimes from a
-/// photograph, so the alphabet must not contain two characters that look the
-/// same. Twenty-four words did not have this problem and had a much worse one:
-/// nobody could face typing them.
 const CODE_ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// A fresh recovery code: 160 bits, in groups of four.
-///
-/// Not a password and never typed to get in day to day, so it can be as long
-/// as it needs to be. It is the way back when the password is forgotten, and
-/// the only thing standing between a forgotten password and a lost vault.
 fn generate_recovery() -> String {
     let bytes = random32();
     let mut out = String::new();
@@ -592,10 +544,6 @@ fn generate_recovery() -> String {
     out
 }
 
-/// Compare recovery codes by what was meant, not by how it was typed.
-///
-/// Case and the grouping dashes carry no information, and neither does the
-/// difference between O and 0 on a code read off a photograph.
 fn normalize_recovery(recovery: &str) -> String {
     recovery
         .chars()
@@ -621,11 +569,6 @@ fn recovery_key(recovery: &str, salt: &str) -> Result<[u8; 32], String> {
     Ok(out)
 }
 
-/// Derive the key-encryption key from what a person typed.
-///
-/// Argon2id, and slow on purpose. `descriptor` is the KDF the wrap was made
-/// with: a device that does not recognise it refuses rather than deriving some
-/// other key and reporting a wrong password.
 fn password_key(password: &str, salt: &str, descriptor: &str) -> Result<[u8; 32], String> {
     if descriptor != kdf_descriptor() {
         return Err(
@@ -797,7 +740,7 @@ fn decrypt_snapshot(
         &snapshot_context(revision),
     )?))
     .map_err(|e| format!("damaged vault snapshot: {e}"))?;
-    // A record at the top of the version range cannot be bumped again.
+
     if let Some(record) = snapshot.records.iter().find(|r| r.version == u64::MAX) {
         return Err(format!(
             "vault record {} has an exhausted version",
@@ -904,7 +847,6 @@ fn key_id(key: &[u8; 32]) -> String {
     hex(&hash.finalize())
 }
 
-/// Revisions only advance, including across password-authorized root rotation.
 fn validate_remote(
     local: &VaultStore,
     remote: &tokenstat_sync::vault::RemoteVault,
@@ -934,9 +876,6 @@ fn validate_remote(
     Ok(())
 }
 
-/// An unowned cache cannot be attributed across different roots. Refuse that
-/// ambiguous migration; a same-key proof stamps its owner before other accounts
-/// can skip it. Already attributed caches retain their floor across rotation.
 fn legacy_baseline(
     path: &std::path::Path,
     owner: &VaultOwner,
@@ -1004,7 +943,7 @@ fn cache_remote_at(
     store.nonce.clone_from(&remote.nonce);
     store.recovery_salt.clone_from(&remote.recovery_salt);
     store.recovery_wrap.clone_from(&remote.recovery_wrap);
-    // Transport identity material is never a vault unlock credential.
+
     store.device_wrap.clear();
     store.password_salt = remote.password_salt.clone().unwrap_or_default();
     store.password_wrap = remote.password_wrap.clone().unwrap_or_default();
@@ -1048,18 +987,6 @@ fn enroll_self(client: &VaultContext) -> Result<(), String> {
     Ok(())
 }
 
-/// Run one vault call, publishing this machine's record if the account says it
-/// has never heard of it.
-///
-/// The record is published once, at login, and best effort: one failed call
-/// there (offline, a flaky minute, a sign-in that predates the code) left the
-/// machine unknown for good, and every vault call from it answered
-/// `machine_required` forever. Nothing retried it, so the vault was simply
-/// unusable on that computer and the screen said there was no vault rather
-/// than that it could not ask.
-///
-/// One retry, because if the republish did not fix it the cause is the token
-/// rather than the record, and only signing in again replaces that.
 fn with_machine_record<T>(
     client: &VaultContext,
     call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
@@ -1080,15 +1007,6 @@ fn with_registration_retry<T>(
     }
 }
 
-/// The account's copy of the vault, registering this machine if it has to.
-/// Whether a vault exists, from what the account said and what this device has
-/// left over from one.
-///
-/// Its own function because the rule is one line and easy to write backwards.
-/// A local record is evidence only while the account could not be asked: once
-/// it answers, it is the answer. Writing this as `remote.is_some() || local`
-/// meant a vault deleted on another device stayed on screen here forever,
-/// because the leftover never expired and nothing else ever contradicted it.
 fn vault_exists(remote_found: bool, unreachable: bool, local_schema: u32) -> bool {
     remote_found || (unreachable && local_schema >= 3)
 }
@@ -1108,17 +1026,10 @@ fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
     }
 }
 
-/// Create the account's one vault, locked by a password.
-///
-/// Returns the recovery code, which is shown once. It is not the way in, it is
-/// the way back when the password is forgotten.
 fn create_v4<'a>(
     password: &str,
     client: impl FnOnce() -> Result<&'a VaultContext, String>,
 ) -> Result<String, String> {
-    // The password before the plan. It is a pure check on what the caller
-    // typed, so answering it first costs nothing and does not make somebody
-    // with a short password wait on an account lookup to be told so.
     if let Some(problem) = tokenstat_core::passphrase::password_error(password) {
         return Err(problem);
     }
@@ -1164,9 +1075,7 @@ fn create_v4<'a>(
     if revision.revision != 1 {
         return Err("server returned an unexpected initial vault revision".into());
     }
-    // The account now has revision 1. If the local writes below fail, a retry
-    // would hit `AlreadyExists` with no local cache. Say so directly so the
-    // recovery path (reset, then create again) is discoverable.
+
     write(storage, &VaultStore {
         owner: None,
         schema_version: SCHEMA,
@@ -1186,20 +1095,13 @@ fn create_v4<'a>(
     .map_err(|e| {
         format!("vault was created but this device could not remember it: {e}. Reset the vault and create it again")
     })?;
-    // An unlock, not just a cached key. A lock left over from the vault this
-    // one replaces would otherwise still be standing, and the vault this
-    // device created seconds ago would answer that it is locked.
+
     unlock_session(storage, *vmk).map_err(|e| {
         format!("vault was created but this device could not unlock it: {e}. Unlock it with your password")
     })?;
     Ok(recovery)
 }
 
-/// Open the vault with what the person typed, and remember the key for this
-/// run so they are not asked again.
-///
-/// The key lives only in this process. Enrollment grants API access but never
-/// stores an identity-encrypted copy of the key locally or on the server.
 fn unlock_with(
     client: &VaultContext,
     password: &str,
@@ -1223,8 +1125,7 @@ fn unlock_with(
         let kdf = remote.kdf.as_deref().unwrap_or_default();
         unwrap_password(wrap, password, salt, kdf)?
     });
-    // Prove it before believing it. A wrap that unwraps to the wrong key would
-    // otherwise be reported as a working unlock and fail later, on a read.
+
     decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
     if remote.device_wrap.is_none() {
         enroll_self(client)?;
@@ -1252,8 +1153,6 @@ fn cache_written(
     cache_remote(client, &remote, key, false)
 }
 
-/// A rotation always replaces the master key, both recovery/password wraps,
-/// and every device enrollment together. Never emulate this with two requests.
 fn rotate_root(
     client: &VaultContext,
     password: &str,
@@ -1321,8 +1220,6 @@ fn rotate_root(
     Ok(code)
 }
 
-/// Serialize vault operations across the app and helper, including the
-/// verification/write of the local rollback floor. File close releases flock.
 struct OperationGuard {
     _process: std::sync::MutexGuard<'static, ()>,
     file: fs::File,
@@ -1410,7 +1307,6 @@ fn verify_request_owner(
     }
 }
 
-/// Reject pure input errors before accessing any account or credential store.
 fn validate_request(method: &str, params: &str) -> Result<(), String> {
     match method {
         "ssh.vault.enrollment.request"
@@ -1520,31 +1416,16 @@ fn dispatch_request(
     let result = match method {
         "ssh.vault.status" => {
             let local = read(storage)?;
-            // What the account said, kept rather than discarded. Swallowing
-            // this made every failure to *reach* the vault look like the
-            // account not having one, so a machine the account did not know
-            // was told to create a second vault and then refused when it
-            // tried. The screen can only be honest if it is given the
-            // difference.
+
             let answer = remote_vault(client);
             let mut unreachable = match &answer {
                 Ok(_) => None,
-                // No vault on the account is an answer, not a failure.
+
                 Err(tokenstat_sync::vault::VaultError::NotFound) => None,
                 Err(error) => Some(error.to_string()),
             };
             let remote = answer.ok();
-            // The account answered, and what it said is that there is no
-            // vault. That is not the same as not being able to ask, which
-            // is what `unreachable` carries, and the difference is the
-            // whole of this: a vault is deleted on one device and every
-            // other device finds out here.
-            //
-            // Local state left over from the vault that used to exist is
-            // not evidence that one still does. It is the thing to clean
-            // up, and until it was, a Mac went on showing "Encrypted
-            // vault, 0 records" and offering to change the password of a
-            // vault an iPhone had deleted an hour earlier.
+
             let gone = remote.is_none() && unreachable.is_none();
             if gone && local.schema_version >= 3 {
                 forget_key(storage);
@@ -1558,9 +1439,7 @@ fn dispatch_request(
                 .as_ref()
                 .and_then(|value| value.device_wrap.as_ref())
                 .is_some();
-            // A v2 vault has no password wrap. It cannot be opened by this
-            // build and the screen has to say so rather than asking for a
-            // password nothing will accept.
+
             let needs_recreate = remote
                 .as_ref()
                 .is_some_and(|value| value.password_wrap.is_none());
@@ -1633,8 +1512,7 @@ fn dispatch_request(
             };
             Ok(json!({"unlocked": true, "recovery": recovery}))
         }
-        // Password changes and recovery resets replace the root key and
-        // all wraps atomically; old wraps cannot decrypt future snapshots.
+
         "ssh.vault.password.set" => {
             verify_paid_account(client)?;
             let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -1654,9 +1532,7 @@ fn dispatch_request(
             let (remote, vmk) = remote_and_key(client, &p.recovery)?;
             let snapshot =
                 decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
-            // Tombstones must cross the bridge too. Filtering them here
-            // made deletes permanent on the writer but impossible to
-            // apply on another enrolled device.
+
             Ok(json!({"records": snapshot.records}))
         }
         "ssh.vault.record.put" => {
@@ -1919,8 +1795,7 @@ mod tests {
         let salt = hex(&random32());
         let recovery = generate_recovery();
         let wrap = wrap_recovery(&vmk, &recovery, &salt).unwrap();
-        // Read off a photograph: lower case, no grouping dashes, and the
-        // letters that look like digits confused for them.
+
         let retyped = recovery.to_lowercase().replace('-', " ").replace('0', "O");
         assert_eq!(unwrap_recovery(&wrap, &retyped, &salt).unwrap(), vmk);
     }
@@ -1944,9 +1819,7 @@ mod tests {
         let vmk = random32();
         let salt = hex(&random32());
         let wrap = wrap_password(&vmk, "Correct-Horse9!", &salt).unwrap();
-        // Deriving with different parameters would produce a different key and
-        // report a wrong password, which sends somebody looking for a typo in
-        // a password that was right.
+
         let refused = unwrap_password(&wrap, "Correct-Horse9!", &salt, "argon2id$v=19$m=1,t=1,p=1")
             .unwrap_err();
         assert!(refused.contains("newer version"), "{refused}");
@@ -1959,8 +1832,6 @@ mod tests {
 
     #[test]
     fn a_vault_out_of_reach_is_still_a_vault() {
-        // The account could not be asked. Saying "no vault" here is what sent
-        // a machine off to create a second one.
         assert!(vault_exists(false, true, SCHEMA));
         assert!(!vault_exists(false, true, 0));
     }
@@ -1972,12 +1843,6 @@ mod tests {
 
     #[test]
     fn a_vault_cannot_be_created_behind_a_weak_password() {
-        // The host checks as well as the client. A client that forgets to
-        // must not be able to put a weak password on an account's one vault.
-        //
-        // The password is checked before the account, which is what makes this
-        // hold on a machine with no account signed in. It failed on CI while
-        // passing here for exactly that reason.
         let refused = create_v4("short", || {
             panic!("invalid password must not acquire credentials")
         })
@@ -2108,8 +1973,7 @@ mod tests {
         assert_eq!(decoded.records.len(), 1);
         assert!(decoded.records[0].deleted);
         assert_eq!(decoded.records[0].id, "host:removed");
-        // The list bridge must serialize tombstones too. Filtering here used
-        // to make a delete on one device impossible to apply on another.
+
         let listed = json!({"records": decoded.records});
         assert_eq!(listed["records"][0]["deleted"], true);
         assert_eq!(listed["records"].as_array().map(|rows| rows.len()), Some(1));
@@ -2185,7 +2049,7 @@ mod tests {
         .unwrap();
         unlock_session(storage, [5; 32]).unwrap();
         assert!(!is_locked(storage));
-        // Reproduce a failed atomic-write staging file without real vault data.
+
         fs::create_dir(storage.path.clone().with_extension("tmp")).unwrap();
         assert!(lock_session(storage).is_err());
         assert!(is_locked(storage));
@@ -2194,12 +2058,12 @@ mod tests {
         unlock_session(storage, [5; 32]).unwrap();
         assert!(!is_locked(storage));
         lock_session(storage).unwrap();
-        // An unlocked flag from another process must not unlock this session.
+
         let mut store = read(storage).unwrap();
         store.locked = false;
         write(storage, &store).unwrap();
         assert!(is_locked(storage));
-        // Legacy device wraps cannot bring an empty session back to life.
+
         store.device_wrap = wrap_for_device(
             &[5; 32],
             &tokenstat_identity::MachineIdentity::from_secret([9; 32]).public_key(),
@@ -2366,7 +2230,7 @@ mod tests {
         .unwrap();
         unlock_session(&b, [9; 32]).unwrap();
         let b_before = fs::read(&b.path).unwrap();
-        // Late A completion cannot release B's unlock or persist into B's cache.
+
         forget_key(&a);
         assert!(cached_key(&a).is_none());
         assert!(read(&a).is_err());
@@ -2455,7 +2319,7 @@ mod tests {
         let remote = remote_fixture(&current_key, 20);
         let legacy = local_fixture(&current_key, &remote);
         fs::write(&legacy_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        // An old valid password/root cannot discard a newer unowned floor.
+
         assert!(
             cache_remote_at(
                 &a,
@@ -2499,7 +2363,7 @@ mod tests {
             serde_json::from_slice(&fs::read(&legacy_path).unwrap()).unwrap();
         assert_eq!(attributed.owner.as_ref(), Some(&a.owner));
         assert_eq!(attributed.revision, 20);
-        // Simulate interrupted migration / loss of only the new scoped file.
+
         fs::remove_file(&a.path).unwrap();
         assert!(
             cache_remote_at(
@@ -2520,7 +2384,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read(&a).unwrap().revision, 21);
-        // A proven A cache never imposes A's floor/key on B.
+
         cache_remote_at(
             &b,
             &legacy_path,
@@ -2535,8 +2399,7 @@ mod tests {
         clear_legacy_for_owner(&a, &legacy_path).unwrap();
         clear_local(&a).unwrap();
         assert!(!legacy_path.exists());
-        // Recreated revision1 remains valid even when its scoped write was
-        // unavailable and the subsequent unlock must rebuild the cache.
+
         cache_remote_at(
             &a,
             &legacy_path,

@@ -10,19 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
-/// Pure rules for the workspace hub: the folder's section menu, the launcher,
-/// the file editor's find and conflict math, and pull review verbs.
-///
-/// Ports the UI-thread-free cores of `ClientWorkspaceDetailView` (section
-/// order and `workspace.summary` badge math), `ClientChatView` (composer
-/// hint), `ClientWorkspaceSessionsView` (catalog partitioning), the phone
-/// `ClientFileEditor` (save gating and conflict summary), `EditorFindBar`
-/// (match counting), and `PullDetailView` (review and merge verbs), so both
-/// platforms answer identically. No Android or coroutine APIs here.
 
-/// One folder section, in the Mac sidebar order iOS lists them in. The key is
-/// the Android section name the content renderer already knows; the label is
-/// the iOS row word.
 enum class HubSection(val key: String, val label: String) {
     SESSIONS("Sessions", L10n.text("common.terminals")),
     CHAT("Chat", L10n.text("common.chats")),
@@ -37,8 +25,6 @@ enum class HubSection(val key: String, val label: String) {
     BROWSER("Browser", L10n.text("common.browser")),
 }
 
-/// What the hub badges say. One value each, filled by one pass over
-/// `workspace.summary`, mirroring `WorkspaceSectionCounts`.
 data class HubCounts(
     val sessions: Int = 0,
     val chats: Int = 0,
@@ -69,9 +55,6 @@ object HubCountsParser {
         (this[key] as? JsonPrimitive)?.intOrNull
             ?: (this[key] as? JsonPrimitive)?.longOrNull?.toInt()
 
-    /// Mirrors the iOS `reload()`: optional host fields fall back to what the
-    /// phone already knows (the git file count for changes, the cached pull
-    /// count), never to a zero that would read as news.
     fun parse(summary: JsonObject, gitChangedFallback: Int?, cachedPulls: Int?): HubCounts {
         val running = summary.int("workflowsRunning") ?: 0
         val workflows = summary.int("workflows") ?: 0
@@ -91,9 +74,6 @@ object HubCountsParser {
         summaries.firstOrNull { (it["id"] as? JsonPrimitive)?.contentOrNull == workspaceId }
 }
 
-/// The chat composer hint. A busy composer says the words wait for this
-/// turn, unless they can ride the next step as a note. Otherwise the folder
-/// is named, quoted, so the question reads as about that place.
 object ChatHint {
     fun hint(folderName: String, busy: Boolean, note: Boolean = false): String {
         if (note) return L10n.text("android.workspacehublogic.add_a_note_for_the_next_step.4778177a")
@@ -103,8 +83,6 @@ object ChatHint {
     }
 }
 
-/// One launcher profile from `launcher.catalog`, mirroring
-/// `RemoteLaunchProfile`'s phone-read fields.
 data class LaunchProfile(
     val id: String,
     val name: String,
@@ -140,7 +118,6 @@ object LaunchCatalog {
         )
     }
 
-    /// The built-in shell tile, for a host that answered with no catalog.
     fun shellFallback(platform: String? = null): LaunchProfile = LaunchProfile(
         id = "shell",
         name = L10n.text("android.workspacehublogic.shell.a7332854"),
@@ -163,9 +140,6 @@ object LaunchCatalog {
         catalog.filter { !it.installed || isOffGrid(it, locallyHidden) }
 }
 
-/// Editor save gating, mirroring the phone `ClientFileEditor.save()`: the
-/// host is re-read first, and a host text that differs from both the draft
-/// and the last save is a conflict, never an overwrite.
 object EditorSave {
     enum class Outcome { SAVE, CONFLICT, ALREADY_SAVED }
 
@@ -176,8 +150,6 @@ object EditorSave {
     }
 }
 
-/// Conflict card math from `EditorConflictCard`: line counts for both sides
-/// and the first line that differs.
 object EditorConflict {
     fun lineCount(text: String): Int = text.split('\n').size
 
@@ -199,8 +171,6 @@ object EditorConflict {
     }
 }
 
-/// Find and replace over the editor buffer, mirroring `EditorFindSession`'s
-/// counting and navigation.
 object EditorFind {
     fun matches(text: String, query: String): List<IntRange> {
         if (query.isEmpty() || text.isEmpty()) return emptyList()
@@ -267,8 +237,6 @@ object EditorFind {
     }
 }
 
-/// Pull review verbs and merge methods, word-for-word with
-/// `PullReviewVerdict` and `PullMergeMethod` raw values.
 object PullReview {
     val VERDICTS = listOf("approve", "requestChanges", "comment")
 

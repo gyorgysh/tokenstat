@@ -3,23 +3,16 @@ import Foundation
 import CoreFoundation
 
 enum SidebarProjectsDisplay: String, CaseIterable, Sendable {
-    /// Folders first, chats nested under each one.
     case byRepository
-    /// One list of chats across folders, newest / working first.
     case byChat
 }
 
 enum SidebarProjectsSort: String, CaseIterable, Sendable {
-    /// The person's drag order (folder mode only).
     case manual
-    /// A–Z by folder or chat title.
     case name
     case recent
 }
 
-/// Device-local, additive preferences. Each disclosure has its own key, so
-/// changing one never rewrites preferences owned by a newer or older release.
-/// Keep existing key names and value types stable; add keys for new semantics.
 final class SidebarPreferences {
     static let shared = SidebarPreferences()
     static let defaultOrder = ["projects", "servers"]
@@ -56,7 +49,6 @@ final class SidebarPreferences {
         return order + Self.defaultOrder.filter { !order.contains($0) }
     }
 
-    /// Retain unknown future sections and values when moving known sections.
     func move(_ section: String, before other: String) {
         guard Self.defaultOrder.contains(section), Self.defaultOrder.contains(other), section != other else { return }
         var raw = defaults.array(forKey: orderKey) ?? Self.defaultOrder

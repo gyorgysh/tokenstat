@@ -47,7 +47,6 @@ internal class StreamingWordArrivals {
     }
 }
 
-/** Draw a fading mask over new words; never change text or remeasure per frame. */
 @Composable
 internal fun StreamingText(text: AnnotatedString, style: TextStyle, modifier: Modifier, live: Boolean,
                            nowMillis: () -> Long = SystemClock::uptimeMillis) {
@@ -71,7 +70,6 @@ internal fun StreamingText(text: AnnotatedString, style: TextStyle, modifier: Mo
         }
     }
     Text(text, style = style, modifier = modifier.drawWithContent {
-        // Reading animation state invalidates drawing only.
         val tick = clock.value
         val now = nowMillis()
         val paths = geometry.values
@@ -82,8 +80,6 @@ internal fun StreamingText(text: AnnotatedString, style: TextStyle, modifier: Mo
             val bottom = paths.maxOf { it.second.getBounds().bottom }.coerceIn(top, size.height)
             clipRect(bottom = top) { this@drawWithContent.drawContent() }
             clipRect(top = bottom) { this@drawWithContent.drawContent() }
-            // A long paragraph must not allocate a full-height animation
-            // texture. Only the lines containing arriving words need a layer.
             clipRect(top = top, bottom = bottom) {
                 drawContext.canvas.saveLayer(Rect(0f, top, size.width, bottom), paint)
                 this@drawWithContent.drawContent()
@@ -96,8 +92,6 @@ internal fun StreamingText(text: AnnotatedString, style: TextStyle, modifier: Mo
             }
         }
     }, onTextLayout = { layout ->
-        // Layout runs before drawing. Store geometry directly so the first
-        // frame of a word is faded too, without an extra composition pass.
         geometry.values = active.map { it to layout.getPathForRange(it.start, it.end) }
     })
 }

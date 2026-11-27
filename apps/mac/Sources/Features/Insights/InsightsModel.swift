@@ -7,11 +7,6 @@
 import Foundation
 import Observation
 
-/// Everything the Insights screen shows, and the one place that talks to the
-/// bridge.
-///
-/// Views stay declarative and never call `Bridge` directly, so when the host
-/// daemon replaces the in-process bridge there is exactly one file to change.
 @Observable
 @MainActor
 final class InsightsModel {
@@ -23,7 +18,6 @@ final class InsightsModel {
 
         var id: String { rawValue }
 
-        /// Days back from today, or nil for the whole archive.
         var days: Int? {
             switch self {
             case .week: return 7
@@ -70,21 +64,14 @@ final class InsightsModel {
     var byProfile: [Bucket] = []
     var activeBlock: Block?
 
-    /// Which harnesses ran in each archive project.
-    ///
-    /// Feeds the inspector when a project row is selected. Built from one
-    /// two-level query rather than a query per project.
     var projectHarnesses: [ProjectHarnesses] = []
 
     var tab: Tab = .overview {
         didSet { if tab != oldValue { selected = nil } }
     }
 
-    /// Row the inspector is describing. Cleared when the tab changes, because
-    /// a row from another breakdown would be describing something else.
     var selected: Bucket?
 
-    /// Rows for the current tab. Overview has no single list of its own.
     var rows: [Bucket] {
         switch tab {
         case .overview: return byModel
@@ -96,13 +83,9 @@ final class InsightsModel {
         }
     }
 
-    /// Defaults to the whole archive. tokenstat exists because agents delete
-    /// their own transcripts, so the first thing to show is everything that
-    /// survived, not the last month of it.
     var period: Period = .all {
         didSet {
             guard period != oldValue else { return }
-            // Choosing a period is choosing to stop looking at one day.
             focusedDay = nil
             reload()
         }
@@ -115,17 +98,10 @@ final class InsightsModel {
     var fetchCooldownUntil: Date?
     var actionMessage: String?
     private var actionGeneration = 0
-    /// Set when a load fails. The message comes from the core, which names the
-    /// actual file or setting at fault, so it is shown rather than replaced.
     var errorMessage: String?
 
     private var loadTask: Task<Void, Never>?
 
-    /// A single day, pinned by clicking it on Home's heatmap.
-    ///
-    /// Overrides the period rather than being another `Period` case, because it
-    /// is not a length of time the user chose from a control and it has to be
-    /// dismissable back to whatever they had selected before.
     private(set) var focusedDay: String?
 
     func focusOn(day: String) {
@@ -142,8 +118,6 @@ final class InsightsModel {
     }
 
     var query: Query {
-        // The archive stores local dates as plain text, so one day is a range
-        // whose ends are the same string.
         if let focusedDay {
             return Query(since: focusedDay, until: focusedDay)
         }
@@ -152,8 +126,6 @@ final class InsightsModel {
         return Query(since: Self.dateFormatter.string(from: start), billing: nil)
     }
 
-    /// The archive stores local dates as plain `YYYY-MM-DD` text, so the filter
-    /// has to be built the same way rather than as an instant.
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
@@ -200,8 +172,6 @@ final class InsightsModel {
                 projects: self.byProject,
                 split: snapshot.projectHarnesses
             )
-            // A selection from before the reload may no longer exist, and a
-            // stale row would sit in the inspector describing nothing.
             if let key = selected?.key {
                 selected = rows.first { $0.key == key }
             }
@@ -213,7 +183,6 @@ final class InsightsModel {
         }
     }
 
-    /// Read every discoverable log source into the archive, then redraw.
     func scan() async {
         guard !isScanning, scanCooldownUntil == nil else { return }
         isScanning = true
@@ -224,7 +193,6 @@ final class InsightsModel {
             showAction(L10n.text("apple.insightsmodel.scan_complete_added_0_new_events_from_1_fi.0eff738d", "\(report.eventsNew)", "\(report.filesRead)"))
             startCooldown(seconds: 10, clearing: \.scanCooldownUntil)
             await refresh()
-            // Home's heatmap is a separate model; tell it the archive moved.
             NotificationCenter.default.post(name: .archiveDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
@@ -273,17 +241,10 @@ final class InsightsModel {
         }
     }
 
-    /// Harnesses that ran in the given project, largest first.
     func harnesses(inProject key: String) -> [SplitBucket] {
         projectHarnesses.first { $0.path == key }?.harnesses ?? []
     }
 
-    /// Attach each project's harnesses to it.
-    ///
-    /// Order comes from `projects`, which the archive already returns busiest
-    /// first, rather than from re-sorting the split. A project with no split
-    /// rows still appears: it has usage, so hiding it would be a lie about the
-    /// archive, even if the harness attribution is missing.
     private static func buildProjectHarnesses(
         projects: [Bucket],
         split: [SplitBucket]
@@ -298,11 +259,5 @@ final class InsightsModel {
         }
     }
 
-    /// Total value for the period, carrying the estimate and completeness
-    /// qualifiers up from the rows it was built from.
-    ///
-    /// Taken from the model breakdown rather than the daily one because both
-    /// cover the same events, and the model split is the one whose rows can
-    /// each be priced directly.
     var periodValue: Money { byModel.totalValue }
 }

@@ -8,16 +8,8 @@ import AppKit
 import UIKit
 #endif
 
-/// Messages waiting for the open turn to finish, sitting above the composer.
-///
-/// The host will not take a second send until this turn ends, so the next
-/// prompt waits here. One waiting message stays on the strip, where it can
-/// still be edited, dropped, or sent now. Two or more open from View pending,
-/// so the list does not cover the transcript.
 struct ChatQueueStrip: View {
     let items: [ChatQueuedMessage]
-    /// Conversation the strip belongs to. Switching threads with the pending
-    /// sheet open must close it rather than retarget it at the new chat.
     var owner: WorkReference?
     var paused = false
     var offline = false
@@ -103,10 +95,6 @@ struct ChatQueueStrip: View {
     }
 }
 
-/// A short note parked for the next tool step, above the waiting messages.
-///
-/// It is not a queued prompt. The agent reads it beside the next result, and
-/// removing it drops the note before that step arrives.
 struct ChatSteerNoteBanner: View {
     let note: String
     var waitingCount = 0
@@ -247,9 +235,6 @@ private struct ChatPendingMessagesSheet: View {
     @State private var draggingID: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// One card per message, no section box. The sheet subtitle already says
-    /// where these go and in what order; the footnote keeps what Send now
-    /// does, which otherwise lived only in a tooltip.
     private var macQueueList: some View {
         ScrollView {
             LazyVStack(spacing: Theme.Space.s) {
@@ -338,9 +323,6 @@ private struct ChatPendingMessagesSheet: View {
 }
 
 #if os(macOS)
-/// Live reorder for the pending-messages sheet: crossing a row moves the
-/// dragged message there at once, so the list itself shows the new order
-/// instead of waiting for the drop.
 private struct QueueDropDelegate: DropDelegate {
     let targetID: String
     let items: [ChatQueuedMessage]
@@ -457,8 +439,6 @@ private struct ChatQueueRow: View {
         }
     }
 
-    /// A themed box on the sheet, so the field is the same object as every
-    /// other editor and not a label sitting on a tinted card.
     private var sheetField: some View {
         TextField(L10n.text("apple.chatqueuestrip.message.2f77668a"), text: $draft, axis: .vertical)
             .textFieldStyle(.themedMultiline)

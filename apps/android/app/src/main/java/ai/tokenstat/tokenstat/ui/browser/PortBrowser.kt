@@ -62,12 +62,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 
-/// Port-forwarded localhost on this phone, matching Apple
-/// `ClientBrowserScreen`.
-///
-/// Original loopback addresses resolve through the paired computer's tunnel.
-/// Listener URLs live only for this screen, and every owned forward is
-/// released on exit. Only web pages pass the navigation gate.
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -160,7 +154,6 @@ private fun PortBrowserView(
             return
         }
         opening = true
-        // Listener cleanup must also run if the screen leaves during the call.
         cleanupScope.launch {
             try {
                 val forwarded = listeners.open(target) { ownsContext() && navigation == ticket } ?: return@launch
@@ -186,15 +179,10 @@ private fun PortBrowserView(
     )
 
     fun blockNavigation() { loadError = L10n.text("android.portbrowser.open_this_preview_s_port_before_loading_th.4a4d565e") }
-    // A pushed screen owns the system back. Without it the gesture falls
-    // through to the activity and closes the app instead of stepping back.
-    // History first: followed links and address-bar loads are pages, and
-    // back walks them before it leaves the screen.
     BackHandler { if (listeners.isCurrent && view?.canGoBack() == true) view?.goBack() else onClose() }
     DisposableEffect(request) {
         onDispose {
             active.set(false)
-            // Cleanup must outlive the composition that owns this screen.
             cleanupScope.launch {
                 listeners.close()
             }
@@ -269,12 +257,7 @@ private fun PortBrowserView(
                             val target = request?.url?.toString()
                             return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
                                 BrowserListenerSession.Route.Direct -> false
-                                // Interception replaces the proxy URL in this
-                                // entry. Loading a new URL here would insert a
-                                // duplicate every time Back revisits an old lease.
                                 BrowserListenerSession.Route.Open -> if (request?.isRedirect == true) {
-                                    // WebView does not intercept a redirect's
-                                    // destination, so acquire it explicitly.
                                     navigate(original(target)!!.url)
                                     true
                                 } else false
@@ -286,8 +269,6 @@ private fun PortBrowserView(
                         @Suppress("OVERRIDE_DEPRECATION")
                         override fun shouldOverrideUrlLoading(v: WebView?, url: String?): Boolean {
                             if (!isCurrentView(v)) return true
-                            // This callback carries neither method nor frame;
-                            // an unmapped request cannot be replayed as GET.
                             val direct = listeners.route(url, false, null) == BrowserListenerSession.Route.Direct
                             if (!direct) blockNavigation()
                             return !direct
@@ -296,9 +277,6 @@ private fun PortBrowserView(
                         override fun shouldInterceptRequest(v: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                             if (!isCurrentView(v)) return blockedResponse()
                             val target = request?.url?.toString()
-                            // WebView omits POST and resource loads from the
-                            // override callback. This hook runs off the UI
-                            // thread and refuses direct device loopback too.
                             return when (listeners.route(target, request?.isForMainFrame == true, request?.method)) {
                                 BrowserListenerSession.Route.Direct -> null
                                 BrowserListenerSession.Route.Open -> {

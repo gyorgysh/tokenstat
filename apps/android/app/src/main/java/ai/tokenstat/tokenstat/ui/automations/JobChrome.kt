@@ -35,8 +35,6 @@ import ai.tokenstat.tokenstat.ui.marks.RunOutcome
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// A labelled fact on a job or graph. Same shape on every detail page.
-/// Port of `ClientFactRow`.
 @Composable
 fun JobFactRow(label: String, value: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -45,7 +43,6 @@ fun JobFactRow(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
-/// The outcome pill beside a run. Dot plus words, like the Apple client.
 @Composable
 fun JobStatusPill(status: String, text: String, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -65,8 +62,6 @@ fun JobStatusPill(status: String, text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/// One past run as a row. Used on the phone list and the detail preview.
-/// Port of `ClientPastRunRow`.
 @Composable
 fun PastRunRow(
     title: String,
@@ -104,8 +99,6 @@ fun PastRunRow(
     }
 }
 
-/// Opens the complete run history from a short preview.
-/// Port of `ClientAllRunsRow`.
 @Composable
 fun AllRunsRow(count: Int, onOpen: () -> Unit) {
     val colors = LocalTsColors.current
@@ -130,8 +123,6 @@ fun AllRunsRow(count: Int, onOpen: () -> Unit) {
     }
 }
 
-/// The header every full-page workbench screen shares: back, title,
-/// subtitle, and trailing actions on the app background.
 @Composable
 fun JobScreenHeader(
     title: String,
@@ -154,8 +145,6 @@ fun JobScreenHeader(
     }
 }
 
-/// A confirm that names the machine, like the Apple confirmation dialogs.
-/// Confirms are not management screens, so a dialog is the faithful shape.
 @Composable
 fun JobConfirmDialog(
     title: String,
@@ -181,18 +170,14 @@ fun JobConfirmDialog(
     )
 }
 
-/// A past run's timestamp: the host wall clock when the zone is known,
-/// otherwise this device's short time. Port of `ClientPastRunRow.when`.
 fun pastRunWhen(epochMs: Long, timezone: String?): String =
     HostScheduleClock.wallClock(epochMs, timezone)
         ?: java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(epochMs))
 
-/// A run header timestamp in this device's locale, like the Apple run view.
 fun deviceDateTime(epochMs: Long): String =
     java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
         .format(java.util.Date(epochMs))
 
-/// The empty detail: the run or job is gone but the folder is still here.
 @Composable
 fun JobGoneCard(title: String, message: String) {
     TsCard(title = title) {

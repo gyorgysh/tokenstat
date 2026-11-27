@@ -29,7 +29,6 @@ mod tests {
     use std::net::TcpListener;
     use std::time::Duration;
 
-    // Synthetic localhost identity, used only by this loopback TLS fixture.
     const CERT: &str = r#"-----BEGIN CERTIFICATE-----
 MIIBnDCCAUGgAwIBAgIUMo4CZBB6Qun12sfUR6dIoaSF+zEwCgYIKoZIzj0EAwIw
 FDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MTAxNTEzNTEyOFoYDzIxMjYwOTIx

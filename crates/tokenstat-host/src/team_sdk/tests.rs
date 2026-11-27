@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 
 fn service(budget: Duration) -> Service {
@@ -295,7 +294,7 @@ fn wrong_token_expiry_and_explicit_retirement_fail_closed() {
         gate.budget.deadline = Deadline::capture(Duration::ZERO).unwrap();
     }
     assert!(expired.shared.live().is_err());
-    // A later budget cannot revive an instance which observed expiry.
+
     expired.shared.gate.lock().unwrap().budget.deadline =
         Deadline::capture(Duration::from_secs(60)).unwrap();
     assert!(expired.shared.live().is_err());
@@ -460,8 +459,6 @@ fn stop_does_not_wait_for_a_slow_account_or_publication_check() {
 }
 
 fn bind_context(context: Value) -> io::Result<Service> {
-    // These fixtures verify paging and size bounds. Give a loaded runner
-    // time to read every page; lease expiry has separate short-budget tests.
     let budget = Duration::from_secs(60);
     Service::bind(
         Budget {

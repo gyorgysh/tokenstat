@@ -3,17 +3,6 @@ package ai.tokenstat.tokenstat.ui.sample
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-/// The sample, as data and nothing else. Port of `ClientSampleStore`.
-///
-/// Deliberately a fixture, not a workspace, a peer or a chat. A sample that
-/// borrowed the real machinery would need a machine to borrow it from, and the
-/// whole point is somebody with no machine, no account standing and nothing
-/// bought.
-///
-/// Nothing in this file may reach the bridge, the network, the account or any
-/// registry. It has no functions that take input, so there is nothing to write
-/// with. The numbers are invented and are labelled as invented everywhere they
-/// are shown. They are not a claim about what anything costs.
 object SampleStore {
     enum class Speaker { PERSON, AGENT }
 
@@ -23,11 +12,6 @@ object SampleStore {
 
     data class Change(val id: Int, val kind: ChangeKind, val text: String)
 
-    /// A short exchange that ends in one edit somebody can read in full.
-    ///
-    /// One line changed, in a file whose purpose is obvious without the rest
-    /// of the project around it. A sample that showed a refactor would be a
-    /// sample nobody could check.
     val conversation: List<Turn> = listOf(
         Turn(
             0,
@@ -56,10 +40,6 @@ object SampleStore {
         Change(4, ChangeKind.CONTEXT, "  </header>"),
     )
 
-    /// What a reading looks like, with made-up numbers.
-    ///
-    /// Shown so somebody knows the shape of what they get, never presented as
-    /// anyone's spend. Every screen that draws these says they are invented.
     data class Reading(val id: String, val label: String, val value: String)
 
     val readings: List<Reading> = listOf(
@@ -68,6 +48,5 @@ object SampleStore {
         Reading("cost", L10n.text("android.samplestore.cost_of_this_task.716802d2"), "$0.04"),
     )
 
-    /// Said in full wherever the numbers appear.
     val disclaimer: String = L10n.text("android.samplestore.this_whole_page_is_an_example_made_up_to_s.1389de3d")
 }

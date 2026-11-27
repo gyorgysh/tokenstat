@@ -3,20 +3,10 @@ package ai.tokenstat.tokenstat.ui.workspace
 
 import android.content.Context
 
-/// How much of an agent's work a transcript shows between a question and
-/// its answer. Port of ChatTranscriptFold.swift `ChatDetail`.
-///
-/// Every level keeps what a person has to see: the question, every reply, an
-/// approval the agent is waiting on, a failure, a handoff and an attachment.
 enum class ChatDetail(val key: String) {
-    /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
     Minimal("minimal"),
-    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test".
-    /// An opened line shows what the step produced, without a card.
     Compact("compact"),
-    /// Thinking and runs of reads and searches fold to one line each.
     Standard("standard"),
-    /// Every step on its own row, with its output open.
     Detailed("detailed"),
     ;
 
@@ -25,14 +15,10 @@ enum class ChatDetail(val key: String) {
     }
 }
 
-/// One folded line standing in for several transcript rows. Port of
-/// `ChatStepGroup`.
 data class ChatStepGroup(
     val style: Style,
     val open: Boolean,
-    /// The rows this line stands for, oldest first.
     val memberIds: List<String>,
-    /// Tool calls and edits. Thinking and in-between text are not steps.
     val steps: Int = 0,
     val files: Int = 0,
     val added: Long = 0,
@@ -40,40 +26,26 @@ data class ChatStepGroup(
     val reads: Int = 0,
     val searches: Int = 0,
     val pages: Int = 0,
-    /// Steps that failed. A failure folds like any other step, since agents
-    /// retry all the time, and the line says how many so none goes unseen.
     val failures: Int = 0,
-    /// Still being added to.
     val running: Boolean = false,
     val liveVerb: String? = null,
     val liveTarget: String? = null,
     val startedAtMs: Long? = null,
     val endedAtMs: Long? = null,
-    /// The turn's reported spend, in Minimal, where its usage row is not drawn.
     val cost: Double? = null,
-    /// The first line of a folded thought.
     val preview: String? = null,
-    /// Drawn as Compact draws it: a plain line, no icon or chevron.
     val plain: Boolean = false,
-    /// The one step a single-member group stands for: its tool name and
-    /// the file or command it acted on.
     val verb: String? = null,
     val subject: String? = null,
 ) {
     enum class Style { Work, Explored, Thought, Step }
 }
 
-/// How a step under an open Compact line is drawn. Port of
-/// `ChatDisplayItem.PlainStep`.
 enum class PlainStep {
-    /// A lone step: only what it produced, no card and no second header.
     Detail,
-    /// One of a run: a plain line of its own, so each names its file.
     Line,
 }
 
-/// The detail level, kept on this device the way the Apple client keeps it
-/// in UserDefaults. Every device starts at Compact until somebody picks.
 class ChatDetailStore(context: Context) {
     private val prefs = context.getSharedPreferences("tokenstat.chat.v1", Context.MODE_PRIVATE)
 
@@ -93,14 +65,10 @@ class ChatDetailStore(context: Context) {
 
     private companion object {
         const val KEY = "detailLevel"
-        /// Where the level lived while "minimal" meant a line per step and
-        /// "compact" a line per stretch of work. Those two names swapped.
         const val PREVIOUS_KEY = "detail"
     }
 }
 
-/// A choice stored under the previous key, by what it did rather than what
-/// it was called, so nobody's transcript changes under them.
 fun renamedDetail(key: String): ChatDetail? = when (key) {
     "minimal" -> ChatDetail.Compact
     "compact" -> ChatDetail.Minimal
@@ -114,13 +82,8 @@ private val pageVerbs = setOf("WebFetch")
 private fun isExploration(verb: String): Boolean =
     verb in readVerbs || verb in searchVerbs || verb in pageVerbs
 
-/// A group's row id. Named after its first step, so it holds while a live
-/// turn adds steps and when an older page lands above.
 fun stepGroupId(firstMember: String): String = "g:$firstMember"
 
-/// Folds coalesced rows into what a detail level shows. Port of
-/// `ChatTranscriptFold.fold`. Detailed is the identity. An open group is
-/// its header followed by its steps as `GroupStep` rows, never one tall row.
 fun foldTranscript(
     items: List<ChatDisplayItem>,
     detail: ChatDetail,
@@ -136,9 +99,6 @@ fun foldTranscript(
     return withTurnChanges(folded, items, running)
 }
 
-/// A turn's edits, one row per file, after the turn has finished. Read from
-/// the raw rows, since a closed group hides its edits from the folded list.
-/// User rows are never folded, so the n-th one starts the same turn in both.
 fun withTurnChanges(
     folded: List<ChatDisplayItem>,
     raw: List<ChatDisplayItem>,
@@ -234,8 +194,6 @@ private fun foldCompact(
     return out
 }
 
-/// The group header standing for `id`, when `id` is one of a closed group's
-/// steps. Null when the row is drawn as itself or is not here.
 fun stepGroupOwner(id: String, folded: List<ChatDisplayItem>): String? =
     folded.firstOrNull { it is ChatDisplayItem.Group && !it.group.open && id in it.group.memberIds }?.id
 
@@ -261,8 +219,6 @@ private fun foldStandard(
             item is ChatDisplayItem.Tool && !item.state.failed && isExploration(item.state.verb) -> run.add(item)
             item is ChatDisplayItem.Thinking -> {
                 flushRun(trailing = false)
-                // Reasoning still arriving stays open. It folds once
-                // anything comes after it.
                 if (running && index == items.lastIndex) {
                     out.add(item)
                 } else {
@@ -287,8 +243,6 @@ private fun foldMinimal(
     isOpen: (String) -> Boolean,
 ): List<ChatDisplayItem> {
     val out = ArrayList<ChatDisplayItem>()
-    // A turn runs from one question to the next. Rows before the first
-    // question (a window that opens mid-turn) are a turn of their own.
     val starts = items.indices.filter { (items[it] as? ChatDisplayItem.User)?.isSteer == false }.toMutableList()
     if (starts.firstOrNull() != 0) starts.add(0, 0)
     starts.forEachIndexed { n, start ->
@@ -334,8 +288,6 @@ private fun foldMinimalTurn(
                 cost += item.costUsd ?: 0.0
                 usage.add(item)
             }
-            // A failed step folds with the rest. The work line counts it, so
-            // it is marked without taking a card of its own.
             item is ChatDisplayItem.Thinking || item is ChatDisplayItem.Tool || item is ChatDisplayItem.Edit -> members.add(item)
             else -> {
                 flush(trailing = false)
@@ -345,8 +297,6 @@ private fun foldMinimalTurn(
     }
     flush(trailing = true)
 
-    // The spend rides on the turn's last work line. A turn with no work to
-    // fold, or without a complete positive cost, keeps one token total.
     val header = out.getOrNull(lastHeader) as? ChatDisplayItem.Group
     val knownCost = cost.isFinite() && usage.all { row -> row.costUsd?.let { it.isFinite() && it >= 0 } == true }
     if (lastHeader >= 0 && header != null && knownCost && cost > 0) {
@@ -371,8 +321,6 @@ private fun emitGroup(
     val open = isOpen(id)
     out.add(ChatDisplayItem.Group(id, group.copy(open = open)))
     if (!open) return
-    // A Compact line already names its step, so a lone step drops its card
-    // and shows what it produced. A run keeps a plain line per step.
     val plain = when {
         !group.plain || group.style == ChatStepGroup.Style.Thought -> null
         members.size == 1 -> PlainStep.Detail
@@ -465,7 +413,6 @@ private fun makeGroup(style: ChatStepGroup.Style, members: List<ChatDisplayItem>
     )
 }
 
-/// The first line that says something, without its markdown marks.
 fun thoughtPreview(text: String): String? {
     val marks = "#*_>`- "
     for (line in text.split("\n")) {

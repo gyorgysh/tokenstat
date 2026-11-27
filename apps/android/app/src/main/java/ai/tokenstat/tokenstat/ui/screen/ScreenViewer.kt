@@ -96,11 +96,6 @@ import androidx.lifecycle.viewModelScope
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/// Legend screen viewer, the Android twin of `ScreenViewerView.swift`.
-///
-/// The session lives in `ScreenViewerModel`; this draws it. H.264 is decoded
-/// on this device, mouse and keyboard travel back as an ordered side channel,
-/// and the relay and account service see encrypted bytes either way.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScreenViewerScreen(
@@ -118,32 +113,19 @@ fun ScreenViewerScreen(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val clipboard = remember(context) { AndroidScreenClipboard(context) }
-    // The viewer close outlives this screen: the composition scope is being
-    // cancelled when `release` runs from `onDispose`.
     val session = remember { ScreenViewerModel(model, scope, clipboard, model.viewModelScope) }
 
     var zoom by remember { mutableFloatStateOf(1f) }
-    /// Local displacement of a magnified picture while merely viewing it.
-    /// Control mode follows the remote pointer instead and keeps this at zero.
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
-    /// Slow the pointer right down, for a target a few pixels across.
     var fine by remember { mutableStateOf(false) }
-    /// The left button is held, so the next drag drags. A toggle rather than
-    /// only a long press, because a long press cannot be held while the other
-    /// hand does anything and is not visible anywhere on screen.
     var dragLatched by remember { mutableStateOf(false) }
     var heldModifiers by remember { mutableStateOf(0L) }
     var pointerMode by remember { mutableStateOf(ScreenPointerMode.Trackpad) }
     var muted by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(Menu.None) }
-    /// The chrome is hidden and the picture has the whole display.
     var immersive by remember { mutableStateOf(false) }
-    /// Whether the last rotation into landscape has been acted on, so leaving
-    /// immersive mode by hand is not undone on the next redraw.
     var appliedLandscape by remember { mutableStateOf(false) }
-    /// The key row has been pulled up over a picture that otherwise has the
-    /// whole display.
     var keysRevealed by remember { mutableStateOf(false) }
     var touchView by remember { mutableStateOf<ScreenTouchView?>(null) }
     var keyboardWanted by remember { mutableStateOf(false) }
@@ -152,9 +134,6 @@ fun ScreenViewerScreen(
 
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val controlling = session.isControlling
-    // The key row has a place of its own in portrait with the chrome up. Full
-    // screen and landscape take that place away, and there it appears only
-    // because somebody pulled the handle on the bottom edge.
     val keyBarIsFurniture = !landscape && !immersive
     val showsKeyBar = controlling && (keyBarIsFurniture || keysRevealed)
 
@@ -183,22 +162,15 @@ fun ScreenViewerScreen(
         }
     }
 
-    // Back leaves full screen first, then the viewer. Closing the whole
-    // session because somebody wanted the chrome back is a long way to fall.
     BackHandler {
         if (immersive) immersive = false else onClose()
     }
 
-    // Keyed on the tier too: it can load after the viewer opens, and a
-    // Legend user with a slow account fetch must not sit behind a paywall
-    // until they press Try again.
     ForegroundEffect(peer, tier) {
         session.start(peer, hostLabel, tier, control = false)
         try { awaitCancellation() } finally { session.stop() }
     }
 
-    // Rotating a phone onto its side is asking for the picture, so going
-    // sideways hides the chrome once. Turning it back shows it again.
     LaunchedEffect(landscape) {
         keysRevealed = false
         if (landscape) {
@@ -212,8 +184,6 @@ fun ScreenViewerScreen(
         }
     }
 
-    // Handing control back leaves nothing on the key row worth showing, and
-    // would leave the far end holding a click nothing here can release.
     LaunchedEffect(controlling) {
         if (!controlling) {
             keysRevealed = false
@@ -246,10 +216,6 @@ fun ScreenViewerScreen(
         ScreenInputActions(
             move = { x, y -> session.move(x, y) },
             nudge = { dx, dy, width, height ->
-                // Divided by the zoom, so magnifying the picture magnifies the
-                // precision with it: at 4x a finger crosses a quarter as much
-                // of the remote screen, which is the whole reason to zoom in
-                // on a control too small to hit. Fine takes another third off.
                 val sensitivity = 1.6f / zoom.coerceAtLeast(1f) * (if (fine) 0.35f else 1f)
                 session.nudge(dx, dy, width, height, sensitivity)
             },
@@ -278,9 +244,6 @@ fun ScreenViewerScreen(
                 }
             },
             modifiersSpent = { heldModifiers = 0 },
-            // A tap on the picture brings the chrome back, but only while
-            // merely watching. In control mode a tap is a click on somebody's
-            // desktop, so full screen there has the corner button instead.
             tapWhileWatching = { immersive = false },
         )
     }
@@ -376,9 +339,6 @@ fun ScreenViewerScreen(
             Modifier.weight(1f).fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
-            // Fit, not fill. Matching the height first on a phone holding a
-            // 16:10 desktop made the picture taller than the box and cut the
-            // right-hand third of somebody's screen off.
             val roomy = maxWidth / maxHeight > session.aspectRatio
             Box(
                 (if (roomy) Modifier.fillMaxHeight() else Modifier.fillMaxWidth())
@@ -390,10 +350,6 @@ fun ScreenViewerScreen(
                     .graphicsLayer {
                         scaleX = zoom
                         scaleY = zoom
-                        // Following the pointer means control mode never needs
-                        // a pan gesture: moving the pointer to an edge brings
-                        // that edge into view. View mode grows from the centre
-                        // and uses the local pan instead.
                         transformOrigin = if (controlling) {
                             TransformOrigin(session.cursorX, session.cursorY)
                         } else {
@@ -418,9 +374,6 @@ fun ScreenViewerScreen(
                         if (touchView === view) touchView = null
                     },
                 )
-                // Trackpad mode hides the finger from the pointer, so the
-                // pointer has to be visible. Direct mode does not need it: the
-                // finger is the pointer.
                 if (controlling && pointerMode == ScreenPointerMode.Trackpad) {
                     Box(
                         Modifier
@@ -446,9 +399,6 @@ fun ScreenViewerScreen(
                     onRetry = { session.start(peer, hostLabel, tier, controlling) },
                 )
             }
-            // The way out that works in either mode. Hiding the chrome hides
-            // the button that hid it, and in control mode a tap on the picture
-            // is a click on somebody's desktop.
             if (immersive) {
                 TsSecondaryButton(
                     label = L10n.text("android.screenviewer.exit_full_screen.897e0cf7"),
@@ -458,10 +408,6 @@ fun ScreenViewerScreen(
                     modifier = Modifier.align(Alignment.TopEnd).padding(Space.m),
                 )
             }
-            // Said once, not twice. The key row's first button already reads
-            // "Release" while the button is down, so this belongs to the
-            // shapes that have no key row, which are exactly the ones where a
-            // held button would otherwise be invisible.
             if (dragLatched && !showsKeyBar) {
                 Row(
                     Modifier
@@ -509,11 +455,6 @@ fun ScreenViewerScreen(
                 }
             }
         }
-        // Full screen and landscape are the shapes somebody chose for the
-        // picture, so the key row does not take a strip of either by default.
-        // It is still what control mode reaches for most, so it is one pull
-        // away. Below the navigation bar either way: a keycap under the
-        // gesture handle is a keycap nobody can press.
         if (controlling) {
             Column(Modifier.navigationBarsPadding()) {
                 if (!keyBarIsFurniture) {
@@ -545,16 +486,8 @@ fun ScreenViewerScreen(
 
 private const val MAX_ZOOM = 8f
 
-/// The picture, on a texture this device owns.
-///
-/// A `TextureView` rather than a `SurfaceView` because the picture is pinched,
-/// panned and drawn under an overlay. A surface layer punches its own hole
-/// through the window and ignores both.
 @Composable
 private fun ScreenVideoSurface(decoder: ScreenDecoder, modifier: Modifier) {
-    // The surface the decoder draws into, owned here. Dropping the reference
-    // without releasing it leaks the surface and its buffers on every
-    // rotation, so each one is released before it is replaced or forgotten.
     val output = remember { SurfaceHolder() }
     AndroidView(
         modifier = modifier,
@@ -601,20 +534,12 @@ private class SurfaceHolder {
     var surface: Surface? = null
 }
 
-/// The grab handle that pulls the key row up over a full-screen picture.
-///
-/// Deliberately quiet and deliberately small. A tap on the picture cannot do
-/// this job: in control mode a tap is a click on somebody's desktop. So the
-/// handle is its own surface on the bottom edge, out of the picture's way, and
-/// it answers to a tap or a drag the way a sheet's grabber does.
 @Composable
 private fun ScreenKeyBarHandle(revealed: Boolean, onRevealed: (Boolean) -> Unit) {
     val colors = LocalTsColors.current
     Box(
         Modifier
             .fillMaxWidth()
-            // The handle is 4 points tall and a thumb is not. The padding is
-            // the target, so the strip that answers is a proper 44.
             .height(44.dp)
             .background(Color.Black)
             .clickable { onRevealed(!revealed) }
@@ -858,9 +783,6 @@ private fun currentDisplayName(session: ScreenViewerModel): String =
         ?: session.displays.firstOrNull()?.name
         ?: L10n.text("android.screenviewer.main.eb814be3")
 
-/// This device's clipboard, kept in step with the far end while controlling
-/// it. The contents are read only when the description says they changed, so
-/// a session that copies nothing never trips the system's paste notice.
 private class AndroidScreenClipboard(context: Context) : ScreenClipboard {
     private val manager =
         context.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

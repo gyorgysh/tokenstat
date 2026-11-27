@@ -8,15 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Getting a repository onto a machine that has none.
-///
-/// A folder has to exist before it can be registered, and on a fresh server
-/// nothing does. The clone runs in a real terminal rather than behind a
-/// spinner: one that asks for a passphrase or an unknown host key can be
-/// answered, and one that hangs looks like a terminal that stopped moving.
-///
-/// Nothing is ever removed, including a clone that failed halfway. It is
-/// somebody's disk.
 struct ClientCloneRepository: View {
     let peer: String
     let hostName: String
@@ -203,7 +194,6 @@ struct ClientCloneRepository: View {
         }
     }
 
-    /// Start at the machine's own home, so the common case needs no picking.
     private func defaultParent() async {
         guard parent == nil else { return }
         let scope = WorkSessionContext.shared.scope
@@ -236,10 +226,6 @@ struct ClientCloneRepository: View {
         }
     }
 
-    /// The machine registers the folder itself when git exits, so this asks it
-    /// what happened rather than deciding from what scrolled past. The poll is
-    /// tied to the view's lifetime and surfaces a timeout instead of sitting
-    /// on "Cloning…" forever.
     private func watch() async {
         guard let id = session?.hostID else { return }
         error = nil
@@ -259,8 +245,6 @@ struct ClientCloneRepository: View {
     }
 }
 
-/// The picker, in the shape the clone screen needs: a folder to land in
-/// rather than a folder to register.
 private struct ClientFolderPickerForClone: View {
     let peer: String
     let hostName: String

@@ -6,19 +6,9 @@
 
 import SwiftUI
 
-// MARK: - Shared empty-state chrome
 
-/// Centred icon + title + subtitle used by all three inspector tabs.
-///
-/// The whole thing is one centred group on purpose, including the optional
-/// call to action. A caller that stacked its own button under this view got a
-/// button pinned to the floor of the pane, because this view claims the height
-/// it is centred in, and a caller that reached for `fixedSize` to stop that got
-/// an infinite ideal height and a pane taller than the window. Hand the button
-/// in instead and it lands where the sentence it belongs to is.
 struct InspectorEmptyState<Action: View>: View {
     var systemImage: String = "circle"
-    /// Product mark. Preferred over `systemImage` so the pane matches cards.
     var mark: String? = nil
     let title: String
     let subtitle: String
@@ -73,22 +63,12 @@ extension InspectorEmptyState where Action == EmptyView {
     }
 }
 
-/// The right pane for a workspace: what changed, and what has already landed.
-///
-/// Two tabs rather than one long scroll, because they answer different
-/// questions. Changes is "what have I done since the last commit", history is
-/// "what is already in". Stacking them would bury whichever one you wanted.
 struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
     #if os(macOS)
     @Bindable var automations: AutomationsModel
     #endif
-    /// The signed-in account. History uses its picture for commits this
-    /// repository counts as yours, and the forge's public pictures for
-    /// everyone else. Nil signs in nobody, so those rows stay monograms.
     var account: Account?
-    /// Dismisses the pane. Owned by the root view, which is the only place the
-    /// inspector's presence is decided.
     var onClose: () -> Void
     var chat: ChatModel? = nil
     var workspace: WorkspaceFolder? = nil
@@ -103,12 +83,6 @@ struct WorkspaceInspector: View {
     #endif
     var onReviewCommit: ((String) -> Void)? = nil
 
-    /// The chosen tab lives in the model, not in `@State` here.
-    ///
-    /// This view is rebuilt whenever the folder list refreshes, which the file
-    /// watcher does every time anything in a workspace changes. With the
-    /// selection in view state it was reset on the next build, so the tabs
-    /// simply did not switch while a build was running in one of the folders.
     private var tab: Binding<InspectorTab> {
         Binding(get: { model.inspectorTab }, set: {
             model.inspectorTab = $0
@@ -117,8 +91,6 @@ struct WorkspaceInspector: View {
     }
 
     private var folder: WorkspaceFolder? { chat == nil ? model.selected : workspace }
-    /// One selection seat shared by the tabs, so choosing a tab slides the
-    /// seat across instead of one tab losing its fill and another gaining it.
     @Namespace private var tabSeat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -156,10 +128,6 @@ struct WorkspaceInspector: View {
                 .padding(.vertical, Theme.Space.s)
                 ThemeRule()
             }
-            // Give every tab the same measured rectangle.  Using an unbounded
-            // max-height here lets a tab's internal VStack negotiate a
-            // different height, which makes the inspector appear to jump when
-            // switching between an empty state and a list.
             GeometryReader { proxy in
                 content
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -207,9 +175,6 @@ struct WorkspaceInspector: View {
             }
         } else {
             #if os(macOS)
-            // A tab stays once it has been opened. Each one is a list of rows
-            // that costs a tenth of a second or more to build, and it used to
-            // be built again on every switch.
             ZStack {
                 ForEach(InspectorTab.allCases) { item in
                     let shown = tab.wrappedValue == item
@@ -220,8 +185,6 @@ struct WorkspaceInspector: View {
                             .allowsHitTesting(shown)
                             .accessibilityHidden(!shown)
                     } else if shown {
-                        // The click answers on the next frame, with the shape
-                        // of what is coming, and the rows are built behind it.
                         PanelListSkeleton(rows: 16, twoLine: item == .history)
                             .task {
                                 try? await Task.sleep(for: .milliseconds(24))
@@ -241,8 +204,6 @@ struct WorkspaceInspector: View {
     }
 
     #if os(macOS)
-    /// Another folder starts over: its lists would otherwise be built for
-    /// tabs nobody has opened there.
     private struct Mounted: Equatable {
         var folder: String?
         var tabs: Set<InspectorTab> = []
@@ -274,16 +235,11 @@ struct WorkspaceInspector: View {
     }
 }
 
-/// The commits already in, newest first.
 struct WorkspaceHistoryView: View {
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
-    /// For the picture beside a commit of your own. Optional so the view can
-    /// still be built without an account in front of it.
     var account: Account?
     var onReviewCommit: ((String) -> Void)? = nil
-    /// Forge pictures for the authors of the list on screen. Empty until the
-    /// lookup returns, and empty for good when there is nothing to show.
     @State private var pictures = HistoryAvatarIndex.empty
     @State private var picturesKey: HistoryAvatarCache.Key?
 
@@ -291,8 +247,6 @@ struct WorkspaceHistoryView: View {
         historyBody
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.background)
-            // Keyed on the folder, so switching workspaces reads the right history
-            // instead of leaving the previous one on screen.
             .task(id: folder?.id) {
                 guard let id = folder?.id else { return }
                 await model.loadHistory(for: id)
@@ -312,9 +266,6 @@ struct WorkspaceHistoryView: View {
             }
     }
 
-    /// The newest pushed commit is where the forge page starts. Unpushed
-    /// commits share their author's picture by email. An empty id asks the
-    /// forge for the default branch instead.
     private var pictureRequest: HistoryPictureRequest {
         let id = folder?.id ?? ""
         let commits = model.history[id] ?? []
@@ -359,10 +310,6 @@ struct WorkspaceHistoryView: View {
                             ForEach(commits) { commit in
                                 CommitRow(
                                     commit: commit,
-                                    // Yours uses the account picture. Everyone
-                                    // else uses the public picture the forge
-                                    // already has for that author. A miss
-                                    // draws initials.
                                     avatar: displayedPictures.url(
                                         commitID: commit.id,
                                         email: commit.email,
@@ -402,16 +349,12 @@ struct WorkspaceHistoryView: View {
 
 private struct CommitRow: View {
     let commit: Commit
-    /// Account picture for a commit of yours, or the author's public forge
-    /// picture. Nil draws the author's monogram.
     let avatar: String?
     let isOpen: Bool
     let action: () -> Void
 
     @State private var isHovering = false
 
-    /// Identity to colour the monogram by. The address is the stable one: two
-    /// people can share a display name, and one person can change theirs.
     private var identity: String {
         commit.email ?? commit.author
     }
@@ -430,9 +373,6 @@ private struct CommitRow: View {
 
     private var content: some View {
         HStack(alignment: .top, spacing: Theme.Space.s) {
-            // Beside the subject rather than beside the name: at the top of the
-            // row it lines up down the list whether a subject wraps to two
-            // lines or not, which is what makes the column readable.
             Avatar(
                 url: avatar,
                 handle: commit.author,
@@ -440,9 +380,6 @@ private struct CommitRow: View {
                 tint: Avatar.tint(for: identity)
             )
             .padding(.top, 1)
-            // The row's own help would hide a tooltip on the mark. A dwell
-            // popover is the card, and it is attached here so only the
-            // picture opens it.
             .authorHoverCard(
                 url: avatar,
                 name: commit.author,
@@ -465,10 +402,6 @@ private struct CommitRow: View {
                     Text("·")
                         .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
-                    // One shared tick rather than a live time source per row.
-                    // A commit list is the worst case for the latter: every
-                    // row installs one, and each one dirties the view graph on
-                    // every frame. See `RelativeClock`.
                     RelativeTimeText(date: commit.date)
                         .font(Theme.font(11))
                         .foregroundStyle(.tertiary)

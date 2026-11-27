@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Share a project this computer already has. A Team repository is what the
-/// team sees, and the first share of a project names one after its folder, so
-/// nobody has to create an empty repository first and attach a folder later.
 struct TeamProjectShareEditor: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -17,11 +14,9 @@ struct TeamProjectShareEditor: View {
     @State private var workspacesNext: Int?
     @State private var deviceName = ""
     @State private var workspaceId: String?
-    /// `nil` shares as a new repository named `newName`.
     @State private var repositoryId: String?
     @State private var newName = ""
     @State private var nameEdited = false
-    /// Created on an earlier attempt that then failed to share.
     @State private var created: TeamRepository?
     @State private var confirmed = false
     @State private var loading = false
@@ -268,8 +263,6 @@ struct TeamProjectShareEditor: View {
                     try await shareDurably(workspaceId: workspaceId, organizationId: organizationId)
                     return
                 }
-                // A new repository exists from here on. If sharing then fails,
-                // it stays listed and the project can be shared into it again.
                 let repository: TeamRepository
                 if let repositoryId, let existing = shareable.first(where: { $0.id == repositoryId }) {
                     repository = existing

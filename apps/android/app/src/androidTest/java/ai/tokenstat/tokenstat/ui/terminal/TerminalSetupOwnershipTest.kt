@@ -9,7 +9,6 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Hold setup replies while the production page owner is replaced or released. */
 @RunWith(AndroidJUnit4::class)
 class TerminalSetupOwnershipTest {
     private fun pages(check: suspend (TerminalBridge, WebView, WebView) -> Unit) {

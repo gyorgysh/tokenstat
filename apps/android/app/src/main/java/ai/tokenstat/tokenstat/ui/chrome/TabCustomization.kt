@@ -59,15 +59,9 @@ import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// One tab the bar can show, in the editor's vocabulary. Ids mirror the iOS
-/// `ClientTab` raw values (`machines`, not `devices`) so the two stores stay
-/// comparable even though neither device reads the other's.
 data class TabDef(val id: String, val label: String, val detail: String, val icon: ImageVector)
 
-/// The two things the tab store persists, behind an interface so the policy
-/// has unit tests that run without Android preferences.
 interface TabPrefs {
-    /// Stored order, or null when this device never arranged its tabs.
     fun loadOrder(): List<String>?
     fun loadHidden(): Set<String>
     fun save(order: List<String>, hidden: Set<String>)
@@ -79,8 +73,6 @@ class SharedPrefsTabs(context: Context) : TabPrefs {
     override fun loadOrder(): List<String>? {
         if (!prefs.contains(OrderKey)) return null
         return prefs.getStringSet(OrderKey, emptySet()).orEmpty().toList()
-            // A set does not keep order, so each slot is stored with its
-            // zero-padded index; see save.
             .sorted()
             .mapNotNull { it.substringAfter(":", "").takeIf { slot -> slot.isNotEmpty() } }
             .takeIf { it.isNotEmpty() }
@@ -101,11 +93,6 @@ class SharedPrefsTabs(context: Context) : TabPrefs {
     }
 }
 
-/// Which tabs this device shows, and in what order. A port of iOS
-/// `ClientTabCustomization`: device furniture, like the layout preference,
-/// that never follows the account. The phone bar stays the familiar four
-/// unless somebody turns SSH on, while a tablet shows it from the start;
-/// hiding is refused while one tab is left standing.
 class TabCustomization(
     private val prefs: TabPrefs,
     allTabs: List<String>,
@@ -116,7 +103,6 @@ class TabCustomization(
     var hidden by mutableStateOf(resolveHidden(prefs.loadOrder() == null, prefs.loadHidden(), order, defaultHidden))
         private set
 
-    /// What the bar, the rail and the shortcuts all draw. Never empty.
     val visibleTabs: List<String>
         get() {
             val shown = order.filter { !hidden.contains(it) }
@@ -126,15 +112,9 @@ class TabCustomization(
     private val allTabs: List<String> = allTabs
     private val defaultHidden: Set<String> = defaultHidden
 
-    /// A direct action may open a destination whose shortcut is hidden. Keep
-    /// that destination in the bar while selected, without changing this
-    /// device's preferences.
     fun displayed(selected: String): List<String> =
         TabVisibility.displayed(order, visibleTabs, selected)
 
-    /// Show or hide one tab. Hiding the last visible tab is refused, because
-    /// the selection would point at nothing and the bar would go blank.
-    /// Returns whether the change stuck, so the editor can say why not.
     fun setVisible(visible: Boolean, tab: String): Boolean {
         if (!visible && !hidden.contains(tab) && order.count { !hidden.contains(it) } <= 1) return false
         hidden = if (visible) hidden - tab else hidden + tab
@@ -160,8 +140,6 @@ class TabCustomization(
     private fun save() = prefs.save(order, hidden)
 
     companion object {
-        /// Tabs added by later builds join at the end rather than jumping
-        /// the order somebody already arranged.
         fun resolveOrder(stored: List<String>?, allTabs: List<String>): List<String> {
             val known = (stored ?: emptyList()).filter { allTabs.contains(it) }.distinct()
             return known + allTabs.filter { !known.contains(it) }
@@ -179,7 +157,6 @@ class TabCustomization(
     }
 }
 
-/// Pure selection policy shared by the tab renderer and its regression suite.
 object TabVisibility {
     fun <T> displayed(order: List<T>, visible: List<T>, selected: T): List<T> {
         if (visible.contains(selected)) return visible
@@ -187,7 +164,6 @@ object TabVisibility {
     }
 }
 
-/// One line in the account sheet, saying which tabs this device shows.
 fun tabSummary(visibleLabels: List<String>): String = when (visibleLabels.size) {
     0 -> L10n.text("common.home")
     in 1..3 -> visibleLabels.joinToString(", ")
@@ -197,8 +173,6 @@ fun tabSummary(visibleLabels: List<String>): String = when (visibleLabels.size) 
     }
 }
 
-/// This device's tab bar and rail, arranged by the person holding it. A card
-/// in the account sheet's This device pane, opening the editor.
 @Composable
 fun TabsCard(summary: String, onOpen: () -> Unit) {
     val colors = LocalTsColors.current
@@ -216,9 +190,6 @@ fun TabsCard(summary: String, onOpen: () -> Unit) {
     }
 }
 
-/// Arrange this device's tabs: order them, switch the unused off, turn SSH
-/// on. Reordering is drag handles, always on: an Edit button would be a
-/// second step before the only thing this screen is for.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismiss: () -> Unit) {
@@ -227,13 +198,6 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
     val listState = rememberLazyListState()
     var dragging by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    // While a row is on the finger the list holds still, like iOS edit
-    // mode: the handle owns the gesture, so no long-press is needed to
-    // tell a drag from a scroll.
-    // Keyed on the drag, not remembered once: the gate must read the row
-    // on the finger now, not the one from first composition. Belt and
-    // braces behind the handle's claimed touch; it also stills a fling
-    // that was already running when the finger landed.
     val dragScrollGate = remember(dragging) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
@@ -261,19 +225,12 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
                 TextButton(onClick = onDismiss) { Text(L10n.text("common.done")) }
             }
             Text(L10n.text("android.tabcustomization.drag_to_reorder_uncheck_what_you_never_ope.ce93af9a"), style = TsType.body, color = colors.textSecondary)
-            // One detector for the whole list, in the column's own frame,
-            // which never translates. Tracking the finger inside the dragged
-            // row instead measures it in that row's moving frame, where it
-            // reads as standing still.
             var columnWidthPx by remember { mutableIntStateOf(0) }
             val density = LocalDensity.current
             val handleZonePx = remember(density) { with(density) { 64.dp.toPx() } }
             fun dragBy(dy: Float) {
                 val id = dragging ?: return
                 dragOffset += dy
-                // Live swap: the row under the finger trades places, and the
-                // offset rebaselines so the next crossing measures from the
-                // new slot.
                 val info = listState.layoutInfo.visibleItemsInfo
                 val current = info.find { it.key == id } ?: return
                 val middle = current.offset + dragOffset + current.size / 2
@@ -299,10 +256,6 @@ fun TabEditorSheet(tabs: List<TabDef>, customization: TabCustomization, onDismis
                             val slop = viewConfiguration.touchSlop
                             while (true) {
                                 val down = awaitFirstDown(pass = PointerEventPass.Initial)
-                                // Off the handle strip the gesture is the
-                                // list's: it scrolls, the sheet drags, rows
-                                // toggle. On a handle the reorder claims it
-                                // before any of them can start.
                                 val hit = listState.layoutInfo.visibleItemsInfo
                                     .find { down.position.y >= it.offset && down.position.y <= it.offset + it.size }
                                 val grabbed: String? = if (down.position.x < columnWidthPx - handleZonePx) {

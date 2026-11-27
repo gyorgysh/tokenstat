@@ -16,10 +16,6 @@ using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Account is three jobs, not one scrolling pile: who you are, vendor quota
-/// windows, and what this PC itself does. Mirrors the Mac AccountView panes.
-/// </summary>
 internal sealed class AccountPage : Page, IToolbarItems
 {
     private readonly ContentControl _tabSlot = new()
@@ -81,12 +77,8 @@ internal sealed class AccountPage : Page, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
-    /// <summary>
-    /// Sync now, offered only while signed in, like the desktop Mac bar.
-    /// </summary>
     public IList<UIElement> ToolbarActions()
     {
         var trailing = new List<UIElement>();
@@ -169,8 +161,6 @@ internal sealed class AccountPage : Page, IToolbarItems
     private async Task RenderPaneAsync()
     {
         _content.Children.Clear();
-        // Each render owns its panel. A slower previous tab can finish
-        // loading without appending its cards into the newly selected tab.
         var content = new StackPanel { Spacing = Theme.SpaceL };
         _content.Children.Add(content);
         var skeleton = Motion.SkeletonCard();
@@ -219,8 +209,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         else
         {
             content.Children.Add(IdentityCard(account));
-            // The address, the handle, who can open the page and whether
-            // search engines may list it, as on the Mac and the phones.
             var profileButton = Buttons.Secondary(L10n.Text("common.profile.title"), ActionIcon.Profile,
                 async (_, _) => await ProfileDialog.ShowAsync(this, account, LoadAsync));
             profileButton.HorizontalAlignment = HorizontalAlignment.Left;
@@ -322,10 +310,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         var tier = Format.Text(account, "tier", "");
         var host = Format.Text(account, "host");
-        // Same shape as the Mac identity row: the picture, then the name with
-        // its tier mark, the handle and the server, and the profile link at
-        // the trailing edge. A plain panel, not a titled card: the picture
-        // and the name are the heading.
         var row = new Grid { ColumnSpacing = Theme.SpaceM };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -335,10 +319,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         row.Children.Add(avatar);
 
         var who = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-        // A left-aligned grid, not a horizontal stack: a stack measures the
-        // name at any width it likes, so a long one would clip instead of
-        // ending in an ellipsis. The star column hugs a short name and gives
-        // way to the tier mark beside a long one.
         var nameRow = new Grid { ColumnSpacing = Theme.SpaceS, HorizontalAlignment = HorizontalAlignment.Left };
         nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -376,8 +356,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         if (!string.IsNullOrEmpty(handle) && !string.IsNullOrEmpty(host)
             && Uri.TryCreate(host.TrimEnd('/') + "/" + Uri.EscapeDataString(handle), UriKind.Absolute, out var profile))
         {
-            // The profile is a public page and this is the only place in the
-            // app that knows its address.
             var url = profile.AbsoluteUri;
             var label = L10n.Text("windows.accountpage.view_profile.d4788f25");
             var link = new HyperlinkButton
@@ -433,7 +411,7 @@ internal sealed class AccountPage : Page, IToolbarItems
         body.Children.Add(ActionIconGlyph.Button(L10n.Text("common.sign_out"), ActionIcon.SignOut, async (_, _) =>
         {
             try { await AppServices.Host.CallAsync("account.logout"); AppServices.NotifyAccountChanged(); }
-            catch { /* stay on the page */ }
+            catch { }
             await LoadAsync();
         }));
         return Chrome.Card(L10n.Text("windows.accountpage.sync.8d261a37"), body, L10n.Text("windows.accountpage.only_aggregate_counters_are_eligible.141802f7"));
@@ -457,11 +435,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Every device that has synced to this account. The one you are sitting
-    /// at is marked, or the list is a set of opaque ids and the only machine
-    /// anyone can act on is the one they cannot pick out.
-    /// </summary>
     private static UIElement DevicesCard(JsonNode account)
     {
         var machines = account["machines"] as JsonArray;
@@ -590,9 +563,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         else if (!string.IsNullOrEmpty(id))
         {
-            // A machine the user has never named shows its id. The id is a
-            // public machine key, so it is shown plain and selectable rather
-            // than blurred.
             head.Children.Add(new TextBlock
             {
                 Text = id,
@@ -664,13 +634,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         return row;
     }
 
-    /// <summary>
-    /// Opt-in posting of vendor quota windows, one switch per reading we have.
-    /// The master switch is still the privacy gate, off by default: percentages
-    /// and reset times only, never a credential. Each row is a source the user
-    /// can leave on this PC, for an expired subscription or a tool they do not
-    /// want on the phone.
-    /// </summary>
     private async Task<UIElement> PlanLimitsCardAsync()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -754,10 +717,6 @@ internal sealed class AccountPage : Page, IToolbarItems
             L10n.Text("windows.accountpage.how_much_of_each_tool_s_subscription_is_le.72953050"));
     }
 
-    /// <summary>
-    /// Claude Code hands its limits to the host after every reply once this is
-    /// on. Off by default, because turning it on edits Claude Code's settings.
-    /// </summary>
     private async Task<UIElement> ClaudeLiveFeedAsync()
     {
         var panel = new StackPanel { Spacing = 4 };
@@ -887,7 +846,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         catch
         {
-            // A missing flag is not stale.
         }
         return parts.Count == 0 ? L10n.Text("windows.accountpage.no_windows_reported.6e652c80") : string.Join(" · ", parts);
     }
@@ -994,11 +952,6 @@ internal sealed class AccountPage : Page, IToolbarItems
             L10n.Text("windows.accountpage.whether_the_host_helper_stays_up_after_you.dd1619f2"));
     }
 
-    /// <summary>
-    /// Local model servers on this PC, found over loopback by the host. A
-    /// missing provider is a normal state, not an error. Per-provider switches
-    /// stay on this machine, beside other launch settings.
-    /// </summary>
     private async Task<UIElement> LocalModelsCardAsync()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1311,7 +1264,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         catch
         {
-            // A switch that cannot persist still works for this run.
         }
     }
 
@@ -1326,11 +1278,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         });
     }
 
-    /// <summary>
-    /// Where deletion happens: `{host}/settings/data#delete` on the website.
-    /// The fragment jumps to the delete section once the page loads, so the
-    /// button lands on the section instead of the top of the page.
-    /// </summary>
     private static UIElement DeleteAccountCard(JsonNode account)
     {
         var host = Format.Text(account, "host", "https://tokenstat.ai");
@@ -1691,8 +1638,6 @@ internal sealed class AccountPage : Page, IToolbarItems
 
     private async Task StartPullLoginAsync()
     {
-        // Reserve the flow before starting its request. A second click must
-        // not replace the token a previous wait owns, including during startup.
         if (_pullPoll is not null) return;
         using var cancellation = new CancellationTokenSource();
         _pullPoll = cancellation;
@@ -1771,7 +1716,6 @@ internal sealed class AccountPage : Page, IToolbarItems
                 }
                 finally
                 {
-                    // A failed or cancelled poll must end the modal wait too.
                     dialog.Hide();
                 }
             }
@@ -1797,19 +1741,12 @@ internal sealed class AccountPage : Page, IToolbarItems
             if (!confirmed)
             {
                 try { await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject()); }
-                catch { /* leaving or ending the flow must not throw */ }
+                catch { }
             }
             _pullPoll = null;
         }
     }
 
-    /// <summary>
-    /// Local run notifications, matching the Mac account card. One switch for
-    /// one feature: this computer watches its own automations and workflows
-    /// and posts a toast when one finishes or stops for a question. No
-    /// account and no network are involved, so the card shows whether or not
-    /// the host answered above.
-    /// </summary>
     private UIElement NotificationsCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1888,11 +1825,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         return Chrome.Card(L10n.Text("windows.accountpage.tokenstat.63d30539"), body, AppInfo.Company);
     }
 
-    /// <summary>
-    /// Display name for a harness, the agent CLI that produced the events.
-    /// The archive stores source ids like `claude_code`. These are shown to
-    /// people, so they get the same spelling tokenstat.ai uses.
-    /// </summary>
     internal static string HarnessName(string id)
     {
         if (id == "opencode2")
@@ -1956,7 +1888,6 @@ internal sealed class AccountPage : Page, IToolbarItems
         }
         catch
         {
-            // The user can copy the URL from the card if a browser fails.
         }
     }
 }

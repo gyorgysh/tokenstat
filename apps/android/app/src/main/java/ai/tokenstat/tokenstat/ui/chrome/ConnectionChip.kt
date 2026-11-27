@@ -40,20 +40,6 @@ import ai.tokenstat.tokenstat.ui.logic.RelativeClock
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// The one place the client says the network is unwell.
-///
-/// Hidden while everything answers, so it never becomes furniture. Present,
-/// it is a glyph in the top bar, and tapping it explains which of the three
-/// things is wrong and offers the one control that can help.
-///
-/// Glyph only, like the Apple client's compact chip. A top bar this narrow is
-/// already carrying an avatar and a title, and "Computer unreachable" landed
-/// on top of both. The sentence lives in the dialog, which is where somebody
-/// who tapped it is looking anyway.
-///
-/// It does not replace what a screen says about its own empty state. This is
-/// the global answer, the screen gives the local one, and they cannot
-/// contradict each other because both read the same `ConnectionTracker`.
 @Composable
 fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
     if (connection.ok) return
@@ -87,10 +73,6 @@ fun ConnectionChip(connection: ConnectionUi, onRetry: () -> Unit) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     Text(connection.detail, color = colors.textSecondary)
-                    // The most recent answer from either plane. "Nothing since
-                    // you opened the app" is said by leaving this out rather
-                    // than by inventing a time. One Text rather than a label
-                    // beside a time, so it wraps on a narrow screen.
                     connection.lastGoodMs?.let { at ->
                         RelativeTick.start()
                         val now by RelativeTick.now.collectAsStateWithLifecycle()

@@ -5,23 +5,13 @@
 //
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Refreshing the list-rate price book, and keeping a session's cached copy in
 //! step.
-//!
-//! Reports price against the book the session opened with, because re-reading
-//! it per frame is what the interactive CLI did before this was a cache. A
-//! long-lived daemon therefore has to reload the cached copy after a refresh,
-//! or every report keeps pricing against the empty (or yesterday's) book until
-//! the process restarts — which is exactly what a machine without the CLI saw:
-//! the daemon fetched a book it never used.
 
 use tokenstat_core::PriceTable;
 
 use crate::session::Session;
 
-/// A bundled book is a small JSON snapshot. Far past any real one, and far
-/// short of what a caller pointing this at some other file could cost.
 const MAX_SEED_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Replace a session's cached book with what is on disk.
@@ -87,12 +77,6 @@ pub fn seed(session: &mut Session, from: &std::path::Path) -> Result<Seeded, Str
     seed_into(session, from, &destination)
 }
 
-/// [`seed`], against a destination the caller names.
-///
-/// Split out for the tests. The data directory is chosen by the platform (via
-/// `$HOME` on Unix and `%APPDATA%` on Windows), so a test that repointed one
-/// environment variable isolated itself on two platforms out of three and
-/// quietly shared the developer's real price book on the third.
 fn seed_into(
     session: &mut Session,
     from: &std::path::Path,
@@ -142,10 +126,7 @@ fn seed_into(
             models: 0,
         });
     }
-    // From the file just written rather than through `reload`, so this holds
-    // for a destination that is not the platform default. The catalog is
-    // attached the same way `load_with_catalog` does it: a book without one
-    // cannot mark an unknown model as an estimate.
+
     session.prices = PriceTable::load_from(destination)
         .unwrap_or_default()
         .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()))
@@ -163,10 +144,6 @@ mod tests {
 
     use super::*;
 
-    /// The data directory follows `$HOME` on macOS (via the `directories`
-    /// crate), so the reload test points it at a temp dir. `HOME` is
-    /// process-wide, so tests that repoint it must not run at the same time;
-    /// this lock is the same convention the identity tests use.
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
     const SNAPSHOT: &str = r#"{
@@ -204,14 +181,6 @@ mod tests {
         );
     }
 
-    /// A directory of this test's own, with no environment variable involved.
-    ///
-    /// `temp_home` above is enough for `reload`, which reads the platform's
-    /// data directory and therefore has to be pointed somewhere. Seeding takes
-    /// its destination as an argument, so these tests name one directly and
-    /// need no lock and no `$HOME`. That also fixes them on Windows, where the
-    /// data directory follows `%APPDATA%` and repointing `HOME` isolated
-    /// nothing.
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-seed-{tag}-{}-{}",

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Durable continuation policy. All decisions share chat's acceptance lock.
 use super::*;
 use crate::provider_limit::Limit;
 use std::fs::File;
@@ -268,8 +267,6 @@ fn activity_file(path: &Path, append: bool) -> Result<File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
     if append {
-        // The caller holds the lifecycle lock. Windows append-only access
-        // cannot truncate an interrupted record, even with write(true).
         options.write(true).create(true);
     }
     #[cfg(unix)]
@@ -354,8 +351,7 @@ fn append_activity<'a>(
     }
     let path = directory.join("routing-activity.ndjson");
     let mut file = activity_file(&path, true)?;
-    // Retire an interrupted last append before writing another complete row.
-    // The durable state is saved only after this journal is flushed.
+
     {
         let len = file.metadata().map_err(|e| e.to_string())?.len();
         let count = len.min(4096);
@@ -740,8 +736,6 @@ impl Store {
         Ok(format!("{}:{epoch}", owner()?))
     }
     pub fn routing_cancel_all(&self) -> Result<(), String> {
-        // A single durable epoch retires every pending intent without waiting
-        // for per-chat launch locks during logout. Other helpers observe it too.
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         let temporary = self
@@ -805,8 +799,7 @@ impl Store {
             "Returned to the preferred agent at the next turn boundary after its usage reset.",
             None,
         );
-        // The next reservation advances the revision. Do not add a second
-        // revision here after validating the client's accepted context.
+
         let result = self.edit_conversation(id, |current| {
             crate::chat_sessions::remember(&safe_join(&self.root, id)?, current)?;
             preferred.apply(current);
@@ -1033,7 +1026,7 @@ impl Store {
             ));
             return self.router_save(id, &state);
         }
-        // Never switch into an agent that can only bypass the current gate.
+
         if (matches!(destination.backend.as_str(), "muse" | "sh") && chat.autonomy != "bypass")
             || crate::launcher::profile_installed(launcher_profile_id(&destination.backend))
                 == Some(false)
@@ -1058,8 +1051,7 @@ impl Store {
                 Ok(c.clone())
             })?;
         }
-        // Durable claim BEFORE spawning: after a crash, uncertain delivery is
-        // held for review instead of replayed by a second helper/scheduler.
+
         pending.created_at_ms = now_ms();
         state.forget_reset(&destination.backend);
         state.pending = Some(Pending {
@@ -1935,8 +1927,7 @@ mod retirement_tests {
                 },
             ],
         );
-        // Bypass append-time retention to exercise a durable long history.
-        // The current file and the user boundary sit behind several pages.
+
         let mut archive = OpenOptions::new()
             .append(true)
             .open(store.events_path("original"))

@@ -2,13 +2,7 @@
 //
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
-
 //! Live power, CPU and memory for a connected peer.
-//!
-//! Sampled on this machine and returned over dispatch. Allowed on the tunnel:
-//! a phone that has already dialled a host asks `host.stats` the same way it
-//! asks `workspace.list`. CPU and RAM never go to tokenstat.ai. Missing
-//! readings are omitted, never reported as zero.
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 
@@ -290,8 +284,6 @@ mod platform {
         ) -> i32;
     }
 
-    // mach_host_self returns a send right. Keep one for the sampler's lifetime
-    // instead of acquiring another right on every CPU and memory read.
     fn host_port() -> u32 {
         static PORT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
         *PORT.get_or_init(|| unsafe { mach_host_self() })
@@ -319,8 +311,6 @@ mod platform {
         })
     }
 
-    // HOST_VM_INFO64 layout (natural_t fields packed into 64-bit words is
-    // wrong). Use the documented 32-bit natural_t struct and read as u32.
     #[repr(C)]
     struct VmStatistics64 {
         free_count: u32,
@@ -350,7 +340,7 @@ mod platform {
     }
 
     const HOST_VM_INFO64: i32 = 4;
-    // HOST_VM_INFO64_COUNT: sizeof(vm_statistics64) / sizeof(integer_t)
+
     const HOST_VM_INFO64_COUNT: u32 = (std::mem::size_of::<VmStatistics64>() / 4) as u32;
 
     fn macos_memory() -> (u64, u64) {
@@ -412,16 +402,7 @@ mod platform {
         if kr != 0 {
             return (0, total);
         }
-        // What Activity Monitor calls Memory Used: app memory, wired, and
-        // whatever the compressor is holding.
-        //
-        // This used to be total minus free-and-speculative, which counts the
-        // file cache and every purgeable page as used. macOS keeps that number
-        // near the top of the bar on a machine with nothing wrong with it, so
-        // the reading said "nearly full" all day and meant nothing. Linux
-        // reads MemAvailable and Windows reads avail_phys, both of which are
-        // the honest figure, and this was the one platform disagreeing with
-        // its own Activity Monitor.
+
         let page = page as u64;
         let app = (vm.internal_page_count as u64).saturating_sub(vm.purgeable_count as u64);
         let used = app
@@ -447,8 +428,7 @@ fn parse_linux_cpu(text: &str) -> Option<CpuTicks> {
     let irq = optional()?;
     let softirq = optional()?;
     let steal = optional()?;
-    // Guest time is already included in user/nice. I/O wait is idle time,
-    // while interrupts and stolen VM time belong in the busy denominator.
+
     Some(CpuTicks {
         user,
         nice,
@@ -500,10 +480,7 @@ mod platform {
                                 || status.eq_ignore_ascii_case("full");
                         }
                     }
-                    // `online` is 1 while the adapter is actually supplying
-                    // power. A machine with the cable in but the supply off
-                    // reads 0, which is the honest answer and the one the
-                    // battery indicator wants.
+
                     "Mains" | "ADP"
                         if fs::read_to_string(path.join("online"))
                             .map(|t| t.trim() == "1")
@@ -620,7 +597,7 @@ mod platform {
         let idle_n = filetime(&idle);
         let kernel_n = filetime(&kernel);
         let user_n = filetime(&user);
-        // Kernel time includes idle.
+
         let system = kernel_n.saturating_sub(idle_n);
         Some(CpuTicks {
             user: user_n,

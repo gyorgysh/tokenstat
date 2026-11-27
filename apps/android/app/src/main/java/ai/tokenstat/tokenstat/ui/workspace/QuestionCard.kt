@@ -39,10 +39,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/// A question the agent asked, drawn where it asked it. Port of
-/// ChatQuestionCard.swift: choices answer in one tap, a multiple-choice
-/// question collects its picks first, and the field takes an answer of the
-/// person's own. Once answered it says what was sent and offers nothing more.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun QuestionCard(question: ChatQuestion, sending: Boolean, error: String?, canAnswer: Boolean = true, onAnswer: (String) -> Unit) {
@@ -115,7 +111,6 @@ internal fun QuestionCard(question: ChatQuestion, sending: Boolean, error: Strin
                     icon = ActionIcon.Send.vector,
                     small = true,
                     enabled = picked.isNotEmpty() && !sending,
-                    // Quoted, so a comma inside a choice cannot read as two.
                     onClick = { onAnswer(picked.joinToString(", ") { "“$it”" }) },
                 )
             }

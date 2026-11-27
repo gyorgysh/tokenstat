@@ -61,9 +61,6 @@ internal fun JsonObject.setupHostLabel(): String =
         ?: get("displayName")?.jsonPrimitive?.contentOrNull?.ifEmpty { null }
         ?: L10n.text("android.setupagentstep.computer.76ed42d2")
 
-/// The machines setup can work with: hosts with a connection key. A record
-/// from before the server knew client kinds carries no kind and would
-/// otherwise list this phone as a machine to set up.
 internal fun setupMachines(account: JsonObject?): List<JsonObject> =
     (account?.get("machines") as? JsonArray ?: JsonArray(emptyList()))
         .mapNotNull { it as? JsonObject }
@@ -72,15 +69,6 @@ internal fun setupMachines(account: JsonObject?): List<JsonObject> =
                 !it.setupPeer().isNullOrEmpty()
         }
 
-/// Step seven: the agent is on the machine, and now it needs its own
-/// sign-in.
-///
-/// The install and finish steps both promise this screen: "the next step
-/// installs one and signs it in". It reads `launcher.catalog` for each
-/// agent's readiness, installs what is missing, and hands a sign-in to a
-/// terminal on the machine that runs it, through `launcher.signIn`. The id
-/// is all that travels; the command lives in the host's hardcoded table, so
-/// this cannot become a way to run something.
 @Composable
 fun SetupAgentStep(
     model: AppViewModel,
@@ -125,9 +113,6 @@ fun SetupAgentStep(
 
     val signing = signInSession
     if (signing != null && peer != null) {
-        // The agent's own sign-in, in a terminal on the machine that runs
-        // it. Closing it returns here and re-reads readiness, so a
-        // completed sign-in lands as Signed in rather than as a guess.
         TerminalScreen(
             model = model,
             peer = peer,

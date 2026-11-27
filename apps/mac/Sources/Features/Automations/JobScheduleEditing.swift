@@ -23,8 +23,6 @@ enum JobScheduleCopy {
     }
 }
 
-/// Frequency fields both job editors write. Schedule values stay exact until
-/// a picker is touched, so a 90-second interval does not round to a minute.
 protocol JobScheduleEditing {
     var scheduleKind: ScheduleKind { get set }
     var intervalMinutes: String { get set }
@@ -144,7 +142,6 @@ extension JobScheduleEditing {
     }
 }
 
-/// Minutes and no-limit, shared by automations and workflows.
 protocol JobBudgetEditing {
     var budgetMinutes: String { get set }
     var noTimeLimit: Bool { get set }

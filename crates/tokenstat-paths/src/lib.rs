@@ -46,10 +46,6 @@ pub fn configure_mobile(data: impl AsRef<Path>, cache: impl AsRef<Path>) -> Resu
 }
 
 pub fn data_dir() -> Option<PathBuf> {
-    // An explicit mobile configuration wins: an API call beats ambient
-    // environment. Otherwise the override applies, then the system directory.
-    // This order matters to tests: an integration test that sandboxes itself
-    // with `configure_mobile` must not have the harness env var hijack it.
     if let Some(roots) = MOBILE_ROOTS.get() {
         return Some(roots.data.clone());
     }
@@ -59,18 +55,6 @@ pub fn data_dir() -> Option<PathBuf> {
     project_dirs().map(|dirs| dirs.data_dir().to_path_buf())
 }
 
-/// `TOKENSTAT_DATA_DIR` points the data directory somewhere else.
-///
-/// That is not a test hook bolted on: a portable install, a second account on
-/// one machine, and a developer sandbox all need the same thing, which is a
-/// data directory that is not the shared one. The test suite is one consumer:
-/// pointed at a temp directory, host tests never touch the live archive, the
-/// live socket, or anything a running app or daemon is watching, so a test
-/// run no longer reads as hundreds of real runs, chats and grants.
-///
-/// An explicit mobile configuration still wins: an API call beats ambient
-/// environment. Empty and relative values are ignored, so a stray export
-/// cannot silently redirect the archive into a checkout.
 fn data_dir_override() -> Option<PathBuf> {
     let dir = std::env::var_os("TOKENSTAT_DATA_DIR").map(PathBuf::from)?;
     if dir.as_os_str().is_empty() || dir.is_relative() {
@@ -176,8 +160,6 @@ pub fn home_dir() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
 }
 
-/// Windows names the home directory twice, and `USERPROFILE` is the one the
-/// platform itself sets.
 #[cfg(windows)]
 const HOME_KEYS: &[&str] = &["USERPROFILE", "HOME"];
 #[cfg(not(windows))]
@@ -185,14 +167,6 @@ const HOME_KEYS: &[&str] = &["HOME"];
 
 #[cfg(test)]
 mod home_tests {
-    /// The password database answers where the environment does not. That is
-    /// the whole reason the function exists, so it is worth a test that
-    /// actually removes HOME rather than one that trusts the crate below.
-    ///
-    /// It is the only test in this crate, deliberately: removing a variable
-    /// is process-wide, and a second test running beside it would read a
-    /// scrubbed environment it did not ask for. Anything added here needs its
-    /// own harness, not another `remove_var`.
     #[test]
     #[cfg(unix)]
     fn a_scrubbed_environment_still_finds_home() {

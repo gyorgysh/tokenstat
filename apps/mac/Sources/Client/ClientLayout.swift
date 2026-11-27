@@ -9,24 +9,11 @@ import GameController
 import SwiftUI
 import UIKit
 
-/// Which shape the client draws itself in.
-///
-/// An iPad in a Magic Keyboard is a laptop running the phone build: landscape,
-/// a thousand points wide, a trackpad, and a floating tab bar sized for a thumb
-/// that is nowhere near the screen. With a keyboard attached, navigation
-/// belongs down the left side, where the pointer already is.
 enum ClientLayoutMode: Equatable {
-    /// The phone's floating tab bar. Every iPhone, and an iPad held in a hand.
     case tabs
-    /// A left sidebar, the way the Mac app is laid out.
     case sidebar
 }
 
-/// What the person chose, which always beats what the app worked out.
-///
-/// Stage Manager, an external display, a keyboard used only for typing, and
-/// somebody who simply prefers the tab bar all end here, and none of them
-/// need a new heuristic.
 enum ClientLayoutPreference: String, CaseIterable, Identifiable {
     case automatic
     case sidebar
@@ -51,22 +38,9 @@ enum ClientLayoutPreference: String, CaseIterable, Identifiable {
     }
 }
 
-/// The decision itself, kept out of the view so it can be reasoned about.
-///
-/// Three inputs in order, and all three have to agree before the layout
-/// changes: a wrong guess moves the whole interface under somebody.
 enum ClientLayout {
-    /// Below this the sidebar is not a desktop, it is a squeeze. A third-width
-    /// Split View is regular horizontally on a 13 inch iPad, so size class
-    /// alone would put a sidebar into 375 points.
     static let minimumSidebarWidth: CGFloat = 820
 
-    /// Room for the wide layout: regular across and regular down.
-    ///
-    /// An iPad has it, and so does an iPhone Duo opened out. A large iPhone in
-    /// landscape is regular across but compact down, and that is still a phone
-    /// surface, so width alone is not the test. Ask the view that draws the
-    /// layout, never the device: a Duo changes between the two while open.
     static func hasRoom(
         horizontal: UserInterfaceSizeClass?,
         vertical: UserInterfaceSizeClass?
@@ -86,8 +60,6 @@ enum ClientLayout {
         case .tabs:
             return .tabs
         case .sidebar:
-            // Still not into a squeeze. The setting says "prefer", and half a
-            // Split View cannot hold a sidebar and a screen.
             return width >= minimumSidebarWidth ? .sidebar : .tabs
         case .automatic:
             guard hasDesktopInput else { return .tabs }
@@ -96,34 +68,17 @@ enum ClientLayout {
     }
 }
 
-/// Whether this iPad has a keyboard or a pointer attached right now.
-///
-/// Two sources, because neither alone is enough:
-/// - **GameController** answers for keyboards outright. `GCKeyboard.coalesced`
-///   is the state now and the two notifications are the changes, and it covers
-///   the Magic Keyboard, the Folio and any Bluetooth keyboard.
-/// - **A hover probe** answers for pointers. A trackpad is not guaranteed to
-///   publish a `GCMouse`, but a hover event cannot happen without a pointer, so
-///   one crossing proves one exists. See `PointerProbe`.
-///
-/// Attaching a Magic Keyboard fires several notifications inside a few hundred
-/// milliseconds, so what this publishes is debounced. The interface swapping
-/// twice would be worse than swapping late.
 @MainActor
 @Observable
 final class PointerKeyboardModel {
     private(set) var hasKeyboard = false
     private(set) var hasPointer = false
 
-    /// Either one is enough. A keyboard with no trackpad still wants the
-    /// sidebar, and a mouse with no keyboard is still a desk.
     var hasDesktopInput: Bool { hasKeyboard || hasPointer }
 
     private var started = false
     private var observers: [NSObjectProtocol] = []
     private var publishTask: Task<Void, Never>?
-    /// Latched by the probe. Cleared when the last mouse disconnects, which is
-    /// the only disconnect signal a trackpad reliably gives.
     private var sawHover = false
 
     func start() {
@@ -156,7 +111,6 @@ final class PointerKeyboardModel {
         started = false
     }
 
-    /// A pointer crossed the app. Only a pointer can do that.
     func noteHover() {
         guard !sawHover else { return }
         sawHover = true
@@ -181,16 +135,6 @@ final class PointerKeyboardModel {
     }
 }
 
-/// A zero-size view that reports the first pointer crossing.
-///
-/// `UIHoverGestureRecognizer` fires only where a pointer exists, so this is a
-/// yes-only answer and it never has to guess.
-///
-/// The recognizer goes on the **window**, not on this view. A view that has to
-/// be hit-tested to see a hover is a view that also swallows taps, and a view
-/// that refuses hit testing never sees the hover either. A hover recognizer on
-/// the window sees the pointer wherever it enters and consumes nothing: it is
-/// not a touch gesture, so no control below it loses an event.
 struct PointerProbe: UIViewRepresentable {
     let onHover: () -> Void
 

@@ -3,8 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-// A host listener is shared by endpoint within the captured account epoch.
-// An older account's close must never disconnect a replacement listener.
 internal static class BrowserBridges
 {
     private static readonly BrowserBridgePool Pool = new(

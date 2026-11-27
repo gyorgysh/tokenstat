@@ -17,15 +17,8 @@ import SwiftTerm
 /// tab identity when a project mixes CLI and SSH sessions in one stack.
 @MainActor
 protocol TerminalPresentable: AnyObject, Identifiable {
-    /// The emulator, if one has been made. Nil for a session that is still
-    /// connecting: the pane draws a starting state over those instead.
     var terminalViewIfLoaded: TerminalView? { get }
 
-    /// This session's view came back to the front: it flipped from hidden to
-    /// visible, or the surface holding it returned from under another
-    /// destination. Sessions with no per-visibility state ignore it; sessions
-    /// holding unconfirmed local predictions use it to settle those before
-    /// the next output.
     func terminalReturnedToFront()
 }
 

@@ -15,8 +15,6 @@ internal sealed record TeamHistoryWindow(IReadOnlyList<JsonObject> Events, bool 
         {
             bytes += Encoding.UTF8.GetByteCount(row.ToJsonString());
             if (kept.Count == rowLimit || bytes > byteLimit) break;
-            // JsonNode parents retain the rest of a response. Detach the kept
-            // rows, so the window's limit also bounds retained page data.
             kept.Add(row.DeepClone().AsObject());
         }
         return new(kept, earlier && Truncated || kept.Count < combined.Count);

@@ -38,8 +38,6 @@ internal sealed class AgentProfiles(JsonNode value)
 
     internal FrameworkElement? Picker(string selected, string? locked, bool enabled, Func<string, Task> onChoose, Func<Task>? onManaged = null)
     {
-        // Shown with only Main too: the menu is where somebody finds out that
-        // profiles exist.
         if (locked == selected)
         {
             var label = new TextBlock { Text = L10n.Text("common.profiles.locked", Title(selected)), TextWrapping = TextWrapping.Wrap };
@@ -53,7 +51,7 @@ internal sealed class AgentProfiles(JsonNode value)
             var id = Format.Text(profile, "id");
             if (locked is not null && id != locked) continue;
             var item = new MenuFlyoutItem { Text = Title(id), IsEnabled = id != selected };
-            if (id == selected) item.Icon = new FontIcon { Glyph = "\uE73E" }; // CheckMark
+            if (id == selected) item.Icon = new FontIcon { Glyph = "\uE73E" };
             AutomationProperties.SetAutomationId(item, "agentProfiles.option." + id);
             item.Click += async (_, _) => await onChoose(id);
             menu.Items.Add(item);
@@ -62,10 +60,8 @@ internal sealed class AgentProfiles(JsonNode value)
         if (locked is null)
         {
             menu.Items.Add(new MenuFlyoutSeparator());
-            var add = new MenuFlyoutItem { Text = L10n.Text("common.profiles.add_ellipsis"), Icon = new FontIcon { Glyph = "\uE710" } }; // Add
+            var add = new MenuFlyoutItem { Text = L10n.Text("common.profiles.add_ellipsis"), Icon = new FontIcon { Glyph = "\uE710" } };
             AutomationProperties.SetAutomationId(add, "agentProfiles.add");
-            // The same settings as in Account, where a profile is named and
-            // its agents signed in, without leaving the chat.
             add.Click += async (_, _) =>
             {
                 if (picker?.XamlRoot is null) return;
@@ -82,12 +78,10 @@ internal sealed class AgentProfiles(JsonNode value)
             };
             menu.Items.Add(add);
         }
-        // A small chip beside the panel's title, as on the Mac and the phones:
-        // which login the listed agents run as, one tap from changing.
         var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        chip.Children.Add(new FontIcon { Glyph = "\uE77B", FontSize = 12 }); // Contact
+        chip.Children.Add(new FontIcon { Glyph = "\uE77B", FontSize = 12 });
         chip.Children.Add(new TextBlock { Text = Title(selected), FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
-        chip.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 9 }); // ChevronDown
+        chip.Children.Add(new FontIcon { Glyph = "\uE70D", FontSize = 9 });
         picker = new Button
         {
             Content = chip,

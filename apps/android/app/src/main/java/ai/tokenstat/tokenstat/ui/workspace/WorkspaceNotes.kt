@@ -98,12 +98,6 @@ private fun JsonObject.toNoteCard(): NoteList.NoteCard? {
     )
 }
 
-/// Small things worth keeping, for one folder, on the machine that owns it.
-///
-/// Ports `ClientWorkspaceNotesView`: quick capture at the top (return saves),
-/// search, newest-first or A-Z sort, an archive behind a toggle, optimistic
-/// rows swapped for the host card, edit sheet, delete confirm, and turning a
-/// note into a task. A note is a `todo` card whose kind is `note`.
 @Composable
 fun NotesSection(
     model: AppViewModel,
@@ -334,12 +328,6 @@ fun NotesSection(
                         )
                     }
                     if (!pending) {
-                        // One overflow, the way the SSH host row does it.
-                        // Four bare text links read as a sentence that
-                        // happened to be tappable and gave no sign which one
-                        // was destructive; four buttons wrapped onto two
-                        // lines and made every note twice as tall. A menu
-                        // names each action with its glyph and costs one row.
                         var menu by remember(note.id) { mutableStateOf(false) }
                         Box {
                             TsSecondaryButton(
@@ -426,8 +414,6 @@ private fun NoteEditorDialog(
     onRead: suspend () -> NoteList.NoteCard?,
     onSave: suspend (NoteList.NoteCard, String, String) -> Boolean,
 ) {
-    // Restore the reviewed revision with the writing. A recreated Activity
-    // must not silently rebase an old draft onto a newer host note.
     val baselineSaver = remember {
         listSaver<NoteList.NoteCard, Any>(
             save = { listOf(it.id, it.title, it.body, it.column, it.createdAtMs, it.revision ?: -1L) },
@@ -457,14 +443,12 @@ private fun NoteEditorDialog(
                     scope.launch {
                         try {
                             if (!onSave(baseline, title.trim(), body.text)) {
-                                // A checked save keeps the writing in the editor. Read
-                                // the competing version before offering an explicit choice.
                                 try {
                                     val fresh = onRead()
                                     missing = fresh == null
                                     changed = fresh?.takeIf { it.revision != baseline.revision }
                                 } catch (cancelled: CancellationException) { throw cancelled }
-                                catch (_: Exception) { /* Keep the save failure and the draft. */ }
+                                catch (_: Exception) { }
                             }
                         } finally { saving = false }
                     }

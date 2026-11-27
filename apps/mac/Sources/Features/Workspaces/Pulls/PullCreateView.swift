@@ -114,8 +114,6 @@ final class PullCreateModel {
     }
 }
 
-/// Each irreversible step uses the existing reviewed operation. Closing the
-/// wizard leaves branch, commits, published work and writing available.
 struct PullCreateView: View {
     let workspaceID: String
     let peer: String?

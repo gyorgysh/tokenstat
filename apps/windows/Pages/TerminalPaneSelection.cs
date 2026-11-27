@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>Stable terminal IDs keep transport, focus and split positions independent.</summary>
 internal sealed class TerminalPaneSelection
 {
     public string? Selected { get; set; }

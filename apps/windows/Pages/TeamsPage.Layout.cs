@@ -8,12 +8,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The shape every Teams screen shares, the same one Devices uses: a row
-/// with the screen's navigation and tabs on the leading edge and its actions
-/// on the trailing edge, then full-width cards. A shared chat docks its
-/// composer under the transcript, as the main chat does.
-/// </summary>
 internal sealed partial class TeamsPage
 {
     // Rebuilt on every Reset. A WinUI element keeps its old parent after the
@@ -77,9 +71,6 @@ internal sealed partial class TeamsPage
         return row;
     }
 
-    /// Says that Teams is an early preview, beside the title on every Teams
-    /// screen. Hovering shows what that means, and a click or tap opens the
-    /// same note, so it also works with touch and the keyboard.
     private static Border PreviewBadge()
     {
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };

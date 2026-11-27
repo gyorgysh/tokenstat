@@ -4,12 +4,9 @@ package ai.tokenstat.tokenstat.ui.logic
 import android.content.Context
 import androidx.compose.runtime.mutableIntStateOf
 
-/// Local display names, scoped to the account, host, project, and session.
 class TerminalNames(context: Context) {
     private val prefs = context.getSharedPreferences("tokenstat.terminalNames.v1", Context.MODE_PRIVATE)
     private companion object {
-        // Project rows, the global list and the live header have separate
-        // store instances. A rename must invalidate all of their readers.
         val revision = mutableIntStateOf(0)
     }
     fun name(owner: ProjectOwner?, session: String): String? {

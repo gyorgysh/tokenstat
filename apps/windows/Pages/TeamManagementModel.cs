@@ -6,7 +6,6 @@ using System.Text.RegularExpressions;
 
 namespace Tokenstat.Pages;
 
-/// A Team operation stays bound to the login that opened its review.
 internal sealed class TeamDirectoryClient(JsonObject scope, string? session, string person,
     Func<string, JsonObject?, Task<JsonNode>> call)
 {
@@ -44,16 +43,11 @@ internal sealed class TeamDirectoryClient(JsonObject scope, string? session, str
 
 internal sealed record TeamManagementRows(List<JsonObject> Rows, int? Next = null, bool Loaded = false);
 
-/// Frozen row revisions and explicit permission checks complement the service's
-/// authoritative validation. Read pagination is never attached to a write.
 internal sealed class TeamManagementModel(TeamDirectoryClient client, JsonObject initial)
 {
     internal static string Text(JsonNode? node, string key) => node?[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : "";
     internal static bool Flag(JsonNode? node, string key) => node?[key] is JsonValue value && value.TryGetValue<bool>(out var flag) && flag;
     internal static void Require(bool valid) { if (!valid) throw new InvalidDataException(); }
-    /// A project whose last computer stopped sharing stays in the team until
-    /// an admin removes it. An older account server sends no count, and then
-    /// every project reads as shared, as it always did.
     internal static bool Shared(JsonNode repository)
     {
         if (repository["activeCheckouts"] is not JsonValue value) return true;

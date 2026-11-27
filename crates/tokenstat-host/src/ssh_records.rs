@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 // Source-available, not open source. See LICENSE for permissions and restrictions.
-
 //! Local SSH connection metadata.
-//!
-//! Secrets deliberately do not live here. A host points at a credential id;
-//! the platform vault owns the password or private key material. Keeping the
-//! record store useful without making it a secret store is the boundary the
-//! later encrypted-vault sync can preserve.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -185,10 +179,6 @@ fn default_port() -> u16 {
 fn default_initial_directory() -> String {
     "~".into()
 }
-/// Version 2 adds folders, per-host connection settings, key fingerprints and
-/// snippet variables. A version 1 file reads as a version 2 file with those
-/// fields at their defaults, so there is no migration step and nothing to go
-/// wrong on the way in.
 fn store_version() -> u32 {
     2
 }
@@ -253,15 +243,6 @@ struct IdParam {
     id: String,
 }
 
-/// Rides alongside a record on a save. Off, which is every save a person
-/// makes, the record is stamped with the time it was written here. On, a
-/// caller that is applying somebody else's already-timestamped record keeps
-/// the stamp that record arrived with.
-///
-/// Only the vault pull sets it. Stamping a pulled record with the local clock
-/// would make this device look like the author of a change it merely received,
-/// and it would push that record straight back over the newer one it just
-/// declined to overwrite.
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveFlags {
@@ -274,9 +255,6 @@ impl SaveFlags {
         serde_json::from_str(params).unwrap_or_default()
     }
 
-    /// The stamp a save should end up with. A caller that asked to keep one
-    /// and sent nothing still gets a stamp: a zero would sort below every
-    /// record ever written and lose every merge it ever entered.
     fn stamp(&self, current: i64) -> i64 {
         if self.keep_updated_ms && current > 0 {
             current
@@ -420,7 +398,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             let host = p.expected.find(&mut store)?;
             host.last_connected_ms = Some(host.last_connected_ms.unwrap_or(0).max(now_ms()));
             let fresh = host.clone();
-            // Recency is device-local bookkeeping, not a merge edit.
+
             save_to(path, &store)?;
             serde_json::to_value(fresh).map_err(|e| e.to_string())
         }
@@ -531,8 +509,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             save_to(path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
         }
-        // Deleting a folder never deletes what is in it. Children move up one
-        // level, which is recoverable, where a cascade is not.
+
         "ssh.folder.delete" => {
             let p: IdParam = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let parent = store
@@ -544,10 +521,6 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             store.folders.retain(|f| f.id != p.id);
             let removed = before != store.folders.len();
             if removed {
-                // Reparenting is a change to each child, not only to the
-                // folder that went. Stamping them is what lets the vault carry
-                // the move: without it the other devices merge the children
-                // back under a folder that no longer exists.
                 let now = now_ms();
                 for folder in store.folders.iter_mut() {
                     if folder.parent_id.as_deref() == Some(p.id.as_str()) {
@@ -566,8 +539,6 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({"removed": removed}))
         }
 
-        // Folder and position in one write, so a drag is one call and a list
-        // cannot end up half reordered.
         "ssh.host.move" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -597,8 +568,6 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(moved).map_err(|e| e.to_string())
         }
 
-        // A flat client can rearrange its list without moving records between
-        // folders. Check the displayed order before assigning all positions.
         "ssh.host.reorder" => {
             #[derive(Deserialize)]
             struct ReorderParams {
@@ -644,9 +613,6 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({ "changed": changed }))
         }
 
-        // Which servers this machine has decided to trust, and how to take it
-        // back. Kept as a view over the host records rather than as a second
-        // file, so there is one place a fingerprint can live.
         "ssh.knownhost.list" => {
             let rows: Vec<Value> = store
                 .hosts
@@ -664,8 +630,7 @@ fn call_at(path: &Path, method: &str, params: &str) -> Result<Value, String> {
                 .collect();
             Ok(Value::Array(rows))
         }
-        // Forgetting is what makes the next connection ask again, which is the
-        // only honest answer to "this server's key changed".
+
         "ssh.knownhost.forget" => {
             let p: IdParam = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let host = store
@@ -848,14 +813,9 @@ fn validate_color(value: &str) -> Result<(), String> {
     }
 }
 
-/// Whether `folder` is `ancestor` or sits underneath it.
-///
-/// Guards the one move that turns a folder list into a cycle and a list view
-/// into an infinite loop.
 fn descends_from(folders: &[SshFolder], folder: &str, ancestor: &str) -> bool {
     let mut current = Some(folder.to_string());
-    // Bounded by the number of folders: a store that already contains a cycle
-    // must not hang the caller that is trying to fix it.
+
     for _ in 0..folders.len() + 1 {
         let Some(id) = current else { return false };
         if id == ancestor {
@@ -882,27 +842,19 @@ fn fingerprint_of(public_key: &str) -> Option<String> {
         .map(|key| key.fingerprint(russh::keys::HashAlg::Sha256).to_string())
 }
 
-/// What `~/.ssh/config` already describes, as candidates to save.
-///
-/// Read only, always. tokenstat never writes to a file another tool owns, and
-/// this one belongs to ssh. Blocks with a wildcard pattern are skipped: `Host *`
-/// is defaults, not a server somebody connects to.
 fn read_ssh_config(store: &Store) -> Result<Vec<Value>, String> {
     let Some(home) = directories::UserDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) else {
         return Ok(Vec::new());
     };
     let text = match fs::read_to_string(home.join(".ssh").join("config")) {
         Ok(text) => text,
-        // No file is an empty answer, not a failure. Most people do not have
-        // one, and the import screen should say "nothing to import".
+
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("read ssh config: {e}")),
     };
     Ok(parse_ssh_config(&text, store))
 }
 
-/// The parsing half, separated from the reading half so it can be tested
-/// without a home directory to write into.
 fn parse_ssh_config(text: &str, store: &Store) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     let mut current: Option<(String, String, String, u16, Option<String>)> = None;
@@ -1324,9 +1276,6 @@ mod tests {
 
     #[test]
     fn an_unstamped_record_is_stamped_even_when_the_stamp_is_kept() {
-        // Records written before merge stamps existed carry 0. Keeping that
-        // would leave them below every stamped record forever, so they lose
-        // every merge they ever enter.
         let keeping = SaveFlags::read(r#"{"keepUpdatedMs":true}"#);
         assert!(keeping.stamp(0) > 0);
     }
@@ -1427,7 +1376,7 @@ mod tests {
             }],
             ..Store::default()
         };
-        // What `ssh.folder.delete` does, without going through the file.
+
         let parent = store
             .folders
             .iter()
@@ -1474,8 +1423,6 @@ mod tests {
 
     #[test]
     fn a_cycle_in_the_store_does_not_hang_the_check() {
-        // Not reachable through the API, but a hand-edited file can hold it and
-        // the answer has to be "no" rather than "forever".
         let folders = vec![
             SshFolder {
                 id: "a".into(),
@@ -1569,23 +1516,13 @@ Host db
     fn an_environment_name_must_be_a_name() {
         assert!(validate_env_name("TERM").is_ok());
         assert!(validate_env_name("_private1").is_ok());
-        // The value is quoted on its way to the shell and the name cannot be,
-        // so anything that is not a name is a command waiting to run.
+
         assert!(validate_env_name("x; curl http://example.test | sh").is_err());
         assert!(validate_env_name("1TERM").is_err());
         assert!(validate_env_name("TE RM").is_err());
         assert!(validate_env_name("").is_err());
     }
 
-    /// The exact keys each record puts on the wire.
-    ///
-    /// Pinned rather than derived, because the clients hard-code the other
-    /// side of this and nothing at runtime notices when the two disagree.
-    /// Serde's camelCase makes `folder_id` into `folderId`; a client asking
-    /// for `folderID` gets a silent `None` on the way in and a dropped field
-    /// on the way out, which is exactly how a saved server kept forgetting
-    /// which folder it was in. Renaming a field here is a protocol change and
-    /// has to be made in the clients in the same commit.
     #[test]
     fn record_wire_keys_are_the_ones_clients_expect() {
         fn keys(value: Value) -> Vec<String> {
@@ -1700,13 +1637,6 @@ Host db
         );
     }
 
-    /// The payload a client sends is the payload that lands in the record.
-    ///
-    /// The regression this pins is not a parser bug: the client sent
-    /// `folderID`, serde ignored the unknown key, and the save reported
-    /// success while dropping the folder, the key and the jump host on every
-    /// write. Reading the misspelling back as `None` is the assertion that
-    /// matters, because that is the half nothing at runtime complains about.
     #[test]
     fn a_host_payload_is_read_with_the_camel_case_ids() {
         let sent = json!({

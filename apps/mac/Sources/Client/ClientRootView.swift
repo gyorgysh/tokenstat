@@ -32,31 +32,16 @@ import UIKit
 struct ClientRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.requestReview) private var requestReview
-    /// iPad and iPhone want different intros. See `signedOut`.
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var launch = LaunchState()
-    /// One account model for the whole client. The avatar reads it, the sheet
-    /// edits it, and every screen that needs a tier or a machine list reads the
-    /// same copy rather than starting a second sign-in state.
     @State private var account = AccountModel()
     @State private var teams = TeamStore(api: .live)
     @State private var webAuth = ClientWebAuth()
-    /// Whether this phone can reach the internet. Every screen in the client is
-    /// account plane, which means every screen depends on the network, so the
-    /// answer belongs at the root rather than in each of them.
     @State private var connectivity = ConnectivityModel()
-    /// What the app believes about the network, folded from the internet, the
-    /// service and the tunnel. Every screen reads this one rather than each
-    /// deciding for itself. See `ConnectionModel`.
     @State private var connection = ConnectionModel()
-    /// Whether this iPad has a keyboard or a trackpad attached, which is what
-    /// decides between the tab bar and the sidebar. See `ClientLayout`.
     @State private var input = PointerKeyboardModel()
-    /// Where the person is, held above both layouts so a keyboard being
-    /// attached or detached does not land them somewhere else.
     @State private var navigation = ClientNavigationModel()
-    /// This device's tabs, shared with the editor in the account sheet.
     @State private var tabCustomization = ClientTabCustomization.shared
     @State private var editors = ClientEditorStore(
         write: ClientRemote.writeFile,
@@ -65,24 +50,12 @@ struct ClientRootView: View {
         },
         sessionID: { WorkSessionContext.shared.scope.map(AnyHashable.init) }
     )
-    /// The account sheet, opened from the avatar rather than from a tab. See
-    /// `AvatarButton`.
     @State private var showAccount = false
     @State private var store = ClientStore()
     @State private var notificationOpen = NotificationOpen.shared
     @State private var ecosystemNavigation = EcosystemNavigation.shared
     @State private var savedAccess = SavedWorkAccess.shared
 
-    /// The door for a phone or an iPad with no account on it.
-    ///
-    /// **The app is behind the sign-in, not beside it.** Every screen here
-    /// answers a question about an account, so a signed out client that can
-    /// reach the tabs is four empty screens and a sign-in card repeated on
-    /// each of them. One door instead: the intro on a first run, the sign-in
-    /// screen after that.
-    ///
-    /// One root-owned intro sheet keeps its page during a fold or rotation.
-    /// The system form sizing supplies a readable width on larger windows.
     @State private var introProgress = ClientIntroProgress()
 
     @ViewBuilder
@@ -91,7 +64,6 @@ struct ClientRootView: View {
             .transition(.opacity)
             .sheet(isPresented: Binding(
                 get: { !hasOnboarded },
-                // Explicit swipe dismissal is also a way to skip the intro.
                 set: { if !$0 { hasOnboarded = true } }
             )) {
                 ClientOnboarding(flow: introProgress)
@@ -99,9 +71,6 @@ struct ClientRootView: View {
             }
     }
 
-    /// Set once the intro has been seen or skipped. A signed-in phone never
-    /// sees it, so a reinstall onto an account that already exists does not get
-    /// pitched the product it is already using.
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
     @State private var showingSetupTour = false
     @State private var showingHandleOffer = false
@@ -121,22 +90,12 @@ struct ClientRootView: View {
             && navigation.presentedTaskBoard == nil && savedAccess.reader == nil
     }
 
-    /// The layout the person picked, which beats what the app worked out.
-    /// Written by the account sheet, read here and nowhere else.
     @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
 
-    /// The width of the window this scene is in, which the layout decision
-    /// needs and no environment value reports. Read once at the root rather
-    /// than by every screen.
     @State private var windowWidth: CGFloat = 0
 
-    /// The projects connection, above the layout branch so both layouts use
-    /// the same one. See `ClientSessionModels`.
     @State private var sessionModels = ClientSessionModels()
 
-    /// Start the saved host while Home is still on screen. The model is
-    /// retained above the tab layout, so Workspaces opens with the same
-    /// in-flight connection and loaded folders instead of starting over.
     private func prewarmSavedHost() {
         guard account.signedIn, let signed = account.account,
               let scope = WorkSessionContext.shared.scope else { return }
@@ -149,8 +108,6 @@ struct ClientRootView: View {
         }
     }
 
-    /// Where the person was when the layout last swapped, waiting for the
-    /// new layout to be on screen. See the `.task(id: layout)` below.
     @State private var layoutHandoff: WorkMobileRoute?
     @State private var layoutHandoffIntent: UInt64 = 0
 
@@ -164,17 +121,10 @@ struct ClientRootView: View {
         )
     }
 
-    /// Reopen a conversation the way a person reaches it: its folder's chat
-    /// screen, with the conversation selected in it. Back then lands on that
-    /// folder's chats, as it would have before the layout changed. False
-    /// when the folder is not known yet, so the caller falls back to the
-    /// conversation on its own.
     private func reopenConversation(_ route: WorkMobileRoute) -> Bool {
         guard let reference = route.reference, reference.kind == .conversation,
               let chatID = reference.itemID, !chatID.isEmpty else { return false }
         let workspaces = sessionModels.models(for: route.scope).workspaces
-        // `folders` is the connected computer's. A chat on another one must
-        // not be matched to a folder here by its id alone.
         guard workspaces.connectedKey == reference.hostIdentity,
               let folder = workspaces.folders.first(where: {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == reference.workspaceID
@@ -195,10 +145,6 @@ struct ClientRootView: View {
 
     private var rootSurface: some View {
         Group {
-            // Three doors after the host is up, not two: still checking,
-            // could not check (usually offline), and a definitive answer.
-            // Folding a failed check into "signed out" was the cold-start bug
-            // that flashed Sign in for a phone that still had a token.
             if !launch.hostReady || account.authPending {
                 LaunchSplashView()
                     .transition(.opacity)
@@ -230,9 +176,6 @@ struct ClientRootView: View {
                     .id(WorkSessionContext.shared.scope)
                     .id(navigation.stackGeneration)
                     .transition(.opacity)
-                    // Hiding the open tab lands on the first visible one
-                    // rather than on a blank bar. The editor refuses the last
-                    // tab, so this is a move, never a guess at nothing.
                     .onChange(of: tabCustomization.visibleTabs) { _, visible in
                         if !visible.contains(navigation.destination) {
                             navigation.destination = visible.first ?? .home
@@ -243,9 +186,6 @@ struct ClientRootView: View {
         .animation(.easeInOut(duration: 0.28), value: account.signedIn)
         .animation(.easeInOut(duration: 0.28), value: account.authChecked)
         .animation(.easeInOut(duration: 0.28), value: account.authNeedsRetry)
-        // The layout swap is animated like the other door changes: a keyboard
-        // being attached should read as the app rearranging itself, not as a
-        // new screen appearing from nowhere.
         .animation(.easeInOut(duration: 0.28), value: layout)
         .tint(Theme.accent)
         .clientPointerProbe(input)
@@ -268,16 +208,12 @@ struct ClientRootView: View {
             connectivity.start()
             input.start()
             connection.attach(connectivity)
-            // Every call that leaves this device reports here. Installed once,
-            // at the root, so no screen has to remember to.
             BridgeObserver.report = { method, peer, error in
                 guard let plane = NetworkPlane.of(method: method) else { return }
                 Task { @MainActor in
                     connection.note(plane: plane, peer: peer, failure: error)
                 }
             }
-            // Offline, a call that has to leave the device fails now rather
-            // than after its patience budget. See `BridgeObserver.precheck`.
             BridgeObserver.precheck = { method in
                 guard NetworkGate.isOffline, NetworkPlane.of(method: method) != nil else {
                     return nil
@@ -287,12 +223,7 @@ struct ClientRootView: View {
                     message: L10n.text("apple.clientrootview.this_device_is_offline.84b7cf97")
                 )
             }
-            // Sign-in presents over the app rather than handing the URL to
-            // Safari and hoping somebody comes back. See `ClientWebAuth`.
             account.signInPresenter = { webAuth.start($0) }
-            // The app closes the window the app opened. Without this the sheet
-            // sits there after a successful approval, on top of a screen that
-            // has already signed in behind it.
             account.signInDismisser = { webAuth.cancel() }
             store.currentAccount = { account.account }
             store.onAccountChange = { updated in
@@ -302,7 +233,6 @@ struct ClientRootView: View {
             }
             store.start()
             await launch.prepare()
-            // Name this phone before anything asks the account who is on it.
             await ClientDeviceName.publish()
             await account.load()
             if let signed = account.account {
@@ -314,14 +244,11 @@ struct ClientRootView: View {
             navigation.sidebarLayoutActive = newLayout == .sidebar
             navigation.layoutGeneration &+= 1
             navigation.stackGeneration &+= 1
-            // An opening without a selected chat still belongs to this root
-            // push. Keep its snapshot while its shared producer finishes.
             if navigation.pushedChat != nil, navigation.chatHandoff.reader == nil,
                navigation.pullHandoff == nil {
                 layoutHandoff = nil
                 return
             }
-            // Keep an exact destination above the subtree being replaced.
             if let route = navigation.currentRoute, route.reference != nil,
                navigation.presentedChat == nil,
                sessionModels.models(for: route.scope).workspaces.activeTerminal == nil {
@@ -335,8 +262,6 @@ struct ClientRootView: View {
             }
         }
         .onChange(of: ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)) { _, _ in
-            // A compact/regular project swap can happen without changing
-            // the root's tab/sidebar mode. Async launch handoffs follow both.
             navigation.layoutGeneration &+= 1
             if layoutHandoff == nil, let pull = navigation.pullHandoff,
                let route = navigation.currentRoute, route.reference == pull.reference,
@@ -346,11 +271,6 @@ struct ClientRootView: View {
                 layoutHandoff = route
             }
         }
-        // And put it back once the new layout is mounted. Set only in the
-        // same update as the swap, the route could be cleared by the old
-        // layout tearing down, or offered to a navigation stack that did
-        // not exist yet: folding an iPhone Duo on an open chat landed on the
-        // tab's top level instead of the chat.
         .task(id: navigation.layoutGeneration) {
             let delivery = navigation.chatHandoff.pending
             guard let route = layoutHandoff ?? delivery?.route else { return }
@@ -367,8 +287,6 @@ struct ClientRootView: View {
             let reader = delivery?.reader ?? navigation.chatHandoff.reader
                 ?? navigation.restoredChatReader.flatMap { $0.matches(route) ? $0 : nil }
             navigation.restoreLayout {
-                // Folder readers keep their list/back route when metadata is
-                // known. A missing folder still uses this exact source below.
                 if reader?.key.conversation == nil, reopenConversation(route) { return }
                 navigation.restoredChatReader = reader?.matches(route) == true ? reader : nil
                 if let tab = ClientTab(rawValue: route.tab), tabCustomization.visibleTabs.contains(tab),
@@ -421,8 +339,6 @@ struct ClientRootView: View {
         }
         .onOpenURL { url in
             #if DEBUG
-            // Debug builds can open the setup tour without waiting for its
-            // normal conditions.
             if url.scheme == "tokenstat", url.host == "debug" {
                 switch url.path {
                 case "/setup": showingSetupTour = true
@@ -445,9 +361,6 @@ struct ClientRootView: View {
             prewarmSavedHost()
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-            // Cold start offline leaves authNeedsRetry. Signed-in screens also
-            // want a fresh me after the network returns, and the tunnel session
-            // this phone holds should reconnect now, not after its backoff.
             connection.reset()
             Task { await account.load() }
             Task { await Bridge.nudgeTunnel(reconnect: true) }
@@ -497,17 +410,9 @@ struct ClientRootView: View {
             ClientWorkSearchPresentation()
         }
         .environment(\.openClientAccount, { showAccount = true })
-        // The setup tour, once per tour revision. A phone only reaches this
-        // body signed in, so the tour skips straight to how the Mac's remote
-        // access is turned on. Settings can open it again; a request while
-        // the account sheet is up closes that first, since two sheets on
-        // one view queue instead of stacking.
         .sheet(isPresented: $showingSetupTour, onDismiss: { SetupTourPreferences.markSeen() }) {
             SetupTour(signedIn: true, remote: nil, onSignIn: {}, onFinish: { showingSetupTour = false })
         }
-        // Signed in, on Home, and never on the first run: a new phone has
-        // just been through the intro and the sign-in. Keyed on both, so it
-        // waits for Home rather than appearing over another tab.
         .task(id: "\(account.signedIn)-\(navigation.destination == .home)") {
             guard account.signedIn, navigation.destination == .home else { return }
             try? await Task.sleep(for: .seconds(1.2))
@@ -597,8 +502,6 @@ struct ClientRootView: View {
             tier: account.account?.vaultTierForSsh))
     }
 
-    // Separate type-checking boundaries keep this chain buildable on CI's
-    // Swift compiler while preserving the presentation/environment order.
     var body: some View {
         rootPresentations
         // **Last in the chain, after every presentation.** A sheet or a cover
@@ -629,8 +532,6 @@ struct ClientRootView: View {
         .environment(sessionModels.models(for: WorkSessionContext.shared.scope).setup)
     }
 
-    /// System routes wait for sign-in and reuse the saved-route availability
-    /// flow for a project on a remote host.
     private func openEcosystemDestination() {
         guard account.signedIn, let target = ecosystemNavigation.pending else { return }
         ecosystemNavigation.pending = nil
@@ -666,9 +567,6 @@ struct ClientRootView: View {
         }
     }
 
-    /// Go where search was asked to go, now that search has closed.
-    /// The account sheet shares this presenter, so tabs and settings wait for
-    /// search dismissal instead of rearranging the interface behind it.
     private func openPendingPlace() {
         guard let place = navigation.pendingPlace else { return }
         navigation.pendingPlace = nil
@@ -713,8 +611,6 @@ struct ClientRootView: View {
             // The bar shrinks out of the way while reading and returns on
             // scroll up. iOS 26 only. It never hides completely.
             .modifier(TabBarMinimizeIfAvailable())
-            // And on iPad it is the same floating bar rather than a pill in
-            // the top bar. See `CompactTabBarOnPad`.
             .clientCompactTabBarOnPad()
         } else {
             TabView(selection: $navigation.destination) {
@@ -739,9 +635,6 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     case workspaces
     case insights
     case machines
-    /// Saved servers, for somebody who lives in them. Opt-in on the phone
-    /// and on from the start on the iPad: the phone bar stays the familiar
-    /// four until it is switched on in the tab editor.
     case ssh
     case team
 
@@ -769,7 +662,6 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// One line in the tab editor, saying what the tab is for.
     var editorDetail: String {
         switch self {
         case .home: return L10n.text("apple.clientrootview.spend_activity_and_limits.c9d9e601")
@@ -781,8 +673,6 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Built on the main actor, like every other view. Said out loud because
-    /// this is an enum member rather than a `View`, so nothing else says it.
     @MainActor
     @ViewBuilder
     func content(workspaces: ClientWorkspacesModel) -> some View {
@@ -797,8 +687,6 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// SSH as a tab, with the account's vault tier like the Devices row passes.
-/// Shared with the sidebar layout, which draws the same destination.
 struct ClientSSHTab: View {
     @Environment(AccountModel.self) private var account
 
@@ -807,18 +695,12 @@ struct ClientSSHTab: View {
     }
 }
 
-/// Could not finish the first account check (almost always offline).
-///
-/// Separate from the login door on purpose: Sign in is for "we know you are
-/// out". This is for "we could not ask". A Retry is the honest control.
 private struct ClientAuthRetryView: View {
     let message: String?
     let isLoading: Bool
     var onSavedWork: (() -> Void)? = nil
     let onRetry: () -> Void
 
-    /// The failure in the app's own words. Raw transport text ("unknown
-    /// status code", edge numbers) never leads on this screen.
     private var friendly: FriendlyError? { message.map(FriendlyError.from) }
 
     var body: some View {
@@ -866,12 +748,6 @@ private struct ClientAuthRetryView: View {
 }
 
 private extension View {
-    /// The top bar every client screen shares: the avatar, the wordmark, and
-    /// room for exactly one contextual control.
-    ///
-    /// A modifier rather than a wrapper view, so each screen keeps its own
-    /// scroll view as the direct child of the navigation stack. That is what
-    /// lets content scroll under the glass instead of stopping at its edge.
     func clientChrome(showAccount: Binding<Bool>) -> some View {
         toolbarTitleDisplayMode(.inline)
             .toolbar {
@@ -879,11 +755,6 @@ private extension View {
                     AvatarButton { showAccount.wrappedValue = true }
                 }
                 .clientAvatarChrome()
-                // The wordmark, not the screen's name. The tab bar already
-                // says which screen this is, and the middle of the top bar is
-                // the one piece of pure brand the client gets.
-                // The one global word about the network, and only when there
-                // is one to say. See `ClientConnectionChip`.
                 ToolbarItem(placement: .topBarTrailing) {
                     ClientWorkSearchButton()
                 }
@@ -896,16 +767,6 @@ private extension View {
                     ClientConnectionChip()
                 }
                 ToolbarItem(placement: .principal) {
-                    // Larger than the Mac's sidebar lockup, and not filling:
-                    // this is the one brand on the screen and it has a whole
-                    // bar to itself, where the sidebar size read as a caption.
-                    // `fills` off so it centres instead of pushing right.
-                    //
-                    // Windowed too. The iPad's traffic lights take the start
-                    // of this row, not its middle, and this bar is the whole
-                    // window wide, so the centre is still free. Dropping the
-                    // brand here left the bar with an avatar at one end and a
-                    // search button at the other.
                     Wordmark(size: 22, fills: false)
                         .accessibilityAddTraits(.isHeader)
                 }
@@ -925,15 +786,6 @@ private struct TabBarMinimizeIfAvailable: ViewModifier {
 }
 
 
-/// The signed-in session's screen models, shared by both layouts.
-///
-/// An iPhone Duo swaps the sidebar and the tabs on every fold. Models owned
-/// by either layout went with it: opening the phone dialled the Mac again,
-/// and Home, Insights and Devices drew their placeholders while they read
-/// everything a second time. The Mac keeps these for the life of the window,
-/// and so does this. Keyed by work scope, the key the layouts are rebuilt on,
-/// so another scope still starts fresh. A cache read from the body, which is
-/// why it is a plain class: handing back the models must not count as a change.
 @MainActor
 final class ClientSessionModels {
     @MainActor
@@ -985,11 +837,6 @@ private extension View {
 }
 
 
-/// Tells `DisplayFit` the size of the screen this window is on.
-///
-/// Sized with the window, so it lays out again on every resize, a rotation
-/// and an iPhone Duo opening or folding included, and reads the screen from
-/// the window's own scene each time.
 private struct ScreenSizeReporter: UIViewRepresentable {
     func makeUIView(context: Context) -> ReporterView {
         let view = ReporterView()

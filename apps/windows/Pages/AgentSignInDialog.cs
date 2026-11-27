@@ -21,7 +21,6 @@ internal static class AgentSignInDialog
             var request = new JsonObject { ["id"] = Format.Text(backend, "launcherId") };
             if (profileId is not null) request["profile"] = profileId;
             var status = await call("launcher.checkSignIn", request);
-            // Whether the CLI answered itself, which is what a send may trust.
             backend["signInVerified"] = Format.Flag(status, "checked");
             return Format.Text(status, "readiness", "unknown");
         }
@@ -66,7 +65,7 @@ internal static class AgentSignInDialog
         {
             terminal.Release();
             try { await call("pty.close", new JsonObject { ["id"] = sessionId }); }
-            catch { /* A disconnected host must not hide the sign-in result. */ }
+            catch { }
         }
     }
 

@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! One serialized encrypted connection per exact account and shared resource.
-//! This pool never borrows a personal session or accepts an arbitrary RPC.
-
 use super::api_error;
 use crate::{
     account_session::AccountSnapshot,
@@ -134,7 +130,6 @@ pub(super) struct AskRequest {
 }
 impl AskRequest {
     pub(super) fn validate(mut self) -> Result<Self, DispatchError> {
-        // A new chat is asked of the checkout. Everything else names a share.
         let new = self.method == TeamAskMethod::New;
         if self.target.share.is_none() != new {
             return Err(api_error(TeamError::InvalidRequest));
@@ -296,8 +291,7 @@ impl Pool {
             return match slot.sender.try_send(job) {
                 Ok(()) => Ok(()),
                 Err(TrySendError::Full(_)) => Err(busy()),
-                // A worker that is retiring cannot accept another call. Its
-                // non-reused lifetime prevents it removing a replacement.
+
                 Err(TrySendError::Disconnected(job)) => {
                     slots.remove(&key);
                     self.start(&mut slots, key, connector, job)
@@ -323,8 +317,7 @@ impl Pool {
         let pool = Arc::downgrade(self);
         let worker_key = key.clone();
         let worker_lifetime = lifetime.clone();
-        // Reserve before starting. The worker owns network I/O; the caller
-        // never waits for a socket, account request, or join under this lock.
+
         slots.insert(key.clone(), Slot { sender, lifetime });
         if std::thread::Builder::new()
             .name("team-connection".into())
@@ -355,8 +348,6 @@ impl Pool {
         self.call_until(key, connector, method, params, Instant::now() + CALL_BUDGET)
     }
 
-    /// Only the closed read enum belongs here. Mutations require explicit
-    /// receipts and must never inherit this bounded reconnect behavior.
     fn read(
         self: &Arc<Self>,
         key: Key,
@@ -476,8 +467,7 @@ fn work_with_retirement(
         }
         let result = connection.call(job.method, &job.params);
         let failed = result.is_err();
-        // Publish retirement before waking a retrying reader. The old worker
-        // cannot accept that retry or remove a replacement's lifetime later.
+
         if failed && let Some(retirement) = retirement {
             retirement.retire();
         }
@@ -490,8 +480,7 @@ fn work_with_retirement(
     if let Some(retirement) = retirement {
         retirement.retire();
     }
-    // The failed worker never replays a job. Its read-only caller may make
-    // one new connection with the same immutable scope and original deadline.
+
     for job in receiver.try_iter() {
         let _ = job.reply.send(Err(ended()));
     }

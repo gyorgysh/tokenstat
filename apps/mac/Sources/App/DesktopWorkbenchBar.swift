@@ -24,7 +24,6 @@ extension DesktopWorkbenchState.Tool {
     }
 }
 
-/// A horizontally scrollable strip keeps tools usable at the narrowest width.
 struct DesktopWorkbenchBar: View {
     let state: DesktopWorkbenchState
     let open: (DesktopWorkbenchState.Tool) -> Void

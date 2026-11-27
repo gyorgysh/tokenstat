@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>Canonical history survives listener rotation. Only the active listener is usable.</summary>
 internal sealed class BrowserRouteState
 {
     internal enum RequestAction { Pass, Rewrite, Reopen, Block }

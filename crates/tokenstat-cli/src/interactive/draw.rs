@@ -15,9 +15,6 @@ pub(super) fn draw(f: &mut Frame<'_>, app: &mut App) {
         Block::default().style(Style::default().fg(MUTED).bg(background())),
         area,
     );
-    // Thin chrome: tabs, flexible data, one input line, one status line.
-    // Suggestions overlay the bottom of the data pane so they do not steal
-    // permanent vertical space.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -44,8 +41,6 @@ pub(super) fn draw(f: &mut Frame<'_>, app: &mut App) {
 }
 
 pub(super) fn draw_tabs(f: &mut Frame<'_>, area: Rect, app: &App) {
-    // Each tab carries its own number, so switching by key is discoverable
-    // without a legend line spending a row on it.
     let titles: Vec<Line<'_>> = Tab::ALL
         .iter()
         .enumerate()
@@ -128,8 +123,6 @@ pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &mut App) {
         Tab::Blocks => format!(" 5 hour windows{filter_note} "),
         Tab::Doctor => " Archive health ".to_string(),
     };
-    // Open at the bottom: the input and status lines below continue the panel,
-    // so a closing rule there would cut the client in half.
     let block = Block::default()
         .borders(Borders::LEFT | Borders::RIGHT | Borders::TOP)
         .border_type(border_type())
@@ -184,8 +177,6 @@ pub(super) fn draw_body(f: &mut Frame<'_>, area: Rect, app: &mut App) {
         lines.insert(0, today_line(app));
     }
 
-    // Leave room at the bottom of the pane when the palette is open so rows
-    // are not permanently covered without a way to scroll past them.
     let reserve = suggestion_height(app, inner.height);
     let view_height = inner.height.saturating_sub(reserve);
     app.page_rows = view_height.max(1);
@@ -216,8 +207,7 @@ pub(super) fn suggestion_height(app: &App, available: u16) -> u16 {
     if n == 0 {
         return 0;
     }
-    // Cap so a tall catalog never eats the whole pane.
-    n.min(available.saturating_sub(4).min(8)).saturating_add(1) // +1 separator
+    n.min(available.saturating_sub(4).min(8)).saturating_add(1)
 }
 
 pub(super) fn draw_suggestions_overlay(f: &mut Frame<'_>, body: Rect, app: &App) {
@@ -267,9 +257,6 @@ pub(super) fn draw_suggestions_overlay(f: &mut Frame<'_>, body: Rect, app: &App)
         let i = start + offset;
         let selected = i == app.suggest_idx;
         let name = format!("/{}", cmd.name);
-        // The running index doubles as the pick key (1-9 run the Nth item), so
-        // the number is part of the row. Show the filtered position, which is
-        // what the key actually picks.
         let pick = i + 1;
         let pick_key = if pick <= 9 {
             pick.to_string()
@@ -341,8 +328,6 @@ pub(super) fn draw_status(f: &mut Frame<'_>, area: Rect, app: &App) {
     };
     let version = format!("v{}", tokenstat_core::VERSION);
     let ver_w = version.chars().count() as u16;
-    // Leave room for the version on the right so it stays put while status text
-    // changes length. Truncate the hint rather than colliding with the version.
     let hint_budget = area.width.saturating_sub(ver_w.saturating_add(3)) as usize;
     let hint = if hint.chars().count() > hint_budget {
         let mut cut = hint
@@ -504,9 +489,6 @@ pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     }
 }
 
-/// The `/heatmap`, `/wrapped`, and `/budget` report window. Contents are
-/// precomputed; the last line of the popup is the scroll hint, so the body and
-/// the hint never fight for the same row.
 pub(super) fn draw_detail(f: &mut Frame<'_>, area: Rect, app: &App) {
     let Some(detail) = &app.detail else {
         return;
@@ -516,7 +498,6 @@ pub(super) fn draw_detail(f: &mut Frame<'_>, area: Rect, app: &App) {
         .min(area.width.saturating_sub(2))
         .max(30.min(area.width));
     let content_h = detail.lines.len() as u16;
-    // Border top, body, hint line, border bottom: content + 3 rows.
     let height = (content_h.saturating_add(3))
         .min(area.height.saturating_sub(2))
         .max(6);

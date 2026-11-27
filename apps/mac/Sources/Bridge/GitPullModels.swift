@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// What a pull would do, as of the fetch review just made on the host.
 struct GitPullReview: Codable, Sendable, Equatable {
     let branch: String
     let head: String
@@ -39,8 +38,6 @@ extension GitCommitTarget: GitPullService {
         await RemoteHostFeature.reviewedPull.isSupported(peer: peer)
     }
     func pullReview() async throws -> GitPullReview {
-        // Review fetches the upstream branch. A quiet fetch on a large or
-        // slow remote can exceed the ordinary 60-second host read budget.
         try await call("workspace.pullReview", [:], patience: Bridge.Patience.long, as: GitPullReview.self)
     }
     func pull(_ review: GitPullReview) async throws -> GitPullOutcome {
@@ -49,12 +46,10 @@ extension GitCommitTarget: GitPullService {
     }
 }
 
-/// The pull request a branch belongs to, in the few words a chip needs.
 struct BranchPull: Codable, Sendable, Hashable {
     let number: UInt32
     let title: String
     let url: String
-    /// `open`, `merged` or `closed`.
     let state: String
     let draft: Bool
     let baseRef: String
@@ -83,21 +78,17 @@ struct BranchPull: Codable, Sendable, Hashable {
     }
 }
 
-/// A pull request a chat opened or talked about, as the host last saw it.
 struct ChatPull: Codable, Sendable, Hashable, Identifiable {
     var id: String { url }
     let number: UInt32
     let title: String
     let url: String
-    /// `open`, `merged` or `closed`.
     let state: String
     let draft: Bool
-    /// `owner/repo`. Absent for the branch's own pull request.
     var repo: String?
     var additions: UInt32?
     var deletions: UInt32?
     var opened: Bool?
-    /// The folder on that computer whose pull request page shows it.
     var workspaceId: String?
 
     init(_ pull: BranchPull) {
@@ -108,7 +99,6 @@ struct ChatPull: Codable, Sendable, Hashable, Identifiable {
         draft = pull.draft
     }
 
-    /// A listed pull request, as the page that opens it wants it.
     init(_ pull: PullSummary, url: String, workspaceID: String) {
         number = pull.number
         title = pull.title
@@ -125,7 +115,6 @@ struct ChatPull: Codable, Sendable, Hashable, Identifiable {
         return value
     }
 
-    /// `owner/repo #53`, read from the address when the host did not say.
     var name: String {
         let parts = webURL?.pathComponents.filter { $0 != "/" } ?? []
         guard let repo = repo ?? (parts.count >= 2 ? "\(parts[0])/\(parts[1])" : nil) else { return "#\(number)" }
@@ -141,14 +130,12 @@ struct ChatPull: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
-    /// The one whose state a row shows: work still open first, then merged.
     static func lead(of pulls: [ChatPull]) -> ChatPull? {
         pulls.first { $0.state == "open" && !$0.draft } ?? pulls.first { $0.state == "open" }
             ?? pulls.first { $0.state == "merged" } ?? pulls.first
     }
 }
 
-/// Where opening a chat's pull request leads, on this device.
 @MainActor @Observable
 final class PullOpenPreference {
     enum Choice: String, CaseIterable, Sendable { case ask, here, browser }
@@ -173,7 +160,6 @@ final class PullOpenPreference {
     }
 }
 
-/// A pull request somebody asked to see, until its folder's page takes it.
 @MainActor @Observable
 final class PullOpenRequest {
     static let shared = PullOpenRequest()
@@ -188,7 +174,6 @@ final class PullOpenRequest {
 }
 
 extension PullSummary {
-    /// Enough to open the page on. The page reads the rest itself.
     init(_ pull: ChatPull) {
         self.init(number: pull.number, title: pull.title, author: "", authorAvatar: nil, createdAt: "", updatedAt: "",
                   headRef: "", baseRef: "", additions: pull.additions ?? 0, deletions: pull.deletions ?? 0,

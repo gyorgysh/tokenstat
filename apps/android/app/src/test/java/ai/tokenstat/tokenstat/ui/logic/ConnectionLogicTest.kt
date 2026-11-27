@@ -17,8 +17,6 @@ class ConnectionLogicTest {
         assertEquals(NetworkPlane.PEER, NetworkPlane.of("remote.call"))
         assertEquals(NetworkPlane.ACCOUNT, NetworkPlane.of("account.status"))
         assertEquals(NetworkPlane.ACCOUNT, NetworkPlane.of("sync"))
-        // Signing out clears this device's login on its own, so it must not
-        // be refused while offline nor counted as evidence about the network.
         assertNull(NetworkPlane.of("account.logout"))
         assertNull(NetworkPlane.of("account.cancelLogin"))
         assertNull(NetworkPlane.of("sync.scheduleStatus"))
@@ -102,9 +100,6 @@ class ConnectionLogicTest {
     @Test
     fun an_unvalidated_network_waits_for_the_app_to_agree() {
         val tracker = ConnectionTracker()
-        // A network that blocks the platform's own probe still carries
-        // traffic, so this alone must not strand anybody behind an offline
-        // card.
         tracker.setPath(PathStatus.UNVALIDATED)
         assertFalse(tracker.offline)
         tracker.note(NetworkPlane.ACCOUNT, null, NetworkFailureKind.SERVICE, now)
@@ -135,8 +130,6 @@ class ConnectionLogicTest {
         assertFalse(tracker.ui().ok)
         tracker.reset()
         assertTrue(tracker.ui().ok)
-        // Still a machine this app has seen working, so two more failures
-        // raise it again rather than falling back behind the never-seen rule.
         repeat(2) { tracker.note(NetworkPlane.PEER, "studio", NetworkFailureKind.PEER_ABSENT, now) }
         assertFalse(tracker.ui().ok)
     }

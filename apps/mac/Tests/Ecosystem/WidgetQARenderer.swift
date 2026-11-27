@@ -69,7 +69,6 @@ import UniformTypeIdentifiers
         let now = Date()
         let attributes = LiveWorkAttributes(startedAt: now.addingTimeInterval(-147).timeIntervalSince1970,
             owner: "preview", peer: "preview", key: "preview", revision: "1", projectName: "Studio", route: "tokenstat://open/workspaces")
-        // Six variants across six states: 36 images, independent of the widget matrix.
         let variants: [(String, CGFloat, CGFloat, Bool, DynamicTypeSize, String)] = [
             ("", 390, 120, false, .large, "Studio"),
             ("narrow", 320, 120, false, .large, "Studio"),
@@ -204,7 +203,6 @@ import UniformTypeIdentifiers
 
     private static func exportLiveWork(_ image: CGImage?, filename: String, directory: URL, report: inout ExportReport) {
         let url = directory.appendingPathComponent(filename)
-        // A prior successful artifact must not hide this run's missing render.
         try? FileManager.default.removeItem(at: url)
         guard let image else {
             report.failures.append("\(filename): ImageRenderer returned no image")

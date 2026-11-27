@@ -3,8 +3,6 @@
 import Foundation
 import CoreGraphics
 
-/// Convert fixed viewport movement to graph coordinates, independently of the
-/// moving card's frame. Pan is already measured in viewport points.
 enum WorkflowCanvasCoordinates {
     static func moved(from origin: CGPoint, translation: CGSize, zoom: CGFloat) -> CGPoint {
         guard zoom.isFinite, zoom > 0,
@@ -14,9 +12,6 @@ enum WorkflowCanvasCoordinates {
         return point.x.isFinite && point.y.isFinite ? point : origin
     }
 
-    /// Count viewport cells instead of incrementing world coordinates. At
-    /// large finite positions, adding one grid step may round back to the
-    /// same Double and an ordinary while loop would never terminate.
     static func gridAxis(pan: CGFloat, extent: CGFloat, zoom: CGFloat, step: CGFloat = 24) -> [CGFloat] {
         guard pan.isFinite, extent.isFinite, extent > 0,
               zoom.isFinite, zoom > 0, step.isFinite, step > 0 else { return [] }
@@ -38,19 +33,12 @@ enum WorkflowCanvasCoordinates {
     }
 }
 
-/// Touch canvas viewport: pan, zoom, fit and port hit-testing without any
-/// view code, so the math stays covered by standalone tests.
-///
-/// The Mac canvas and the iPad touch canvas share card size and the
-/// fit-only-zooms-out rule: a blank draft opens at its own size, never
-/// magnified into a wall of one node.
 enum WorkflowTouchViewport {
     static let cardWidth: CGFloat = 228
     static let cardHeight: CGFloat = 120
     static let minZoom: CGFloat = 0.4
     static let maxZoom: CGFloat = 2.2
     static let pad: CGFloat = 64
-    /// Finger-sized port targets stay generous even when the canvas is small.
     static let portHitRadius: CGFloat = 22
 
     struct Fit: Equatable {
@@ -58,7 +46,6 @@ enum WorkflowTouchViewport {
         var pan: CGSize
     }
 
-    /// Bounding-box fit over node top-left points. Empty input resets.
     static func fit(nodeOrigins: [CGPoint], canvasSize: CGSize) -> Fit {
         guard !nodeOrigins.isEmpty, canvasSize.width > 1, canvasSize.height > 1 else {
             return Fit(zoom: 1, pan: .zero)

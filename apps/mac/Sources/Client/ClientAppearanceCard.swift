@@ -3,11 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Mode and colour theme on the phone and the iPad.
-///
-/// The same store as the Mac, with the built-in themes only. Writing and
-/// importing a theme file is desktop work. OLED matters most here: an iPhone
-/// screen turns a black pixel off, which a Mac display does not.
 struct ClientAppearanceCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {

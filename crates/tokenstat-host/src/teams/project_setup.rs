@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Durable orchestration of folder sharing. A repository create has no retry
-//! receipt on older account servers: persist its uncertain outcome before
-//! sending, then require an explicit existing-project choice after interruption.
-//! Checkout publication retains its original host-owned receipt throughout.
-
 use super::{
     api_error,
     publications::{Folder, Owner, Store},
@@ -557,8 +551,7 @@ pub(super) fn perform(
                 review_members(client, &record)?;
                 let mut creating = record.clone();
                 creating.phase = Phase::Creating;
-                // Persist BEFORE the one non-idempotent request. Any uncertain
-                // outcome remains Creating and cannot repeat this call.
+
                 current(owner, client, &record)?;
                 save(&store, &record, &creating)?;
                 record = creating;

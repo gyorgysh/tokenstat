@@ -2,7 +2,6 @@
 import Foundation
 import Observation
 
-/// Shared listeners survive closing one of several pages using the same port.
 @MainActor
 private final class ProjectBrowserBridges {
     static let shared = ProjectBrowserBridges()
@@ -72,7 +71,6 @@ private final class ProjectBrowserBridges {
     }
 }
 
-/// One explicitly opened browser, with a canonical address and transport ownership.
 @MainActor @Observable
 final class ProjectBrowserSession: Identifiable {
     let id = UUID()
@@ -86,7 +84,6 @@ final class ProjectBrowserSession: Identifiable {
     private(set) var navigationGeneration = 0
     private(set) var loadRevision = 0
     #if os(iOS)
-    /// Keep the same native document when a compact sheet becomes a pane.
     @ObservationIgnored var clientWebSurface: ClientWebView.Surface?
     #endif
     @ObservationIgnored private let isCurrent: () -> Bool
@@ -159,7 +156,6 @@ final class ProjectBrowserSession: Identifiable {
         return actual
     }
 
-    /// Remote loopback requests must use this page's live listener or be intercepted.
     func intercepts(_ actual: URL) -> Bool {
         guard peer != nil, let host = actual.host, BrowserTarget.isLoopback(host),
               ["http", "https"].contains(actual.scheme?.lowercased() ?? "") else { return false }
@@ -183,9 +179,6 @@ final class ProjectBrowserSession: Identifiable {
         var restoring = pendingExplicitNavigation ? pendingHistoryIndex : mappedIndex
         var address = restoring.map { pageHistory[$0].url } ?? canonicalURL(url.absoluteString)
         if redirectsHistory {
-            // Replaying a retired listener creates another native copy of the
-            // same canonical entry. Native traversal can also select an alias
-            // on the opposite side of canonical history; skip those copies.
             let index = pageHistoryIndex + (historyDirection < 0 ? -1 : 1)
             guard pageHistory.indices.contains(index) else { return true }
             restoring = index
@@ -237,8 +230,6 @@ final class ProjectBrowserSession: Identifiable {
             var transport = parsed.absoluteString
             if let peer, let target {
                 let endpoint = "\(target.bridgeHost)|\(target.port)"
-                // A page needs one live endpoint. Keep old address mappings for Back,
-                // which reacquires its listener instead of retaining every visited port.
                 for (key, old) in leases where key != endpoint {
                     ProjectBrowserBridges.shared.release(old)
                     leases[key] = nil
@@ -281,9 +272,6 @@ final class ProjectBrowserSession: Identifiable {
         guard !isClosed, isCurrent(), generation == nil || generation == navigationGeneration,
               registered || !pendingExplicitNavigation else { return false }
         let original = canonicalURL(actual)
-        // Only completed pages enter canonical history. The native history
-        // contains disposable listener addresses, so replaying it after a
-        // port change would append a replacement page and trap Back in a loop.
         if pendingExplicitNavigation, let index = pendingHistoryIndex, pageHistory.indices.contains(index) {
             pageHistoryIndex = index
             pageHistory[index].url = original
@@ -307,8 +295,6 @@ final class ProjectBrowserSession: Identifiable {
         return true
     }
 
-    /// WebKit remains authoritative for same-document history and its states.
-    /// Canonical entries only replay a URL when its native listener has retired.
     @discardableResult
     func observedHistory(_ mutation: BrowserPageHistoryMutation, items: [BrowserPageHistoryItem],
                          currentID: UUID, generation: Int) -> Bool {
@@ -323,8 +309,6 @@ final class ProjectBrowserSession: Identifiable {
         let end = items.firstIndex(where: { $0.id == currentID })!
         switch mutation {
         case .push, .replace, .pop:
-            // A snapshot can already include later pushes or a following Back.
-            // Reconcile native IDs, including items currently in Forward.
             if let index = pageIndex(for: currentID) {
                 pageHistoryIndex = index
             } else if let prior = items[..<end].lastIndex(where: { pageIndex(for: $0.id) != nil }),
@@ -337,7 +321,6 @@ final class ProjectBrowserSession: Identifiable {
             }
         case .snapshot:
             if pageHistory[pageHistoryIndex].nativeID == nil {
-                // Routers can push before the first completed document load.
                 let previous = pageHistoryIndex > 0 ? items[..<end].lastIndex(where: {
                     pageHistory[pageHistoryIndex - 1].nativeIDs.contains($0.id)
                 }) : nil
@@ -406,8 +389,6 @@ final class ProjectBrowserSession: Identifiable {
     }
 }
 
-/// Agent web UIs can bind well after their terminal starts. A bridge's 502
-/// means the service is still starting, so wait before loading its first page.
 @MainActor enum BrowserServiceReadiness {
     static func wait(_ url: URL, isCurrent: () -> Bool, timeout: TimeInterval = 45,
                      probe: (URL) async -> Bool = responseIsReady) async -> Bool {

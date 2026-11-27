@@ -5,21 +5,12 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// Conversations in this folder, on the machine that owns it.
-///
-/// A list first, the way Notes and Tasks are lists. Tapping one opens the
-/// transcript. Setup lives in the conversation until the first turn, then
-/// behind Edit setup, because the phone has no inspector column.
 struct ClientChatView: View {
     let peer: String
     let workspaceID: String
     let folderName: String
     var hostName: String = ""
-    /// The folder, so a turn's changes can be opened for review from the
-    /// conversation. Nil leaves Review off.
     var folder: WorkspaceFolder? = nil
-    /// Launcher entry: skip the list and land in the conversation worth
-    /// returning to, creating the first one when this folder has none.
     var openConversationOnAppear = false
     var retainedSession: ClientChatSession? = nil
 
@@ -74,7 +65,6 @@ private struct ClientChatContent: View {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let folder = model.folderID ?? ""
         return model.chats.filter {
-            // Chats opened and never used stay out, apart from the open one.
             !model.isUntouched($0, in: folder)
             && (agent.isEmpty || $0.backend == agent) && (!runningOnly || $0.running)
                 && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
@@ -85,25 +75,12 @@ private struct ClientChatContent: View {
                 : ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
         }
     }
-    /// The conversation being read, shown in place of the list.
-    ///
-    /// Not a push, and that is the point. A pushed screen outlives the screen
-    /// that pushed it: on the iPad this list lives in a split view's detail
-    /// column, and choosing another sidebar row destroys this view while the
-    /// stack keeps holding the thread, which then sits on top of the page that
-    /// just opened. Nothing outside the stack can pop it, and the stack cannot
-    /// be reached: `.id` does not rebuild a split view's detail column and
-    /// emptying a bound path does not reach this kind of push. The retained
-    /// session keeps this selection while a fold replaces the presentation.
     private var opened: ChatConversation? {
         get { session.opened }
         nonmutating set { session.opened = newValue }
     }
     @State private var pendingDelete: ChatConversation?
     @State private var pendingDeleteOwner: WorkReference.Scope?
-    /// A foreground refresh is in flight. Reopening the app onto yesterday's
-    /// rows in silence reads as broken sync; the strip says what is happening
-    /// until the fresh answer lands.
     @State private var refreshing = false
     private var showingChatSidebar: Bool {
         get { session.presentation.sidebarVisible }
@@ -176,8 +153,6 @@ private struct ClientChatContent: View {
         .onDisappear {
             visible = false
             session.disappear(viewer)
-            // Locking the phone must not forget this thread. A tap on its
-            // notification would otherwise remount it over itself.
             guard scenePhase == .active else { return }
             navigation.leaveChat(owner: viewer)
         }
@@ -321,8 +296,6 @@ private struct ClientChatContent: View {
         retainedThread = opened; self.opened = nil
     }
 
-    /// Room for the iPad's conversation sidebar. Anything narrower gets the
-    /// phone's back button and title menu instead.
     private var canShowChatSidebar: Bool {
         workbenchWidth >= 600 && workbenchHeight >= 500
             && verticalSizeClass != .compact
@@ -362,9 +335,6 @@ private struct ClientChatContent: View {
             intent: publicationIntent, handoffID: handoffID, layout: publicationLayout)
     }
 
-    // A sidebar tap may arrive before this retained reader's in-flight load
-    // finishes. Retry when it becomes ready, even though the request itself
-    // has not changed. Keep the request scoped to this exact project/account.
     private var requestedChatLoadIdentity: String? {
         guard let requested = navigation.requestedChat,
               let id = WorkDestinationResolver.requestedConversation(requested,
@@ -393,9 +363,6 @@ private struct ClientChatContent: View {
                 (L10n.text("common.running"), "\(model.chats.filter(\.running).count)", "mark_running"),
                 (L10n.text("apple.clientchatview.agents.279b44d2"), "\(Set(model.chats.map(\.backend)).count)", "mark_agent"),
             ]).clientCardRow()
-            // The list gets a name of its own, because the figures above it
-            // are about the folder and the rows below are the conversations.
-            // Home and Workspaces already label their sections this way.
             ClientSectionTitle(title: L10n.text("apple.clientchatview.conversations.1d432f58"), mark: "mark_chat")
                 .clientCardRow()
             HStack {
@@ -428,8 +395,6 @@ private struct ClientChatContent: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            // Unsent words are written a third of a second after the last
-            // keystroke. Leaving the app can arrive sooner than that.
             guard phase == .active else {
                 model.saveDraftNow()
                 return
@@ -573,9 +538,6 @@ private struct ClientChatContent: View {
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                     ChatPullMark(pulls: chat.pulls, font: ClientType.caption)
-                    // Words waiting in this thread. The mark reads the draft
-                    // store itself, so this list is not rebuilt every time
-                    // somebody pauses typing in one of them.
                     ChatDraftMark(reference: draft, size: 10, scalesWithText: true)
                 }
                 HStack(spacing: 4) {
@@ -610,8 +572,6 @@ private struct ClientChatContent: View {
 
     private func reload() async {
         await session.load(workspaceID: workspaceID, peer: peer, refresh: true)
-        // A tap that arrived mid-reload found an empty list and returned
-        // without consuming. Retry now that the folder has answered.
         await openRequestedChat()
     }
 
@@ -619,11 +579,6 @@ private struct ClientChatContent: View {
         refreshing || connectivity.status == .offline
     }
 
-    /// Fresh on return, with the strip up while it happens. The list's own
-    /// `.task` runs once on appear; minimizing and reopening never
-    /// re-appears, so without this the rows sit stale in silence. Stale
-    /// complaints die with the attempt: a failure now raises its own error,
-    /// so yesterday's modal can never pop for today's retry.
     private func foregroundRefresh() async {
         guard !refreshing else { return }
         refreshing = true
@@ -638,10 +593,6 @@ private struct ClientChatContent: View {
         navigation.openNewChat(repositoryID: "remote:\(peer):\(workspaceID)")
     }
 
-    /// A notification named this conversation. Only consume it if it is in
-    /// this folder, so a list that is still on screen for another workspace
-    /// cannot steal the tap. Already open is a no-op: re-selecting blanks
-    /// the transcript.
     @discardableResult
     private func openRequestedChat() async -> Bool {
         guard visible, publicationLayout == navigation.stackGeneration,
@@ -661,8 +612,6 @@ private struct ClientChatContent: View {
                 && WorkDestinationResolver.sameConversation(navigation.requestedChat, requested)
                 && requested.scope == WorkSessionContext.shared.scope
         }
-        // An explicit destination suppresses the launcher's most-recent/new
-        // fallback, including when that conversation has been deleted.
         if opened?.id == id, reader.selected?.id == id {
             publicationIntent = intent
             publishChat(id)
@@ -685,9 +634,6 @@ private struct ClientChatContent: View {
     }
 }
 
-/// The slim strip both chat screens show while a foreground refresh is in
-/// flight, or while the connection is down. A spinner while working, plain
-/// words while waiting: the two states ask for different patience.
 private struct ClientReconnectBanner: View {
     var offline: Bool = false
 
@@ -712,7 +658,6 @@ private struct ClientReconnectBanner: View {
     }
 }
 
-/// One conversation: setup, transcript, glass composer.
 struct ClientChatThread: View {
     private enum BrowserFocus: String { case chat, split, browser }
     private enum Companion: String { case browser, changes, terminal }
@@ -723,17 +668,10 @@ struct ClientChatThread: View {
     let folderName: String
     let hostName: String
     var folder: WorkspaceFolder? = nil
-    /// How to leave, when this is shown in place of the chat list rather than
-    /// pushed on top of it. `PullDetailView` takes the same closure for the
-    /// same reason.
     var isActive = true
     var onBack: (() -> Void)?
-    /// A root reader presented as a cover closes through its owner.
     var onSwipeBack: (() -> Void)?
-    /// The iPad's sidebar toggle. Absent where the sidebar has no room.
     var onShowChats: (() -> Void)? = nil
-    /// Phone navigation. When present it owns the back button, the edge swipe
-    /// and the title menu.
     var switcher: ClientChatSwitcher? = nil
     var availableWorkbenchWidth: CGFloat? = nil
     var availableWorkbenchHeight: CGFloat? = nil
@@ -742,7 +680,6 @@ struct ClientChatThread: View {
     var onDelete: ((ChatConversation) -> Void)?
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
-    /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
@@ -757,29 +694,16 @@ struct ClientChatThread: View {
     @State private var readerMoved = false
     @State private var settleMood: PersonaMood?
     @State private var settleTaskID = UUID()
-    /// Bumped on send so the transcript scrolls to the end synchronously,
-    /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
     @State private var presenceOwner = UUID()
     @State private var viewportPlaced = false
-    /// Lock and unlock keep this scroll view at the reader's row.
     @State private var placedViewport: PlacedViewport?
     /// Last instant (non-animated) pin. A scrollTo on a lazy stack walks
     /// every row in between, so silent pins share one ~150ms gate, same as
     /// the growth repins. Animated pins always go through.
     @State private var lastSilentPinAt = Date.distantPast
-    /// How many newest rows sit below the built slice. Same rule as the Mac:
-    /// the slice stays a fixed width, older built rows arrive by sliding it.
-    /// Reset on every open.
     @State private var olderOffset = 0
-    /// First row of the built slice, when it is not glued to the end. Same
-    /// lock as the Mac: the offset is from the newest row, so a turn or a
-    /// page would otherwise replace what is on screen.
     @State private var sliceAnchor: [String] = []
-    /// Whether rows are reporting where they are. Set from the scroll
-    /// callback as the top of the loaded conversation comes near, so the
-    /// geometry readers exist for the stretch that can need an anchor and
-    /// nowhere else.
     @State private var measuringRows = false
     @State private var showingHandoff = false
     @State private var showingSetup = false
@@ -804,15 +728,11 @@ struct ClientChatThread: View {
         let navigationGeneration: UInt64
     }
     @State private var pendingFileOpen: PendingFileOpen?
-    /// The folder's changes, opened from a turn's card or the changes pill.
     @State private var reviewingChanges = false
     @State private var recordedTurnReview: ClientRecordedTurnReview?
-    /// The folder's live git state, for the changes pill and the chip.
     @State private var folderGit: GitStatus?
     @State private var branchPull: BranchPull?
     @State private var folderStateOwner: String?
-    /// Same strip as the list: reopening onto a stale transcript says what
-    /// is happening until the explicit poll below answers.
     @State private var refreshing = false
     @State private var showPort = false
     @State private var portText = "5173"
@@ -887,9 +807,6 @@ struct ClientChatThread: View {
             && !dynamicTypeSize.isAccessibilitySize
     }
 
-    /// The global Duo sidebar can narrow the detail column without folding
-    /// the device. Keep the companion in this column instead of presenting a
-    /// sheet over the app; only the simultaneous two-pane layout needs 600pt.
     private var showsCompanionTabs: Bool {
         (availableWorkbenchWidth ?? chatWidth) >= 420
             && (availableWorkbenchHeight ?? .infinity) >= 500
@@ -931,8 +848,6 @@ struct ClientChatThread: View {
         .background(Theme.background)
     }
 
-    /// The chat's name and its project, on a glass chip. On a phone it is
-    /// also the way to another chat, so it says so with a small chevron.
     private func titleChip(_ chat: ChatConversation, opensMenu: Bool) -> some View {
         HStack(spacing: Theme.Space.xs) {
             VStack(spacing: 1) {
@@ -964,8 +879,6 @@ struct ClientChatThread: View {
 
     private func setControlsCollapsed(_ collapsed: Bool) {
         guard isActive else { return }
-        // Reading and live-follow move the transcript in both directions.
-        // Keep this explicit choice until the reader shows the controls again.
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
             chromeCollapsed = collapsed
         }
@@ -1046,8 +959,6 @@ struct ClientChatThread: View {
         }
     }
 
-    /// The folder's uncommitted work and the branch's pull request, above
-    /// the composer, as on the Mac.
     @ViewBuilder
     private var changesRow: some View {
         ChatGitStatusStrip(git: folderGit, pull: branchPull, review: { reviewingChanges = true })
@@ -1055,9 +966,6 @@ struct ClientChatThread: View {
             .padding(.bottom, Theme.Space.xs)
     }
 
-    /// The strip above the composer belongs to the folder, so moving between
-    /// chats in one folder keeps it while it is checked again. Clearing it
-    /// on every open emptied the strip and moved the composer twice.
     private func loadFolderState() async {
         guard let folder, let peer = model.peer, model.savedCopy == nil else {
             folderGit = nil
@@ -1091,10 +999,6 @@ struct ClientChatThread: View {
         model.chats.first { $0.id == chatID } ?? model.selected.flatMap { $0.id == chatID ? $0 : nil }
     }
 
-    /// Files, Changes and History for this folder, beside the transcript.
-    /// Regular both ways only (iPad, an open iPhone Duo): compact layouts push
-    /// the same surface instead, and a large iPhone in landscape is compact
-    /// down, so it stays the phone layout.
     private var showsToolsPane: Bool {
         showingToolsPane
             && ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
@@ -1138,8 +1042,6 @@ struct ClientChatThread: View {
         .background(Theme.background)
     }
 
-    /// What a pin files this conversation under. Nothing without an account
-    /// scope, a verified peer and the folder it belongs to.
     private var pinReference: WorkReference? {
         guard let scope = account.account?.pinnedWorkScope,
               let peer = model.peer, !peer.isEmpty,
@@ -1165,23 +1067,15 @@ struct ClientChatThread: View {
             try requireCurrent()
             _ = try await Bridge.setTunnel(true)
             try requireCurrent()
-            // Access and protocol checks are shared with desktop in ChatModel.
         }
     }
 
-    /// One explicit round trip on return. The poll loop restarts on its own
-    /// but sleeps first, so without this the transcript sits a full interval
-    /// stale with no strip to say so. Never a re-select: that empties the
-    /// transcript and reads it back, which is the screen blanking. Stale
-    /// complaints die with the attempt, like the list.
     private func foregroundRefresh() async {
         guard isActive, !Task.isCancelled, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
         model.error = nil
         if let selected = model.selected, model.events.isEmpty {
-            // An older host could return an empty page at the archive's end.
-            // A tail poll at that cursor cannot recover the missing history.
             await model.select(selected)
         } else {
             await model.poll()
@@ -1437,8 +1331,6 @@ struct ClientChatThread: View {
                     }
             }
         }
-        // Asked again when a turn ends, since the agent may have changed
-        // files or opened the pull request.
         .task(id: "\(model.busy)|\(isActive)|\(model.folderID ?? "")") {
             guard isActive, !model.busy else { return }
             await loadFolderState()
@@ -1456,9 +1348,6 @@ struct ClientChatThread: View {
         .task(id: chatID) { await loadChat() }
         .task(id: "live-\(chatID)-\(scenePhase == .active)-\(isActive)") {
             guard scenePhase == .active, isActive else { return }
-            // Transcript events must not cancel an in-flight capability probe.
-            // Retry after offline launch or account verification and heartbeat
-            // quiet runs even when no new transcript event is produced.
             while !Task.isCancelled {
                 await updateLiveActivity()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
@@ -1564,13 +1453,7 @@ struct ClientChatThread: View {
             follow.freeze()
             UserPresence.shared.leaveChatSurface(owner: presenceOwner)
         }
-        // The host is on the other computer and cannot see this screen. Until
-        // it is told, a turn finishing here pushed to this very phone.
         .watching(conversationID: chatID, peer: model.peer, isActive: isActive && model.savedCopy == nil)
-        // Optimistic while offline. A modal for a failure the recovery pass
-        // is about to erase is a popup, not information: the strip says
-        // reconnecting, the foreground refresh retries, and anything still
-        // broken once back online raises its own error then.
         .modifier(ChatFileTransferControls(model: model, cancelOnDisappear: session == nil))
         .modifier(ChatCacheWarningAlert(model: model, isActive: isActive))
         .modifier(AgentUpdatePromptSheet(model: model, isActive: isActive))
@@ -1688,17 +1571,11 @@ struct ClientChatThread: View {
 
     private func loadChat() async {
         guard !Task.isCancelled, isActive else { return }
-        // A first task offered by setup, put in the composer rather than
-        // sent. Only into an empty one, only once, and only for the folder
-        // setup opened: any other thread mounting first must not consume it.
         if model.draft.isEmpty, let scope = navigation.folderID,
            let offered = navigation.takeSuggestedPrompt(for: scope) {
             model.draft = offered
         }
         guard let chat = model.chats.first(where: { $0.id == chatID }) else { return }
-        // An already loaded page can be empty while the first upload or
-        // sign-in waits. Re-selecting it would put the loading cover back
-        // over the reader prepared by the new-chat screen.
         if model.savedCopy == nil && (model.selected?.id != chat.id
             || (model.transcriptItems.isEmpty && !model.hasPreparedInitialTranscript)) {
             guard !Task.isCancelled, isActive else { return }
@@ -1743,8 +1620,6 @@ struct ClientChatThread: View {
                 ChatSharingNotice(model: model)
                     .padding(.horizontal, Theme.Space.s)
             }
-            // A saved copy explains itself above the composer: what the
-            // rows are, when they were kept, and the way back to live.
             if let copy = model.savedCopy {
                 ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy,
                     canCheck: model.currentReference?.scope == WorkSessionContext.shared.scope) {
@@ -1752,8 +1627,6 @@ struct ClientChatThread: View {
                 }
                 .padding(.horizontal, Theme.Space.s)
             }
-            // Pending writing stays available offline for copying or cancellation.
-            // Sending and receipt checks require a live, verified owner.
             if !model.isSharedSource, let note = chat.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
                 ChatSteerNoteBanner(
                     note: note,
@@ -1892,14 +1765,6 @@ struct ClientChatThread: View {
                 .equatable()
             }
         }
-        // No geometry readers mid-fling: each one reports per
-        // frame, and a fast scroll turns those reports into a
-        // transaction per frame that placement never drains.
-        // Readers return 0.35s after the last moved frame, via
-        // `scrolling`, before any paging decision needs them.
-        // Also wherever the reader has stopped above the
-        // latest turn: that place is worth keeping. Never
-        // mid-scroll, which is a report per row per frame.
         .clientTranscriptRowFrame(
             item.id,
             watched: (!follow.scrolling || (follow.settling && !follow.pinned))
@@ -1911,22 +1776,13 @@ struct ClientChatThread: View {
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
-        // Once per pass, not once per reader of it. `visibleItems` copies the
-        // window out of the conversation every time it is asked, and the
-        // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
-        // The same split as the Mac: a docked slice with little to lay out
-        // is measured whole, so starting to scroll has no estimates to
-        // correct under the reader's finger. See `TranscriptMeasuredTail`.
         let split = measuredTail.split(rows, generation: model.selectionGeneration,
                                       streaming: model.busy, docked: follow.pinned || follow.settling)
         let reading = model.readingIdentity
         return ScrollViewReader { proxy in
             ScrollView {
-                // Keep the bottom target measured even when a tall lazy row
-                // is offscreen. Following must reach a real frame, not walk
-                // toward an estimate until its correction budget runs out.
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                         if hiddenAboveCount > 0 {
@@ -1949,7 +1805,6 @@ struct ClientChatThread: View {
                     // See the Mac transcript: a lazy stack that gave all its
                     // rows away keeps the size it estimated for them.
                     .id(split.lazy.isEmpty)
-                    // See `TranscriptSlice.measuredTail`.
                     ForEach(split.measured) { item in
                         transcriptRow(item, chat: chat, spinning: spinning)
                     }
@@ -1970,11 +1825,7 @@ struct ClientChatThread: View {
                         TranscriptBottomSentinel()
                     }
                 }
-                // Rows report their place in the transcript here. See
-                // `TranscriptWindow.noteContentTop`.
                 .coordinateSpace(name: TranscriptFollow.contentSpaceName)
-                // Empty space still takes taps so a short transcript can hide
-                // the keyboard, not only a fling on a long one.
                 .contentShape(Rectangle())
                 .allowsHitTesting(!model.isShowingCachedTranscript)
                 .environment(\.streamingWordsPaused, follow.showJump || sliceOffset > 0)
@@ -2000,12 +1851,6 @@ struct ClientChatThread: View {
             .transcriptOpensAtEnd()
             .chatDropSurface(enabled: acceptsDrops, isTargeted: $transcriptDropTargeted, receive: receive)
             .scrollDismissesKeyboard(.immediately)
-            // No tap-to-dismiss gesture here: `.scrollDismissesKeyboard`
-            // already hides the keyboard on scroll, and a transcript-wide
-            // tap gate fires on attachment taps, link taps and text
-            // selection too.
-            // The composer has its own area in every mobile layout. Keep the
-            // transcript and follow controls clear above it.
             .clientHideScrollEdgeEffect(for: .bottom)
             // Cover the build-up, do not hide the stack. Opacity 0 is how a
             // lazy stack skipped measuring the last prompt until a later
@@ -2041,9 +1886,6 @@ struct ClientChatThread: View {
                 TranscriptProbe.shared.scrolling = follow.scrolling
                 TranscriptProbe.shared.built = visibleItems.count
                 #endif
-                // The slice flag first: note() treats a hidden newest as
-                // far from the end. Then the pin, then the window, which
-                // has to see that decision on the same frame.
                 follow.sliceHidesNewest = sliceOffset > 0
                 follow.note(metrics)
                 window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
@@ -2073,8 +1915,6 @@ struct ClientChatThread: View {
                                     revealEarlier: revealEarlier, revealLater: revealLater,
                                     holdSliceStart: holdSliceStart)
             #if DEBUG
-            // `notifyutil -p ai.tokenstat.debug.<track|perf-start|perf-stop|where>`
-            // in the simulator, the phone's side of the Mac's debug keys.
             .onAppear { ClientDebugHooks.start() }
             .onReceive(NotificationCenter.default.publisher(for: ClientDebugHooks.command)) { note in
                 guard isActive, let command = note.object as? String else { return }
@@ -2115,9 +1955,6 @@ struct ClientChatThread: View {
                 follow.suppressed = !ids.isEmpty
                 if follow.pinned, let id = ids.first { scrollTarget = "approval-\(id)" }
             }
-            // A scroll that has come to rest is a reader who has stopped
-            // somewhere. Wait a beat for the rows to say where they are:
-            // they report on the update this change itself causes.
             .onChange(of: follow.scrolling) { _, moving in
                 readingFrames.cancelCapture()
                 guard !moving, isActive, follow.active else { return }
@@ -2126,8 +1963,6 @@ struct ClientChatThread: View {
             .onChange(of: detail.level) { _, _ in
                 beginViewportChoice()
             }
-            // A request that arrives mid-stream would otherwise be pushed off
-            // a short viewport before anybody saw it.
             .onChange(of: model.approvals.first?.id) { _, id in
                 guard let id else { return }
                 scrollTo("approval-\(id)", proxy, animated: true)
@@ -2242,8 +2077,6 @@ struct ClientChatThread: View {
                         }
                     }
                 }
-                // Fetch time does not spend the layout-settling budget. Slow
-                // hosts used to exhaust every correction before rows arrived.
                 while model.openingConversation {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, isActive, follow.active,
@@ -2267,8 +2100,6 @@ struct ClientChatThread: View {
                 model.viewportContinuity.record(.latest, generation: generation, owner: presenceOwner)
                 follow.jump()
                 showNewest()
-                // Same as the Mac: hold the end until the conversation has
-                // stopped arriving, not for a fixed count of frames.
                 var quiet = 0
                 var correctionPins = 0
                 for _ in 0..<40 {
@@ -2278,9 +2109,6 @@ struct ClientChatThread: View {
                           reference == model.currentReference,
                           model.viewportContinuity.canPlace(generation: generation, currentGeneration: model.selectionGeneration, owner: presenceOwner,
                               ticket: ticket, currentTicket: settleTaskID) else { return }
-                    // A lazy-stack scroll walks every row between here and
-                    // the end. Limit settling corrections; geometry-based
-                    // repinning handles later height changes.
                     if !follow.atEnd, correctionPins < 8 {
                         correctionPins += 1
                         pinToLatest(proxy, animated: false)
@@ -2300,13 +2128,6 @@ struct ClientChatThread: View {
         }
     }
 
-    /// Stage the bytes under the file's real name and hand them to Quick
-    /// Look, which plays video, renders text and PDF, shows images, and
-    /// carries the share sheet that Save to Files lives in.
-    ///
-    /// Staging every time rather than once: the copy sits in a cache that is
-    /// pruned on a budget, so the one made when the row first appeared may
-    /// well be gone by the time somebody taps it.
     private func open(_ attachment: ChatAttachment, data: Data) {
         guard isActive, let reference = model.currentReference, WorkCacheAccess.canRead(reference) else { return }
         pendingFileOpen = PendingFileOpen(attachment: attachment, data: data, reference: reference,
@@ -2378,12 +2199,6 @@ struct ClientChatThread: View {
                 }
             }
         }
-        // Presented from this sheet, because the button that opens it is in
-        // this sheet. Two `.sheet` modifiers on one view are not two
-        // presentations: while the first is up the second is ignored, so
-        // Personas did nothing until Done put the setup sheet away, and then
-        // opened over the transcript. Done here comes back to setup. The
-        // account sheet already learned this for its paywall.
         .sheet(isPresented: $showingPersonas) {
             PersonaEditor(model: model, onClose: { showingPersonas = false })
         }
@@ -2443,8 +2258,6 @@ struct ClientChatThread: View {
     /// message of a new chat for the length of the settle budget.
     @State private var opening = false
 
-    /// Whether the wireframe is up: an opening is under way, it has not
-    /// settled, and no cached preview is standing in for it.
     private var showsSkeleton: Bool {
         hasPendingViewport || (opening && !transcriptReady && model.recentMessagePreview.isEmpty)
     }
@@ -2458,8 +2271,6 @@ struct ClientChatThread: View {
     }
 
 
-    /// A reopened transcript owns its new viewport and places it at the end.
-    /// Only a jump within the current transcript may use this scroll proxy.
     private func returnToLatest(_ proxy: ScrollViewProxy, for reading: ChatReadingIdentity) async {
         guard !Task.isCancelled, isActive, reading == model.readingIdentity,
               !model.openingConversation, !follow.settling else { return }
@@ -2493,21 +2304,16 @@ struct ClientChatThread: View {
         }
     }
 
-    /// How many frames one press of Jump to latest may spend arriving.
     private static let chaseFrames = 24
 
-    /// Rows the transcript builds this pass. Same slice as the Mac.
     private var visibleItems: [ChatDisplayItem] {
         TranscriptSlice.items(model.transcriptItems, olderOffset: sliceOffset)
     }
 
-    /// Rows above the built slice. Zero while the whole conversation fits.
     private var hiddenAboveCount: Int {
         TranscriptSlice.hiddenAbove(count: model.transcriptItems.count, olderOffset: sliceOffset)
     }
 
-    /// `olderOffset` counted from the live end, or the offset that still
-    /// starts on `sliceAnchor` after rows arrived above or below.
     private var sliceOffset: Int {
         if olderOffset > 0, !sliceAnchor.isEmpty {
             return TranscriptSlice.holding(sliceAnchor, in: model.transcriptItems, current: olderOffset)
@@ -2519,8 +2325,6 @@ struct ClientChatThread: View {
         applySlice(0)
     }
 
-    /// Keep the slice on the row it starts on while a page lands (`true`),
-    /// then let a slice the page did not move glue to the end again.
     private func holdSliceStart(_ holding: Bool) {
         if holding {
             let start = visibleItems.prefix(8).map(\.id)
@@ -2533,19 +2337,12 @@ struct ClientChatThread: View {
         }
     }
 
-    /// Slide the built slice towards the start, holding the reader's row
-    /// where it is. See the Mac transcript's `revealEarlier`.
     private func revealEarlier() {
-        // The window's flag runs ahead of the view after a page lands. With
-        // nothing actually above the slice, ask the archive instead of
-        // sliding a slice that cannot move, which was a loop at the top of
-        // the conversation with nothing loading.
         guard hiddenAboveCount > 0 else {
             window.hasHiddenEarlierRows = false
             window.ask()
             return
         }
-        // Never drop a row the reader can see from the bottom of the slice.
         let room = window.slideRoom(in: visibleItems.map(\.id), later: false)
         guard room > 0 else { return }
         follow.stopFollowing()
@@ -2557,14 +2354,11 @@ struct ClientChatThread: View {
         )
     }
 
-    /// Slide back towards the newest rows as the reader reaches the end of
-    /// the slice, holding the place across the rows dropped above.
     private func revealLater() {
         guard sliceOffset > 0 else {
             window.hasHiddenLaterRows = false
             return
         }
-        // Nor from its top.
         let room = window.slideRoom(in: visibleItems.map(\.id), later: true)
         guard room > 0 else { return }
         window.holdPlace("slide-later")
@@ -2575,8 +2369,6 @@ struct ClientChatThread: View {
         )
     }
 
-    /// Slide the built window and remember its first row so later inserts
-    /// cannot replace what is on screen.
     private func applySlice(_ offset: Int) {
         let clamped = TranscriptSlice.clampOffset(offset, count: model.transcriptItems.count)
         olderOffset = clamped
@@ -2591,8 +2383,6 @@ struct ClientChatThread: View {
         }
     }
 
-    /// Let the scroll callback put the viewport back on the end. Weak on the
-    /// state, which owns the closure.
     private func installRepin(_ proxy: ScrollViewProxy) {
         let state = follow
         let model = model
@@ -2608,10 +2398,6 @@ struct ClientChatThread: View {
         }
     }
 
-    /// Whether a scroll to the end is the actual latest turn.
-    ///
-    /// The ForEach is a bounded slice, so walking it is cheap. A slice that
-    /// has dropped the newest rows is not the end.
     private var canScrollToEnd: Bool { sliceOffset == 0 }
 
     /// A lazy stack can be left holding none of its rows while the scroll
@@ -2638,7 +2424,6 @@ struct ClientChatThread: View {
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard isActive, scenePhase == .active, follow.active else { continue }
-            // Placement and explicit jumps own their corrections while settling.
             let showsRows = rowMounts.showsRows(viewportHeight: window.viewportHeight)
             if showsRows || visibleItems.isEmpty
                 || model.openingConversation || follow.settling || follow.scrolling || scrollAccess.readerIsTouching {
@@ -2650,10 +2435,6 @@ struct ClientChatThread: View {
             guard consecutiveEmptySamples >= 2, scrollAccess.isEligible else { continue }
             consecutiveEmptySamples = 0
             traceViewport("unmounted-repair")
-            // A screen's move first. If the stack is still empty after it,
-            // its estimates are too far off for any move to reach a row:
-            // start a new scroll view, as leaving and reopening the chat
-            // does. Placement then restores the end or the reading place.
             if nudged {
                 guard rebuilds < 3, Date().timeIntervalSince(lastTranscriptRebuild) > 5 else { continue }
                 lastTranscriptRebuild = Date()
@@ -2668,7 +2449,6 @@ struct ClientChatThread: View {
                   let originalOffset = scrollAccess.view?.contentOffset.y else { continue }
             let following = follow.pinned || follow.atEnd
             let screen = scrollAccess.viewportHeight
-            // Up a screen where there is room, down a screen at the top.
             let step = scrollAccess.canMove(by: -screen) ? -screen : screen
             follow.markDrivenInstant()
             guard scrollAccess.nudge(by: step) else { continue }
@@ -2687,8 +2467,6 @@ struct ClientChatThread: View {
     }
 
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
-        // A pending request owns the view. Streaming text must not scroll it
-        // out from under somebody who is reading it to decide.
         guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner),
               follow.pinned, model.approvals.isEmpty else { return }
@@ -2726,8 +2504,6 @@ struct ClientChatThread: View {
               !follow.pinned || follow.atEnd else { return }
         let position = readingPosition()
         traceViewport("sample", position: position)
-        // A preference pass can arrive before the local native reporter.
-        // Keep gesture permission until fresh geometry supplies a real row.
         guard position != .unknown else { return }
         TranscriptReading.record(position, for: model.currentReference)
         model.viewportContinuity.recordMeasurement(position,
@@ -2737,8 +2513,6 @@ struct ClientChatThread: View {
         readingFrames.captureReady = false
     }
 
-    /// A deliberate row jump or disclosure changes what the reader chose to
-    /// see. Retire the old hold now; measure the new choice after it settles.
     private func beginViewportChoice() {
         guard isActive, follow.active,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
@@ -2820,9 +2594,6 @@ struct ClientChatThread: View {
         model.viewportContinuity.release(generation: model.selectionGeneration, owner: presenceOwner)
     }
 
-    /// A layout can move an older row after placement has converged. Perform
-    /// measured corrections after layout, with a fixed budget and no history
-    /// writes. Reader input and explicit latest always take over immediately.
     private func holdViewport(_ proxy: ScrollViewProxy) {
         guard viewportPlaced, preservesReadingMark, !follow.settling,
               scenePhase == .active, let attachment = scrollAccess.attachmentIdentity, scrollAccess.matches(attachment),
@@ -2847,8 +2618,6 @@ struct ClientChatThread: View {
                 return !group.open && row.id == "g:\(mark.eventID)"
             }?.id
             guard let id = closedHeader ?? ChatReadingAnchor.resolve(mark.eventID, items: rows, events: model.events) else { return }
-            // A native reflow can briefly report the end. Kept reading intent
-            // owns this correction and suppresses any pending end repin.
             if follow.pinned { follow.stopFollowing() }
             if let frame = readingFrames.frames[id] {
                 let result = scrollAccess.correct(mark, frame: frame,
@@ -2874,16 +2643,12 @@ struct ClientChatThread: View {
         #endif
     }
 
-    /// Explicit navigation wins. Otherwise only the same live selection may
-    /// resume its viewport; passive history never moves a new selection.
     private func restoreReadingPlace(_ proxy: ScrollViewProxy, attachment: ChatViewportAttachmentIdentity) async -> TranscriptReading.Restoration {
         guard scenePhase == .active, scrollAccess.matches(attachment),
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner),
               let reference = model.currentReference,
               let mark = ChatReadingStore.shared.takeRequest(for: reference)
                 ?? model.viewportContinuity.mark(generation: model.selectionGeneration) else { return .unavailable }
-        // Keep explicit navigation before the first await, so a cancelled
-        // presentation hands the same requested row to its successor.
         model.viewportContinuity.record(.away(mark), generation: model.selectionGeneration, owner: presenceOwner)
         traceViewport("restore", mark: mark)
         let generation = model.selectionGeneration
@@ -2914,8 +2679,6 @@ struct ClientChatThread: View {
         }
     }
 
-    /// Put one row where the reader had it, with the rest of the conversation
-    /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
         guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
@@ -2931,14 +2694,8 @@ struct ClientChatThread: View {
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
         guard isActive, follow.active, scenePhase == .active, scrollAccess.isEligible,
               model.viewportContinuity.owns(generation: model.selectionGeneration, owner: presenceOwner) else { return }
-        // Every scroll here is programmatic. Say so, or the frames of the
-        // animation read as the reader leaving and unpin mid-flight.
-        // Instant pins land on the same frame and only need a short window.
-        // The end always exists. Anything else may sit outside the built
-        // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
             beginViewportChoice()
-            // A target folded into a step group opens it first.
             model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
         } else {
@@ -2962,8 +2719,6 @@ struct ClientChatThread: View {
                         updateAnswered: Bool = false) {
         guard isActive, model.selected?.id == chat.id, model.unconfirmedSend == nil else { return }
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        // An attached image is content on its own: text is only mandatory
-        // when there is nothing attached.
         guard !model.isSharedSource, !text.isEmpty || !model.attachments.isEmpty, !model.sending else { return }
         if model.consumeChatCommand() { return }
         ClientReviewPrompt.noteUse()
@@ -2976,15 +2731,9 @@ struct ClientChatThread: View {
             followPulse += 1
             return
         }
-        // Enqueue first: a full queue reports an error and returns nil, and
-        // the words must survive that path rather than being wiped.
         if sendNow {
             guard let item = model.enqueue(text, atFront: true) else { return }
             model.clearDraft()
-            // Sending is engaging: follow is the default, so a new turn resumes
-            // it even if it was paused before. Pausing again is one tap. Hide the
-            // keyboard and snap to the end so the next tokens are not off-screen
-            // above a closed keyboard.
             showNewest()
             resumeLatest()
             followPulse += 1
@@ -3011,9 +2760,6 @@ struct ClientChatThread: View {
                 return
             }
         }
-        // The agent this chat runs on is behind. Offer the update before the
-        // message goes, once per version, as on the Mac. The words stay in
-        // the composer until the answer.
         if !updateAnswered, model.updatingAgentID == nil,
            AgentUpdatePrompt.isDue(model.backend(for: chat.backend), peer: model.peer),
            let backend = model.backend(for: chat.backend) {
@@ -3035,8 +2781,6 @@ struct ClientChatThread: View {
             askBeforeColdSend(chat, text: text, idleMs: idle, tokens: cache.tokens)
             return
         }
-        // The composer empties, the stored copy does not: it is dropped when
-        // the host has the words and put back when it refuses them.
         guard model.holdDraftForSending(text) else { return }
         showNewest()
         resumeLatest()
@@ -3046,8 +2790,6 @@ struct ClientChatThread: View {
 
     private func askBeforeColdSend(_ chat: ChatConversation, text: String, idleMs: Int64, tokens: UInt64) {
         let peer = model.peer
-        // Files are uploaded into this chat, so a message carrying them
-        // cannot move to another one.
         let movable = model.attachments.isEmpty && model.savedCopy == nil
         Task { @MainActor () -> Void in
             let canStart = movable ? await RemoteHostFeature.chatContinue.isSupported(peer: peer) : false
@@ -3071,8 +2813,6 @@ struct ClientChatThread: View {
                                               tokens: tokens, proceed: proceed)
     }
 
-    /// Move this message into a new chat that continues this one, and send it
-    /// there. The words go back where they were if the new chat cannot be made.
     private func continueInNewChat(_ text: String, from chat: ChatConversation) {
         guard model.selected?.id == chat.id,
               model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == text,
@@ -3256,9 +2996,6 @@ private final class ClientTranscriptScrollAccess {
         readinessSource = nil
     }
 
-    /// A fade can become visible without new geometry. Probe only this
-    /// attached instance for a bounded episode; hidden layout frames cannot
-    /// keep replenishing its budget.
     private func startReadinessIfNeeded() {
         guard readinessTask == nil, liveAttachmentIdentity == nil, let identity = sourceIdentity,
               view?.window?.windowScene?.activationState == .foregroundActive,
@@ -3322,7 +3059,6 @@ private final class ClientTranscriptScrollAccess {
 
     var viewportHeight: CGFloat { view?.bounds.height ?? 0 }
 
-    /// Whether the offset can move by `distance` without hitting an edge.
     func canMove(by distance: CGFloat) -> Bool {
         guard let view else { return false }
         let minimum = -view.adjustedContentInset.top
@@ -3397,8 +3133,6 @@ private final class ClientTranscriptScrollAccess {
     }
 }
 
-/// Paging owns its named-coordinate dictionary and may clear it. Reading
-/// measurements belong to this presentation and never invalidate the body.
 @MainActor
 private final class ClientTranscriptReadingFrames {
     var frames: [String: CGRect] = [:]
@@ -3476,8 +3210,6 @@ enum ClientViewportTrace {
         append(line)
     }
 
-    /// The simulator drops a launch's stdout redirect, so a debug trace
-    /// also lands in the app's caches folder.
     static func append(_ line: String) {
         guard enabled, let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
         let url = folder.appendingPathComponent("viewport-trace.log")
@@ -3493,8 +3225,6 @@ enum ClientViewportTrace {
 }
 #endif
 
-/// A compact review surface beside the transcript. The full Changes screen
-/// owns commit and sync controls; this one gives the diff the available space.
 private struct ClientChatChangesCompanion: View {
     let peer: String
     let workspaceID: String
@@ -3628,8 +3358,6 @@ private struct ClientChatChangesCompanion: View {
     }
 }
 
-/// Keep pointer-rate drag state below the chat thread. Updating the thread's
-/// own @State on every move rebuilds its transcript and composer.
 @MainActor @Observable private final class ClientChatResizeState {
     private(set) var liveWidth: CGFloat?
     @ObservationIgnored private var origin: CGFloat?
@@ -3669,8 +3397,6 @@ private struct ClientChatResizeFrame: ViewModifier {
     }
 }
 
-/// Keep the live drag outside the transcript's @State. A width change still
-/// lays out the content, but it does not rebuild every visible chat row.
 @MainActor @Observable final class ClientChatSidebarResizeState {
     private(set) var liveWidth: CGFloat?
     @ObservationIgnored private var origin: CGFloat?
@@ -3693,12 +3419,6 @@ private struct ClientChatResizeFrame: ViewModifier {
     func reset() { origin = nil; liveWidth = nil }
 }
 
-/// How a phone moves between chats: back to the list, or across to another
-/// chat in the same project from the title.
-///
-/// Built from the platform's own pieces, a back button, the edge swipe and a
-/// title menu, so it moves the way every other iPhone app does. A drawer was
-/// tried first and read as a second app inside this one.
 struct ClientChatSwitcher {
     let chats: [ChatConversation]
     let isUnread: (ChatConversation) -> Bool
@@ -3706,7 +3426,6 @@ struct ClientChatSwitcher {
     let onSelect: (ChatConversation) -> Void
     let onNewChat: () -> Void
 
-    /// The newest first, capped so the menu fits a phone without scrolling.
     var recent: [ChatConversation] {
         Array(chats.sorted {
             ($0.lastMessageAtMs ?? $0.updatedAtMs) > ($1.lastMessageAtMs ?? $1.updatedAtMs)
@@ -3714,7 +3433,6 @@ struct ClientChatSwitcher {
     }
 }
 
-/// The title of an open chat on a phone, and the menu behind it.
 struct ClientChatSwitcherMenu<Title: View>: View {
     let switcher: ClientChatSwitcher
     let currentID: String
@@ -3728,8 +3446,6 @@ struct ClientChatSwitcherMenu<Title: View>: View {
             }
             Section(place) {
                 ForEach(switcher.recent) { chat in
-                    // Every row carries a glyph so the names line up, and the
-                    // glyph is the row's state: here, working, unread, or quiet.
                     Button { switcher.onSelect(chat) } label: {
                         Label(name(chat), systemImage: symbol(chat))
                     }
@@ -3747,8 +3463,6 @@ struct ClientChatSwitcherMenu<Title: View>: View {
         .accessibilityHint(L10n.text("apple.clientchatview.switch_chats_hint"))
     }
 
-    /// One line. A menu wraps a long first prompt over three rows otherwise,
-    /// and a list of chats turns into a list of paragraphs.
     private func name(_ chat: ChatConversation) -> String {
         let title = chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ")
@@ -3875,8 +3589,6 @@ private struct ClientChatResizeDivider: View {
     }
 }
 
-/// Attach an existing host session or start any installed launcher beside a
-/// chat. Leaving the pane detaches its view without stopping the host process.
 private struct ClientChatTerminalCompanion: View {
     let peer: String
     let workspaceID: String
@@ -4087,7 +3799,6 @@ private struct ClientTranscriptScrollReporter: UIViewRepresentable {
 #if DEBUG
 import notify
 
-/// Debug commands from outside the app, as Darwin notifications.
 enum ClientDebugHooks {
     static let command = Notification.Name("ai.tokenstat.client.debug")
     private nonisolated(unsafe) static var started = false

@@ -17,13 +17,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 
-/// Delivers pushes the server addressed to this device.
-///
-/// The payload carries a fixed reason plus a machine id only, never free
-/// text: the banner is composed here from the reason, and anything off the
-/// allowlist is dropped rather than rendered. Tapping a chat or waiting-run
-/// delivery carries the machine id into the app so the refreshed directory
-/// can resolve it; every other reason only informs.
 class TokenstatMessagingService : FirebaseMessagingService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -38,9 +31,6 @@ class TokenstatMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: com.google.firebase.messaging.RemoteMessage) {
-        // The data map is the whole payload. A server-composed notification
-        // body or title would be free text riding somebody else's server, so
-        // both are ignored on purpose: only reason plus machine are read.
         if (!PushRegistrar.isOn()) return
         val delivery = PushPayload.parse(message.data) ?: return
         if (VisibleChat.suppresses(delivery.reason, delivery.machine)) return

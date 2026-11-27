@@ -32,10 +32,6 @@ import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// A checkbox in the app's colours. Ported from `BrandCheckboxStyle` in
-/// `Sources/Design/Theme.swift`: the stock checkbox is a small grey circle
-/// on a dark panel, so a tick in an accent box says the same thing and
-/// belongs to this app. The whole row is the tap target.
 @Composable
 fun BrandCheckbox(
     checked: Boolean,
@@ -83,9 +79,6 @@ fun BrandCheckbox(
     }
 }
 
-/// A check that wears the theme, not the platform default. Ported from
-/// `ThemeCheckDisc`: accent-filled with a white check when on, a quiet ring
-/// when off. The disc never handles the touch; the row around it does.
 @Composable
 fun BrandCheckDisc(on: Boolean, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -112,11 +105,6 @@ fun BrandCheckDisc(on: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
-/// The one switch the app keeps, in the app's colours. A `Switch` left
-/// untinted draws the platform default, and a default-coloured control in
-/// this app reads as a control from another app. Single flags that can be a
-/// chip should be a `BrandToggleChip` instead; this is for rows where the
-/// platform switch is the expected shape, like notifications.
 @Composable
 fun TsBrandSwitch(
     checked: Boolean,

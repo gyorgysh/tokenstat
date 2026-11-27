@@ -50,8 +50,6 @@ struct TeamManagementView: View {
                 else { hubToolbar }
             }
             #if os(iOS)
-            // A phone's bar has no room for one more item, so the note sits
-            // at the top of the screen instead.
             if !compactReader {
                 HStack { TeamPreviewBadge(); Spacer(minLength: 0) }
                     .padding([.horizontal, .top], Theme.Space.m)
@@ -115,8 +113,6 @@ struct TeamManagementView: View {
         }
         #if !os(macOS)
         .toolbar {
-            // One control in a phone's crowded bar. Four icons pushed the
-            // app's own name into an ellipsis.
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if store.phase == .ready && !store.browsingProjects {
@@ -136,8 +132,6 @@ struct TeamManagementView: View {
         #endif
     }
     #if os(macOS)
-    /// The organization being looked at, named where every scoped screen
-    /// names its scope.
     private var chromeScope: ScopeChip? {
         guard store.phase == .ready else { return nil }
         if store.browsingProjects { return ScopeChip(label: L10n.text("common.teams.shared_projects"), symbol: "folder.fill.badge.person.crop") }
@@ -161,15 +155,11 @@ struct TeamManagementView: View {
                 Button(L10n.text("common.refresh"), .refresh) { refresh() }.buttonStyle(TeamButtonStyle())
             }
         case .authorization:
-            // A signed-in device turns Teams on by itself. Only a device the
-            // person removed from Teams lands here, so say that plainly.
             let removed = store.capabilities?.deviceRemoved == true
             EmptyState(symbol: "person.2",
                 title: removed ? L10n.text("common.teams.device_removed_title") : L10n.text("common.teams.enable_title"),
                 message: removed ? L10n.text("common.teams.device_removed_detail") : L10n.text("common.teams.enable_detail")) {
                 VStack(spacing: Theme.Space.m) {
-                    // Teams should have turned on by itself. When it did not,
-                    // say which step stopped it, with the code to report.
                     if !removed, let issue = store.capabilities?.setupIssue {
                         TeamNotice(message: L10n.text("common.teams.setup_issue", issue.message, issue.code), warning: true)
                             .frame(maxWidth: 420)
@@ -282,8 +272,6 @@ struct TeamManagementView: View {
             !rows.contains(where: { $0.id == focused.id }) { return rows + [focused] }
         return rows
     }
-    /// The team list and every shared project are the two views of the same
-    /// place, so they are its tabs, the way Devices and Access are.
     @ViewBuilder private var hubToolbar: some View {
         #if os(macOS)
         TeamToolbarRow {
@@ -299,8 +287,6 @@ struct TeamManagementView: View {
         }
         #endif
     }
-    /// The trailing actions of an organization's toolbar row: what this
-    /// section adds to, never navigation.
     @ViewBuilder private func sectionActions(_ directory: TeamDirectorySnapshot) -> some View {
         let organization = directory.details.organization
         switch store.section {

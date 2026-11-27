@@ -46,18 +46,10 @@ import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 
 private val barShape = RoundedCornerShape(4.dp)
 
-/// One grey bar standing in for a line of text or a number.
-///
-/// [width] of null fills the space, which is what a title or a row wants. A
-/// soft opacity pulse (when motion is allowed) keeps the layout alive without
-/// a shimmer that steals attention from the data about to land. [phaseMillis]
-/// offsets neighbouring bars so they do not pulse in lockstep.
 @Composable
 fun SkeletonBar(width: Dp? = null, height: Dp = 12.dp, phaseMillis: Int = 0) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
-    // Reduce Motion holds the bar still at full strength, like Apple's nil
-    // animation, rather than running a loop nobody sees.
     val alpha = if (reduceMotion) {
         1f
     } else {
@@ -84,10 +76,6 @@ fun SkeletonBar(width: Dp? = null, height: Dp = 12.dp, phaseMillis: Int = 0) {
     )
 }
 
-/// A stack of rows, each a label bar and a value bar, like a list. Widths vary
-/// down the stack so it reads as text rather than as a bar chart.
-/// Deterministic, not random: a placeholder that reshuffles on every redraw is
-/// a distraction of its own.
 @Composable
 fun SkeletonRows(count: Int = 5, showsValue: Boolean = true) {
     val labelWidths = listOf(128.dp, 96.dp, 152.dp, 84.dp, 116.dp, 104.dp)
@@ -105,7 +93,6 @@ fun SkeletonRows(count: Int = 5, showsValue: Boolean = true) {
     }
 }
 
-/// A card-shaped placeholder: heading, subheading, and some rows.
 @Composable
 fun SkeletonCard(rows: Int = 3) {
     val colors = LocalTsColors.current
@@ -126,7 +113,6 @@ fun SkeletonCard(rows: Int = 3) {
     }
 }
 
-/// A page of cards still on their way, fading out towards the bottom.
 @Composable
 fun SkeletonPage(count: Int = 4, rows: Int = 2) {
     Column(
@@ -158,7 +144,6 @@ private val transcriptLineGap = 9.dp
 private val transcriptTurnGap = 22.dp
 private val transcriptBubblePadding = 12.dp
 
-/// Loading placeholder for a chat. Fills the pane, newest turn at the bottom.
 @Composable
 fun TranscriptSkeleton(modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current

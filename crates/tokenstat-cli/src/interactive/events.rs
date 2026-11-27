@@ -26,7 +26,6 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
 
             let suggesting = app.showing_suggestions() && !app.filtered_commands().is_empty();
 
-            // When the palette is open, ↑↓ pick a command instead of scrolling.
             if suggesting {
                 match key.code {
                     KeyCode::Up => {
@@ -46,9 +45,6 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
                         app.apply_suggestion();
                         return Ok(());
                     }
-                    // 1-9 run the Nth suggestion directly. The overlay shows the
-                    // number on each row, so this is the fast path past the
-                    // arrow keys. Only applies while the palette is open.
                     KeyCode::Char(c @ '1'..='9') => {
                         let idx = (c as u8 - b'1') as usize;
                         if idx < app.filtered_commands().len() {
@@ -203,9 +199,6 @@ pub(super) fn handle_event(app: &mut App, ev: Event) -> Result<()> {
     Ok(())
 }
 
-/// Keys while a report window (heatmap / wrapped / budget) is open: Esc or q
-/// closes it, arrows and page keys scroll. Everything else is ignored so a
-/// stray keystroke cannot disturb the report.
 pub(super) fn handle_detail_key(
     app: &mut App,
     code: KeyCode,
@@ -376,7 +369,6 @@ pub(super) fn wizard_option_count(wizard: &Wizard) -> usize {
         },
     }
 }
-/// Leave the alternate screen so device login can print the code and wait.
 pub(super) fn run_login_outside_tui(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -390,8 +382,6 @@ pub(super) fn run_login_outside_tui(
     )
     .context("leaving alternate screen for login")?;
 
-    // The terminal is cooked again. Default termination also works while
-    // login or the return prompt is blocked, without running Rust in a handler.
     restore_stop_signal_handlers();
     println!();
     println!("  Linking this machine to tokenstat.ai…");
@@ -418,10 +408,7 @@ pub(super) fn run_login_outside_tui(
     match outcome {
         Ok(result) => {
             app.refresh_sync_hint();
-            // Same as CLI login: sync only runs on a schedule once linked.
             let _ = app.install_linked_schedules(host_flag);
-            // Plain text: the status line is drawn by the TUI, not the
-            // terminal, so ANSI styling would show up as characters.
             app.status = match result.handle.as_deref() {
                 Some(handle) => format!("Logged in as @{handle} · {}", result.host),
                 None => format!("Logged in · {}", result.host),
@@ -440,12 +427,6 @@ pub(super) fn run_login_outside_tui(
     Ok(())
 }
 
-/// Kick off a `/sync` on a worker thread and return.
-///
-/// A sync is a schema fetch plus up to four POST attempts, each with a ten
-/// second connect timeout: on a dead network that is tens of seconds, and the
-/// UI must not sit frozen through it. The status line says what is happening
-/// and [`poll_sync_result`] lands the outcome on the next loop pass.
 pub(super) fn start_sync(app: &mut App, host_flag: Option<&str>) {
     if app.pending_sync.is_some() {
         app.status = "sync already running".into();
@@ -475,7 +456,6 @@ pub(super) fn start_sync(app: &mut App, host_flag: Option<&str>) {
     app.dirty = true;
 }
 
-/// Collect a finished background sync, if any.
 pub(super) fn poll_sync_result(app: &mut App) {
     let Some(rx) = &mut app.pending_sync else {
         return;

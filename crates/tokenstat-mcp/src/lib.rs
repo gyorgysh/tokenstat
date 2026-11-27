@@ -867,11 +867,6 @@ fn host_socket(engine: &Engine) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("host.sock"))
 }
 
-/// Talk to hostd over its local unix socket. Archive tools never come here.
-///
-/// Framing lives in `tokenstat_core::host_rpc::exchange`, shared with the CLI
-/// console, so the timeout, size cap and envelope stay identical in both.
-/// This only adds the MCP-side socket path and its not-running hint.
 fn host_call(engine: &Engine, method: &str, params: Value) -> Result<Value, String> {
     #[cfg(not(unix))]
     {
@@ -942,7 +937,6 @@ fn query_from_args(args: &Value) -> Query {
     }
 }
 
-/// One line from the MCP transport.
 enum Incoming {
     /// A parsed JSON-RPC message.
     Message(Value),

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// These records predate host/account ownership. They are local recovery
-/// material only: no reference is inferred and no outbox adopts them.
 enum ChatLegacyQueueStore {
     private static let prefix = "chat.queuedMessages.v1."
     struct Message: Codable, Equatable, Sendable {
@@ -34,8 +32,6 @@ enum ChatLegacyQueueStore {
         return listing
     }
 
-    /// Only an explicit Remove action deletes a matching legacy copy. A newer
-    /// edit in an older window is left untouched rather than overwritten.
     static func remove(_ draft: Draft, defaults: UserDefaults = .standard) throws {
         guard draft.storageKey.hasPrefix(prefix), let data = defaults.data(forKey: draft.storageKey),
               data.count <= 8 * 1024 * 1024 else { throw CocoaError(.fileReadCorruptFile) }

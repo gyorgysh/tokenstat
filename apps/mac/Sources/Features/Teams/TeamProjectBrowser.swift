@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Projects from every team, reachable without changing the account scope.
-/// Each section loads independently and keeps its own explicit next page.
 struct TeamProjectBrowser: View {
     @Bindable var store: TeamStore
     @State private var organizationId: String?
     @State private var filteredOrganization: TeamOrganization?
-    /// A directory refresh returns its first page. Keep a chosen later-page
-    /// organization until its own authorized project lookup can refresh it.
     private var filterChoices: [TeamOrganization] {
         if let filteredOrganization, !store.organizations.contains(where: { $0.id == filteredOrganization.id }) {
             return store.organizations + [filteredOrganization]
@@ -104,8 +100,6 @@ private struct TeamProjectGroup: View {
             let result: TeamRepositories = try await store.read("repositories.list", fields: ["organization": .string(organization.id),
                 "page": TeamStore.page(offset: more ? nextOffset ?? 0 : 0)], context: context)
             guard request == id else { return }
-            // A project nobody shares any more is not shared with anyone,
-            // unless this computer's own sharing is newer than the count.
             let rows = result.repositories.filter { row in
                 row.organizationId == organization.id && row.role != nil && (row.isShared
                     || store.localProjects.contains { $0.repositoryId == row.id && $0.organizationId == organization.id && $0.phase == "active" })

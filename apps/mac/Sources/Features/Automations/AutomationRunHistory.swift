@@ -4,11 +4,6 @@
 
 import Foundation
 
-/// How a job's runs are ordered and windowed for the library preview and the
-/// history destination.
-///
-/// The host returns the retained list in one read. Live runs stay on the first
-/// page so Stop is never behind Earlier runs. Completed runs are newest first.
 enum AutomationRunHistory {
     static let previewCount = 5
     static let pageSize = 20

@@ -34,8 +34,6 @@ data class BillingState(
     val loading: Boolean = true,
     val products: List<PlanProduct> = emptyList(),
     val error: String? = null,
-    /// Whether Play holds an active subscription of ours to replace. A plan
-    /// change without it would stack a second subscription beside the first.
     val hasPlaySubscription: Boolean = false,
 )
 
@@ -46,17 +44,10 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
     @Volatile var appAccountToken: String? = null
     @Volatile var onActivated: ((JsonElement) -> Unit)? = null
 
-    /// Whether this account has already had a trial, on any store.
-    ///
-    /// The server still reports it for accounts that took one. No plan offers
-    /// a trial now and the paywall always sells the base plan, so this is kept
-    /// only for a future offer that would need the same account-wide gate.
     @Volatile var trialUsed: Boolean = false
         set(value) {
             val changed = field != value
             field = value
-            // The account usually lands after billing has already connected,
-            // so the first query ran without knowing this.
             if (changed && client.isReady) queryProducts()
         }
 
@@ -106,23 +97,12 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 mutableState.update { it.copy(loading = false, error = result.debugMessage) }; return@queryProductDetailsAsync
             }
             val products = found.productDetailsList.flatMap { details ->
-                // One product per tier, one entry per base plan: monthly and
-                // yearly live under the same product id so an interval change
-                // stays inside one subscription. An offer the user is
-                // eligible for carries the price they would actually pay
-                // first; otherwise the plain base plan price.
                 details.subscriptionOfferDetails.orEmpty()
                     .groupBy { it.basePlanId }
                     .mapNotNull { (basePlanId, group) ->
-                        // Always the plain base plan. No plan has a free trial:
-                        // the free plan, with two devices and a relay
-                        // allowance, is how somebody tries tokenstat. An offer
-                        // left configured in Play is never bought from here.
                         val offer = group.firstOrNull { it.offerId == null } ?: return@mapNotNull null
                         val phases = offer.pricingPhases.pricingPhaseList
                         val phase = phases.lastOrNull() ?: return@mapNotNull null
-                        // A base plan has one phase, the recurring price, and
-                        // its period decides the tab.
                         val interval = intervalOfBasePlan(basePlanId, phase.billingPeriod)
                             ?: return@mapNotNull null
                         PlanProduct(
@@ -151,10 +131,6 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             return
         }
         scope.launch {
-            // Read at buy time, not at connect time: a subscription bought,
-            // cancelled or lapsed since the app started must neither be
-            // stacked beside for want of a fresh token nor replaced by a
-            // stale one.
             val fresh = runCatching {
                 client.queryPurchasesAsync(
                     QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()
@@ -164,7 +140,6 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
                 mutableState.value = mutableState.value.copy(error = L10n.text("android.playbillingmanager.could_not_check_your_play_subscription_ple.85eea382"))
                 return@launch
             }
-            // A failed lookup does not mean there is no subscription to replace.
             if (fresh.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
                 mutableState.value = mutableState.value.copy(error = fresh.billingResult.debugMessage)
                 return@launch
@@ -261,11 +236,6 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
         const val PACKAGE_NAME = "ai.tokenstat.tokenstat"
         const val INTERVAL_MONTH = "month"
         const val INTERVAL_YEAR = "year"
-        // One Play product per tier, unlike Apple where each interval is its
-        // own product. Monthly and yearly are base plans under the tier
-        // product, so an interval change is a subscription update instead of
-        // a cancel plus a new purchase. The ".yearly" in the id is only a
-        // name left over from before the monthly base plan existed.
         val PRODUCT_IDS = listOf(
             "ai.tokenstat.supporter.yearly",
             "ai.tokenstat.patron.yearly",

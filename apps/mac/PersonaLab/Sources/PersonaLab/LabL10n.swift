@@ -2,20 +2,14 @@
 
 import Foundation
 
-/// The app's string lookup, reduced to what the persona engine asks for.
-///
-/// The engine names each mood through `L10n.text`, as it does inside the app.
-/// The lab reads the same English catalogs from the checkout, so a label here
-/// is the label the app shows. A key the catalogs do not hold reads as itself,
-/// which is loud enough to notice and never stops the lab from drawing.
 enum L10n {
     private static let catalog: [String: String] = {
         let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // PersonaLab
-            .deletingLastPathComponent()   // Sources
-            .deletingLastPathComponent()   // PersonaLab package
-            .deletingLastPathComponent()   // apps/mac
-            .deletingLastPathComponent()   // apps
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
             .appendingPathComponent("localization/en")
         var merged: [String: String] = [:]
         for name in ["common", "apple"] {

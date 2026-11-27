@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// One explicit handoff sheet for one conversation. Reading a record never
-/// writes to the composer or the reading store; importing is a separate action.
 @MainActor @Observable
 final class WorkHandoffModel {
     enum Phase: Equatable {
@@ -13,7 +11,6 @@ final class WorkHandoffModel {
     let reference: WorkReference
     private(set) var phase: Phase = .idle
     private(set) var shared: WorkHandoff?
-    /// Immutable after a send starts, including when its acknowledgement is lost.
     private(set) var pending: WorkHandoffRequest?
     private(set) var error: String?
     private var hasLoaded = false
@@ -36,8 +33,6 @@ final class WorkHandoffModel {
     var canShare: Bool { hasLoaded && pending == nil && !isBusy && phase != .invalidated }
     var canRetryShare: Bool { phase == .failed && pending != nil }
 
-    /// Called on dismissal, scope change or loss of the selected destination.
-    /// An in-flight host write may have succeeded; it cannot update another view.
     func invalidate() {
         generation = UUID()
         shared = nil
@@ -74,8 +69,6 @@ final class WorkHandoffModel {
         }
     }
 
-    /// The caller takes a snapshot of the local draft and reading position only
-    /// when the user chooses Share. Later typing cannot change an uncertain send.
     func share(deviceName: String, draft: WorkSharedDraft?, anchor: WorkHandoffAnchor?) async {
         guard canShare, owns(generation) else { return }
         pending = WorkHandoffRequest(requestID: UUID().uuidString,
@@ -89,9 +82,6 @@ final class WorkHandoffModel {
         await sendPending()
     }
 
-    /// Explicitly publish the preserved local version after reviewing a
-    /// conflict. Another intervening edit produces another conflict, never a
-    /// blind overwrite. The original local payload remains unchanged.
     func shareMyVersion() async {
         guard phase == .conflict, let previous = pending, owns(generation) else { return }
         pending = WorkHandoffRequest(requestID: UUID().uuidString,
@@ -100,8 +90,6 @@ final class WorkHandoffModel {
         await sendPending()
     }
 
-    /// Keep the local composer and leave the host's version alone. This is only
-    /// available for an answered conflict, not an uncertain write.
     func keepMine() {
         guard phase == .conflict, owns(generation) else { return }
         pending = nil

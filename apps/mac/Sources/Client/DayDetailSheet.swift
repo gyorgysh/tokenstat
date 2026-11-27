@@ -8,13 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// One day, tapped out of the heatmap.
-///
-/// A sheet where the Mac has a hover popover. A finger has no hover, and a
-/// popover anchored to a 15 point square would cover the square it describes.
-///
-/// Sized to its content with detents, so a day with two models does not open a
-/// full screen panel with nothing in the bottom two thirds of it.
 struct DayDetailSheet: View {
     let day: HeatCell
 
@@ -34,8 +27,6 @@ struct DayDetailSheet: View {
                             partRow(row)
                         }
                     } else {
-                        // A quiet day is an answer. It must not read as a
-                        // failure to look.
                         Text(L10n.text("apple.daydetailsheet.nothing_recorded_on_this_day.5ad77ba8"))
                             .font(ClientType.label)
                             .foregroundStyle(.secondary)
@@ -56,9 +47,6 @@ struct DayDetailSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .task {
-            // Account scope, because the grid this was tapped out of is the
-            // account's. A local answer here would describe a machine whose
-            // squares are not the ones on screen.
             detail = try? await Bridge.dayDetail(date: day.date, scope: "account")
             isLoading = false
         }

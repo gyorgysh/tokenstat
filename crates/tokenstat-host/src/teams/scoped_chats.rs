@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Read-only chat projections. Each call requires an exact, online-validated
-//! share ticket as well as the publisher's current private source binding.
-
 use super::{
     AuthorizedTeamPrincipal,
     publications::{ChatShare, ChatTarget, Folder, Owner, Store},
@@ -20,7 +16,6 @@ use std::{
 use tokenstat_sync::teams::{Page, RepositoryRole, TeamCapability, TeamClient};
 
 const PAGE_TARGET: usize = 512 * 1024;
-/// Base64 of this fits one Team response with room to spare.
 const ATTACHMENT_LIMIT: u64 = 5 * 1024 * 1024;
 
 fn allows_agent_runs(ready: bool, backend: &str, role: RepositoryRole) -> bool {
@@ -128,10 +123,7 @@ pub(super) fn call(
         }
         TeamReadMethod::ChatAttachment => {
             let wanted = params.attachment.as_deref().ok_or_else(changed)?;
-            // Only a file the shared history shows. An id from anywhere else
-            // in this chat, or in another chat, is not reachable from here.
-            // The bounded file index is cached per shared revision. Archived
-            // agent output cannot add files and is never expanded here.
+
             let (marker, size) = match shown_file(&row, wanted) {
                 Some(found) => found,
                 None => {
@@ -179,8 +171,7 @@ pub(super) fn call(
         }
         _ => return Err(changed()),
     };
-    // A local withdrawal or folder replacement that raced the bounded read
-    // must not publish a late result. A retired reference cannot be reused.
+
     if store.resolve_chat(&target, share)? != row
         || store.resolve(
             &owner,
@@ -192,16 +183,12 @@ pub(super) fn call(
     {
         return Err(changed());
     }
-    // Canonical-only recovery can leave a damaged or restored map intact.
-    // Recheck the exact source marker, not just its private map reference.
+
     chats.ensure_sharing_snapshot(&checkout.workspace_id, &row.conversation_id, &marker)?;
     principal.ensure_live()?;
     Ok(result)
 }
 
-/// Who is in the organization now, from the publisher's own view. Reuse a
-/// roster within its verified membership epoch for at most a minute.
-/// `None` when the list cannot be read: authors then show as recorded.
 struct MemberRoster {
     issuer: String,
     organization: String,
@@ -260,9 +247,6 @@ fn current_members(issuer: &str, organization: &str, epoch: u64) -> Option<HashS
     })
 }
 
-/// A person who has left the organization, or deleted their account, reads
-/// as a former member with nothing that links back to them. The event keeps
-/// its place, so the conversation still reads in order.
 fn former_authors(event: &mut Value, current: &HashSet<String>) {
     let former = |person: &mut Value| {
         if person["kind"] == "person"
@@ -285,9 +269,6 @@ type ChatMarker = crate::chat::sharing::Binding;
 type ShownFiles = (ChatShare, ChatMarker, HashMap<String, u64>);
 static SHOWN: Mutex<Vec<ShownFiles>> = Mutex::new(Vec::new());
 
-/// The file's size when this exact share record, unchanged in every field,
-/// is known to show it, and the chat still carries the same binding.
-/// `None` means not cached: that share is read in full.
 fn shown_file(row: &ChatShare, wanted: &str) -> Option<(ChatMarker, u64)> {
     row.source_revision?;
     let cache = SHOWN.lock().ok()?;
@@ -404,7 +385,7 @@ mod tests {
         let mut named = json!({"author":{"kind":"person","id":"joined","name":"New teammate"}});
         former_authors(&mut named, &joined);
         assert_eq!(named["author"]["name"], "New teammate");
-        // Paging within the same verified membership epoch can reuse the list.
+
         assert!(
             cached_members(&cache, issuer, "org", 2, || panic!(
                 "unchanged roster refetched"

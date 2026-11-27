@@ -6,17 +6,10 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The provider caches a conversation for one model, for a few minutes or an
-/// hour after the last turn. The host records the size, model and lifetime on
-/// the conversation as <c>promptCache</c>. No percentage of a plan is shown:
-/// nobody publishes how tokens map onto one.
-/// </summary>
 internal static class ChatCacheRule
 {
     public const long MinimumTokens = 50_000;
 
-    /// <summary>Protocol 54 adds <c>chat.continueInNew</c>.</summary>
     public const int ContinueMinProtocol = 54;
 
     public static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -28,7 +21,6 @@ internal static class ChatCacheRule
         return Format.Long(cache, "tokens") >= MinimumTokens ? cache : null;
     }
 
-    /// <summary>How long the cache has been gone, or null while it holds.</summary>
     public static long? Idle(JsonNode? chat, long nowMs)
     {
         if (Cache(chat) is not { } cache) return null;
@@ -36,10 +28,6 @@ internal static class ChatCacheRule
         return idle > Format.Long(cache, "ttlMs") ? idle : null;
     }
 
-    /// <summary>
-    /// A warm cache on another model. A cold one costs the same either way,
-    /// and the send question covers it.
-    /// </summary>
     public static bool Switching(JsonNode? chat, string next, long nowMs)
     {
         if (Cache(chat) is not { } cache) return false;
@@ -94,7 +82,6 @@ internal static class ChatCacheRule
         }
         catch
         {
-            // Remembering is a courtesy. The next question can be answered again.
         }
     }
 }

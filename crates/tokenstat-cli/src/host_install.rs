@@ -32,9 +32,6 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         allow,
         print_invite,
     } = *request;
-    // Enrollment and socket RPC currently run as the installer. A system
-    // unit for another user would read a different identity and data directory.
-    // Refuse before redeeming a one-time code or changing a service.
     if service.run_as != crate::host_service::current_user()? {
         bail!(
             "Installing for another account is not supported yet. Sign in as {} and run `tokenstat host --user install` so enrollment and the daemon use the same identity.",
@@ -45,8 +42,6 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
     if let Some(name) = name {
         tokenstat_identity::set_machine_label(name).map_err(anyhow::Error::msg)?;
     }
-    // A redeemed code links the machine; the handle only names the
-    // account, and a new account has not claimed one yet.
     let account = code
         .map(crate::host_enroll::PairingCode::redeem)
         .transpose()?
@@ -74,9 +69,6 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
         crate::host_rpc::call(&socket, "machine.rename", json!({"name":name}))?;
     }
     let identity = crate::host_rpc::call(&socket, "machine.identity", json!({}))?;
-    // The grant travels down the console the installer is already running on,
-    // and never through tokenstat.ai. A server that could hand itself a grant
-    // for a key of its own choosing would undo the whole claim.
     if let Some(device) = allow {
         crate::host_rpc::call(
             &socket,
@@ -153,11 +145,6 @@ pub fn run(service: &Service, request: &Request<'_>, json_output: bool) -> Resul
     Ok(())
 }
 
-/// Install the agents the wizard asked for, on the machine that will run them.
-///
-/// A failure here is reported and not fatal: the host is up, signed in and
-/// reachable, and an agent that would not install is something a person can
-/// retry from the app rather than a reason to leave a machine half set up.
 fn install_agents(socket: &Path, agents: &[String], json_output: bool) -> Result<Vec<Value>> {
     if agents.is_empty() {
         return Ok(Vec::new());
@@ -196,8 +183,6 @@ struct PlannedAgent {
     present: bool,
 }
 
-/// Resolve the ids somebody typed against the catalog of the machine that
-/// would run them, so an unknown id fails before anything is installed.
 fn agent_plan(catalog: &Value, agents: &[String]) -> Result<Vec<PlannedAgent>> {
     let catalog = catalog
         .as_array()
@@ -261,8 +246,6 @@ fn resolve_binary(given: Option<&Path>) -> Result<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn install_service(binary: &Path, _: &Service) -> Result<()> {
-    // Embed the app's installer so a standalone CLI uses the same launchd
-    // identity, logs and lifetime policy even without a source checkout.
     let status = Command::new("bash")
         .arg("-c")
         .arg(include_str!("../../../scripts/install-host-agent.sh"))

@@ -8,8 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Arrange Workspaces once a host is connected: order and hide Projects,
-/// Recent chats and All sessions. Same working-copy pattern as Customize Home.
 struct ClientWorkspacesEditor: View {
     @Bindable var layout: WorkspacesLayout
     @Environment(\.dismiss) private var dismiss
@@ -285,8 +283,6 @@ struct ClientWorkspacesEditor: View {
     }
 }
 
-/// A miniature computer with its sections nested underneath. The saved order
-/// applies inside every connected computer, not across computers.
 private struct WorkspacesLayoutPreview: View {
     let sections: [WorkspacesSection]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

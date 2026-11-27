@@ -37,8 +37,6 @@ struct ChatActivityRead {
     var lease = UUID()
 }
 
-/// Recent inspector reports can paint immediately while a fresh read runs.
-/// They never establish live status, and never cross a login or run boundary.
 @MainActor final class ChatActivitySnapshots {
     static let shared = ChatActivitySnapshots()
     private struct Entry {
@@ -103,8 +101,6 @@ extension ChatModel {
         activityRead?.lease = UUID()
     }
 
-    /// One reader serves the summary, inspector and command sheet. A result
-    /// cannot cross account, host, conversation, backend, model or run changes.
     func watchActivity() async {
         let requested = activityOwner
         let lease = UUID()
@@ -173,8 +169,6 @@ extension View {
     }
 }
 
-/// A quiet, persistent entry point while work is in progress. Unknown activity
-/// stays absent here; the inspector and commands explain unreported sections.
 struct ChatActivityStrip: View {
     @Bindable var model: ChatModel
     var body: some View {
@@ -270,7 +264,6 @@ private struct ChatActivitySummary: View {
     }
 }
 
-/// The checklist as a timeline row, from the steps one plan report carried.
 struct ChatPlanCard: View {
     let steps: [ChatPlanStep]
     let live: Bool

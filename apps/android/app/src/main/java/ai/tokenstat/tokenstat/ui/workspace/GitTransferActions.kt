@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/** Both directions keep the same width and height, including wrapped labels. */
 @Composable
 internal fun GitTransferActions(
     pull: @Composable (Modifier) -> Unit,

@@ -9,31 +9,15 @@ import AppKit
 import UIKit
 #endif
 
-/// What a screen input surface can ask the session to do.
-///
-/// One struct rather than a delegate protocol, because both platform surfaces
-/// are leaves: they translate a gesture or an event into an intent and forget
-/// it. Coordinates are normalized to the video rect, so neither surface has to
-/// know the remote display's size and a zoomed view sends the same numbers as
-/// an unzoomed one.
 struct ScreenInputActions {
-    /// Put the pointer at this normalized point.
     var move: (CGPoint) -> Void
-    /// Move the pointer by a distance measured on this surface. Trackpad mode:
-    /// the finger is not where the pointer is.
     var nudge: (CGSize, CGSize) -> Void
-    /// Press and release, with a button and a click count in one message.
     var click: (Int, Int) -> Void
-    /// Hold or release the left button, for a drag that outlives one gesture.
     var press: (Bool) -> Void
     var scroll: (CGSize) -> Void
-    /// Move a locally zoomed picture without sending anything to the host.
     var panView: (CGSize, CGSize) -> Void
-    /// Typed characters, with modifier flags already folded in.
     var text: (String, UInt64) -> Void
-    /// A key that has no character: escape, tab, the arrows.
     var key: (UInt16, Bool, UInt64) -> Void
-    /// Pinch. The surface reports the factor, the view decides what to do.
     var magnify: (CGFloat, CGSize) -> Void
 }
 
@@ -52,8 +36,6 @@ enum ScreenKey {
     static let up: UInt16 = 126
 }
 
-/// Modifier bits shared with `EventModifiers.screenFlags` and with
-/// `CGEventFlags` on the host.
 enum ScreenFlag {
     static let shift: UInt64 = 1 << 17
     static let control: UInt64 = 1 << 18
@@ -62,8 +44,6 @@ enum ScreenFlag {
 }
 
 enum ScreenPointerMode: String, CaseIterable, Identifiable {
-    /// The finger drags the pointer from wherever it already is. What a laptop
-    /// trackpad does, and the only thing that works on a phone.
     case trackpad
     case direct
 
@@ -175,9 +155,6 @@ struct ScreenInputSurface: NSViewRepresentable {
         }
 
         override func magnify(with event: NSEvent) {
-            // Zoom changes only this viewer. It is useful while watching and
-            // must not require permission to send mouse or keyboard input to
-            // the far end.
             guard let actions else { return }
             actions.magnify(1 + event.magnification, bounds.size)
         }
@@ -237,9 +214,7 @@ struct ScreenInputSurface: UIViewRepresentable {
     let enabled: Bool
     let mode: ScreenPointerMode
     let zoomed: Bool
-    /// Raised so the accessory bar can show which modifiers are held.
     @Binding var heldModifiers: UInt64
-    /// Set by the view when the keyboard should be up.
     @Binding var keyboardWanted: Bool
 
     func makeUIView(context: Context) -> UIView {
@@ -296,9 +271,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             self.enabled = enabled
             self.mode = mode
             self.zoomed = zoomed
-            // Pinch is local viewing, not remote control. Keep the surface in
-            // the gesture chain in view mode and let every input-sending
-            // handler enforce `enabled` itself.
             isUserInteractionEnabled = true
             for recognizer in gestureRecognizers ?? [] {
                 let shouldEnable: Bool
@@ -348,8 +320,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
         ) -> Bool {
-            // Pinch and the two-finger scroll share their touches: a pinch that
-            // drifted should still zoom rather than being eaten by the pan.
             gestureRecognizer is UIPinchGestureRecognizer || other is UIPinchGestureRecognizer
         }
 
@@ -360,9 +330,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             )
         }
 
-        /// Everything a tap does starts by putting the pointer somewhere.
-        /// Direct mode uses the touch, trackpad mode leaves the pointer where
-        /// the last drag left it.
         private func positionForTap(_ recognizer: UIGestureRecognizer) {
             guard mode == .direct, let actions else { return }
             actions.move(normalized(recognizer.location(in: self)))
@@ -425,8 +392,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             actions.scroll(delta)
         }
 
-        /// Long press, then move: the button stays down until the finger
-        /// leaves. This is how a window gets dragged or a file gets selected.
         @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
             guard enabled, let actions else { return }
             switch recognizer.state {
@@ -463,7 +428,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             recognizer.scale = 1
         }
 
-        // MARK: Keyboard
 
         override var canBecomeFirstResponder: Bool { enabled }
         var hasText: Bool { false }
@@ -486,9 +450,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             consumeModifiers()
         }
 
-        /// A hardware keyboard on an iPad reaches this instead of `insertText`
-        /// for anything with a modifier, which is exactly the set that matters
-        /// here: cmd+tab, ctrl+c, the arrows.
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
             guard enabled, let actions else { return super.pressesBegan(presses, with: event) }
             var handled = false
@@ -513,8 +474,6 @@ struct ScreenInputSurface: UIViewRepresentable {
             if handled { consumeModifiers() } else { super.pressesBegan(presses, with: event) }
         }
 
-        /// Modifiers are sticky for one keystroke, the way an on-screen
-        /// modifier has to be when there is only one finger to press it with.
         private func consumeModifiers() {
             guard modifiers != 0 else { return }
             modifiers = 0
@@ -538,8 +497,6 @@ private extension ScreenKey {
         }
     }
 
-    /// A character typed with command or control still has to reach the host
-    /// as a key code, because the host synthesises a key event and not text.
     static func code(forCharacter scalar: Unicode.Scalar) -> UInt16? {
         let letters: [Character: UInt16] = [
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
@@ -561,20 +518,9 @@ private extension UIKeyModifierFlags {
     }
 }
 
-/// The row of keys a touch screen has no other way to send.
-///
-/// Sticky rather than held, because holding control with one thumb and typing
-/// with the other is not a thing on a phone. A modifier stays lit until the
-/// next keystroke spends it.
 struct ScreenKeyBar: View {
     @Binding var modifiers: UInt64
     let send: (UInt16, UInt64) -> Void
-    /// Pointer controls, when this bar is drawn over a screen somebody is
-    /// controlling with a finger.
-    ///
-    /// Buttons and not more gestures. A remote desktop needs a click, a double
-    /// click, a right click and a held button, and a phone was asking somebody
-    /// to guess four gestures for them with nothing on screen to say so.
     var pointer: ScreenPointerControls?
 
     private struct Special: Identifiable {
@@ -602,8 +548,6 @@ struct ScreenKeyBar: View {
     var body: some View {
         HStack(spacing: 0) {
             if let pointer {
-                // A held mouse button cannot scroll off screen: releasing it
-                // is the one pointer action that always has to be reachable.
                 Button(action: pointer.toggleDrag) {
                     ActionIcon.move.label(pointer.dragLatched ? L10n.text("apple.screeninputsurface.release.e020e3c6") : L10n.text("apple.screeninputsurface.hold.8e685d54"))
                 }
@@ -650,9 +594,6 @@ struct ScreenKeyBar: View {
                 .padding(.trailing, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
             }
-            // A keycap cut in half at the edge reads as a broken row rather
-            // than as one that scrolls. Fading the last few points says the
-            // same thing and says it on purpose.
             .mask(
                 LinearGradient(
                     stops: [
@@ -669,8 +610,6 @@ struct ScreenKeyBar: View {
     }
 }
 
-/// What the bar can do to the pointer. A value rather than a pile of bindings,
-/// so the bar takes one parameter and the viewer keeps the state.
 struct ScreenPointerControls {
     var fine: Bool
     var dragLatched: Bool
@@ -683,7 +622,6 @@ struct ScreenPointerControls {
 
 private struct ScreenKeyStyle: ButtonStyle {
     let active: Bool
-    /// A fixed width, for a key whose label changes while it is on screen.
     var width: CGFloat?
 
     func makeBody(configuration: Configuration) -> some View {

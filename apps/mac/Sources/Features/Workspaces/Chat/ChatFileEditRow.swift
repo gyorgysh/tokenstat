@@ -4,12 +4,7 @@ import SwiftUI
 
 struct ChatFileEditRow: View {
     let state: ChatEditState
-    /// Whether this row carries the transcript's spinner. See
-    /// `TranscriptFollow.spinningRow`: one animating platform view per
-    /// transcript, whatever the timeline says is still running.
     var animatesRunning: Bool = true
-    /// The chat's Detailed level: open every finished diff, not only a
-    /// small one. A hand toggle still wins.
     var expandsOutput: Bool = false
     var compact: Bool = false
     private var usesCompactStyle: Bool { compact }
@@ -206,9 +201,6 @@ struct ChatFileEditRow: View {
 
     private var bar: Color {
         if state.failed { return Theme.danger.opacity(0.6) }
-        // Finished reads accent like its header: the bar marks the card, and
-        // the added/removed meaning already lives in the patch lines and the
-        // stat, which keep their diff colours.
         return Theme.accent
     }
 
@@ -230,7 +222,6 @@ struct ChatFileEditRow: View {
             if shownText == nil { parse() }
             expanded = true
         } else {
-            // Detailed was switched off: what it opened closes again.
             expanded = false
         }
     }

@@ -219,8 +219,6 @@ pub fn parse_file(
             continue;
         };
 
-        // A missing counter is unknown, not zero: writing it down as a zero
-        // would defeat `has_unknown` and present a partial sum as complete.
         let prompt = ctx.prompt_tokens;
         let cached = ctx.cached_prompt_tokens;
         let completion = ctx.completion_tokens;

@@ -5,7 +5,6 @@ enum BrowserPageHistoryMutation: String {
     case push, replace, pop, snapshot
 }
 
-/// IDs belong to native history items, including different states at one URL.
 struct BrowserPageHistoryItem {
     let id: UUID
     let url: String
@@ -17,7 +16,6 @@ struct BrowserPageHistoryTraversal {
 }
 
 
-/// A completion belongs to the navigation that started it, even after a new Go.
 struct BrowserNavigationEpoch {
     struct Completion: Equatable {
         let generation: Int
@@ -47,7 +45,6 @@ struct BrowserNavigationEpoch {
         return owner
     }
 
-    /// Same-document native history emits popstate without navigation callbacks.
     mutating func abandonIfNotStarted(_ navigation: AnyObject?) {
         guard let navigation else { return }
         let id = ObjectIdentifier(navigation)
@@ -58,7 +55,6 @@ struct BrowserNavigationEpoch {
 #if canImport(WebKit)
 import WebKit
 
-/// Shared by both project browsers; page messages never supply trusted URLs.
 @MainActor
 final class BrowserNativeHistory: NSObject, WKScriptMessageHandler {
     var generation = 0
@@ -100,7 +96,6 @@ final class BrowserNativeHistory: NSObject, WKScriptMessageHandler {
         onAbandon(historyNavigation)
         historyNavigation = nil
         if let id, let item = items[id], item.url == url {
-            // Live native items retain History API state and cached documents.
             let navigation = view.go(to: item)
             historyNavigation = navigation
             return navigation
@@ -111,7 +106,6 @@ final class BrowserNativeHistory: NSObject, WKScriptMessageHandler {
     func traversal(for action: WKNavigationAction, in view: WKWebView) -> BrowserPageHistoryTraversal? {
         guard action.navigationType == .backForward, let target = view.backForwardList.currentItem,
               target.url == action.request.url, let id = items.first(where: { $0.value === target })?.key else { return nil }
-        // Policy sees the destination item while webView.url is still source.
         let list = view.backForwardList.backList + [target] + view.backForwardList.forwardList
         let source = currentID.flatMap { items[$0] }
         let sourceIndex = list.firstIndex(where: { $0 === source })
@@ -152,7 +146,6 @@ final class BrowserNativeHistory: NSObject, WKScriptMessageHandler {
         let delta = (body["delta"] as? NSNumber)?.intValue
         guard mutation != .snapshot, mutation != nil || (kind == "traverse" && delta != nil) else { return }
         let generation = self.generation
-        // Late messages from a replaced document must not affect the new Go.
         view.evaluateJavaScript("window.__tokenstatHistoryDocument") { [weak self, weak view] active, _ in
             guard let self, let view, self.webView === view, self.generation == generation,
                   active as? String == documentID else { return }

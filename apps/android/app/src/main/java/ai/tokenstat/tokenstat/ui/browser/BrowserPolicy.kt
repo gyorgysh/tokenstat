@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui.browser
 
-/// Which URLs the port-forwarded browser may load, ported from Apple
-/// `ClientWebView.allows`.
-///
-/// The tunnel proxy answers on this device's own loopback. PortBrowser
-/// routes supported navigation callbacks to the paired computer. WebView
-/// controls redirected resource loads; this is a preview policy, not a
-/// network sandbox.
-/// Only web pages belong here: allowing a mailto:, tel: or custom scheme
-/// stalls on a navigation the view cannot perform, so everything else is
-/// refused.
-///
-/// Kept free of Android imports so unit tests pin the same answers.
 object BrowserPolicy {
     fun allows(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
@@ -28,8 +16,6 @@ object BrowserPolicy {
             (host == "tokenstat.ai" || host.endsWith(".tokenstat.ai"))
     }
 
-    /// The address-bar title: the host, or the product name when the URL
-    /// has none. Mirrors the Apple navigation title fallback.
     fun title(url: String?): String =
         runCatching { java.net.URI(url?.trim().orEmpty()).host }.getOrNull()
             ?.takeIf { it.isNotBlank() } ?: "tokenstat.ai"

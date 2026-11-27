@@ -223,7 +223,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/// `str` comes from the shared workspace readers in `WorkspaceSections.kt`.
 
 @Composable
 fun ChatSection(
@@ -264,12 +263,7 @@ fun ChatSection(
     var loadingEarlier by remember(projectOwner, openId) { mutableStateOf(false) }
     val pagingContext = LocalContext.current
     val paging = remember { ChatPaging.forDevice(pagingContext) }
-    // An earlier page is in `events` and its rows are not on screen yet. The
-    // next page waits for it, and the reader's line is restored with it.
     var earlierPending by remember(projectOwner, openId) { mutableStateOf(false) }
-    // Set by the reader's own scroll away from the latest message. A chat
-    // that just opened sits at the top of its list for a frame before it is
-    // pinned to the end, and that must not read as somebody reaching back.
     var readerLeftEnd by remember(projectOwner, openId) { mutableStateOf(false) }
     var approvals by remember(projectOwner, openId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var error by remember(projectOwner) { mutableStateOf<String?>(null) }
@@ -299,9 +293,6 @@ fun ChatSection(
         }
     }
     val composerFailure by model.chatComposers.failure.collectAsStateWithLifecycle()
-    /// Which conversations have a send in flight. Per conversation, because a
-    /// send outlives a navigation: one unkeyed flag showed the spinner on
-    /// whatever conversation was opened next.
     var sendingIds by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     var preparingIds by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     val sending = openId?.let { it in sendingIds || it in preparingIds } == true
@@ -325,31 +316,17 @@ fun ChatSection(
     var showingSetup by remember(projectOwner) { mutableStateOf(false) }
     var showingHandoff by remember(projectOwner, openId) { mutableStateOf(false) }
     var handoffOffer by remember(projectOwner, openId) { mutableStateOf<WorkHandoff?>(null) }
-    // A place another device shared, until the rows it names are on screen.
     var sharedPlace by remember(projectOwner, openId) { mutableStateOf<HandoffAnchor?>(null) }
-    // Agent, model and effort, one tap from the composer the way the iPhone
-    // reaches them. The list lives here rather than in the sheet, because the
-    // composer's summary line reads it too.
     var showingAgent by remember(projectOwner) { mutableStateOf(false) }
     var backends by remember(projectOwner) { mutableStateOf<List<JsonObject>>(emptyList()) }
-    // Files chosen but not sent yet. They go up with the message rather than
-    // on pick, so removing one before sending costs the host nothing.
     var attachError by remember(projectOwner) { mutableStateOf<String?>(null) }
-    /// Why a setup change did not take. The host refuses one while a turn is
-    /// running, and a pill that snaps back explains nothing by itself.
     var setupError by remember(projectOwner) { mutableStateOf<String?>(null) }
     var fastModeSaveId by remember(projectOwner) { mutableStateOf<String?>(null) }
-    // A conversation opens on its latest turn and stays with it, the way the
-    // Apple transcript does. Fresh per conversation, so opening another chat
-    // starts pinned again rather than inheriting a scrollback.
     val follow = remember(projectOwner, openId) { TranscriptFollowState() }
     val listState = remember(projectOwner, openId) { LazyListState() }
     var autoScrolling by remember(projectOwner, openId) { mutableStateOf(false) }
     val context = LocalContext.current
     val homeStores = remember(context) { HomeStores(context) }
-    // How much of the agent's work shows between a question and its answer.
-    // One level for every chat on this device. Which groups are open is the
-    // open conversation's own, and starts folded each time it opens.
     val detailStore = remember(context) { ChatDetailStore(context) }
     var detail by remember(detailStore) { mutableStateOf(detailStore.level()) }
     var smoothStreaming by remember(detailStore) { mutableStateOf(detailStore.smoothStreaming()) }
@@ -357,62 +334,29 @@ fun ChatSection(
     var groupsOpen by remember(projectOwner, openId) { mutableStateOf(false) }
     var toggledGroups by remember(projectOwner, openId) { mutableStateOf(emptySet<String>()) }
     val pinIdentity = HomeStores.pinIdentity(client.account)
-    /// How the last conversation was set up, which is what a new one opens
-    /// with. See `LaunchDefaults`.
     val launchChoice: LaunchChoiceStore = remember(context) { SharedPrefsLaunchChoice(context) }
-    /// Messages waiting for the open turn. Durable, because they are somebody's
-    /// own writing rather than a cache. See `ChatOutbox`.
     val outbox: ChatOutbox = remember(context) { FileChatOutbox(context) }
     var pendingQueueKeys by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
     var legacyReviewId by remember(projectOwner) { mutableStateOf<String?>(null) }
     var legacyReviewed by remember(projectOwner, legacyReviewId) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
     var recoveringLegacy by remember(projectOwner) { mutableStateOf(false) }
     var legacyFailure by remember(projectOwner, legacyReviewId) { mutableStateOf<String?>(null) }
-    /// Whether the last attempt to reach this host worked.
-    ///
-    /// Not the account's own connection state: that is only recomputed when
-    /// something refreshes the account, so it still read "connected" with the
-    /// radio off. The poll below asks this host about every 400ms while a
-    /// turn is running or a note is parked, and every two seconds otherwise.
-    /// Its answer is the truthful one.
     var hostReachable by remember(projectOwner) { mutableStateOf(true) }
     val offline = !hostReachable
     val inspectedChat = chats.firstOrNull { it.str("id") == openId }
     val chatInspection = rememberChatInspection(model, peer, inspectedChat, projectOwner, enabled = projectOwner != null && !offline)
     var queued by remember(projectOwner) { mutableStateOf<List<QueuedMessage>>(emptyList()) }
-    /// Which queued messages this session may send without being asked again.
-    ///
-    /// A message somebody just pressed Send on is authorised. Messages found
-    /// on disk at open are not, except the ones explicitly marked Send when
-    /// connected: reopening the app is not the same as asking to send.
     var authorized by remember(projectOwner) { mutableStateOf<Set<String>>(emptySet()) }
-    /// The message the composer is delivering on its first attempt. Twin of
-    /// `ChatModel.deliveringFromComposer`: the strip draws `pending` rather
-    /// than `queued`, so a healthy send never opens it.
     var deliveringFromComposer by remember(projectOwner) { mutableStateOf<String?>(null) }
-    /// Accepted notes remain protected over lists requested before each park.
     var heldSteers by remember(projectOwner) { mutableStateOf<Map<String, SteerHold>>(emptyMap()) }
     val steerVersions = remember(projectOwner) { SteerVersions() }
-    /// Conversations whose note was cleared here. An in-flight list that still
-    /// carries the old words must not put them back.
     var retiredSteers by remember(projectOwner) { mutableStateOf<Map<String, Long>>(emptyMap()) }
-    /// Counts `chat.list` requests, so a list asked for after a note was
-    /// parked or dropped is trusted over what this screen is holding.
     val listRequests = remember(projectOwner) { java.util.concurrent.atomic.AtomicLong() }
     var appliedListRequest by remember(projectOwner) { mutableStateOf(0L) }
-    /// One delivery of a parked note is already in flight.
     var deliveringSteer by remember(projectOwner) { mutableStateOf(false) }
     var clearingSteer by remember(projectOwner) { mutableStateOf(false) }
-    /// A note is being parked. Send stays Send, and a second tap waits.
     var parkingSteer by remember(projectOwner) { mutableStateOf(false) }
-    /// This computer's helper has no mid-turn note. Remembered with the peer,
-    /// so a folder change on the same computer does not ask again.
     var steerUnsupported by remember(projectOwner) { mutableStateOf(false) }
-    /// What the pending strip draws: everything genuinely waiting, which is
-    /// to say everything except the send that is in flight right now. A
-    /// refused or unconfirmed send clears the filter on its way out, so it
-    /// appears the moment it really is pending. Twin of
-    /// `ChatModel.pendingQueue`.
     var fileRelayRemaining by remember(projectOwner) { mutableStateOf<Long?>(null) }
     var fileRelayPrompt by remember(projectOwner) { mutableStateOf<Pair<String, Long>?>(null) }
     var fileRelayAnswer by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
@@ -435,8 +379,6 @@ fun ChatSection(
     }
     DisposableEffect(projectOwner) { onDispose { cacheAnswer?.complete(ChatCacheAnswer.CANCEL) } }
     cacheQuestion?.let { question -> ChatCacheDialog(question, context) { cacheAnswer?.complete(it) } }
-    // An agent update offered before a message goes, once per version, as on
-    // the Mac. True sends after updating, false sends without, null cancels.
     var updateQuestion by remember(projectOwner) { mutableStateOf<JsonObject?>(null) }
     var updateAnswer by remember(projectOwner) { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean?>?>(null) }
     suspend fun askUpdate(backend: JsonObject): Boolean? {
@@ -480,7 +422,6 @@ fun ChatSection(
         retiredSteers = reconciled.retired
     }
 
-    /// Drop the note on this screen. The host copy is a separate call.
     fun clearLocalSteer(id: String) {
         heldSteers = heldSteers - id
         chats = chats.map { row ->
@@ -493,8 +434,6 @@ fun ChatSection(
         return raw.ifEmpty { L10n.text("android.chatpullssections.the_note_could_not_be_saved.385b172a") }
     }
 
-    /// Say why a note failed, and only when this conversation is still open
-    /// and the sentence is new.
     fun showNoteFailure(thrown: Throwable, id: String) {
         if (openId != id) return
         val sentence = noteFailure(thrown)
@@ -511,7 +450,6 @@ fun ChatSection(
         if (!ownsProject()) return
         loading = true
         pendingQueueKeys = runCatching { outbox.pendingKeys() }.getOrElse {
-            // An unreadable queue must not hide a row that might hold writing.
             chats.mapNotNull { it.str("id") }.map { ChatOutboxRules.key(peer, workspace, it) }.toSet()
         }
         val listRequest = listRequests.incrementAndGet()
@@ -532,8 +470,6 @@ fun ChatSection(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, L10n.text("android.chatpullssections.chat_actions.8ba35bb8")) }
             DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                // Pin was one plain row among five and people read past it.
-                // It leads now, in the accent, with its glyph.
                 val pinned = homeStores.isPinned(pinIdentity, peer, workspace, PinnedWork.Kind.CONVERSATION, id)
                 DropdownMenuItem(
                     text = {
@@ -629,13 +565,6 @@ fun ChatSection(
             }
         }
     }
-    // What the open conversation ended up set to, kept for the next new one.
-    // Recorded from the record rather than from each control, so a setting
-    // changed anywhere (composer, setup sheet, agent picker) is carried.
-    // Twin of `ChatModel.saveLaunchChoice`. Written only when it changed:
-    // the poll below runs about every 400ms while a turn is running or a
-    // note is parked, and every two seconds otherwise, for as long as a
-    // chat is open.
     var lastLaunch by remember(projectOwner) { mutableStateOf<LaunchChoice?>(null) }
     fun rememberLaunch(chat: JsonObject?) {
         val backend = chat?.str("backend")?.ifBlank { null } ?: return
@@ -645,17 +574,12 @@ fun ChatSection(
             effort = chat.str("effort")?.ifBlank { null },
             mode = chat.str("mode")?.ifBlank { null } ?: LaunchDefaults.MODE,
             autonomy = chatComposerAutonomy(chat),
-            // Empty, not null: no persona is a choice worth carrying.
             personaId = chat.str("personaId").orEmpty(),
         )
         if (choice == lastLaunch) return
         lastLaunch = choice
         launchChoice.write(choice)
     }
-    // The list without the list chrome: the open conversation polls this so
-    // its `running` flag (and the thinking indicator reading it) stays live.
-    // `loadChats` would do, but it flashes the spinner and clears a sticky
-    // list error on every pass.
     suspend fun refreshChats(): Boolean {
         val listRequest = listRequests.incrementAndGet()
         return runCatching {
@@ -742,16 +666,10 @@ fun ChatSection(
             if (openId == id) eventsError = TunnelCopy.display(failure.message ?: L10n.text("android.chatpullssections.earlier_messages_could_not_be_read.59d38481"), hostLabel)
         } finally { loadingEarlier = false }
     }
-    // Create, then open what was created. A "New chat" button that lands
-    // back on the list created the chat and hid it in the same motion.
     suspend fun createAndOpen(setup: NewChatSetup? = null): String? {
         if (creating) return null
         var createdId: String? = null
         creating = true
-        // The agent list first. Without it there is nothing to check the
-        // remembered agent against, and a new chat opened on the fallback
-        // rather than on what the person was last working in. `ChatModel`
-        // loads it in the same breath for the same reason.
         if (backends.isEmpty()) {
             runCatching {
                 model.workspaceSection(peer, "chat.backends", buildJsonObject {})
@@ -770,12 +688,6 @@ fun ChatSection(
             model.workspaceSection(peer, "chat.create", setup?.createParameters(workspace) ?: buildJsonObject {
                 put("workspaceId", workspace)
                 put("backend", backendId)
-                // What was last used, not what the host falls back to. The
-                // host's `default_mode` is plan because that is the safe
-                // reading of a record with no mode; a chat somebody just
-                // asked for is a different thing, and planning at them is a
-                // turn that does nothing they wanted. Twin of
-                // `ChatModel.startChat`.
                 put("mode", LaunchDefaults.mode(saved))
                 put(
                     "autonomy",
@@ -797,8 +709,6 @@ fun ChatSection(
         creating = false
         return createdId
     }
-    // Instant, like the Apple chase: an animated walk through a lazy list
-    // lands on estimated heights and stops short, so Jump takes one press.
     suspend fun scrollToEnd() {
         autoScrolling = true
         try {
@@ -820,8 +730,6 @@ fun ChatSection(
     LaunchedEffect(projectOwner, openId, protocol) {
         val id = openId ?: return@LaunchedEffect
         if (!HostContracts.supportsHandoff(protocol)) return@LaunchedEffect
-        // Only the conversation in front asks, once, and only offers. The
-        // authenticated identity, not a name, says whether it came from here.
         try {
             val answer = model.workspaceSection(peer, "work.continuity.get", buildJsonObject {
                 put("workspaceId", workspace); put("conversationId", id)
@@ -830,7 +738,6 @@ fun ChatSection(
             val mine = model.machineIdentity().str("key") ?: return@LaunchedEffect
             if (ownsProject() && openId == id && record.deviceId != mine) handoffOffer = record
         } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {
-            // An offer is a courtesy. The sheet says what went wrong when asked.
         }
     }
     LaunchedEffect(projectOwner, legacyReviewId) {
@@ -853,10 +760,6 @@ fun ChatSection(
         }
     }
 
-    /// Save a queue change, and say so when it is refused rather than letting
-    /// the list quietly disagree with what is on disk. Published only when
-    /// this conversation is still the open one: a send for chat A that lands
-    /// after chat B was opened must not overwrite B's strip.
     suspend fun writeQueue(id: String, mutate: (MutableList<QueuedMessage>) -> Unit): Boolean {
         if (!ownsProject()) return false
         return runCatching { outbox.update(outboxKey(id), mutate) }
@@ -871,8 +774,6 @@ fun ChatSection(
             .isSuccess
     }
 
-    /// Put a message in the queue. Written to disk before the host is asked,
-    /// so a send that is interrupted leaves the words somewhere.
     suspend fun enqueue(id: String, text: String, files: List<QueuedAttachment>, whenConnected: Boolean): QueuedMessage? {
         val revision = chats.firstOrNull { it.str("id") == id }?.long("sendRevision")
         val item = QueuedMessage(
@@ -888,16 +789,11 @@ fun ChatSection(
         }
         if (!writeQueue(id) { it.add(item) }) return null
         if (!ownsProject()) return item
-        // Pressing Send is the authorisation. Nothing else auto-sends.
         authorized = authorized + item.id
         ai.tokenstat.tokenstat.ui.legal.ReviewPrompt.noteUse(context)
         return item
     }
 
-    /// Ask the host whether it took a message whose send was never confirmed.
-    /// Never a resend: an unknown receipt is not proof it was never sent.
-    /// True when the receipt cleared the message, so the drain carries on
-    /// while the host is free instead of waiting for the next poll.
     suspend fun checkReceipt(id: String, item: QueuedMessage): Boolean {
         if (!ownsProject()) return false
         if (!HostContracts.supportsReceipt(protocol)) {
@@ -910,8 +806,6 @@ fun ChatSection(
                 put("id", id); put("clientMessageId", item.id)
             }) as? JsonObject
         }.getOrElse {
-            // A cancelled check is not a failed one. Navigating away mid-send
-            // must leave the message where it was, not mark it failed.
             if (it is CancellationException) throw it
             sendError = TunnelCopy.display(it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"), hostLabel.ifBlank { L10n.text("android.chatpullssections.that_computer.2b209061") })
             return false
@@ -933,11 +827,6 @@ fun ChatSection(
         return false
     }
 
-    /// Hand one queued message to the host.
-    ///
-    /// Nothing leaves the queue before the host acknowledges it, and every
-    /// outcome that is not a plain acceptance leaves the copy behind in a
-    /// state that says what to do next. Port of `ChatModel.deliverQueued`.
     suspend fun deliver(item: QueuedMessage, stopCurrent: Boolean, steerCurrent: Boolean = false, retryUnavailableSteer: Boolean = true): Boolean {
         if (!ownsProject()) return false
         val id = openId ?: return false
@@ -953,10 +842,6 @@ fun ChatSection(
         var deferredSteer: QueuedMessage? = null
         try {
             if (item.needsReceipt) return checkReceipt(id, item)
-            // The host refuses a send with no revision, and a message written
-            // against a conversation nobody can name has to be looked at. A
-            // review flag is not a revision either: an explicit retry must
-            // re-aim the message rather than send it past the review.
             if (item.expectedRevision == null || item.delivery == ChatDelivery.NeedsReview) {
                 writeQueue(id) { list ->
                     val at = list.indexOfFirst { it.id == item.id }
@@ -972,8 +857,6 @@ fun ChatSection(
                     throw cancelled
                 } catch (_: Exception) {
                 }
-                // Stop leaves a parked note in place. The note stays visible,
-                // and the poll delivers it once this conversation is idle.
                 repeat(80) {
                     if (!ownsProject()) return false
                     if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) return@repeat
@@ -981,8 +864,6 @@ fun ChatSection(
                     kotlinx.coroutines.delay(200)
                 }
             }
-            // Claim the latest saved bytes atomically. Removing or editing a
-            // message during the stop wait must never send a stale closure.
             if (openId != id || !ownsProject()) return false
             var attempt: QueuedMessage? = null
             if (!writeQueue(id) { list ->
@@ -1019,13 +900,8 @@ fun ChatSection(
                 return true
             }
             val failure = sent.exceptionOrNull()
-            // A cancelled send is not a failed one. Navigating away mid-send
-            // must leave the message where it was, not mark it failed.
             if (failure is CancellationException) throw failure
             val code = (failure as? ai.tokenstat.tokenstat.core.CoreFailure)?.code.orEmpty()
-            // This refusal precedes input acceptance and receipt creation.
-            // Preserve authorization until a fresh idle report lets the
-            // ordinary outbox send it, without stopping or repeating a turn.
             if (steerCurrent && code == "steer_unavailable") {
                 var deferred = false
                 if (!writeQueue(id) { list ->
@@ -1082,7 +958,6 @@ fun ChatSection(
         }
     }
 
-    /// Send what is waiting, oldest first, while the host will take it.
     suspend fun drainOutbox() {
         if (!ownsProject()) return
         val id = openId ?: return
@@ -1100,8 +975,6 @@ fun ChatSection(
         return ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
     }
 
-    /// Hand a note the turn ended without taking to the host as the next
-    /// message. The queue moves only once that note is gone.
     suspend fun deliverParked(id: String) {
         if (!ownsProject()) return
         val captured = ChatSteer.noteOf(chats.firstOrNull { it.str("id") == id })
@@ -1165,8 +1038,6 @@ fun ChatSection(
         if (openChatNote().isEmpty()) drainOutbox()
     }
 
-    /// A parked note goes out before anything waiting in the queue.
-    /// `deliverNote` false is the path after the note was just handed off.
     suspend fun drainQueue(deliverNote: Boolean = true) {
         if (!ownsProject()) return
         if (sendingIds.isNotEmpty() || clearingSteer || !hostReachable) return
@@ -1186,8 +1057,6 @@ fun ChatSection(
         drainOutbox()
     }
 
-    /// Park the words on the next tool step. True when this send is finished.
-    /// False when the words should wait in the queue instead.
     suspend fun tryParkSteer(id: String, text: String): Boolean {
         if (!ownsProject()) return true
         val noteOwner = projectOwner?.conversation(id) ?: return true
@@ -1256,7 +1125,6 @@ fun ChatSection(
         }
     }
 
-    /// Keep the note visible and the queue paused until the host drops it.
     suspend fun clearSteer(id: String) {
         if (!ownsProject()) return
         if (clearingSteer) return
@@ -1312,9 +1180,6 @@ fun ChatSection(
             }
         }
         val selectedBackend = backends.firstOrNull { it.str("id") == chats.firstOrNull { chat -> chat.str("id") == id }?.str("backend") }
-        // Only the CLI's own answer stops a send. A stored token past its
-        // expiry is routine (the CLI renews it), and an agent signed in with
-        // an environment key has no login file at all.
         val liveInput = chat?.bol("running") == true && chat.bol("nativeSteer") &&
             ChatCommandRules.canSteer(command, staged.isNotEmpty(), chat.bol("nativeSteerAttachments"))
         val clean = text.trim()
@@ -1338,15 +1203,11 @@ fun ChatSection(
                     model.updateAgent(peer, selectedBackend.str("launcherId").orEmpty(), selectedBackend.str("label").orEmpty()) {
                         updated.complete((it?.get("ok") as? JsonPrimitive)?.booleanOrNull == true)
                     }
-                    // A failed update keeps the words in the composer.
                     if (!updated.await() || openId != id || !ownsProject()) return
                 }
             }
             if (!ownsProject() || openId != id || model.chatComposers.capture(sentOwner) != sentDraft) return
         }
-        // A long pause emptied the prompt cache: this message would make the
-        // agent read the whole conversation again. Ask first. Files are
-        // uploaded into this chat, so a message carrying them cannot move.
         val idle = ChatCacheRules.idle(chat, System.currentTimeMillis())
         if (idle != null && !liveInput && chat?.bol("running") != true && clean != "/compact" &&
             !ChatCacheSuppression.idle(context)) {
@@ -1380,10 +1241,6 @@ fun ChatSection(
         pinToLatest()
         if (openId != id || !ownsProject()) return
         if (clean != "/compact" && staged.isEmpty() && tryParkSteer(id, clean)) return
-        // Uploaded first, and only then queued: a message that names a file
-        // the host does not have yet is worse than a slower send. A refused
-        // attachment stops the send with the draft intact. The ids travel on
-        // the message, so a queued one cannot pick up somebody else's files.
         val files = mutableListOf<QueuedAttachment>()
         for (attachment in sent.attachments) {
             val uploaded = runCatching {
@@ -1413,15 +1270,8 @@ fun ChatSection(
         if (!ownsProject()) return
         attachError = null
         sendError = null
-        // Hidden while this first attempt is in flight, the way the Apple
-        // strip hides it. A refusal clears this on the way out, so the
-        // message appears the moment it really is pending.
         deliveringFromComposer = item.id
         try {
-            // This explicit new intent can proceed while an older, uncertain
-            // delivery remains available for review in Pending.
-            // Try the chosen live action first. Only a definite refusal may
-            // return it to the queue for a fresh idle report.
             if (liveInput) deliver(item, stopCurrent = false, steerCurrent = true)
             else if (chats.firstOrNull { it.str("id") == id }?.bol("running") != true) deliver(item, stopCurrent = false)
         } finally {
@@ -1438,8 +1288,6 @@ fun ChatSection(
         }
     }
 
-    /// Stop the open turn so this message goes next, or check a delivery
-    /// nobody could confirm, or re-aim one at the conversation as it is now.
     suspend fun sendNow(item: QueuedMessage, steerOnly: Boolean = false) {
         val id = openId ?: return
         if (item.needsReceipt) {
@@ -1484,13 +1332,9 @@ fun ChatSection(
         startedNewChatSend = startedNewChatSend + pending.first
         try { send(pending.third) } finally { if (pendingNewChatSend?.first == pending.first) pendingNewChatSend = null }
     }
-    // A navigation that named a conversation: open exactly it, even when
-    // this folder's list is already on screen.
     LaunchedEffect(initialChatId, projectOwner) {
         if (initialChatId != null) openId = initialChatId
     }
-    // The launcher's promise: arriving to start work opens the conversation
-    // worth returning to, or starts one when there is none.
     LaunchedEffect(loading, openConversationOnAppear, conversationNonce) {
         if (!openConversationOnAppear || didOpenConversation || loading || error != null) return@LaunchedEffect
         didOpenConversation = true
@@ -1508,18 +1352,9 @@ fun ChatSection(
             model.workspaceSection(peer, "chat.backends", buildJsonObject {})
         }.onSuccess { backends = asObjects(it) }
     }
-    // What the push service should stay quiet about: a turn finishing in
-    // the transcript on screen needs no banner. Cleared on the way out, so
-    // a backgrounded app still notifies.
     DisposableEffect(workspace) {
         onDispose { VisibleChat.hidden() }
     }
-    // The watching heartbeat, port of `WatchingHeartbeat`: while this
-    // conversation is on a foreground screen, the host holds a 30s lease
-    // saying so and skips the finished-turn push. Renewed every 10s so one
-    // dropped beat does not let a banner through; released on the way out,
-    // and expired by the host when no release ever arrives. Without this a
-    // phone driving a chat buzzes about the turn on its own screen.
     val watchingOwner = ai.tokenstat.tokenstat.ui.logic.WatchingOwner.from(client.account)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
@@ -1538,7 +1373,6 @@ fun ChatSection(
         val owner = watchingOwner ?: return@LaunchedEffect
         val id = openId ?: return@LaunchedEffect
         if (!foreground) return@LaunchedEffect
-        // A cancelled foreground lease cannot release its successor.
         val watcherId = java.util.UUID.randomUUID().toString()
         try {
             while (true) {
@@ -1569,9 +1403,6 @@ fun ChatSection(
             }
             .getOrDefault(emptyList())
         queued = items
-        // Reopening the app is not asking to send. Only messages explicitly
-        // marked Send when connected resume on their own; the rest wait for
-        // Send now, so nothing goes out that somebody has forgotten about.
         authorized = items
             .filter { it.whenConnected && it.delivery == ChatDelivery.Waiting }
             .map { it.id }
@@ -1586,9 +1417,6 @@ fun ChatSection(
                 status = { refreshChats() },
             )
             rememberLaunch(chats.firstOrNull { it.str("id") == id })
-            // The turn that was in the way may have finished. Read the flag
-            // rather than the value composed with this effect: this loop
-            // outlives the composition that started it.
             if (hostReachable) drainQueue()
             val open = chats.firstOrNull { it.str("id") == id }
             kotlinx.coroutines.delay(
@@ -1642,8 +1470,6 @@ fun ChatSection(
                 )
                 return
             }
-            // Chats opened and never used stay out of the list, apart from
-            // the one that is open. Same rule as the desktop sidebar.
             val listed = chats.filterNot {
                 UntouchedChats.isUntouched(
                     title = it.str("title"),
@@ -1746,8 +1572,6 @@ fun ChatSection(
                         state = dismiss,
                         enableDismissFromStartToEnd = false,
                         onDismiss = {
-                            // Only the dialog removes a chat. Restore the row
-                            // first so dismissing that dialog cannot reopen it.
                             scope.launch {
                                 dismiss.reset()
                                 if (ownsProject()) pendingDelete = chat
@@ -1776,20 +1600,11 @@ fun ChatSection(
                 }
             }
         } else {
-            // A conversation is a push, not a tab: the bar goes away and Back
-            // is the way out, which is what `clientTabBarHidden` does on iOS.
-            // Claimed by the composition, so every exit restores it.
             HideTabBar()
-            // Back returns to the list, the way the arrow beside the title
-            // does. Without it the gesture reached the activity and closed
-            // the app from inside a conversation.
             BackHandler {
                 openId = null
                 scope.launch { loadChats() }
             }
-            // And the header: the section above only knows it is "Chat",
-            // while this knows which conversation. Two headers with two back
-            // arrows is what stacking them looked like.
             OwnSectionHeader()
             if (!compactKeyboard) Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1908,13 +1723,6 @@ fun ChatSection(
             }
             val openChat = chats.firstOrNull { it.str("id") == openId }
             val chatActivity = chatActivityData(chatInspection.data, openChat)
-            // Status polls also update names, usage and timestamps. Only the
-            // row inputs should rebuild an image-rich transcript.
-            // Built off the main thread: a page is thousands of records, and
-            // a streaming reply changes them several times a second. Conflated
-            // rather than restarted, so updates that arrive faster than a slow
-            // phone can fold them never starve the screen. The previous rows
-            // stay until the new ones are ready.
             val backendNow by rememberUpdatedState(openChat?.str("backend"))
             val runningNow by rememberUpdatedState(openChat?.bol("running") ?: true)
             var transcript by remember(projectOwner, openId) { mutableStateOf<List<ChatDisplayItem>>(emptyList()) }
@@ -1935,17 +1743,9 @@ fun ChatSection(
             }
             val imageRows = remember(foldedRows, transcript) { chatImageRows(foldedRows, transcript) }
             val shownRows = imageRows.rows
-            // Fills, rather than wrapping: the composer below is docked to
-            // the bottom edge the way every chat app docks it, instead of
-            // floating at whatever height the transcript happened to end.
             if (transcript.isEmpty() && events.isNotEmpty() && builtFrom !== events) {
-                // Read but not folded yet: not an empty conversation.
                 Box(Modifier.weight(1f).fillMaxWidth())
             } else if (transcript.isEmpty()) {
-                // The character, the way the Apple clients open an empty
-                // conversation with one. A blank rectangle above a composer
-                // says the screen failed to load; the persona says it is
-                // waiting for you.
                 Column(
                     Modifier.weight(1f).fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1982,21 +1782,11 @@ fun ChatSection(
                         )
                     }
                 }
-                // The reader's own scrolls move the pin. Our pins must never
-                // count as the reader leaving, or auto-follow would unpin
-                // itself mid-stream.
                 LaunchedEffect(atBottom, listState.isScrollInProgress) {
                     val userScroll = listState.isScrollInProgress && !autoScrolling
                     follow.note(atBottom, userScroll = userScroll)
                     if (userScroll && !atBottom) readerLeftEnd = true
                 }
-                // A conversation opens on its latest turn, and a pinned
-                // transcript stays on it as turns stream in. A hand on the
-                // screen wins: while the reader is scrolling, no pin.
-                // The running flag is a key too, not just the transcript: the
-                // thinking indicator is its own row below the last turn, and
-                // without this the list never scrolls it into view when a
-                // turn starts with no new events yet.
                 LaunchedEffect(transcript, openChat?.bol("running"), openChat?.get("routing"), chatActivity?.plan) {
                     if (transcript.isNotEmpty() && follow.pinned &&
                         !(listState.isScrollInProgress && !autoScrolling)
@@ -2087,21 +1877,14 @@ fun ChatSection(
                         onDismiss = { showingHandoff = false },
                     )
                 }
-                // Earlier pages load on their own as the reader nears the top,
-                // the way the Apple clients do. The button stays for a page
-                // that failed or a reader who got there first.
                 val nearTop by remember(listState) {
                     derivedStateOf { listState.firstVisibleItemIndex <= 3 }
                 }
                 LaunchedEffect(nearTop, readerLeftEnd, hasEarlier, loadingEarlier, earlierPending) {
                     if (nearTop && readerLeftEnd && hasEarlier && !loadingEarlier && !earlierPending && eventsError == null) {
-                        // In the screen's scope: starting the load changes
-                        // this effect's keys, which would cancel it here.
                         openId?.let { id -> scope.launch { loadEarlier(id) } }
                     }
                 }
-                // Before the new rows are measured, so the page and the place
-                // land in one frame.
                 val rowSpacing = with(density) { 6.dp.roundToPx() }
                 val laidOutRows = remember(projectOwner, openId) { arrayOf(emptyList<ChatDisplayItem>()) }
                 SideEffect {
@@ -2162,10 +1945,6 @@ fun ChatSection(
                                     })
                             }
                         }
-                        // The turn in progress, with the conversation's own
-                        // face at the same left edge as an agent reply, the
-                        // way the Apple transcript keeps its character moving
-                        // while you wait.
                         if (openChat?.bol("running") == true) {
                             item(key = "working") {
                                 val waiting = pending.isNotEmpty()
@@ -2202,8 +1981,6 @@ fun ChatSection(
                     TextButton(onClick = { fileTransferJob?.cancel(); fileProgress = null; fileRelayAnswer?.complete(false) }) { Text(L10n.text("common.cancel")) }
                 }
             }
-            // An agent update started from the picker. It runs on the view
-            // model, so it reports here after the agent sheet has closed.
             val agentUpdate by model.agentUpdate.collectAsStateWithLifecycle()
             LaunchedEffect(agentUpdate) {
                 val notice = agentUpdate
@@ -2229,9 +2006,6 @@ fun ChatSection(
                 modifier = Modifier.align(Alignment.End).clickable { savedNotice = null },
             )
             if (sendError != null) {
-                // One baseline for every action: a bordered chip beside a
-                // bare text link sat at two heights, and Check delivery on
-                // its own row below read as a second mistake.
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Banner(sendError!!, BannerSeverity.DANGER)
                     Row(
@@ -2241,10 +2015,6 @@ fun ChatSection(
                         TsSecondaryButton(
                             label = L10n.text("android.chatpullssections.try_again.d8b8392e"),
                             small = true,
-                            // A failed send leaves the queue unauthorised, so
-                            // retrying asks again for exactly the head. A
-                            // review flag still stops it there: retry re-aims
-                            // through the sheet, never past it.
                             onClick = {
                                 scope.launch {
                                     queued.firstOrNull()?.let { authorized = authorized + it.id }
@@ -2292,10 +2062,6 @@ fun ChatSection(
                 items = pendingQueue,
                 canSteer = runningTurn && openChat?.bol("nativeSteer") == true,
                 canSteerAttachments = openChat?.bol("nativeSteerAttachments") == true,
-                // Paused when the next message is not one this session was
-                // asked to send: a reopened queue waits to be told. Read
-                // from what the strip shows, so the in-flight send hiding
-                // above does not decide it.
                 paused = pendingQueue.firstOrNull()?.let { it.id !in authorized } == true,
                 offline = offline,
                 onChange = { item, text ->
@@ -2353,8 +2119,6 @@ fun ChatSection(
                 chat = chats.firstOrNull { it.str("id") == openId },
                 profileTitle = agentProfileTitle(profiles, openChat?.str("profileId")),
                 quota = quota@{
-                    // A local model spends no plan, so the plan's windows
-                    // would only suggest that it does.
                     if (localChatProvider(openChat?.str("model").orEmpty()) != null) return@quota
                     val backendId = openChat?.str("backend").orEmpty()
                     val launcher = backendOf(backends, backendId)?.str("launcherId")
@@ -2383,8 +2147,6 @@ fun ChatSection(
                         if (id in preparingIds) fileTransferJob?.cancel()
                         try {
                             stopChat(id)
-                            // Stop keeps a parked note; the refreshed list shows
-                            // it with Send now and the poll delivers it later.
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
@@ -2402,9 +2164,6 @@ fun ChatSection(
                 fastModeSaving = fastModeSaveId != null,
                 onQueueWhenConnected = {
                     val id = openId ?: return@ChatComposer
-                    // Text only: an attachment cannot be uploaded with no
-                    // connection, and a message that names a file the host
-                    // has never seen is not a message it can take.
                     scope.launch {
                         val owner = projectOwner?.conversation(id) ?: return@launch
                         val sentDraft = model.chatComposers.capture(owner)
@@ -2435,10 +2194,6 @@ fun ChatSection(
                                 setupError = null
                                 loadChats()
                             }.onFailure {
-                                // The host refuses a setup change while a turn is
-                                // running. Swallowing that left the pill snapping
-                                // back with nothing said: somebody pressing
-                                // Execute saw Plan stay lit and no reason why.
                                 setupError = TunnelCopy.display(
                                     it.message ?: L10n.text("android.chatpullssections.the_request_failed.db4fb447"),
                                     hostLabel.ifBlank { L10n.text("android.chatpullssections.the_computer.da52d93a") },
@@ -2538,7 +2293,6 @@ fun ChatSection(
                                     if (!ownsProject()) return@launch
                                     val recovered = outbox.recoverLegacy(legacyOutboxKey(id), scoped, reviewed)
                                     if (!ownsProject()) return@launch
-                                    // Recovered copies are never authorised by this review.
                                     authorized = authorized - reviewed.map { it.id }.toSet()
                                     queued = recovered
                                     pendingQueueKeys = pendingQueueKeys - legacyOutboxKey(id) + scoped
@@ -2718,10 +2472,6 @@ private fun ChatStatPanels(chats: List<JsonObject>) {
         Triple(L10n.text("common.running"), chats.count { it.bol("running") }.toString(), Icons.Default.Bolt),
         Triple(L10n.text("android.chatpullssections.agents.279b44d2"), chats.mapNotNull { it.str("backend") }.toSet().size.toString(), Icons.Default.Person),
     )
-    // Figure and glyph share the top row, label spans the width underneath,
-    // the way the Apple tiles are built. Sitting the glyph beside the label
-    // instead left "Conversations" competing with it for room in a third of
-    // the screen, and it lost: the tile read "Conversation".
     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
         panels.forEach { (label, value, mark) ->
             TsCard(Modifier.weight(1f)) {
@@ -2774,9 +2524,6 @@ private fun ChatAgentMenuItem(label: String, checked: Boolean, onClick: () -> Un
     )
 }
 
-/// Keep the agent, mode and recency on separate lines, as in the iPhone list.
-/// The mode changes what the next turn may do and should be visible before
-/// opening a conversation.
 @Composable
 private fun ChatRow(chat: JsonObject, peer: String, hostLabel: String) {
     val colors = LocalTsColors.current
@@ -2819,10 +2566,6 @@ private fun ChatRow(chat: JsonObject, peer: String, hostLabel: String) {
     }
 }
 
-/// A tool approval awaiting an answer: the step in plain words, the
-/// preview, and Allow, Always allow, Deny. The line under the buttons
-/// names what Always allow actually stores. Decided approvals read back
-/// their outcome instead.
 @Composable
 internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
     val verb = approval.str("verb")
@@ -2878,9 +2621,6 @@ internal fun ApprovalCard(approval: JsonObject, onResolve: (String) -> Unit) {
     }
 }
 
-/// Chat setup: who answers, which persona, and the instructions behind the
-/// conversation. Agent, model and effort sit behind one field that opens the
-/// picker holding all three, the same way the Apple setup screen reaches them.
 @Composable
 private fun ChatSetupDialog(
     model: AppViewModel,
@@ -2933,9 +2673,6 @@ private fun ChatSetupDialog(
         runCatching {
             model.workspaceSection(peer, "chat.instructions", buildJsonObject { put("id", chatId) })
         }.onSuccess { element ->
-            // `chat.instructions` answers {brief, added, channel}. Reading it
-            // for an "instructions" key that was never there fell through to
-            // `toString`, which put the raw JSON on screen, escapes and all.
             val obj = element as? JsonObject
             brief = obj?.str("brief")
             if (!editingBrief) briefDraft = brief.orEmpty()
@@ -2953,9 +2690,6 @@ private fun ChatSetupDialog(
     }
     LaunchedEffect(chatId, chat?.str("systemPrompt")) { load() }
 
-    /// This conversation's own persona, which is the id and the brief written
-    /// together: the host keeps the text on the chat, so a persona edited
-    /// later does not silently rewrite a conversation already under way.
     fun applyPersona(persona: ChatPersona?) {
         scope.launch {
             runCatching {
@@ -3116,9 +2850,6 @@ private fun ChatSetupDialog(
                     }
                 }
                 HorizontalDivider(color = colors.border)
-                // Which persona new chats in this folder inherit, including
-                // none. A row rather than a mark on whichever persona is open,
-                // so there is a way to say "none of them".
                 ChatSetupDisclosure(L10n.text("android.chatpullssections.new_chats_here.cc6a9bf2"), null, chatId, primary = {
                     TsPickerField(summary = personas.firstOrNull { it.id == defaultId }?.name ?: L10n.text("android.chatpullssections.no_persona.cce53fca"),
                         onOpen = { pickingDefault = true }, modifier = Modifier.fillMaxWidth())
@@ -3210,10 +2941,6 @@ private fun ChatSetupDialog(
     }
 }
 
-/// The personas a picker offers, with "No persona" first because choosing
-/// none is a real answer rather than the absence of one. The folder default
-/// is named on its row, so a list of four names says which one a new chat
-/// would have started with.
 internal fun personaPickerChoices(
     personas: List<ChatPersona>,
     defaultId: String?,
@@ -3228,8 +2955,6 @@ internal fun personaPickerChoices(
         }
 
 
-/// Installed agents as id-to-label pairs, the way the Apple agent picker
-/// lists them. Uninstalled entries stay out: picking one would fail.
 internal fun chatBackendOptions(backends: List<JsonObject>): List<Pair<String, String>> =
     backends.mapNotNull { backend ->
         val id = backend.str("id") ?: return@mapNotNull null
@@ -3240,25 +2965,18 @@ internal fun chatBackendOptions(backends: List<JsonObject>): List<Pair<String, S
 internal fun stringList(backend: JsonObject?, key: String): List<String> =
     (backend?.get(key) as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
 
-/// The agent's models, keeping the conversation's current one even when the
-/// host no longer lists it, so the picker never hides what is set.
 internal fun chatModelOptions(backend: JsonObject?, current: String?): List<String> {
     val listed = stringList(backend, "models")
     val clean = current?.ifBlank { null }
     return if (clean != null && clean !in listed) listed + clean else listed
 }
 
-/// The agent's efforts, with the same keep-what-is-set rule as the models.
 internal fun chatEffortOptions(backend: JsonObject?, current: String?): List<String> {
     val listed = stringList(backend, "efforts")
     val clean = current?.ifBlank { null }
     return if (clean != null && clean !in listed) listed + clean else listed
 }
 
-/// The body for one `chat.send` call. `expectedRevision` is the open
-/// conversation's `sendRevision`: the host rejects a receipted send without
-/// it (`send_upgrade_required`), so every send carrying a client message id
-/// would fail. Omitted when unknown, mirroring the Apple client.
 internal fun chatSendParams(
     id: String,
     text: String,
@@ -3271,8 +2989,6 @@ internal fun chatSendParams(
     put("clientMessageId", messageId)
     put("clientMessageCreatedAtMs", createdAtMs)
     if (sendRevision != null) put("expectedRevision", sendRevision)
-    // Named on the message rather than left to the conversation, so a queued
-    // message cannot arrive carrying files somebody attached after it.
     if (attachmentIds.isNotEmpty()) {
         put("attachmentIds", kotlinx.serialization.json.buildJsonArray {
             attachmentIds.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) }
@@ -3362,8 +3078,6 @@ private fun PullFilterSheet(
 
 private data class AndroidPullSnapshot(val rows: List<JsonObject>, val next: String?)
 
-/// New hosts return a page; older hosts return an array. A few older
-/// Android-era hosts wrapped the array as `pulls`.
 internal fun pullListRows(response: kotlinx.serialization.json.JsonElement): List<JsonObject> {
     val page = response as? JsonObject
     val rows = page?.get("rows") as? JsonArray ?: page?.get("pulls") as? JsonArray
@@ -3371,9 +3085,6 @@ internal fun pullListRows(response: kotlinx.serialization.json.JsonElement): Lis
     return rows.filterIsInstance<JsonObject>()
 }
 
-/// Pull requests for this folder: availability first (a paired client can
-/// inspect, never connect), then scope and state filters, then rows with
-/// the same counts the Apple list shows. Detail opens over the list.
 @Composable
 fun PullsSection(
     model: AppViewModel,
@@ -3420,7 +3131,6 @@ fun PullsSection(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Keep the last known connection state while the list retries.
             }
         }
         try {
@@ -3505,8 +3215,6 @@ fun PullsSection(
             hostLabel = hostLabel,
             number = opened,
             modifier = modifier,
-            // The row that was tapped already knows the title and the author,
-            // so the loading page can show them instead of a bare spinner.
             summary = pulls.firstOrNull { it.long("number") == opened },
             onBack = { openNumber = null; scope.launch { load() } },
         )
@@ -3654,9 +3362,6 @@ fun PullsSection(
     }
 }
 
-/// A file chosen in the composer and not yet sent. The bytes are carried as
-/// base64 because that is what `chat.attach` takes, and they are held only
-/// until the message goes.
 data class StagedAttachment(
     val name: String,
     val data: String,
@@ -3668,23 +3373,14 @@ data class StagedAttachment(
 
 data class StagedHostFile(val id: String, val owner: String)
 
-/// What reading a picked file produced. A failure carries a sentence rather
-/// than an exception: the composer shows it and the person picks again.
 sealed interface AttachmentRead {
     data class Ok(val attachment: StagedAttachment) : AttachmentRead
 
     data class Failed(val reason: String) : AttachmentRead
 }
 
-/// The host refuses anything larger, so refuse it here instead of spending a
-/// person's connection on a transfer that cannot land. Matches
-/// `ATTACHMENT_CAP` in `tokenstat-host::chat`.
 private const val ATTACHMENT_CAP = 12 * 1024 * 1024
 
-/// Read one picked document into a staged attachment.
-///
-/// Off the main thread: a picked file can be megabytes, and both the read and
-/// the base64 pass are long enough to drop frames.
 internal fun readAttachment(context: android.content.Context, uri: android.net.Uri, byteLimit: Int = FILE_MAX): AttachmentRead {
     val resolver = context.contentResolver
     val name = runCatching {
@@ -3815,8 +3511,6 @@ private fun ChatWorkingIndicator(
     }
 }
 
-/** Only a fresh composer inherits launch defaults. Older conversations with
- * no autonomy field retain the host's approval-based interpretation. */
 internal fun chatComposerAutonomy(chat: JsonObject?, launchAutonomy: String = LaunchDefaults.AUTONOMY): String =
     if (chat == null) launchAutonomy else if (chat.str("autonomy") == "bypass") "bypass" else "standard"
 
@@ -3826,7 +3520,6 @@ internal fun compactChatKeyboard(): Boolean =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE &&
         LocalConfiguration.current.screenHeightDp < 600
 
-/// The message field, attachments and model controls docked below the conversation.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun ChatComposer(
@@ -3835,9 +3528,7 @@ internal fun ChatComposer(
     onDraft: (String) -> Unit,
     hint: String,
     sending: Boolean,
-    /// A note is being parked. Send stays Send and stays quiet.
     parking: Boolean = false,
-    /// What the send control says it will do.
     sendLabel: String = L10n.text("android.chatpullssections.send.f6f4688f"),
     staged: List<StagedAttachment>,
     onPick: () -> Unit,
@@ -3851,12 +3542,9 @@ internal fun ChatComposer(
     quota: @Composable () -> Unit = {},
     profileTitle: String? = null,
     launchAutonomy: String = LaunchDefaults.AUTONOMY,
-    /// Whether this device can reach the host at all.
     offline: Boolean = false,
     fastModeSaving: Boolean = false,
-    /// Keep the draft and send it once there is a connection again.
     onQueueWhenConnected: () -> Unit = {},
-    /// The unsent landing composer can explicitly open an empty conversation.
     allowEmpty: Boolean = false,
     submitEnabled: Boolean = true,
     attachmentEnabled: Boolean = true,
@@ -3876,34 +3564,19 @@ internal fun ChatComposer(
         editor.setTextAndPlaceCursorAtEnd(text)
         publishDraft()
     }
-    // The value is "standard", not "ask": the host only treats "standard"
-    // as ask-with-approvals, and anything else that is not "bypass" runs
-    // without the approval plumbing. The label stays Ask.
     val autonomy = chatComposerAutonomy(chat, launchAutonomy)
-    // An agent with no approval protocol of its own runs on Bypass or not at
-    // all. Twin of `isBypassOnly` in `ChatSetupHeader.swift`.
     val bypassOnly = chatAgentForcesBypass(backends, chat?.str("backend").orEmpty())
-    // The host refuses a setup change while a turn is running, so the pills
-    // say so rather than accepting a press it will reject. `sending` alone
-    // was this screen's own flag and went false long before the turn did.
     val locked = sending || chat?.bol("running") == true
     val canSend = submitEnabled && !parking && (allowEmpty || visibleDraft.isNotBlank() || staged.isNotEmpty())
-    // An agent that can only run on Bypass is put on it, the way the Apple
-    // header enforces it on appear and on every change of agent.
     LaunchedEffect(bypassOnly, autonomy, locked) {
         if (bypassOnly && autonomy != "bypass" && !locked) onChange("autonomy", "bypass")
     }
-    // Five lines is the right height for a message and the wrong one for a
-    // brief. The toggle sits at the top right of the bar, away from send,
-    // the way the iPhone composer grows its field.
     var expanded by remember { mutableStateOf(false) }
     val expandedField = expanded && !compactKeyboard
     val inputFocus = remember { FocusRequester() }
     var inputFocused by remember { mutableStateOf(false) }
     var restoreInputFocus by remember { mutableStateOf(false) }
     LaunchedEffect(expanded, compactKeyboard) {
-        // Opening a landscape keyboard moves the editor into the short row.
-        // Transfer focus once, then leave it there when the keyboard closes.
         if (compactKeyboard && expanded) {
             expanded = false
             restoreInputFocus = true
@@ -3915,8 +3588,6 @@ internal fun ChatComposer(
     }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
-    // Dictation reads and writes the draft as it is now, not as it was when
-    // the mic was pressed.
     val currentEditor by rememberUpdatedState(editor)
     val currentReplace by rememberUpdatedState(::replaceDraft)
     val dictation = rememberChatDictation(blocked = sending)
@@ -3930,8 +3601,6 @@ internal fun ChatComposer(
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     ChatCommandMenu(visibleDraft, ::replaceDraft)
-                    // Nothing can be sent right now, so the offer is to keep it. The
-                    // twin of the button `ClientChatComposer` shows over a saved copy.
                     if (offline) {
                         TsSecondaryButton(
                             label = L10n.text("android.chatpullssections.send_when_connected.c2aae57a"),
@@ -4049,16 +3718,11 @@ internal fun ChatComposer(
                     }
                     if (expandedField) Spacer(Modifier.weight(1f)) else input(Modifier.weight(1f))
                     ChatDictationButton(dictation, read = { currentEditor.text.toString() }, write = { currentReplace(it) }, enabled = !sending)
-                    // Stop lives in the row above, as on the iPhone. A landscape
-                    // keyboard hides that row, so it stays here then.
                     if (locked && compactKeyboard) {
                         IconButton(onClick = onStop) {
                             Icon(ActionIcon.Stop.vector, L10n.text("common.stop"), tint = colors.danger)
                         }
                     }
-                    // Send appears once there is something to send, and is
-                    // the one filled control in the bar. While a turn runs it
-                    // queues or steers, the way its label says.
                     AnimatedVisibility(
                         visible = canSend && !sending,
                         enter = fadeIn() + scaleIn(initialScale = 0.6f),
@@ -4069,10 +3733,6 @@ internal fun ChatComposer(
                                 .size(48.dp)
                                 .clip(CircleShape)
                                 .clickable(onClickLabel = sendLabel, role = Role.Button) {
-                                    // The answer is the point of sending, and it
-                                    // arrives under the keyboard. Twin of
-                                    // `ClientChatComposer.sendTapped`, which puts the
-                                    // keyboard away before it sends.
                                     dictation.stop()
                                     keyboard?.hide()
                                     focus.clearFocus()
@@ -4108,9 +3768,6 @@ private fun attachmentSize(bytes: Int): String = when {
     else -> "$bytes B"
 }
 
-/// Two choices, one of them on. The iOS composer's paired controls: a
-/// bordered capsule with the live half filled, rather than a switch, because
-/// neither side is the "off" one.
 @Composable
 internal fun ChatSegmented(
     options: List<Pair<String, String>>,
@@ -4120,9 +3777,6 @@ internal fun ChatSegmented(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
-    // Its own outline. Two borderless pairs side by side on the same card
-    // read as one four-way control, and "Execute Ask" is not a thing anyone
-    // should have to work out is two answers.
     Row(
         modifier
             .clip(RoundedCornerShape(10.dp))
@@ -4158,7 +3812,6 @@ internal fun ChatSegmented(
     }
 }
 
-/** Freeze a queued attempt in the same store update that reads its latest text. */
 internal fun prepareQueuedDelivery(
     items: MutableList<QueuedMessage>, id: String, now: Long, replacementId: String,
 ): QueuedMessage? {
@@ -4175,7 +3828,6 @@ internal fun prepareQueuedDelivery(
     ).also { items[index] = it }
 }
 
-/** A host-confirmed unaccepted steer may wait for the turn without a receipt hold. */
 internal fun deferUnavailableSteer(
     items: MutableList<QueuedMessage>, attempt: QueuedMessage, code: String, steering: Boolean,
 ): Boolean {
@@ -4186,9 +3838,6 @@ internal fun deferUnavailableSteer(
     return true
 }
 
-/// An agent update offered just before a message goes to an agent that is
-/// behind. Port of the Apple `AgentUpdatePrompt`: asked once per version and
-/// per host, and the picker still updates any agent by hand.
 internal object AgentUpdateOffer {
     private fun prefs(context: android.content.Context) =
         context.getSharedPreferences("tokenstat.agentupdate.v1", android.content.Context.MODE_PRIVATE)

@@ -365,8 +365,6 @@ pub struct SyncBuildArgs<'a> {
     pub prices: Option<&'a crate::pricing::PriceTable>,
 }
 
-/// The model id as the account should see it: `local:` marks a model this
-/// machine served itself.
 fn synced_model(model: String, prices: Option<&crate::pricing::PriceTable>) -> String {
     let trimmed = model.trim();
     if trimmed.starts_with("local:") || !prices.is_some_and(|p| p.is_local(trimmed)) {
@@ -442,8 +440,6 @@ pub fn build_sync_payload(
             src: b.src,
         });
     }
-    // Server uniqueness is (d, src, model, proj). Never emit two rows that
-    // only differ on plan/conf: merge any collision by summing counters.
     rows = collapse_duplicate_row_keys(rows);
     rows.sort_by(|a, b| (&a.d, &a.src, &a.model, &a.proj).cmp(&(&b.d, &b.src, &b.model, &b.proj)));
 
@@ -467,7 +463,6 @@ pub fn build_sync_payload(
     Ok(payload)
 }
 
-/// Wire-only v1 row (single `cw`). Used by [`SyncPayload::canonical_bytes`].
 #[derive(Debug, Clone, Serialize)]
 struct SyncRowV1 {
     conf: String,
@@ -507,10 +502,6 @@ struct SyncPayloadV1 {
     window: SyncWindow,
 }
 
-/// Merge rows that share the server uniqueness key `(d, src, model, proj)`.
-///
-/// `plan` stays true only when every merged contributor was plan. Confidence
-/// keeps the weaker rank so mixed buckets do not look stronger than they are.
 fn collapse_duplicate_row_keys(rows: Vec<SyncRow>) -> Vec<SyncRow> {
     use std::collections::BTreeMap;
     let mut map: BTreeMap<(String, String, String, Option<String>), SyncRow> = BTreeMap::new();
@@ -843,7 +834,6 @@ mod tests {
         assert_eq!(choose_schema_v(1, 1).unwrap(), 1);
         assert_eq!(choose_schema_v(1, 2).unwrap(), 2);
         assert_eq!(choose_schema_v(2, 2).unwrap(), 2);
-        // Server only speaks v=3+ and we max out at SYNC_SCHEMA_VERSION.
         assert!(choose_schema_v(3, 4).is_err());
     }
 
@@ -864,8 +854,6 @@ mod tests {
         let sql = Store::SYNC_ROLLUP_SQL;
         assert!(sql.contains("project"), "{sql}");
         assert!(!sql.contains("session"), "{sql}");
-        // Server uniqueness is (d, src, model, proj). Billing must not split
-        // that key into duplicate rows.
         assert!(
             !sql.contains(
                 "GROUP BY local_date, source, model, project,\n                 CASE WHEN billing"

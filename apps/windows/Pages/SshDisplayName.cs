@@ -3,7 +3,6 @@ using System.Net;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Connection titles use friendly names, including after platform caching.</summary>
 internal static class SshDisplayName
 {
     internal static string Private(string? label, string fallback)

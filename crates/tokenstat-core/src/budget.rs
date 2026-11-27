@@ -133,8 +133,6 @@ pub fn list_value_detail(
         match EquivalentValue::price(prices, &b.key, &b.counters) {
             Some(v) => micros = micros.saturating_add(v.micros()),
             None => {
-                // An empty bucket contributes nothing and is not a coverage
-                // gap; only usage that could not be valued is.
                 if b.counters.total() > 0 && !unpriced_models.contains(&b.key) {
                     unpriced_models.push(b.key.clone());
                 }
@@ -256,7 +254,6 @@ mod tests {
             .to_zoned_datetime(tz.clone())
             .date()
             .to_string();
-        // 1M input @ $10/M = $10
         let _ = today;
         let ev = UsageEvent {
             profile_id: None,
@@ -317,8 +314,6 @@ mod tests {
 
         let st = status(&store, &tz, &prices()).unwrap();
         assert_eq!(st.today_usd, 0.0);
-        // The zero must not read as "nothing was spent"; a caller can now say
-        // the figure is an unpriceable floor instead of presenting it complete.
         assert!(st.today_is_floor());
         assert_eq!(st.today_unpriced, vec!["model-with-no-price"]);
         assert!(st.month_is_floor());

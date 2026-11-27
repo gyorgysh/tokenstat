@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Dismissal survives refreshes and restarts. Settings remains the retry path.
 struct UsageKeychainNoticePolicy {
     private(set) var dismissed: Set<String>
 

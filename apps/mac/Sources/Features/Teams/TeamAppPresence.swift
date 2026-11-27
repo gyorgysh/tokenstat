@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// All windows share one publisher for each login. Visibility is sampled
-/// locally; only a change or a due foreground heartbeat reaches the server.
 @MainActor final class TeamAppPresence {
     static let shared = TeamAppPresence()
     private final class State {
@@ -40,9 +38,6 @@ import Foundation
             if let pending = state.pending {
                 state.pending = nil
                 let revision = state.revision
-                // A background watcher can finish while the preceding call
-                // is still returning. Send its latest state independently of
-                // that caller's cancellation; a newer sample supersedes it.
                 Task { @MainActor [weak self] in
                     guard let self, self.states[owner] === state, state.revision == revision else { return }
                     await self.publish(pending.active, owner: owner, api: pending.api)
@@ -54,12 +49,8 @@ import Foundation
                 ["operation": .string("presence.set"), "active": .bool(active)], owner: owner)
             state.published = active
             state.retry = .seconds(30)
-            // The existing server lease lasts 75 seconds. Leave 30 seconds
-            // for transport delays without extending stale online status.
             state.nextAttempt = now().advanced(by: .seconds(45))
         } catch {
-            // A lost reply may still have reached the server. A later state
-            // change must publish again, including an inactive transition.
             state.published = nil
             state.nextAttempt = now().advanced(by: state.retry)
             state.retry = min(.seconds(300), state.retry * 2)

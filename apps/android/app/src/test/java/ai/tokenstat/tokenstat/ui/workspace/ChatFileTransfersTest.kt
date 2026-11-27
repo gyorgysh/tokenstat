@@ -172,8 +172,6 @@ class ChatFileTransfersTest {
             { error("Finishing already uploaded bytes needs no consent") }, {})
         assertEquals("finished", result["id"]!!.jsonPrimitive.content)
 
-        // A host can retain only a prefix after an interrupted upload. Refusing
-        // or dismissing its relay prompt must keep that upload available.
         offset = 500
         cap = FILE_MAX
         repeat(2) { attempt ->
@@ -250,16 +248,12 @@ class ChatFileTransfersTest {
                 "chat.fileCapabilities" -> {
                     capabilities++
                     buildJsonObject {
-                        // After a direct upload, the next route can have a
-                        // smaller file limit. Reusing its receipt sends no data.
                         put("maxFileBytes", if (relay) 500 else FILE_MAX)
                         put("relay", relay)
                     }
                 }
                 "chat.fileUploadStart" -> {
                     starts++
-                    // A previous setup acknowledgement was lost after the final
-                    // chunk. The host resumes it; no Android Base64 API is needed.
                     buildJsonObject {
                         put("transferId", "transfer-one")
                         put("offset", 1000)

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Only an agent's own refusals qualify; a tool's GitHub login error does not.
 enum ChatAuthenticationFailure {
     struct Recovery {
         let failureID: String
@@ -10,17 +9,12 @@ enum ChatAuthenticationFailure {
     }
 
     static func latestRecovery(in items: [ChatDisplayItem], backend: String) -> Recovery? {
-        // Presentation changes only agent prose and counters inside a turn.
-        // Earlier turns cannot contribute to this retry, so avoid projecting
-        // their tool output and attachments again when a new page arrives.
         guard let start = items.lastIndex(where: { if case .user = $0.kind { return true }; return false }) else { return nil }
         let turn = presented(Array(items[start...]))
         guard case let .user(text) = turn[0].kind,
               let failure = turn.dropFirst().last(where: {
                   if case let .failed(text) = $0.kind { return needsSignIn(text, backend: backend) }; return false
               }) else { return nil }
-        // User attachments immediately follow the prompt. Agent-returned files
-        // later in the turn must never become input to a retry.
         var attachments: [ChatAttachment] = []
         for item in turn.dropFirst() {
             guard case let .attachment(file) = item.kind else { break }
@@ -33,8 +27,6 @@ enum ChatAuthenticationFailure {
         latestRecovery(in: items, backend: backend)?.failureID
     }
 
-    /// Whether this chat, on this backend, can be offered sign-in recovery
-    /// for the failure. A refusal from another agent must not open this login.
     static func needsSignIn(_ text: String, backend: String) -> Bool {
         switch backend {
         case "claude", "claude_code": return isClaudeSignInRefusal(text)
@@ -44,18 +36,12 @@ enum ChatAuthenticationFailure {
         }
     }
 
-    /// Whether a failure row is Claude's normalized sign-in refusal. The host
-    /// writes this wording only for a Claude turn, so the text names its own
-    /// backend, including in a chat that has since moved to another agent.
     static func isClaudeSignInRefusal(_ text: String) -> Bool {
         let lower = text.lowercased()
         return lower.hasPrefix("claude code is not signed in")
             || lower.hasPrefix("claude code's sign-in on this computer has expired")
     }
 
-    /// Older hosts persisted Cursor's stderr unchanged. Require both its own
-    /// login command and environment key beside the CLI refusal, so an
-    /// unrelated tool's authentication error cannot offer Cursor sign-in.
     private static func isCursorSignInRefusal(_ text: String) -> Bool {
         var lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if lower.hasPrefix("cursor is not signed in on this machine.") { return true }
@@ -70,9 +56,6 @@ enum ChatAuthenticationFailure {
 
     private static let museSignInRefusal = "Muse is not signed in on this machine. Open a terminal and run muse login."
 
-    /// Older hosts joined the CLI's plain startup lines into an assistant
-    /// row. Require its complete device challenge and its own backend before
-    /// replacing that row, without persisting or presenting the device code.
     private static func isLegacyMuseChallenge(_ text: String, backend: String?) -> Bool {
         guard backend == "muse" else { return false }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -87,8 +70,6 @@ enum ChatAuthenticationFailure {
         return url.scheme == "https" && url.host == "auth.meta.com"
     }
 
-    /// Hide duplicate CLI refusal prose and empty counters only in turns with
-    /// a normalized auth failure. The persisted transcript remains intact.
     static func presented(_ items: [ChatDisplayItem]) -> [ChatDisplayItem] {
         var output: [ChatDisplayItem] = []
         var turn: [ChatDisplayItem] = []

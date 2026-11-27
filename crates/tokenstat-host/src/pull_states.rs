@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! What this computer last learned about each pull request, by repository.
-//!
-//! One answer per pull request, for everything that shows a state. The pull
-//! request list, a pull request's page and a branch's lookup all teach it
-//! what they read, so a chat's marks usually cost no request at all. When one
-//! has aged, [`ensure`] is the only place that asks, once for all of a
-//! repository's stale numbers.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -16,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokenstat_sync::forge::{self, Repo};
 
 const FILE: &str = "pull-states.json";
-/// The most pull requests kept for one repository, newest answer first.
 const KEPT: usize = 500;
-/// A merged or closed pull request rarely changes again.
 const SETTLED_MS: i64 = 6 * 60 * 60 * 1000;
 
 /// One pull request, as much of it as anything here has read.
@@ -106,7 +97,6 @@ impl State {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Entry {
-    /// None once the forge has said the number is not a pull request.
     pull: Option<State>,
     checked_at_ms: i64,
 }
@@ -114,7 +104,6 @@ struct Entry {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Repository {
-    /// `owner/repo`, in its own spelling.
     name: String,
     pulls: BTreeMap<u32, Entry>,
 }
@@ -131,7 +120,6 @@ pub(crate) fn key(repo: &Repo) -> String {
 
 impl States {
     fn load(path: &Path) -> Self {
-        // Derived, and asked for again when it is missing or unreadable.
         std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -143,7 +131,6 @@ impl States {
         known.name = format!("{}/{}", repo.owner, repo.repo);
         let before = known.pulls.remove(&number).and_then(|entry| entry.pull);
         let pull = pull.map(|mut pull| {
-            // A reader that does not know the size must not lose it.
             if let Some(before) = before {
                 pull.additions = pull.additions.or(before.additions);
                 pull.deletions = pull.deletions.or(before.deletions);
@@ -224,7 +211,6 @@ fn save(states: &States) {
 /// from before the request: a sign-out or a write since then makes the
 /// answer one that must not be kept.
 pub(crate) fn learn(repo: &Repo, pulls: impl IntoIterator<Item = State>, epoch: u64) {
-    // Unit tests drive the readers over fictional repositories.
     if cfg!(test) {
         return;
     }
@@ -291,7 +277,6 @@ pub(crate) fn ensure(repo: &Repo, numbers: &[u32], open_ms: i64) {
     let epoch = crate::pulls::cache_epoch();
     let stale = lock().stale(repo, numbers, open_ms, now_ms());
     for numbers in stale.chunks(forge::BRIEFS_LIMIT) {
-        // Signed out, offline or rate limited: the last answer stands.
         let Ok(briefs) = forge::briefs(repo, numbers) else {
             return;
         };

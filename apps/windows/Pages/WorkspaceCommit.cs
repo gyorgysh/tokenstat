@@ -14,10 +14,6 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Small shared git labels. One place, so the Changes list, the commit
-/// composer and the history cards cannot spell the same kind three ways.
-/// </summary>
 internal static class WorkspaceGit
 {
     public static string KindLabel(string raw) => raw switch
@@ -51,13 +47,6 @@ internal static class WorkspaceGit
         id.Length > 7 ? id[..7] : id;
 }
 
-/// <summary>
-/// The reviewed commit flow for one workspace, matching the Mac workbench.
-/// Selection stays local until Commit: checking a file only adds it to this
-/// session. The only commit call sends the frozen review back, so the host
-/// cannot silently commit a newer worktree snapshot. One entry per workspace
-/// id, shared across page instances, so the draft survives navigation.
-/// </summary>
 internal sealed class WorkspaceCommitSession
 {
     private const int MaxMessageBytes = 128 * 1024;
@@ -163,10 +152,6 @@ internal sealed class WorkspaceCommitSession
         OutcomeMessage = "";
     }
 
-    /// <summary>
-    /// Drop paths that are no longer changed. Only while nothing is
-    /// submitted and no review is frozen: a review names exact paths.
-    /// </summary>
     public void Reconcile(IEnumerable<string> available)
     {
         if (Working || SubmittedOperationId is not null || Review is not null)
@@ -275,9 +260,6 @@ internal sealed class WorkspaceCommitSession
         }
         catch (Exception ex)
         {
-            // No rollback, retry or new id follows a lost response. The
-            // submission is persisted (in this session), so reconcile it
-            // with a receipt check before anything else runs.
             Error = L10n.Text("windows.workspacecommit.the_commit_outcome_has_not_been_confirmed.5b129e15", $"{ex.Message}");
         }
         finally
@@ -304,7 +286,6 @@ internal sealed class WorkspaceCommitSession
                     ["id"] = workspaceId,
                     ["operationId"] = SubmittedOperationId,
                 });
-            // HostClient represents a successful JSON null as an empty object.
             if (receipt is null or JsonObject { Count: 0 })
             {
                 CanRetry = true;
@@ -408,14 +389,8 @@ internal sealed class WorkspaceCommitSession
             : message;
 }
 
-/// <summary>
-/// The review composer: title and description over a frozen selection,
-/// with the branch and folder in the subtitle. Every commit goes through
-/// here, never past it.
-/// </summary>
 internal static class WorkspaceCommitComposer
 {
-    /// <summary>Shows the composer. Returns true when a commit landed.</summary>
     public static async Task<bool> ShowAsync(UIElement owner, string workspaceId, string folderName, string branch)
     {
         var session = WorkspaceCommitSession.For(workspaceId);

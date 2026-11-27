@@ -58,31 +58,13 @@ import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.rowSelected
 import kotlinx.coroutines.launch
 
-/// A picker that opens a panel you can type into, for lists a menu cannot
-/// carry. Port of `Sources/Design/SearchablePicker.swift`.
-///
-/// A dropdown is the right control for four efforts. It is the wrong one for
-/// the forty-odd model ids an agent CLI now lists, where the only way to reach
-/// `meta/muse-spark-1.3` is to read every line above it, and where a list that
-/// changed a minute ago has nowhere to say so. The panel adds the two things
-/// the dropdown has no room for: a filter, and a way to ask the host to look
-/// again.
 
-/// One option in a searchable picker.
-///
-/// `detail` is a second line, and `section` a heading. Both are optional and
-/// the plain case, one flat list of labels, needs neither.
 data class PickerChoice<T>(
     val value: T,
     val label: String,
     val detail: String? = null,
     val section: String = "",
 ) {
-    /// Every word of the query has to appear somewhere in the row.
-    ///
-    /// Word by word rather than as one substring, so "meta 1.3" finds
-    /// `meta/muse-spark-1.3` without anybody having to remember where the
-    /// slashes and dashes fall in an id they did not choose.
     fun matches(query: String): Boolean {
         val words = query.split(' ', '\t', '\n').filter { it.isNotEmpty() }
         if (words.isEmpty()) return true
@@ -91,8 +73,6 @@ data class PickerChoice<T>(
     }
 }
 
-/// Sections in first-seen order. Grouping by map would sort them by name and
-/// put Effort above Agent.
 fun <T> pickerSections(choices: List<PickerChoice<T>>): List<Pair<String, List<PickerChoice<T>>>> {
     val order = mutableListOf<String>()
     val grouped = mutableMapOf<String, MutableList<PickerChoice<T>>>()
@@ -106,7 +86,6 @@ fun <T> pickerSections(choices: List<PickerChoice<T>>): List<Pair<String, List<P
     return order.map { it to (grouped[it] ?: emptyList()) }
 }
 
-/// Which rows survive the filter field and the section tab.
 fun <T> pickerFiltered(
     choices: List<PickerChoice<T>>,
     query: String,
@@ -115,10 +94,6 @@ fun <T> pickerFiltered(
     it.matches(query) && (selectedSection.isEmpty() || it.section == selectedSection)
 }
 
-/// What Done on the keyboard takes, which is what a person typing three
-/// letters of a model id is asking for. Prefer an exact label match, then a
-/// match inside the section being filtered, so typing a model id that
-/// substring-matches an Agent row does not select the Agent.
 fun <T> pickerSubmitTarget(
     choices: List<PickerChoice<T>>,
     query: String,
@@ -129,8 +104,6 @@ fun <T> pickerSubmitTarget(
     val trimmed = query.trim()
     filtered.firstOrNull { it.label.equals(trimmed, ignoreCase = true) }?.let { return it.value }
     if (selectedSection.isNotEmpty()) return filtered.first().value
-    // No section filter: prefer a non-Agent section, since the combined
-    // panel's Agent rows otherwise shadow model ids like "codex".
     val sections = pickerSections(filtered)
     if (sections.size > 1) {
         sections.firstOrNull { !it.first.contains("agent", ignoreCase = true) }
@@ -139,17 +112,12 @@ fun <T> pickerSubmitTarget(
     return filtered.first().value
 }
 
-/// Where a stepped picker goes after a row in `section` is picked: the next
-/// tab, or null when that was the last step and the panel should close.
-/// A section that is no longer a tab (the agent changed under it) also ends.
 fun pickerNextStep(sectionTabs: List<String>, section: String): String? {
     val index = sectionTabs.indexOf(section)
     if (index < 0) return null
     return sectionTabs.getOrNull(index + 1)
 }
 
-/// The panel shell: a bottom sheet with the title and Done, matching the
-/// sheet the iPhone puts the same list in.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TsPickerSheet(
@@ -182,13 +150,6 @@ fun TsPickerSheet(
     }
 }
 
-/// Search field, filtered rows, and an optional way to reload the list.
-///
-/// The reload is not decoration. A model list is the agent CLI's answer as of
-/// the last time the host asked it, cached so the picker does not shell out to
-/// four CLIs on every keystroke. Add an API key to one of them and the new
-/// provider is real everywhere except here, with nothing on screen admitting
-/// it and no way to hurry it along. That is what the Refresh is for.
 @Composable
 fun <T> TsPickerOptionList(
     choices: List<PickerChoice<T>>,
@@ -198,38 +159,19 @@ fun <T> TsPickerOptionList(
     pick: (T) -> Unit,
     modifier: Modifier = Modifier,
     monospaced: Boolean = true,
-    /// A line above the search field naming what the panel is for.
     caption: String? = null,
-    /// A control at the end of the caption line, such as which login the
-    /// listed agents run as.
     captionAccessory: (@Composable () -> Unit)? = null,
-    /// A full-width control under the caption, such as which profile the
-    /// agents sign in with. Sized for a finger, unlike the caption line.
     header: (@Composable () -> Unit)? = null,
     onRefresh: (suspend () -> Unit)? = null,
-    /// What a section is currently set to, shown beside its heading.
     sectionValue: ((String) -> String?)? = null,
-    /// Tabs for a picker that holds several independent settings, one per
-    /// section, each showing what it is set to. The agent/model/effort picker
-    /// uses these so the model and effort lists are visible before anybody
-    /// scrolls past the agents. Two or more turn them on.
     sectionTabs: List<String> = emptyList(),
-    /// Walk the tabs in order: picking a row moves on to the next tab, and
-    /// picking in the last one calls `onFinish`. Search covers only the
-    /// current step, because a step is one question. The tabs stay tappable,
-    /// so any earlier answer is one tap away.
     stepped: Boolean = false,
-    /// The search prompt for one step, "Search models" rather than a prompt
-    /// that names all three.
     stepPrompt: ((String) -> String)? = null,
     onFinish: (() -> Unit)? = null,
     onStepPick: (suspend (T) -> List<String>?)? = null,
     selectionSummary: String? = null,
     enabled: Boolean = true,
-    /// Trailing accessory per row, for the model picker's favourite star.
     accessory: (@Composable (T) -> Unit)? = null,
-    /// A mark between the check and the label, for the agent rows' brand
-    /// marks. Draw nothing to leave a row without one.
     icon: (@Composable (T) -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
@@ -238,12 +180,8 @@ fun <T> TsPickerOptionList(
     var query by remember { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     var refreshRequest by remember { mutableStateOf(0) }
-    // The tab somebody chose. Empty, or one that no longer exists (Effort
-    // after switching to an agent without it), means the first tab.
     var selectedSection by remember { mutableStateOf("") }
     val tabbed = sectionTabs.size > 1
-    // The section the list shows, or empty for all of them: when there are
-    // no tabs, and while a search runs across every tab.
     val activeSection = when {
         !tabbed -> ""
         query.isNotEmpty() && !stepped -> ""
@@ -257,9 +195,6 @@ fun <T> TsPickerOptionList(
         selectedSection = section
         query = ""
     }
-    // Picking answers the current step and asks the next one. Picking the row
-    // that is already marked counts too: it is how somebody says "that one is
-    // fine" and moves on.
     fun choose(choice: PickerChoice<T>) {
         if (choosing) return
         if (!stepped || onStepPick == null) {
@@ -441,13 +376,6 @@ fun <T> TsPickerOptionList(
     }
 }
 
-/// One tab per setting, with its current value under its name.
-///
-/// This was a row of small All/Agent/Model/Effort pills that people did not
-/// notice, so the agent list read as the whole panel. A tab that says "Model,
-/// opus" is the summary and the way in at once. Stepped, the tabs carry a
-/// number, turn into a check once answered, and sit between chevrons, so the
-/// strip reads as progress rather than as three filters.
 @Composable
 private fun TsPickerTabStrip(
     sectionTabs: List<String>,
@@ -550,13 +478,6 @@ private fun <T> TsPickerRow(
     }
 }
 
-/// A section heading inside a panel, with what that section is currently set
-/// to on the right of it.
-///
-/// The value is the part that earns its keep. A panel holding agent, model and
-/// effort reads as one long list of names unless each group says what it is and
-/// what it is set to, and the person who opened it came to change one of the
-/// three.
 @Composable
 private fun TsPickerSectionHeading(title: String, value: String?) {
     val colors = LocalTsColors.current
@@ -586,16 +507,12 @@ private fun TsPickerSectionHeading(title: String, value: String?) {
     }
 }
 
-/// One setting's tab: its name, and what it is set to underneath. Not a
-/// `TabRow`, because a solid indicator here would outweigh the row the person
-/// came to change.
 @Composable
 private fun TsPickerSectionTab(
     title: String,
     value: String,
     selected: Boolean,
     modifier: Modifier = Modifier,
-    /// The step's number in a stepped picker, null in a plain tab strip.
     step: Int? = null,
     answered: Boolean = false,
     onSelect: () -> Unit,
@@ -656,9 +573,6 @@ private fun TsPickerSectionTab(
     }
 }
 
-/// The field that says what a setting is and opens its picker. Port of
-/// `ChatAgentField`: the summary is the label, and the chevron is the only
-/// decoration it carries.
 @Composable
 fun TsPickerField(
     summary: String,
@@ -697,7 +611,6 @@ fun TsPickerField(
     }
 }
 
-/// A full-width picker row: a label on the left, the field on the right.
 @Composable
 fun TsPickerFieldRow(
     label: String,
@@ -726,8 +639,6 @@ fun TsPickerFieldRow(
     }
 }
 
-/// A flat list in the picker's sheet, for the single-setting cases: pick a
-/// persona, pick which agent drafts one.
 @Composable
 fun <T> TsSimplePickerSheet(
     title: String,

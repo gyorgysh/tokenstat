@@ -6,12 +6,6 @@
 
 import SwiftUI
 
-/// How a reading is written, in one place.
-///
-/// The full bar and the one-line strip say the same thing about the same
-/// machine, so a change of wording cannot land on one and miss the other.
-/// Missing readings are "n/a" rather than zero: a figure nobody measured is
-/// not a machine that is idle.
 enum HostStatsFormat {
     static func powerSymbol(_ stats: HostStats?) -> String {
         if stats?.charging == true { return "battery.100percent.bolt" }
@@ -39,12 +33,6 @@ enum HostStatsFormat {
         return L10n.text("apple.hoststatsbar.n_a.a683c5c5")
     }
 
-    /// What the memory figure counts, in one line.
-    ///
-    /// Worth saying out loud. "24 GB" beside a machine with 32 invites the
-    /// reading that eight are left and everything else is spoken for, which is
-    /// not what any of the three platforms measures: the cache and the
-    /// purgeable pages are available and are not in this number.
     static let ramExplanation = L10n.text("apple.hoststatsbar.memory_in_use_by_apps_wired_and_compressed.d6cddcc1")
 
     static func ramLabel(used: UInt64, total: UInt64) -> String {
@@ -60,10 +48,6 @@ enum HostStatsFormat {
         return "\(Int((min(1, max(0, cpu)) * 100).rounded()))%"
     }
 
-    /// Direct vs relay for a live peer, from this device's `remote.status`.
-    ///
-    /// Missing stays missing. The screen must not invent Encrypted relay
-    /// for a path nobody has observed yet.
     @MainActor
     static func loadRoute(for peer: String) async -> String? {
         let traffic = await ConnectionRoutes.shared.traffic()
@@ -71,13 +55,6 @@ enum HostStatsFormat {
     }
 }
 
-/// One `remote.status` for a screenful of machine rows.
-///
-/// Every row asks for its own path at the same moment, and the answer is the
-/// same list for all of them. The host builds that list under the lock every
-/// peer call takes a slot in, so a list of machines used to mean one of those
-/// per row. Rows within a couple of seconds of each other share one answer,
-/// and a request in flight is joined rather than duplicated.
 @MainActor
 final class ConnectionRoutes {
     static let shared = ConnectionRoutes()
@@ -102,7 +79,6 @@ final class ConnectionRoutes {
     }
 }
 
-/// The same wording and colours the screen viewer uses, on a machine row.
 struct ConnectionRouteMark: View {
     let route: String?
 
@@ -120,14 +96,9 @@ struct ConnectionRouteMark: View {
     }
 }
 
-/// Compact power, CPU and memory for a machine, filled after a tunnel hop.
-///
-/// Peer set: ask that host. Peer nil: this machine. Offline hosts are not
-/// dialled. Missing readings stay off the bar rather than drawing as zero.
 struct HostStatsBar: View {
     var peer: String? = nil
     var online: Bool = true
-    /// Local sample, used for "this Mac" in the inspector.
     var local: Bool = false
 
     @State private var stats: HostStats?
@@ -274,9 +245,6 @@ struct HostStatsBar: View {
     }
 
     private func refresh() async {
-        // The task restarts (and cancels this one) when the peer changes, but
-        // a cancelled await still resumes: only publish when this refresh is
-        // still the current one, or one peer's answer lands on another's row.
         let peerAtStart = peer
         var fresh: HostStats?
         var didFail = false
@@ -303,10 +271,6 @@ struct HostStatsBar: View {
 }
 
 extension View {
-    /// Opaque panel on both platforms. `cardSurface` is iOS-only.
-    ///
-    /// Shared by the readings bar and the update card, so it is named for what
-    /// it is rather than for whichever of them asked first.
     func machineCardSurface() -> some View {
         #if os(macOS)
         background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -320,15 +284,6 @@ extension View {
     }
 }
 
-/// The same readings as `HostStatsBar`, on a host row.
-///
-/// A row in a list has little height to spend, so this drops the captions,
-/// the meters and the surface and keeps the three figures plus the path
-/// (direct or relay) once this device has one. The full bar stays on the
-/// device screen, where there is room to say where the numbers came from.
-///
-/// Nothing is dialled for an offline host, and a reading that is missing is
-/// left out rather than drawn as zero.
 struct HostStatsStrip: View {
     let peer: String
     var online: Bool = true
@@ -382,9 +337,6 @@ struct HostStatsStrip: View {
                 cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
             }
             if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-                // Used of total, not used alone. One figure with nothing to
-                // measure it against is a figure nobody can read: "24 GB" says
-                // nothing until the 32 is beside it.
                 cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
                     .help(HostStatsFormat.ramExplanation)
             }

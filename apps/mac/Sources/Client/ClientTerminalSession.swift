@@ -11,10 +11,6 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
-/// One live terminal on a remote host, driven over the tunnel for the phone.
-///
-/// Same model as the Mac `TerminalSession` (host owns the process, we poll
-/// and type), simplified for a full-screen mobile surface.
 @MainActor
 @Observable
 final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
@@ -50,21 +46,15 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     private(set) var outputPaused = false
     var transportError: String?
 
-    /// Ctrl on the key bar armed for the next key. The bar has no letter keys,
-    /// so the flag lives here and `send(source:data:)` folds the next typed
-    /// byte to its C0 code. Cleared by that fold, or by the next bar key, so
-    /// it behaves like a modifier tapped once.
     var controlArmed = false
 
     @ObservationIgnored private var terminalView: TerminalView?
     @ObservationIgnored private var offset: UInt64 = 0
-    /// Output on its way to the emulator, minus what it cannot read correctly.
     @ObservationIgnored private var outputFilter = TerminalOutputFilter()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var writerTask: Task<Void, Never>?
     @ObservationIgnored private var removed = false
     @ObservationIgnored private var isPending = false
-    /// Close was tapped before spawn returned. Kill the real id on attach.
     @ObservationIgnored private var closeWhenAttached = false
     @ObservationIgnored private var lastInfoAt = Date.distantPast
     @ObservationIgnored private var inForeground = true
@@ -147,10 +137,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     func stop() {
         removed = true
-        // The reported bug, from this end: closing a session here used to leave
-        // the Mac's own terminal clamped to the phone's width. Giving up the
-        // claim puts it straight back. Fire and forget: the host expires the
-        // claim on its own, and closing a screen must not wait on the tunnel.
         if ownsSession, !isPending, !hostID.isEmpty {
             let id = hostID
             let peer = peer
@@ -162,11 +148,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         endLocalWork()
     }
 
-    /// Stop the process on the host, then drop the phone's hold.
-    ///
-    /// Done only detaches. Close is what the Mac tab close does.
-    /// Throws when the host never heard the close, so the caller can keep
-    /// the row instead of pretending the process is gone.
     func close() async throws {
         guard ownsSession, !Task.isCancelled else { throw CancellationError() }
         if isPending {
@@ -202,9 +183,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         eventStream.continuation.finish()
     }
 
-    /// The screen is on screen. Backgrounded polls skip the held read so a
-    /// frozen phone does not sit in a tunnel wait, and coming back nudges
-    /// the supervisor instead of waiting out a leftover backoff.
     func setForeground(_ active: Bool) {
         inForeground = active
     }
@@ -218,8 +196,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             mayStart: { self.mayOperate && self.alive && self.hostID == info.id })
     }
 
-    /// A path change is not a dead process. Drop the last transport error so
-    /// the next poll can reattach by pty id over a new dial.
     func clearTransientTunnelError() {
         if let error = transportError, ClientTunnelCopy.isAbsent(error) {
             transportError = nil
@@ -331,8 +307,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                         return false
                     }
                 } catch {
-                    // A failed list is still a transport outage, not proof
-                    // that the remote PTY disappeared.
                 }
             }
             return true
@@ -349,7 +323,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             return true
         }
         if info.alive { transportError = nil }
-        // EOF can precede reaping, including during tunnel recovery.
         return true
     }
 
@@ -380,8 +353,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         offset = chunk.nextOffset
         if !chunk.bytes.isEmpty {
             hasOutput = true
-            // Share the Mac pane's embedded geometry and legacy keyboard
-            // policy. See `TerminalOutputFilter`.
             let bytes = outputFilter.filter([UInt8](chunk.bytes)[...])
             let slice = 24 * 1024
             var start = 0
@@ -396,20 +367,14 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             }
         }
         if let code = chunk.exitCode { exitCode = code; alive = false }
-        // A descendant can retain output after its parent exits. New hosts
-        // report EOF independently; older hosts keep their empty-read fallback.
         let drained = !chunk.reportsOutputEnd || chunk.outputEndOffset.map { offset >= $0 } == true
         return chunk.bytes.isEmpty && exitCode != nil && drained
     }
 
-    /// Ask the host whether the process is still running. A clean exit used
-    /// to leave this screen saying Running until the next failed read.
     @MainActor
     private func checkLiveness(peer: String, id: String, minimumInterval: TimeInterval = 0.25) async -> Bool {
         guard mayOperate else { return false }
         guard exitCode == nil else { return true }
-        // Read replies can carry process status, but metadata still supplies
-        // negotiated geometry and provider session identities during quiet runs.
         guard Date().timeIntervalSince(lastInfoAt) >= minimumInterval else { return true }
         lastInfoAt = Date()
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
@@ -428,7 +393,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
         if !info.alive {
             alive = false
-            // Give the wait thread a chance to expose a real exit status.
             return info.exitCode == nil
         }
         transportError = nil
@@ -446,11 +410,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         view.optionAsMetaKey = true
         view.changeScrollback(4_000)
         view.terminalDelegate = delegate
-        // Soft keyboard: TerminalView is a UIKeyInput scroll view.
         view.isUserInteractionEnabled = true
-        // SwiftTerm's own accessory has no Shift and no back-tab, which is the
-        // one chord an agent session needs. `ClientTerminalKeys` replaces it,
-        // and two bars stacked would be worse than the gap it fills.
         view.inputAccessoryView = nil
         return view
     }
@@ -464,36 +424,22 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         )
     }
 
-    // MARK: - TerminalViewDelegate
 
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         Task { @MainActor in
             guard mayOperate, newCols > 0, newRows > 0 else { return }
-            // Against what was last announced, not against `rows`/`cols`. Those
-            // are the host's answer, and the host's answer is the *agreed* size
-            // across every viewer, which on a phone attached to a wider Mac is
-            // smaller than this screen. Comparing against it would suppress the
-            // announcement of the phone's real width, and the pty would keep
-            // wrapping to a geometry this screen cannot show.
             if announced?.rows == newRows, announced?.cols == newCols { return }
             announced = (rows: newRows, cols: newCols)
             eventStream.continuation.yield(.resize(rows: newRows, cols: newCols))
         }
     }
 
-    /// What this screen last told the host it can show.
     @ObservationIgnored private var announced: (rows: Int, cols: Int)?
 
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
 
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
-    /// Whether a drag scrolls the buffer instead of reaching the program.
-    ///
-    /// An agent that asks for mouse reporting gets every drag as an event,
-    /// which pins the view to the bottom of a 4,000 line scrollback. Turning
-    /// reporting off hands panning back to the terminal. Starts off, because
-    /// typing is what a keyboard is for and a scroll is the deliberate act.
     var scrolls: Bool = false {
         didSet {
             guard scrolls != oldValue else { return }
@@ -505,18 +451,11 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     func followOutput() { (terminalView as? ClientTerminalInputView)?.followLatest() }
 
-    /// The visible screen as plain text. Empty until the view exists, and it
-    /// never creates one: the sheet that reads it does not own the mount.
     func screenText() -> String {
         guard let view = terminalView else { return "" }
         return view.visibleTextSnapshot()
     }
 
-    /// Put the keyboard away, or bring it back, without ending the session.
-    ///
-    /// Hiding it is what makes a phone readable, and until the terminal is
-    /// tapped there is nothing that says how to get it back. The same key
-    /// does both.
     func toggleKeyboard() {
         guard let view = terminalView else { return }
         if view.isFirstResponder {
@@ -526,10 +465,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
     }
 
-    /// Type raw bytes, for the key bar above the keyboard.
-    ///
-    /// The same queue typing uses, so a tapped key and a typed one cannot
-    /// arrive out of order.
     func sendBytes(_ bytes: [UInt8]) {
         guard mayOperate, !bytes.isEmpty else { return }
         eventStream.continuation.yield(.write(bytes))
@@ -538,9 +473,6 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
         Task { @MainActor in
-            // Ctrl armed on the bar applies to the key that is typed here, not
-            // to a bar key. The fold and the clear happen on the main actor so
-            // they cannot race the bar's toggle.
             guard mayOperate else { return }
             var out = bytes
             if controlArmed {
@@ -576,7 +508,6 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> TerminalView {
         let view = session.view
         view.setNeedsDisplay()
-        // Become first responder so the software keyboard can type.
         DispatchQueue.main.async {
             _ = view.becomeFirstResponder()
         }
@@ -584,9 +515,6 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalView, context: Context) {
-        // Focus is taken once, on appear. Taking it back on every update
-        // would make Hide keyboard last until the next redraw, which on a
-        // live terminal is immediately.
         (uiView as? ClientTerminalInputView)?.scrollMode = session.scrolls
     }
 }
@@ -625,8 +553,6 @@ struct ClientTerminalScreen: View {
         if !embedded, let reference = session.workReference, reference.scope.kind == .account {
             navigation.showTerminal(reference, owner: session.id)
         }
-        // A basename is a label. Never hand the working directory or command
-        // (which may include a prompt) to the persistence boundary.
         ClientRecentPlaces.shared.record(
             in: account.account?.recentPlacesScope, peer: session.peer,
             workspaceID: session.workspaceID,
@@ -646,9 +572,6 @@ struct ClientTerminalScreen: View {
                     Text(SidebarTerminalNames.shared.name(for: session.workReference) ?? URL(fileURLWithPath: session.command).lastPathComponent)
                         .font(ClientType.label.weight(.semibold))
                         .lineLimit(1)
-                    // Write failures and catch-up status can change on each
-                    // typed key. Keep them in the existing fixed header line
-                    // so they never resize the terminal or its remote PTY.
                     Button { showingTransportDetails = true } label: {
                         HStack(spacing: Theme.Space.xs) {
                             Text(statusText).lineLimit(1).truncationMode(.middle)
@@ -747,8 +670,6 @@ struct ClientTerminalScreen: View {
             }
         }
         .onDisappear {
-            // Full-screen dismiss: stop draining when nobody is watching.
-            // Re-open attaches a fresh session from pty.list.
             session.stop()
             navigation.leaveTerminal(owner: session.id)
         }
@@ -769,7 +690,6 @@ struct ClientTerminalScreen: View {
                         onClose?()
                         if !embedded { dismiss() }
                     } catch {
-                        // Keep the screen. The process is still running.
                     }
                 }
             }

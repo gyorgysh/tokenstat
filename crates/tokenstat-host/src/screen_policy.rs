@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Explicit per-device screen permissions and short-lived capabilities.
 
 use std::collections::HashMap;
@@ -48,49 +47,13 @@ pub struct PendingRequest {
 /// different behaviours for one action.
 pub(crate) const PENDING_TTL: u64 = 15 * 60;
 
-/// The one account whose devices are granted screen access without a person.
-///
-/// pueev's App Review demo account, and nothing else. Not a secret and not a
-/// credential: it is written here in plain so that anybody reading this file
-/// can see exactly which account the exception is for, and that theirs is not
-/// it. See `is_review_demo`.
 const REVIEW_DEMO_ACCOUNT_ID: &str = "u_5ce664fd625c5ea13f51f5d2";
 
-/// The account name the review machine runs under.
-///
-/// The other half of the same question, and the half a server cannot answer.
-/// Pinning the account id says *which* account the exception is for, but the
-/// server is what asserts the account, so a server that named the demo account
-/// to every machine would hand every machine the exception. This is a fact
-/// about the computer instead, and the two have to agree.
-///
-/// Nothing here is a secret. It is a username, written in plain for the same
-/// reason the account id is: so anybody reading this file can see that theirs
-/// is not it. Somebody who deliberately renames their macOS account to this
-/// has only reached the *second* gate, and still needs a server willing to
-/// call them the demo account.
-///
-/// Kept on every platform rather than compiled away with the check that reads
-/// it, because what the exception is for is worth saying in one place whatever
-/// the target. Only the Unix build has anything to compare it against.
 #[cfg_attr(not(unix), allow(dead_code))]
 const REVIEW_DEMO_USER: &str = "appreview";
 
-/// Whether this computer is the one the review exception is for.
-///
-/// Read out of the passwd database for the effective uid rather than `$USER`,
-/// because an environment variable is set by whoever started the process and
-/// the whole point of this check is a fact the caller cannot supply.
-///
-/// Not Unix, no exception. App Review runs on a Mac, so a Windows host has no
-/// business granting this and answering no there costs nothing.
 #[cfg(unix)]
 fn on_review_machine() -> bool {
-    // `getpwuid_r` over `getpwuid`: the latter answers into a static buffer
-    // shared by the process, and this runs on a daemon serving many peers.
-    // Start at 16 KiB and grow once on ERANGE so a large directory entry does
-    // not become a spurious miss. A miss is a closed gate, so failing here
-    // only denies the exception, still the right side to fail on.
     let mut size = 16 * 1024;
     loop {
         let mut buf = vec![0 as libc::c_char; size];
@@ -128,8 +91,6 @@ fn on_review_machine() -> bool {
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
     permissions: Vec<ScreenPermission>,
-    /// Absent in every file written before requests existed, which is why it
-    /// defaults rather than being required.
     #[serde(default)]
     pending: Vec<PendingRequest>,
 }
@@ -157,9 +118,7 @@ fn load_at(path: &std::path::Path) -> Result<Store, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Store::default(),
         Err(e) => return Err(e.to_string()),
     };
-    // Pruned on the way in rather than on a timer. Every path that cares about
-    // a request reads the store first, so there is no moment where an expired
-    // one can be seen, and nothing has to be woken up to sweep.
+
     prune(&mut store, now());
     Ok(store)
 }
@@ -178,8 +137,7 @@ pub(crate) fn prune_pending(pending: &mut Vec<PendingRequest>, now: u64) {
 pub(crate) fn now_secs() -> u64 {
     now()
 }
-// Serialize the entire read/modify/write, including requests and answers.
-// Atomic rename alone cannot keep a stale snapshot from restoring a grant.
+
 fn update_store<T>(edit: impl FnOnce(&mut Store) -> T) -> Result<T, String> {
     update_store_at(&path()?, edit)
 }
@@ -216,11 +174,6 @@ fn legend(tier: &str) -> Result<(), String> {
     }
 }
 
-/// The account this machine is signed into, once it has been checked.
-///
-/// Returns the status rather than `()` so a caller that also needs to know
-/// whether this is the review demo account gets it from the request that was
-/// going out anyway.
 fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, String> {
     let status = tokenstat_sync::sync_status(None).map_err(|e| e.to_string())?;
     legend(status.tier.as_deref().unwrap_or(""))?;
@@ -246,8 +199,7 @@ pub(crate) fn stream_allowed(peer: &str, control: bool) -> bool {
             .iter()
             .any(|(id, view, ctrl)| id == peer && *view && (!control || *ctrl));
     }
-    // Hold the cache lock while reading and publishing. A writer's invalidation
-    // must happen after any read of the old file, never before its publication.
+
     let Ok(mut guard) = stream_cache().lock() else {
         return false;
     };
@@ -361,8 +313,6 @@ struct SetParams {
     view: bool,
     control: bool,
 }
-/// What a device asks for. No peer id: that comes from the transport, and a
-/// field here would be a device naming somebody else.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AskParams {
@@ -385,10 +335,6 @@ struct VerifyParams {
     control: bool,
 }
 
-/// A live session, and a capability that grants the answer being asked for.
-///
-/// Host-side only: a device that cannot capture a screen has no session to
-/// name, and answers `screen.control.set` as the unknown method it is.
 #[cfg(feature = "local-host")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -398,7 +344,6 @@ struct ControlParams {
     control: bool,
 }
 
-/// The picture a live session should be worth, from the fixed set.
 #[cfg(feature = "local-host")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,26 +353,10 @@ struct QualityParams {
     quality: String,
 }
 
-/// Whether this machine may grant screen access without asking a person.
-///
-/// Two independent conditions, both required. The server has to say the round
-/// is open, and the account it names has to be the one this build was
-/// compiled for. A flag on its own would mean one boolean stood between a
-/// device and somebody's screen: flip it by mistake, point a host at a
-/// different server, and every ordinary account would start granting silently.
-/// Pinning the id means that cannot happen, because no other account can be
-/// the demo account whatever a server says.
-///
-/// A server too old to name the account cannot pass this, which is the right
-/// answer: the exception is worth nothing next to granting by accident.
 fn is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
     account_is_review_demo(status) && on_review_machine()
 }
 
-/// What the server said, on its own.
-///
-/// Split out so the account half can be tested without the machine half: a
-/// test host is not called `appreview` and never will be.
 fn account_is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
     status.review_demo && status.account_id.as_deref() == Some(REVIEW_DEMO_ACCOUNT_ID)
 }
@@ -447,12 +376,6 @@ pub(crate) fn signed_into_review_demo() -> bool {
         .unwrap_or(false)
 }
 
-/// Write one device's grant, and make the change take effect now.
-///
-/// Every path that changes a permission goes through here: the toggles in
-/// Devices, and answering a request. Held capabilities are dropped and a live
-/// session is cut back or ended, because a grant somebody just narrowed has to
-/// mean the next frame, not the next reconnect.
 fn set_permission(peer_id: &str, view: bool, control: bool) -> Result<(), String> {
     if control && !view {
         return Err("control permission requires view permission".into());
@@ -494,14 +417,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             set_permission(&p.peer_id, p.view, p.control)?;
             Ok(json!({"saved":true}))
         }
-        // The device asking, over the tunnel it is already connected on.
-        //
-        // The push below is a nudge and never was the mechanism: a
-        // notification carries a reason and a machine id by design, never the
-        // id of the device that asked, and the Mac app does not register for
-        // push at all. So the question travels the one channel that can carry
-        // it, and the peer it names comes from the transport rather than from
-        // the params, the same rule `screen.capability.issue` follows.
+
         "screen.access.ask" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a screen access request must arrive from the device asking")?;
@@ -514,9 +430,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     }) {
                         return true;
                     }
-                    // Keep the host sheet stable while the owner decides.
-                    // A later request for mouse control may strengthen a
-                    // view-only question, but a repeat must not replace it.
+
                     if store
                         .pending
                         .iter()
@@ -538,33 +452,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             if granted {
                 return Ok(json!({"pending": false, "granted": true}));
             }
-            // Record the request before the network check, without retaining
-            // a snapshot that could overwrite a concurrent local answer.
 
-            // The one automatic grant in the product, and the reason it
-            // exists: App Review signs into the website's demo account on a
-            // fresh iPhone and asks a Mac for its screen, and nobody at Apple
-            // has that Mac to press a button on. An untestable feature is a
-            // rejected build.
-            //
-            // Five things have to hold, and a user can set none of them. The
-            // account has to be `REVIEW_DEMO_ACCOUNT_ID`, which is compiled in
-            // rather than taken from the answer. The server has to say the
-            // review round is open, which is false for every other account and
-            // for this one between rounds. The device has to be approved
-            // already, which `serve_peer` checks before dispatch is reached,
-            // so a stranger never gets this far. The account has to be Legend,
-            // checked here as everywhere. And the grant is an ordinary row: it
-            // is listed in Devices, revocable there, and gone the moment the
-            // round's switch goes off, because the next check re-reads it.
-            //
-            // No build flag on purpose. A path that only exists in some builds
-            // is a path nobody tests.
-            //
-            // A failure here is not a refusal. Not signed in, not Legend, or
-            // the account unreachable for a moment all mean "not the demo
-            // account", and the request stands for a person as it should. The
-            // only way past this line is a positive answer.
             let review_demo = verify_legend_account()
                 .map(|status| is_review_demo(&status))
                 .unwrap_or(false);
@@ -580,9 +468,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             Ok(serde_json::to_value(load()?.pending).map_err(|e| e.to_string())?)
         }
-        // The answer, from the person at this machine. Deny is view false and
-        // control false, which is the same call: refusing and revoking are the
-        // same state, and a request that is answered stops standing either way.
+
         "screen.access.answer" => {
             if crate::request_context::remote_peer().is_some() {
                 return Err("screen access requests are answered on the host".into());
@@ -646,10 +532,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             verify_capability(&peer, &p.token, p.control)?;
             Ok(json!({"allowed":true}))
         }
-        // Hand the mouse over, or take it back, on a session that is already
-        // running. The alternative was reopening the stream, which the relay
-        // refuses while the old channel is still closing. See
-        // `screen_runtime::set_control`.
+
         #[cfg(feature = "local-host")]
         "screen.control.set" => {
             let peer = crate::request_context::remote_peer()
@@ -659,8 +542,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             crate::screen_runtime::set_control(&p.session_id, &peer, p.control)?;
             Ok(json!({"control":p.control}))
         }
-        // Same shape as `screen.control.set`, and for the same reason: what a
-        // session spends can change without the picture stopping.
+
         #[cfg(feature = "local-host")]
         "screen.quality.set" => {
             let peer = crate::request_context::remote_peer()
@@ -671,8 +553,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             Ok(json!({"quality": p.quality}))
         }
         "screen.direct.candidates" => direct_candidates(),
-        // Kept for peers from before candidate lists. New callers never rely
-        // on this one-address contract.
+
         "screen.direct.candidate" => direct_candidate(),
         _ => Err(format!("unknown screen method: {method}")),
     })())
@@ -780,8 +661,6 @@ mod tests {
 
     #[test]
     fn only_the_asking_device_may_ask_and_only_the_host_may_answer() {
-        // No transport, so nobody is asking: a local caller cannot queue a
-        // request in some other device's name.
         let refused = call("screen.access.ask", r#"{"control":true}"#)
             .unwrap()
             .expect_err("a local caller has no device to ask for");
@@ -813,17 +692,17 @@ mod tests {
                 review_demo,
                 raw: serde_json::Value::Null,
             };
-        // Somebody else's account, however loudly a server says otherwise.
+
         assert!(!account_is_review_demo(&status(
             Some("u_someone_else"),
             true
         )));
-        // The demo account between rounds.
+
         assert!(!account_is_review_demo(&status(
             Some(REVIEW_DEMO_ACCOUNT_ID),
             false
         )));
-        // A server too old to name the account cannot pass.
+
         assert!(!account_is_review_demo(&status(None, true)));
         assert!(account_is_review_demo(&status(
             Some(REVIEW_DEMO_ACCOUNT_ID),
@@ -839,9 +718,6 @@ mod tests {
 
     #[test]
     fn a_request_that_says_nothing_is_not_asking_for_the_mouse() {
-        // What a device sends decides how much the answer can grant, and the
-        // review demo grant hands over exactly this. A missing field must be
-        // the picture only, not everything.
         let quiet: AskParams = serde_json::from_str("{}").unwrap();
         assert!(!quiet.control);
         let asked: AskParams = serde_json::from_str(r#"{"control":true}"#).unwrap();

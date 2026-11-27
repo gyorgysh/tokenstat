@@ -27,9 +27,6 @@ pub use vendor_totals::VendorHour;
 
 const SCHEMA_VERSION: i64 = 2;
 
-/// Upsert for one row of `event`. Shared by [`Store::insert_events`] and
-/// [`Store::replace_recovered`] so the max-on-conflict semantics cannot drift
-/// between the two writers.
 const UPSERT_EVENT_SQL: &str = r#"INSERT INTO event
    (id, source, ts_ms, local_date, local_hour, model, session, project,
     input_fresh, cache_read, cache_write_5m, cache_write_1h, output,
@@ -64,13 +61,6 @@ const UPSERT_EVENT_SQL: &str = r#"INSERT INTO event
       OR COALESCE(excluded.cache_write_5m, -1) > COALESCE(event.cache_write_5m, -1)
       OR COALESCE(excluded.cache_write_1h, -1) > COALESCE(event.cache_write_1h, -1)"#;
 
-/// Clamp a token count into SQLite's signed 64-bit domain.
-///
-/// A counter can exceed `i64::MAX` (the model keeps them unsigned, and a JSON
-/// file its owner edited is untrusted input), and `as i64` would wrap to a
-/// negative number and corrupt every sum and max-on-conflict that reads it.
-/// Saturating keeps the stored figure a lower bound instead of making it wrong
-/// in the other direction.
 fn clamp_i64(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
@@ -83,8 +73,6 @@ pub const BLOCK_DURATION_MS: i64 = 5 * 60 * 60 * 1000;
 
 pub struct Store {
     conn: Connection,
-    /// Where this archive lives, when it lives anywhere. `None` for an
-    /// in-memory store, which is also the answer to "can this be backed up".
     path: Option<PathBuf>,
 }
 
@@ -269,10 +257,6 @@ impl Store {
                 source,
             })?;
         }
-        // An existing archive must open without DDL. CREATE TABLE takes a write
-        // lock, and the hourly scan holds write transactions for far longer than
-        // a statusline or sync wants to wait. Fresh files still get the full
-        // schema on first open.
         let fresh = !path.exists()
             || std::fs::metadata(path)
                 .map(|m| m.len() == 0)
@@ -282,9 +266,6 @@ impl Store {
         if fresh || !Self::schema_ready(&conn)? {
             Self::migrate(&conn)?;
         } else {
-            // Indexes added after first ship. IF NOT EXISTS is a catalog check
-            // when present, so a ready archive still gains new ones without a
-            // full migrate write path.
             Self::migrate_event_profiles(&conn)?;
             Self::ensure_indexes(&conn)?;
         }
@@ -325,13 +306,10 @@ impl Store {
         }
     }
 
-    /// WAL + busy wait. Safe to call on a connection that will only read.
     fn configure(conn: &Connection) -> Result<(), CoreError> {
         // WAL keeps a statusline read from ever blocking behind a scan.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        // Scan insert_events can hold a write lock for tens of seconds on a
-        // large archive. Five seconds was too short for overlapping sync opens.
         conn.busy_timeout(std::time::Duration::from_secs(60))?;
         Ok(())
     }
@@ -494,14 +472,6 @@ impl Store {
         Ok(())
     }
 
-    /// Ensure post-ship indexes exist on archives that already had a schema.
-    /// Objects added after first ship, for an archive that already exists.
-    ///
-    /// `open` skips the full migrate on a ready archive, because CREATE TABLE
-    /// takes a write lock and a statusline must not wait behind one. Anything
-    /// added later therefore has to appear here as well, or it exists only on
-    /// machines that started fresh afterwards. `IF NOT EXISTS` is a catalog
-    /// check when the object is already there, so this stays cheap.
     fn ensure_indexes(conn: &Connection) -> Result<(), CoreError> {
         conn.execute_batch(
             r#"
@@ -590,13 +560,9 @@ impl Store {
         let tx = self.conn.transaction()?;
         let touched = Self::insert_events_in_tx(&tx, events, tz)?;
         tx.commit()?;
-        // Count both brand-new ids and counter upgrades. A streaming partial
-        // that only raises output would otherwise look like "nothing new".
         Ok(touched)
     }
 
-    /// The insert itself, against a caller-owned transaction so a swap that
-    /// must also delete can be one unit. See [`Self::replace_recovered`].
     fn insert_events_in_tx(
         tx: &rusqlite::Transaction<'_>,
         events: &[UsageEvent],
@@ -605,9 +571,6 @@ impl Store {
         let mut touched = 0u64;
         let mut stmt = tx.prepare(UPSERT_EVENT_SQL)?;
         for e in events {
-            // A later sessions.json update can arrive without a new
-            // trajectory line. Keep an already archived turn authoritative
-            // even when the incremental scanner skipped its unchanged file.
             if e.source == crate::model::SourceId::OpenClaw
                 && e.id == EventId::derive(&["openclaw", "session", &e.session])
                 && tx.query_row(
@@ -641,11 +604,6 @@ impl Store {
         Ok(touched)
     }
 
-    /// SUM that stays NULL when any row in the group left that field unknown.
-    ///
-    /// SQLite's `SUM` skips NULL, so a Claude event with a cache-write count
-    /// plus a Codex event that never reports the field would otherwise look
-    /// like a complete total.
     fn sum_known_counters() -> String {
         [
             "input_fresh",
@@ -971,8 +929,6 @@ impl Store {
         });
         where_sql.push_str("ts_ms <= ?");
         args.push(Box::new(now_ms));
-        // Only timestamps are read while locating the start. Stop at a gap,
-        // rather than inventing a fresh block at an arbitrary lookback limit.
         let sql = format!("SELECT DISTINCT ts_ms FROM event{where_sql} ORDER BY ts_ms DESC");
         let mut stmt = self.conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -1111,7 +1067,6 @@ impl Store {
         )? as u64)
     }
 
-    /// Claude-only figures comparable to Claude Code's vendor rollup.
     pub(crate) fn claude_reconciliation_totals(
         &self,
     ) -> Result<(u64, u64, Option<String>), CoreError> {
@@ -1261,8 +1216,6 @@ impl Store {
             };
             let mut model: String = r.get(2)?;
             if model.len() > 128 {
-                // Walk back to a char boundary: truncate panics inside a
-                // multibyte character, and model ids come from vendor files.
                 let mut end = 128;
                 while !model.is_char_boundary(end) {
                     end -= 1;
@@ -1366,8 +1319,6 @@ impl Store {
         self.replace_source_sessions(crate::model::SourceId::Codex, events, tz)
     }
 
-    /// Replace successfully read source sessions, including derived remainder
-    /// rows which may shrink when individual requests become available.
     pub(crate) fn replace_source_sessions(
         &mut self,
         source: crate::model::SourceId,
@@ -1832,9 +1783,9 @@ mod tests {
         let tz = jiff::tz::TimeZone::UTC;
         s.insert_events(
             &[
-                ev("a", 1_699_920_000_000, "m", 10), // 2023-11-14
-                ev("b", 1_700_006_400_000, "m", 20), // 2023-11-15
-                ev("c", 1_701_388_800_000, "m", 40), // 2023-12-01
+                ev("a", 1_699_920_000_000, "m", 10),
+                ev("b", 1_700_006_400_000, "m", 20),
+                ev("c", 1_701_388_800_000, "m", 40),
             ],
             &tz,
         )
@@ -1851,8 +1802,6 @@ mod tests {
     fn day_detail_groups_by_model_and_source_and_filters_the_date() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
-        // 2023-11-14 and 2023-11-15. The same model on the same day through two
-        // harnesses stays two rows; the same pair on another day stays out.
         let mut codex = ev("a", 1_699_920_000_000, "gpt-x", 10);
         codex.source = SourceId::Codex;
         let mut claude = ev("b", 1_699_920_000_000, "gpt-x", 30);
@@ -1867,7 +1816,7 @@ mod tests {
         assert_eq!(rows[0].model, "gpt-x");
         assert_eq!(rows[0].counters.output, Some(30));
         assert_eq!(rows[0].events, 1);
-        assert_eq!(rows[0].tokens(), 36); // 1 fresh + 2 cache read + 3 cache write + 30 out
+        assert_eq!(rows[0].tokens(), 36);
         assert_eq!(rows[1].source, "codex");
         assert_eq!(rows[1].tokens(), 16);
 
@@ -1878,7 +1827,6 @@ mod tests {
     fn date_filters_apply() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
-        // 2023-11-14 and 2023-11-15
         s.insert_events(
             &[
                 ev("a", 1_699_920_000_000, "m", 5),
@@ -1922,7 +1870,6 @@ mod tests {
     fn statusline_snapshot_scopes_today_separately_from_the_month() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
-        // 2023-11-14 and 2023-11-15, both in the same month.
         s.insert_events(
             &[
                 ev("a", 1_699_920_000_000, "m", 5),
@@ -1941,7 +1888,6 @@ mod tests {
     fn statusline_snapshot_on_an_empty_archive_is_not_an_error() {
         let s = Store::open_in_memory().unwrap();
         let (day, month) = s.statusline_snapshot("2026-07-29", "2026-07-01").unwrap();
-        // Nothing recorded is unknown, not zero, and must not panic.
         assert_eq!(day.output, None);
         assert_eq!(month.total(), 0);
     }
@@ -2018,7 +1964,6 @@ mod tests {
         s.insert_events(&[ev("a", 1_700_000_000_000, "m", 1)], &tz)
             .unwrap();
         let t = s.totals(&Query::default()).unwrap();
-        // cache_write_1h was never reported, so it must not read as zero.
         assert_eq!(t.counters.cache_write_1h, None);
         assert!(t.counters.has_unknown());
     }
@@ -2069,9 +2014,6 @@ mod tests {
     fn replacing_recovery_lowers_rows_a_corrected_pass_wrote_differently() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
-        // The id recovery derives for the pair, so the swap is a replacement
-        // rather than an addition. insert_events alone would keep the larger
-        // figure; replace_recovered has to delete before inserting.
         let id = EventId::derive(&["claude_rollup", "2023-11-14", "m"]);
         let mut inflated = ev("ignored", 1_700_000_000_000, "m", 9);
         inflated.id = id;
@@ -2095,7 +2037,6 @@ mod tests {
         huge.counters.output = Some(u64::MAX);
         s.insert_events(&[huge], &tz).unwrap();
         let t = s.totals(&Query::default()).unwrap();
-        // Casting would have stored -1 and made every sum below it wrong.
         assert_eq!(t.counters.output, Some(i64::MAX as u64));
     }
 
@@ -2163,7 +2104,6 @@ mod tests {
     fn statusline_snapshot_excludes_dates_after_today() {
         let mut s = Store::open_in_memory().unwrap();
         let tz = jiff::tz::TimeZone::UTC;
-        // 2023-11-15 and 2023-11-20. Snapshot for the 15th must not include the 20th.
         s.insert_events(
             &[
                 ev("a", 1_700_006_400_000, "m", 7),
@@ -2193,8 +2133,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(s.relabel_legacy_recovery().unwrap(), 1);
-        // Sync refuses `estimated`, so the relabel is what lets the day leave
-        // the machine at all.
         let rows = s.sync_rollup("2026-06-01", "2026-06-30").unwrap();
         assert_eq!(rows.len(), 2);
         assert!(
@@ -2207,10 +2145,6 @@ mod tests {
 
     #[test]
     fn opening_an_existing_archive_does_not_need_the_writer_to_finish() {
-        // The old open path ran CREATE TABLE on every call, which takes a write
-        // lock and lost to a concurrent scan. Re-opening an existing file must
-        // stay read-only enough to succeed while another connection holds a
-        // write transaction.
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-store-busy-{}-{}",
             std::process::id(),

@@ -63,7 +63,6 @@ open class UsageWidgetProvider : AppWidgetProvider() {
             runCatching {
                 val operation = WorkManager.getInstance(context).enqueueUniqueWork(REFRESH, ExistingWorkPolicy.KEEP,
                     OneTimeWorkRequestBuilder<UsageWidgetWorker>().build())
-                // Enqueue can fail after it returns, before any worker starts.
                 operation.result.addListener({
                     runCatching { operation.result.get() }.onFailure { refreshSchedulingFailed(context, epoch) }
                 }, Executor { it.run() })
@@ -132,7 +131,6 @@ open class UsageWidgetProvider : AppWidgetProvider() {
             manager.updateAppWidget(id, views)
         }
 
-        /** Also used by layout verification: no credentials or network needed. */
         fun render(context: Context, id: Int, week: Boolean, snapshot: UsageSnapshot?, wide: Boolean, tall: Boolean = false, compact: Boolean = false): RemoteViews {
             val views = RemoteViews(context.packageName, when { compact -> R.layout.usage_widget_compact; tall -> R.layout.usage_widget_tall; else -> R.layout.usage_widget })
             views.setViewVisibility(R.id.widget_configure, if (compact) View.GONE else View.VISIBLE)
@@ -145,8 +143,6 @@ open class UsageWidgetProvider : AppWidgetProvider() {
                 else NumberFormat.getNumberInstance().apply { maximumFractionDigits = 2; minimumFractionDigits = 2 }
                     .format(value / 1_000_000.0) + " USD")
             val dateLabel = today.format(DateTimeFormatter.ofPattern(if (compact) "d/M" else "d MMM", Locale.getDefault()))
-            // A launcher may defer its update past midnight. An explicit date
-            // keeps the cached number honest until Android refreshes the view.
             views.setTextViewText(R.id.widget_period, if (value == null) context.getString(if (week && compact) R.string.widget_week_compact else if (week) R.string.widget_week else R.string.widget_today)
                 else if (week) context.getString(if (compact) R.string.widget_week_compact else R.string.widget_week_short) + " · " + dateLabel else dateLabel)
             views.setContentDescription(R.id.widget_period, context.getString(if (week) R.string.widget_week else R.string.widget_today) + " · " + today)
@@ -230,7 +226,6 @@ class UsageWidgetWorker(context: Context, parameters: WorkerParameters) : Corout
     override suspend fun doWork(): Result = UsageWidgetRefresh(applicationContext).run()
 }
 
-/** Refresh orchestration is separate so unavailable accounts/services can be verified offline. */
 internal class UsageWidgetRefresh(
     private val context: Context,
     private val call: suspend (String, JsonObject) -> JsonElement = CoreClient::call,
@@ -256,20 +251,14 @@ internal class UsageWidgetRefresh(
                 activitySucceeded = calendar is JsonNull || UsageSnapshot.calendar(lease.owner, calendar as JsonObject) != null
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { UsageWidgetStore.failed(context, lease) }
-            // Missing activity access must not prevent an independent allowance refresh.
             try { UsageWidgetStore.publishLimits(context, lease, call("usage.limits", buildJsonObject {})) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { UsageWidgetStore.failedLimits(context, lease) }
             if (activitySucceeded) ListenableWorker.Result.success() else ListenableWorker.Result.failure()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            // Verification may advance the epoch when a process first learns
-            // the account. The verified lease then owns the failure; the
-            // original epoch is only useful before an account was verified.
             if (lease == null) UsageWidgetStore.failed(context, null, epoch)
             else UsageWidgetStore.failed(context, lease)
-            // A manual refresh reports its failure instead of silently retrying
-            // for hours. The periodic task and next tap can try again.
             ListenableWorker.Result.failure()
         } finally { UsageWidgetProvider.setRefreshing(context, false) }
     }

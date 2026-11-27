@@ -2,11 +2,6 @@
 import Foundation
 import Observation
 
-/// The three breakdowns, their rows, and how old the numbers are.
-///
-/// One model rather than one per cut: they all come from the same cached series
-/// on the host's side, so three models would be three views of one fetch
-/// pretending to be independent.
 @Observable
 @MainActor
 final class ClientInsightsModel {
@@ -20,21 +15,15 @@ final class ClientInsightsModel {
         var label: String {
             switch self {
             case .model: return L10n.text("apple.clientinsightsview.models.d17d2d78")
-            // Same label as the Mac Insights tab. A different word here
-            // makes the two screens look like different breakdowns.
             case .source: return L10n.text("apple.clientinsightsview.coding_tools.6032f740")
             case .day: return L10n.text("apple.clientinsightsview.days.e08c0aa8")
             }
         }
 
-        /// Used in the search prompt, where "Filter Models" reads as a command
-        /// and "Filter models" reads as a description of the field.
         var plural: String { label.lowercased() }
 
         var wire: String { rawValue }
 
-        /// A row's key as a person reads it. A harness id is a slug, and a day
-        /// is an ISO date nobody says out loud.
         func title(for key: String) -> String {
             switch self {
             case .model: return key
@@ -47,8 +36,6 @@ final class ClientInsightsModel {
 
     var cut: Cut = .model
 
-    /// Rows per cut. Nil means "not asked yet", which is not the same as an
-    /// empty account and must not draw like one.
     private var cached: [Cut: AccountReport] = [:]
     private var requests: [Cut: UUID] = [:]
     private var errors: [Cut: String] = [:]
@@ -71,11 +58,6 @@ final class ClientInsightsModel {
         errors.removeAll()
     }
 
-    /// "As of 12 minutes ago", and only when it is worth saying.
-    ///
-    /// A fresh answer gets no line: dating something that is current is noise.
-    /// A remembered one always gets one, because the alternative is a number
-    /// that quietly claims to be now.
     var ageDescription: String? {
         guard owner == WorkSessionContext.shared.scope, let report = cached[cut], report.stale else { return nil }
         let fetchedAt = report.fetchedAt
@@ -87,8 +69,6 @@ final class ClientInsightsModel {
 
     func load() async {
         synchronizeOwner()
-        // Already have it. Switching back to a cut somebody just looked at
-        // should be instant, and a refresh is one pull away.
         if cached[cut] != nil { return }
         await fetch()
     }
@@ -97,9 +77,6 @@ final class ClientInsightsModel {
         synchronizeOwner()
         requests.removeAll()
         errors.removeAll()
-        // Drop everything rather than the current cut alone: they are three
-        // views of one series, and refreshing one of them would leave the other
-        // two describing an older account.
         cached.removeAll()
         await fetch()
     }

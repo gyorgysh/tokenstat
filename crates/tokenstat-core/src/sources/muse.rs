@@ -125,9 +125,7 @@ pub struct ParseOutput {
 
 #[derive(Deserialize)]
 struct Row {
-    /// Unique per record, so a re-read lands on the same event.
     id: Option<String>,
-    /// Microseconds since the epoch.
     recorded_at: Option<i64>,
     payload: Option<Payload>,
 }
@@ -144,9 +142,6 @@ struct Event {
     usage: Option<Usage>,
 }
 
-/// Only the token fields. `resource_usage_sampled` also has a `usage`, holding
-/// resident memory and CPU milliseconds, and it is skipped by kind rather than
-/// by shape, but nothing here would read a byte count as a token either.
 #[derive(Deserialize)]
 struct Usage {
     input_tokens: Option<u64>,
@@ -168,9 +163,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
 
     for (i, line) in contents.lines().enumerate() {
         let line = line.trim();
-        // Most of a session log is tool output and streamed deltas. One
-        // substring test is what keeps this from deserializing megabytes of
-        // records that cannot carry counters.
         if line.is_empty() || !line.contains("model_completed") {
             continue;
         }
@@ -196,8 +188,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         let cache_read = usage.cache_read_tokens.unwrap_or(0);
         let cache_write = usage.cache_write_tokens.unwrap_or(0);
         let output = usage.output_tokens.unwrap_or(0);
-        // A refusal or a cancelled call writes zeroes. A zero row is not a
-        // fact about spend, and keeping it would put empty turns in the count.
         if input == 0 && output == 0 {
             continue;
         }
@@ -248,8 +238,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     out
 }
 
-/// The session id, which is the directory the log sits in. True for a subagent
-/// as well, whose directory is its own id.
 fn session_id(path: &Path) -> String {
     path.parent()
         .and_then(|d| d.file_name())
@@ -258,11 +246,6 @@ fn session_id(path: &Path) -> String {
         .to_string()
 }
 
-/// The folder this session ran in, read from the head of the file.
-///
-/// Bounded on purpose: a session log reaches tens of megabytes, the records
-/// that name the workspace are written in its first moments, and this runs
-/// once per changed file per scan.
 fn workspace_project(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = BufReader::new(file.take(HEAD_BYTES));
@@ -284,8 +267,6 @@ fn workspace_project(path: &Path) -> Option<String> {
 
 const HEAD_BYTES: u64 = 256 * 1024;
 
-/// `payload.record.workspace_root`, from either the metadata record or the
-/// workspace-branch one. Both spell it the same way and both are near the top.
 fn workspace_root(line: &str) -> Option<String> {
     let line = line.trim();
     if line.is_empty() {
@@ -344,8 +325,6 @@ mod tests {
         dir
     }
 
-    /// The two header shapes and two turns, in the field order the real log
-    /// uses.
     const METADATA: &str = r#"{"schema_version":1,"stream":{"kind":"session","id":"s1"},"id":"r0","recorded_at":1788257844312475,"record_type":"event","payload_type":"runtime.session.metadata","payload":{"kind":"metadata","record":{"workspace_root":"/Users/x/git/demo","provider_id":"meta","build":{"semver":"1.0.1"}}}}"#;
     const FIRST_CALL: &str = r#"{"schema_version":1,"stream":{"kind":"session","id":"s1"},"id":"r1","recorded_at":1788257973508549,"record_type":"event","payload_type":"runtime.session","payload":{"event":{"kind":"model_completed","usage":{"input_tokens":35336,"output_tokens":236,"cached_tokens":0,"cache_write_tokens":0,"cache_read_tokens":0,"reasoning_tokens":60},"duration_ms":7202,"finish_reason":"tool_calls","model":"muse-spark-1.2"}}}"#;
     const CACHED_CALL: &str = r#"{"schema_version":1,"stream":{"kind":"session","id":"s1"},"id":"r2","recorded_at":1788257977748102,"record_type":"event","payload_type":"runtime.session","payload":{"event":{"kind":"model_completed","usage":{"input_tokens":37538,"output_tokens":97,"cached_tokens":35313,"cache_write_tokens":0,"cache_read_tokens":35313,"reasoning_tokens":0},"duration_ms":3937,"finish_reason":"tool_calls","model":"muse-spark-1.2"}}}"#;
@@ -370,7 +349,6 @@ mod tests {
         assert_eq!(e.session, "01a05c79");
         assert_eq!(e.counters.input_fresh, Some(35336));
         assert_eq!(e.counters.output, Some(236));
-        // Reasoning is inside output, so it does not add to the total.
         assert_eq!(e.extras.reasoning_within_output, Some(60));
         assert_eq!(e.counters.total(), 35336 + 236);
     }
@@ -384,14 +362,10 @@ mod tests {
         let e = &out.events[0];
         assert_eq!(e.counters.cache_read, Some(35313));
         assert_eq!(e.counters.input_fresh, Some(37538 - 35313));
-        // Which is what keeps the disjoint buckets summing to the prompt Muse
-        // reported, plus the output.
         assert_eq!(e.counters.input_total(), 37538);
         assert_eq!(e.counters.total(), 37538 + 97);
     }
 
-    /// Microseconds, not milliseconds. A thousandfold error here puts every
-    /// session in 1970 and every report at zero.
     #[test]
     fn recorded_at_is_microseconds() {
         let dir = session_dir("01a05c81");
@@ -401,8 +375,6 @@ mod tests {
         assert_eq!(out.events[0].ts.utc_ms, 1_788_257_973_508);
     }
 
-    /// The attribution ledger and the subagent observation both restate spend
-    /// that `model_completed` already carries.
     #[test]
     fn ignores_the_records_that_would_double_count() {
         let attribution = r#"{"id":"r3","recorded_at":1788257973600000,"payload_type":"runtime.session","payload":{"event":{"kind":"goal_usage_attribution","record":{"usage_id":"usage-1","usage_family":"provider","quantity":{"input_tokens":35336,"output_tokens":236,"cached_tokens":0,"reasoning_tokens":60}}}}}"#;
@@ -425,7 +397,6 @@ mod tests {
         assert_eq!(out.events[0].project, "demo");
     }
 
-    /// A subagent has no workspace in its metadata, only in its branch record.
     #[test]
     fn a_subagent_takes_the_workspace_from_its_branch_record() {
         let branch = r#"{"id":"b0","recorded_at":1788257844410562,"payload_type":"session.workspace_branch.observed","payload":{"kind":"workspace_branch","record":{"workspace_root":"/Users/x/git/demo","reference":{"kind":"branch","name":"main"},"vcs":"git"}}}"#;
@@ -440,8 +411,6 @@ mod tests {
         assert_eq!(out.events[0].session, "0e4e845f");
     }
 
-    /// A cancelled call writes zeroes, and a zero row is not a fact about
-    /// spend.
     #[test]
     fn skips_a_call_that_spent_nothing() {
         let empty = r#"{"id":"r5","recorded_at":1788257973800000,"payload_type":"runtime.session","payload":{"event":{"kind":"model_completed","usage":{"input_tokens":0,"output_tokens":0,"cached_tokens":0,"cache_write_tokens":0,"cache_read_tokens":0,"reasoning_tokens":0},"model":"muse-spark-1.2"}}}"#;
@@ -470,7 +439,6 @@ mod tests {
         let sub = parent.join("subagent").join("0e4e865f");
         std::fs::create_dir_all(&sub).unwrap();
         write(&sub, &[FIRST_CALL]);
-        // The sessions root is three levels above the session directory.
         let root = parent.parent().unwrap().parent().unwrap().parent().unwrap();
         let found = shards(root);
         assert_eq!(found.len(), 2);

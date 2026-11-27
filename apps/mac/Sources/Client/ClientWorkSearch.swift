@@ -21,10 +21,6 @@ struct ClientWorkSearchPresentation: View {
     @State private var failure: String?
     @State private var preparing = false
     @State private var visible = false
-    /// What has been typed while saved work is still opening, or after it
-    /// refused to. The app's own screens are searchable either way: a saved
-    /// store that will not open is exactly when somebody goes looking for the
-    /// Saved work setting.
     @State private var placeQuery = ""
     @FocusState private var placeFieldFocused: Bool
 
@@ -54,10 +50,6 @@ struct ClientWorkSearchPresentation: View {
                 .task { placeFieldFocused = true }
             }
         }
-        // `visible` is set here as well as in `onAppear`, because the task
-        // can run first: it guards every step of the preparation, and a task
-        // that starts with it false gives up before doing anything and never
-        // runs again. That is a search sheet that never opens its saved work.
         .task { visible = true; placeQuery = navigation.ecosystemSearchTerm; navigation.ecosystemSearchTerm = ""; await prepare() }
         .onAppear { visible = true }
         .onChange(of: navigation.ecosystemSearchTerm) { _, query in
@@ -79,10 +71,6 @@ struct ClientWorkSearchPresentation: View {
             matches: { ClientAppPlaces.matches($0, machines: machines) },
             open: { place in
                 guard let destination = ClientAppPlaces.destination(of: place) else { return }
-                // Recorded rather than opened. The account sheet is presented
-                // from the same view as this one, and two sheets on one view
-                // queue instead of stacking, so the root opens it once search
-                // has closed. See `ClientRootView.openPendingPlace`.
                 navigation.pendingPlace = destination
             }
         )
@@ -95,8 +83,6 @@ struct ClientWorkSearchPresentation: View {
                 .textFieldStyle(.plain)
                 .font(Theme.body)
                 .focused($placeFieldFocused)
-                // A screen's name is not a sentence, and a first word the
-                // keyboard has corrected into another one finds nothing.
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
@@ -160,17 +146,6 @@ struct ClientWorkSearchPresentation: View {
         }
     }
 
-    /// Ask the machines this device may already open what folders they hold.
-    ///
-    /// A phone knows the folders it pinned and the ones it opened, which is a
-    /// fraction of what is on a Mac, so a folder somebody has never tapped
-    /// here was unfindable by name. The list comes from the machine that owns
-    /// it, once when search opens rather than once per keystroke.
-    ///
-    /// **Verified hosts only, and no access is asked for.** A check would
-    /// write a new answer into `WorkAccessStore`, and this sheet closes itself
-    /// when that generation moves, so asking here would shut the search
-    /// somebody just opened. Unknown stays unknown, as it does everywhere else.
     private func learn(scope: WorkReference.Scope, hosts: Set<String>,
                        access: UInt64, linked: Set<String>) async {
         guard !hosts.isEmpty else { return }
@@ -188,15 +163,9 @@ struct ClientWorkSearchPresentation: View {
                 answered.insert(host)
                 known += folders.map { folder in
                     WorkSearchCatalog.KnownFolder(
-                        // The machine's own id, which is what a reference
-                        // carries. Only the folder screens wear the
-                        // `remote:<peer>:` prefix.
                         reference: WorkReference(scope: scope, hostIdentity: host,
                             workspaceID: folder.id, kind: .workspace, itemID: nil),
                         name: folder.name,
-                        // A name, not a save. Dating it now would put "Saved a
-                        // moment ago" under a folder nothing happened to, so it
-                        // carries no time and the row prints none.
                         updatedAt: Date(timeIntervalSince1970: 0))
                 }
             }

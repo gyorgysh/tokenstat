@@ -16,7 +16,6 @@ struct SavedWorkflowDraft: Codable, Equatable, Sendable {
     }
 }
 
-/// One owner per account, computer, folder and graph. A new graph uses a folder key.
 @MainActor @Observable
 final class WorkflowEditorSession {
     let target: WorkflowEditorTarget
@@ -34,21 +33,14 @@ final class WorkflowEditorSession {
     private(set) var errorMessage: String?
     private(set) var noticeMessage: String?
     private(set) var backends: [AgentBackend] = []
-    /// Automations an automation step can run. Empty until load.
     private(set) var jobs: [Automation] = []
-    /// Working copy of steps. Metadata stays on `fields`.
     private(set) var document = WorkflowGraphDocument()
-    /// IANA name of the host scheduler clock. Empty until queue answers.
     private(set) var schedulerTimezone: String = ""
-    /// Prompt for `workflow.design`. Kept in memory: the generated steps
-    /// are the durable draft, and the prompt stays until they land.
     var designPrompt = ""
     var designBackend = ""
     var designModel = ""
     var designEffort = ""
     private(set) var designing = false
-    /// What the designer said while drafting. Cleared when Blank or an
-    /// example replaces the steps.
     private(set) var designTranscript = ""
     private var designTask: Task<Void, Never>?
     private var designGeneration: UInt64 = 0
@@ -106,11 +98,7 @@ final class WorkflowEditorSession {
             || !fields.enabled
     }
     var creating: Bool { saved.pendingCreate || saved.pendingID != nil }
-    /// The computer copy moved under an unsaved draft. Saving stays off
-    /// until the person chooses which copy continues.
     private(set) var conflict = false
-    /// Whether the host speaks revision-checked `workflow.edit`.
-    /// Below protocol 22 every save is last-write-wins with an honest caption.
     private(set) var supportsEdits = false
     var canSave: Bool {
         loaded && !working && !missing && !conflict && otherDraft == nil && !creating
@@ -204,10 +192,6 @@ final class WorkflowEditorSession {
         }
     }
 
-    /// A failed save is never retried blindly: the host may have applied it
-    /// while the reply was lost. Re-read and compare. If the computer copy
-    /// is our submitted graph, adopt it. If it moved elsewhere, surface the
-    /// conflict instead of overwriting. Otherwise the save can go again.
     private func recoverSave(graph: WorkflowGraph, baseline: WorkflowGraph, error: Error) async {
         let current: WorkflowGraph?
         do {
@@ -235,7 +219,6 @@ final class WorkflowEditorSession {
         errorMessage = Self.display(error)
     }
 
-    /// Same content, ignoring run metadata the host owns.
     private func graphMatches(_ left: WorkflowGraph, _ right: WorkflowGraph) -> Bool {
         left.name == right.name
             && left.workspaceID == right.workspaceID
@@ -294,7 +277,6 @@ final class WorkflowEditorSession {
         await submitCreation(graph, pendingID: pendingID)
     }
 
-    /// Clears a finished create so the next New workflow is a blank graph.
     func finishCreated() async -> WorkflowGraph? {
         guard let created = saved.created else { return nil }
         cancelDesign()
@@ -359,10 +341,6 @@ final class WorkflowEditorSession {
             && !designAgents.isEmpty
     }
 
-    /// Draft a graph from the prompt. The host saves nothing and runs
-    /// nothing: the result replaces the working steps as an editable draft,
-    /// and Create/Save stay explicit. Cancelling or losing the response
-    /// keeps the prompt and any steps already on screen.
     func design() {
         guard canDesign else { return }
         designTask?.cancel()
@@ -466,7 +444,6 @@ final class WorkflowEditorSession {
         document.beginNodeMove()
     }
 
-    /// Live touch drag. Undo was captured at `beginStepMove`.
     func moveStep(id: String, x: Double, y: Double) {
         guard !creating, otherDraft == nil else { return }
         document.moveNode(id: id, x: x, y: y)
@@ -598,9 +575,6 @@ final class WorkflowEditorSession {
         }
     }
 
-    /// The computer copy moved. With a checked host the save refuses, so the
-    /// person chooses a copy here. Without it the save overwrites, and the
-    /// notice says exactly that. A clean draft simply follows the computer.
     private func reconcileComputerCopy(current: WorkflowGraph, baseline: WorkflowGraph) {
         guard supportsEdits else {
             if !fields.matches(baseline), !fields.matches(current) {
@@ -627,8 +601,6 @@ final class WorkflowEditorSession {
         }
     }
 
-    /// Choose which copy continues after a conflict. The computer version
-    /// reloads the draft; keeping mine re-enables saving at its revision.
     func resolveConflict(keepMine: Bool) async {
         guard !working, conflict, let current else { return }
         saved.baseline = current

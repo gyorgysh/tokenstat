@@ -1,26 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! What one agent needs to know to pick up where another left off.
-//!
-//! A conversation can change backend mid-way, and until now that lost
-//! everything: each agent keeps its own session under its own resume token, so
-//! switching handed the next one a blank page and the person had to re-explain
-//! their own project to a second robot in the same window.
-//!
-//! The transcript was always the shared memory. It is written to
-//! `chat/<id>/events.ndjson` for every backend alike, and nothing about it is
-//! vendor-specific. What was missing was the handover: a short, honest fold of
-//! that timeline, given to an incoming agent once.
-//!
-//! ## What it is not
-//!
-//! Not a replay. Feeding a full transcript back would cost more than the
-//! conversation did, and most of it is machinery nobody needs twice. This
-//! keeps what changes an agent's behaviour: what was asked, what was changed,
-//! what ran, what the person refused, and where it was left.
-//!
-//! Not a sync payload either. This is conversation text and it never leaves
-//! the machine, the same way `events.ndjson` never does.
 
 use serde_json::Value;
 
@@ -31,8 +11,6 @@ use serde_json::Value;
 /// enough that it is never the expensive part of the first reply.
 pub const BUDGET: usize = 6_000;
 
-/// The most recent assistant reply is the single most useful line in a
-/// handover, so it gets its own allowance inside [`BUDGET`].
 const TAIL_BUDGET: usize = 1_400;
 
 #[derive(Default)]
@@ -71,8 +49,7 @@ impl Summary {
                 if let Some(text) = event.get("text").and_then(Value::as_str) {
                     self.folded.turns += 1;
                     self.folded.asks.push(one_line(text, 240));
-                    // A new question ends the previous answer. Keeping only
-                    // the latest is what makes "where it was left" true.
+
                     self.reply.clear();
                 }
             }
@@ -106,9 +83,7 @@ impl Summary {
                     Some("toolStart") => {
                         let verb = agent.get("verb").and_then(Value::as_str).unwrap_or("");
                         let target = agent.get("target").and_then(Value::as_str).unwrap_or("");
-                        // A shell call is worth remembering by what it ran. A
-                        // read is not: the file it touched says nothing about
-                        // what the conversation achieved.
+
                         if is_shell(verb) && !target.is_empty() {
                             push_unique(&mut self.folded.commands, one_line(target, 160));
                         }
@@ -152,8 +127,7 @@ pub(crate) fn is_shell(verb: &str) -> bool {
     {
         return true;
     }
-    // Token match for the short names, so `sh` and `exec` do not fire on
-    // verbs that merely contain those letters (`push`, `execute_turn`).
+
     verb.split(|c: char| !c.is_ascii_alphanumeric())
         .any(|token| matches!(token, "sh" | "zsh" | "exec" | "run"))
 }
@@ -181,8 +155,7 @@ fn render(folded: &Folded, folder: &str, budget: usize) -> (String, usize) {
         tail.extend(folded.last_reply.chars().take(remaining / 4));
         tail.push('\n');
     }
-    // Tools and refusals can grow just as much as the conversation. Reserve
-    // half of the space after the reply for asks, including the newest one.
+
     let available = remaining.saturating_sub(tail.chars().count());
     let mut details = String::new();
     for (title, items) in [
@@ -204,8 +177,6 @@ fn render(folded: &Folded, folder: &str, budget: usize) -> (String, usize) {
     (out.chars().take(budget).collect(), dropped)
 }
 
-/// Keep the newest complete items and include the omission notice in the
-/// character budget. Byte counts unfairly discarded non-ASCII conversation.
 fn fit(items: &[String], budget: usize, omitted: &str) -> (Vec<String>, usize) {
     let cost = |item: &String| item.chars().count() + 3;
     if items.iter().map(cost).sum::<usize>() <= budget {
@@ -407,8 +378,6 @@ pub fn export_markdown(events: &[Value], folder: &str) -> String {
     out
 }
 
-/// Collapse to one line and cap it. A handover is a list, and a list item that
-/// spans forty lines of pasted output is not a list item.
 #[derive(Default)]
 struct NormalizedLine {
     text: String,
@@ -577,8 +546,6 @@ mod tests {
         assert!(text.contains("question number 199"));
     }
 
-    /// Reads and edits are not commands. A handover listing every file an
-    /// agent looked at is noise that crowds out what it did.
     #[test]
     fn only_shell_calls_count_as_commands() {
         let events = vec![
@@ -639,7 +606,7 @@ mod tests {
                 }
                 events.push(row);
             }
-            // Exercise trimming an answer much longer than its last content.
+
             events.push(
                 json!({"kind":"agent","backend":"codex","event":{"kind":"text","delta":"  final"}}),
             );

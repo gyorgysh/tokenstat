@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Chart authoring must work offline, without opening an archive or contacting a host.
 use std::io::Write;
 use std::process::{Command, Stdio};
 

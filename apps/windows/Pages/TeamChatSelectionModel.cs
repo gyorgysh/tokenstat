@@ -4,8 +4,6 @@ using static Tokenstat.Pages.TeamManagementModel;
 
 namespace Tokenstat.Pages;
 
-/// Selection and original publication identities are owned by the publishing
-/// host. Loading this model never confirms or publishes a private chat.
 internal sealed class TeamChatSelectionModel(TeamPublisherModel publisher, string checkout)
 {
     internal JsonObject? Selection { get; private set; }

@@ -6,7 +6,6 @@ enum LaunchPreferences {
     static var restoresLocation: Bool { UserDefaults.standard.bool(forKey: restoreLocationKey) }
 }
 
-/// Startup behavior belongs to this device, independently of saved-work storage.
 struct LaunchSettings: View {
     @AppStorage(LaunchPreferences.restoreLocationKey) private var restoreLocation = false
 

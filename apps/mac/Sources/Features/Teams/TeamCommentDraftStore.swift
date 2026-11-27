@@ -3,8 +3,6 @@ import Foundation
 import CryptoKit
 import Darwin
 
-/// Team writing is filed by stable person and exact published resource. It
-/// never uses a private conversation ID, personal queue or provider session.
 struct TeamCommentTarget: Codable, Hashable, Sendable {
     let origin: String
     let person: String
@@ -20,8 +18,6 @@ struct TeamCommentAttempt: Codable, Equatable, Sendable {
     let id: String
     let createdAtMs: Int64
 }
-/// A private, local label snapshot. Names never select authority or enter the
-/// send payload, and remain useful after the original audience is withdrawn.
 struct TeamCommentLocation: Codable, Equatable, Sendable {
     let organization: String
     let repository: String
@@ -73,9 +69,6 @@ enum TeamCommentDraftFailure: LocalizedError {
     }
 }
 
-/// An attempt is durably recorded before sending. An uncertain attempt keeps
-/// the original text, ID and time through navigation, relaunch and sign-in.
-/// No draft is evicted. CAS also protects writing in another app window.
 actor TeamCommentDraftStore {
     static let shared = TeamCommentDraftStore()
     private let directory: URL
@@ -98,8 +91,6 @@ actor TeamCommentDraftStore {
     func load(_ target: TeamCommentTarget) throws -> TeamCommentDraft? { try locked(target) { try read($0, target) } }
     func unsavedWriting(_ target: TeamCommentTarget) -> Unsaved? { unsaved[target] }
     func forgetUnsavedWriting(_ target: TeamCommentTarget) { unsaved[target] = nil }
-    /// Local recovery needs no membership or reachable publishing computer.
-    /// Read a bounded page and never turn an unreadable file into an empty draft.
     func list(origin: String, person: String, after: String? = nil) throws -> Page {
         try lockedDirectory { root in
             let recovery = try Dictionary(uniqueKeysWithValues: unsaved.filter { $0.key.origin == origin && $0.key.person == person }.map { (try key($0.key) + ".json", $0) })
@@ -125,8 +116,6 @@ actor TeamCommentDraftStore {
             return Page(entries: entries, next: visited < names.count ? names[visited - 1] : nil, unreadable: unreadable)
         }
     }
-    /// Removes only the reviewed local version. This never cancels a send or
-    /// changes the original attempt held by an in-flight request.
     func discard(_ entry: Entry) throws {
         try locked(entry.target) { file in
             guard try read(file, entry.target) == entry.draft, unsaved[entry.target] == entry.unsaved else { throw TeamCommentDraftFailure.changed }
@@ -148,8 +137,6 @@ actor TeamCommentDraftStore {
             unsaved[target] = nil
             return result
         } catch {
-            // A failed save still belongs to its original person and share.
-            // Keep it in memory for returning views, including CAS conflicts.
             unsaved[target] = Unsaved(text: text, expected: expected, location: location ?? expected?.location)
             throw error
         }
@@ -196,8 +183,6 @@ actor TeamCommentDraftStore {
         guard descriptor >= 0 else { throw TeamCommentDraftFailure.unavailable }
         defer { Darwin.close(descriptor) }
         var region = flock(); region.l_type = Int16(F_WRLCK); region.l_whence = Int16(SEEK_SET)
-        // A stalled second app must not hold a Swift worker indefinitely.
-        // Keep the unsaved copy and let the person retry a busy file.
         while Darwin.fcntl(descriptor, F_SETLK, &region) == -1 {
             guard errno == EINTR else { throw TeamCommentDraftFailure.unavailable }
         }

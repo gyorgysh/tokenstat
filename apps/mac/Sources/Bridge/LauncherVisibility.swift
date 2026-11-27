@@ -7,12 +7,6 @@
 import Foundation
 import Observation
 
-/// Which launcher tiles the user has taken off the main grid.
-///
-/// This is display only. The binary stays on the machine. A hidden installed
-/// profile moves under the + row and can be shown again without running an
-/// installer. The set is per owning machine so hiding Codex on a remote host
-/// does not hide it on this one.
 @MainActor
 @Observable
 final class LauncherVisibility {
@@ -42,14 +36,11 @@ final class LauncherVisibility {
         persist(set, scope: scope)
     }
 
-    /// Replace the set from the owning host's catalog.
     func replace(_ ids: Set<String>, scope: String) {
         hidden[scope] = ids
         persist(ids, scope: scope)
     }
 
-    /// Cached after the first write. Reads fall back to defaults so a view
-    /// body never mutates this object.
     func ids(for scope: String) -> Set<String> {
         hidden[scope] ?? Set(UserDefaults.standard.stringArray(forKey: Self.key(scope)) ?? [])
     }
@@ -78,7 +69,6 @@ extension AgentBackend {
         }
     }
 
-    /// Hidden only when every matching tile is hidden. Cursor has two tiles.
     @MainActor
     func isHiddenFromLaunchers(scope: String = "local") -> Bool {
         let ids = launcherIDs
@@ -88,14 +78,6 @@ extension AgentBackend {
 }
 
 extension [AgentBackend] {
-    /// Picker list: hidden tiles stay out, unless this card or job already uses one.
-    ///
-    /// Shell goes last. The host lists it first because it is the plainest
-    /// backend, and a picker that opens on it offers a shell as the obvious
-    /// way to run a scheduled job, which is the one thing almost nobody wants
-    /// here: the prompt field is where a command belongs. It stays in the
-    /// list, because a shell job is a real thing to want, just not the thing
-    /// somebody lands on.
     @MainActor
     func visibleForPicker(keeping id: String? = nil, scope: String = "local") -> [AgentBackend] {
         var out = filter { !$0.isHiddenFromLaunchers(scope: scope) }
@@ -109,9 +91,6 @@ extension [AgentBackend] {
         return out
     }
 
-    /// What a new card or job should start on: an agent, never the shell.
-    ///
-    /// `first` was doing this, and the host's list opens with Shell.
     @MainActor
     func defaultForPicker(keeping id: String? = nil, scope: String = "local") -> AgentBackend? {
         let out = visibleForPicker(keeping: id, scope: scope)

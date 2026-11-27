@@ -455,7 +455,6 @@ mod tests {
         });
         assert_eq!(a.input_fresh, Some(3));
         assert_eq!(a.output, Some(7));
-        // Never observed on either side, so it stays unknown rather than zero.
         assert_eq!(a.cache_read, None);
     }
 
@@ -482,15 +481,11 @@ mod tests {
         let a = EventId::derive(&["req_1", "msg_1"]);
         let b = EventId::derive(&["req_1", "msg_1"]);
         assert_eq!(a, b);
-        // Without a separator these two would hash identically.
         assert_ne!(EventId::derive(&["ab", "c"]), EventId::derive(&["a", "bc"]));
     }
 
     #[test]
     fn a_separator_byte_inside_a_part_cannot_forge_a_boundary() {
-        // Under the separator-only framing both tuples hashed the same bytes,
-        // so a request id that happened to contain 0x1f could collide with a
-        // different request. The length-prefixed encoding keeps them apart.
         assert_ne!(
             EventId::derive(&["a\u{1f}", "b"]),
             EventId::derive(&["a", "\u{1f}b"])
@@ -518,8 +513,6 @@ mod tests {
 
     #[test]
     fn local_date_uses_the_given_zone() {
-        // Late evening UTC is already the next day further east, which is
-        // exactly the boundary that makes daily bucketing timezone sensitive.
         let ts = Timestamp::from_ms(
             "2026-07-28T23:30:00Z"
                 .parse::<jiff::Timestamp>()

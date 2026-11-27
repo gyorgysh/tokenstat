@@ -102,8 +102,6 @@ fn a_torn_or_missing_initialized_claim_registry_never_becomes_an_empty_registry(
                 std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
             }
         }
-        // Ordinary operations do not depend on recovery records. A Team run
-        // must still refuse to overwrite a damaged registry.
         let mut ordinary = Lease::at(&folder, &root).unwrap();
         ordinary.ensure_current().unwrap();
         let result = ordinary.claim_run(&"cd".repeat(32));
@@ -143,7 +141,6 @@ fn lanes_run_beside_the_main_checkout_and_each_other() {
     first.claim_run(&"ab".repeat(32)).unwrap();
     first.ensure_current().unwrap();
     drop(main_lease);
-    // A run's recovery record does not reserve its lane or the project.
     Lease::at(&main, &root).unwrap().ensure_current().unwrap();
     drop((first, second));
     Lease::at_with(&a, None, &root, true).unwrap();
@@ -293,8 +290,6 @@ fn linked_metadata_paths_preserve_non_utf8_and_control_bytes() {
         .path()
         .join(std::ffi::OsString::from_vec(b" space\xff\n\" ".to_vec()));
     if let Err(error) = std::fs::create_dir(&main) {
-        // Some filesystems require UTF-8 names. Refusal must happen before
-        // any coordination files or project effects are created.
         assert_eq!(error.raw_os_error(), Some(libc::EILSEQ));
         let root = temp.path().join("locks");
         assert!(matches!(Lease::at(&main, &root), Err(Error::Unavailable)));
@@ -520,7 +515,6 @@ fn lease_process_child() {
     let root = std::env::var_os("TOKENSTAT_WRITER_FIXTURE_LOCKS").unwrap();
     let ready = std::env::var_os("TOKENSTAT_WRITER_FIXTURE_READY").unwrap();
     let held = Lease::at(Path::new(&folder), Path::new(&root)).unwrap();
-    // Model a still-running host from before checkout locks were removed.
     let _legacy: Vec<_> = held
         .target
         .requests()

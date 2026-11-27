@@ -35,8 +35,6 @@ internal sealed partial class ChatPage
             var record = _chats.FirstOrDefault(row => Format.Text(row, "id") == chat);
             if (record is null) return;
             _openChat = ChatSteerOverlay.MergeRecord(record, _openChat);
-            // Paused private messages require their own review after sharing
-            // ends; this action never resumes the personal outbox.
             _authorizedQueue.Clear(); PaintConversation();
             AppServices.NotifyConversationsChanged();
         }

@@ -40,10 +40,6 @@ internal enum WorkspaceSection
     Launcher,
 }
 
-/// <summary>
-/// The sections of the SSH library. Fixed set, fixed order, the same shape a
-/// workspace has. Labels match the Mac sidebar exactly.
-/// </summary>
 internal enum SSHSection
 {
     Hosts,
@@ -55,8 +51,6 @@ internal enum SSHSection
 
 internal static class Sections
 {
-    // Retained navigation targets. The shell hides these rows and presents
-    // machine-wide places through RailPlace, matching the macOS rail.
     public static readonly GlobalSection[] Standalone =
         [GlobalSection.Home, GlobalSection.Insights, GlobalSection.Machines];
 

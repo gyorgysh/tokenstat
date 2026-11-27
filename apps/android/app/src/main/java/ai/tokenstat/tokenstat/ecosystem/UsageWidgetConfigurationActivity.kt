@@ -11,7 +11,6 @@ import android.widget.*
 import androidx.core.content.edit
 import ai.tokenstat.tokenstat.R
 
-/** Native launcher configuration, separate from app navigation. */
 class UsageWidgetConfigurationActivity : Activity() {
     private var saveState: (() -> Bundle)? = null
     override fun onSaveInstanceState(outState: Bundle) {

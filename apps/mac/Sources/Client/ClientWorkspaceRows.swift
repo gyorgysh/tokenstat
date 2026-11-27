@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A single column on phones and in narrow split panes; roomier grids on iPad.
 struct ClientAdaptiveCards<Content: View>: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ViewBuilder var content: () -> Content
@@ -20,13 +19,6 @@ struct ClientAdaptiveCards<Content: View>: View {
     }
 }
 
-/// One panel per figure, not one card holding every figure.
-///
-/// Three panels read as three facts. They always sit in one equal-width row:
-/// stacking on the phone made Models and Harnesses look like a different
-/// layout from Days, and unequal heights made a short number look broken next
-/// to a long one. Each keeps its own card, and each says which fact it is
-/// with a mark from the house vocabulary.
 struct ClientStatPanels: View {
     var panels: [(label: String, value: String, mark: String)]
 
@@ -34,8 +26,6 @@ struct ClientStatPanels: View {
         HStack(alignment: .top, spacing: Theme.Space.s) {
             ForEach(panels.indices, id: \.self) { index in
                 panel(panels[index])
-                    // Stretch to the tallest sibling so three cards of one
-                    // fact row share one height, not three near-misses.
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
@@ -58,14 +48,7 @@ struct ClientStatPanels: View {
                     .minimumScaleFactor(0.7)
             }
             Spacer(minLength: 0)
-            // Trailing, not leading. The figure is what the card is
-            // for, and every panel lines its number up on the same left
-            // edge. A mark in front would push each one in by a
-            // different amount. It also fills the room a short number
-            // leaves behind.
             FeatureMark(name: item.mark, size: 22)
-                // The label already says which fact this is. A second
-                // reading of it, from an image's asset name, is noise.
                 .accessibilityHidden(true)
         }
         .padding(Theme.Space.s)
@@ -78,10 +61,6 @@ private enum ClientRowMark {
     static let size: CGFloat = 26
 }
 
-/// A workspace folder on the phone: folder mark, name, path.
-///
-/// The folder is the container. Sessions underneath it carry the harness
-/// mark, same split the Mac sidebar uses.
 struct ClientFolderRow: View {
     let folder: WorkspaceFolder
     var grouped = false
@@ -105,8 +84,6 @@ struct ClientFolderRow: View {
                     .truncationMode(.middle)
                 if let subtitle = folder.subtitle {
                     HStack(spacing: 4) {
-                        // The same glyph the Mac sidebar uses. Without it the
-                        // branch is a bare word in a line of numbers.
                         if folder.git?.isRepo == true,
                            folder.git?.branch?.isEmpty == false {
                             Image(systemName: "arrow.triangle.branch")
@@ -142,7 +119,6 @@ struct ClientFolderRow: View {
     }
 }
 
-/// A running or stopped session: harness mark, name, state.
 struct ClientSessionRow: View {
     let session: PtySessionInfo
     var showsChevron: Bool = false

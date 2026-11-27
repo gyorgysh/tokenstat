@@ -23,21 +23,15 @@ enum ChatRowContinuity {
         carrying(next, from: previous).rows
     }
 
-    /// The rows, and the ids of the blocks that grew at their start. A reader
-    /// inside one of those keeps their place by its bottom edge, because the
-    /// text before theirs grew and the text after did not.
     static func carrying(_ next: [ChatDisplayItem], from previous: [ChatDisplayItem])
         -> (rows: [ChatDisplayItem], extendedAtStart: Set<String>) {
         guard !previous.isEmpty, !next.isEmpty else { return (next, []) }
-        // A block that already carries an older id and grew again keeps its
-        // id without help, and still grew at its start.
         var previousStart: [String: UInt64] = [:]
         for row in previous where kind(row) != nil { previousStart[row.id] = row.firstSequence }
         var grown = Set<String>()
         for row in next where kind(row) != nil {
             if let was = previousStart[row.id] ?? nil, let now = row.firstSequence, now < was { grown.insert(row.id) }
         }
-        // Fast path: nothing renamed. The common case on every streamed token.
         let previousIDs = Set(previous.map(\.id))
         guard next.contains(where: { (kind($0) != nil || call($0) != nil) && !previousIDs.contains($0.id) })
         else { return (next, grown) }
@@ -47,8 +41,6 @@ enum ChatRowContinuity {
             guard let kind = kind(row), let start = row.firstSequence else { continue }
             starts[kind, default: []].append((start, row.id))
         }
-        // A tool call cut by the page boundary arrives as its end alone and is
-        // named after that. The page with its start names it after the start.
         var calls: [String: String] = [:]
         for row in previous { if let call = call(row) { calls[call] = calls[call] ?? row.id } }
         guard !starts.isEmpty || !calls.isEmpty else { return (next, grown) }
@@ -78,7 +70,6 @@ enum ChatRowContinuity {
         return (carried, claimed.subtracting(toolCarries).union(grown))
     }
 
-    /// A tool row's call, scoped by backend: two agents can reuse an id.
     private static func call(_ row: ChatDisplayItem) -> String? {
         guard case let .tool(tool) = row.kind, !tool.callId.isEmpty else { return nil }
         return (row.sourceBackend ?? "") + "|" + tool.callId

@@ -9,7 +9,6 @@ internal readonly record struct HoverRect(double X, double Y, double Width, doub
         x >= X - margin && x <= Right + margin && y >= Y - margin && y <= Bottom + margin;
 }
 
-/// <summary>Pointer union and a fixed exit grace, also sampled when no exit event arrives.</summary>
 internal sealed class SidebarHoverState
 {
     private long? _leftAt;
@@ -32,8 +31,6 @@ internal sealed class SidebarHoverState
                 var right = rightward ? panel.X : trigger.X;
                 var top = Math.Max(trigger.Y, panel.Y);
                 var bottom = Math.Min(trigger.Bottom, panel.Bottom);
-                // Only the crossing beside the row is a corridor. The empty
-                // space beside the rest of a tall card must dismiss it.
                 if (right >= left && bottom > top && new HoverRect(left, top, right - left, bottom - top).Contains(x, y)) return true;
             }
         }

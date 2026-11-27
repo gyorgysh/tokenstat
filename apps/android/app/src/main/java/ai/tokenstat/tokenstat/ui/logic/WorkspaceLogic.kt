@@ -3,35 +3,20 @@ package ai.tokenstat.tokenstat.ui.logic
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-/// Pure workspace rules shared by the files, changes, and notes sections.
-/// Ports the UI-thread-free cores of `ClientWorkspaceSections.swift`
-/// (selection counting), `GitCommitSession.swift` (draft message, commit
-/// gating), `ClientReviewAllView.swift` (review caps), and
-/// `ClientWorkspaceNotesView.swift` (note sorting and filtering), so both
-/// platforms answer identically. No Android or coroutine APIs here.
 
-/// File selection counting, mirroring the Changes footer
-/// ("N of M selected") and the Select all toggle.
 object FileSelection {
     fun label(selected: Int, total: Int): String = L10n.text("android.workspacelogic.0_of_1_selected.d06c59a5", "${selected}", "${total}")
 
     fun toggle(current: Set<String>, path: String): Set<String> =
         if (current.contains(path)) current - path else current + path
 
-    /// Apple `selectAll`: tapping with everything selected clears,
-    /// otherwise selects the whole list.
     fun selectAllOrNone(current: Set<String>, all: Set<String>): Set<String> =
         if (current == all) emptySet() else all
 
-    /// Apple `reconcileAvailablePaths`: a fresh status drops selected paths
-    /// that no longer changed. Only applies before a review exists and while
-    /// nothing is submitted.
     fun reconcile(selected: Set<String>, available: Set<String>): Set<String> =
         selected.intersect(available)
 }
 
-/// The commit draft message, mirroring `GitCommitDraft.message`: the title
-/// alone, or title, blank line, details.
 object CommitDraft {
     fun message(title: String, details: String): String {
         val cleanTitle = title.trim()
@@ -41,8 +26,6 @@ object CommitDraft {
 
     const val MAX_MESSAGE_BYTES = 128 * 1024
 
-    /// Mirrors `GitCommitSession.canCommit`: a non-blank title, a message
-    /// within the host limit, and a review frozen on exactly this selection.
     fun canCommit(title: String, reviewedPaths: Set<String>?, selectedPaths: Set<String>): Boolean {
         if (title.trim().isEmpty()) return false
         if (message(title, "").toByteArray().size > MAX_MESSAGE_BYTES) return false
@@ -54,8 +37,6 @@ object CommitDraft {
         message(title, details).toByteArray().size > MAX_MESSAGE_BYTES
 }
 
-/// Review caps from `ClientReviewAllView`: at most twenty files, sixty
-/// lines each, with the cut count said out loud.
 object ReviewClip {
     const val MAX_FILES = 20
     const val LINES_PER_FILE = 60
@@ -75,8 +56,6 @@ object ReviewClip {
         L10n.text("android.workspacelogic.0_more_file_1_changed_open_2_from_changes.206bca3b", "${leftover}", "${if (leftover == 1) "" else "s"}", "${if (leftover == 1) "it" else "them"}")
 }
 
-/// Push button words from `GitPushControl`: a submitted push is checked,
-/// otherwise the outgoing count decides.
 object PushLabel {
     fun label(submitted: Boolean, outgoing: Long): String = when {
         submitted -> L10n.text("android.workspacelogic.check_push.c821c305")
@@ -85,16 +64,11 @@ object PushLabel {
     }
 }
 
-/// Commit and push receipt states. The host reports "succeeded", "failed",
-/// or an in-between state; anything in between is unresolved and must be
-/// reconciled before another operation starts.
 object OperationState {
     fun succeeded(state: String): Boolean = state == "succeeded"
     fun unresolved(state: String): Boolean = state != "succeeded" && state != "failed"
 }
 
-/// Change kinds, mirroring `ChangeKind.label` word-for-word. The host sends
-/// lowercase single words.
 object ChangeKinds {
     fun label(kind: String): String = when (kind.lowercase()) {
         "added" -> L10n.text("android.workspacelogic.added.6b02e0d3")
@@ -107,9 +81,6 @@ object ChangeKinds {
     }
 }
 
-/// Per-type file icon keys for the tree. Apple draws folders and documents;
-/// the phone tree names the kind so text, image, audio, video, PDF, and
-/// archive files are recognizable at a glance.
 object FileIcons {
     fun keyFor(name: String, isDir: Boolean): String {
         if (isDir) return "dir"
@@ -129,9 +100,6 @@ object FileIcons {
     }
 }
 
-/// Notes list rules from `ClientWorkspaceNotesView`: newest first unless
-/// alphabetical, archive partitioned behind a toggle, search across title
-/// and body. The host column for put-away notes is "archive".
 object NoteList {
     const val ARCHIVE_COLUMN = "archive"
 
@@ -168,12 +136,6 @@ object NoteList {
         cards.count { it.column == ARCHIVE_COLUMN }
 }
 
-/// A chat that was opened and never used: the host's default title, no
-/// message either way and nothing running. Lists leave these out so rows of
-/// "New chat" do not bury real conversations, except the one that is open.
-/// The title test keeps chats from a host too old to send `lastMessageAtMs`,
-/// because every host renames a chat from its first prompt. Port of the
-/// Mac's `ChatModel.isUntouched`.
 object UntouchedChats {
     const val DEFAULT_TITLE = "New chat"
 

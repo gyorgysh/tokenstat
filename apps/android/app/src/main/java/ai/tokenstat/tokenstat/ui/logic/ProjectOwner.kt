@@ -7,8 +7,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
-/// Device state belongs to an account on one server, a host, and a project.
-/// Labels and tunnel listener addresses never contribute to this identity.
 @ConsistentCopyVisibility
 data class ProjectOwner private constructor(val key: String, val accountScope: String) {
     fun conversation(chatId: String): String? = item("conversation", chatId)
@@ -39,8 +37,6 @@ data class ProjectOwner private constructor(val key: String, val accountScope: S
 
         private fun segment(value: String): String = "${value.length}:$value"
 
-        /// Matches WorkReference.Scope.account: retain an account service's
-        /// path prefix, remove query/fragment, trailing slash and default port.
         internal fun canonicalOrigin(value: String?): String? {
             val parsed = runCatching { URI(value?.trim().orEmpty()) }.getOrNull() ?: return null
             val scheme = parsed.scheme?.lowercase() ?: return null

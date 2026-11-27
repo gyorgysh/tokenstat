@@ -37,8 +37,6 @@ internal sealed partial class TeamsPage
         if (!_comments.TryGetValue(binding, out var model))
         {
             var accountScope = _scope!.DeepClone(); var session = _session;
-            // Capture the account once. A late storage completion cannot use
-            // the next login's mutable page scope to send old writing.
             async Task<JsonNode> BoundCall(string method, JsonObject fields)
             {
                 fields["_accountScope"] = accountScope.DeepClone();

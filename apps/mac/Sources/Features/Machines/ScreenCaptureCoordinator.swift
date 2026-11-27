@@ -7,7 +7,6 @@ import CoreVideo
 import ScreenCaptureKit
 import VideoToolbox
 
-/// Device-local endpoint for Legend screen sessions owned by hostd.
 final class ScreenCaptureCoordinator: @unchecked Sendable {
     static let shared = ScreenCaptureCoordinator()
 
@@ -37,26 +36,9 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
         }
     }
 
-    /// How often the helper looks for waiting input.
-    ///
-    /// A tenth of a second is the pace of bookkeeping, not of a pointer. A
-    /// finger moving across a phone produces events at the display's rate, and
-    /// polling ten times a second turned that into ten coarse jumps a
-    /// tenth of a second behind the finger, which is what made control mode
-    /// feel like it was arguing back. Watching costs nothing extra: with no
-    /// controller on the session there is nothing in the queue to find, so the
-    /// loop stays on the slow beat.
     private static let controlPoll = Duration.milliseconds(8)
     private static let idlePoll = Duration.milliseconds(100)
-    /// Nobody is watching this screen, which is nearly all of the time. The
-    /// session list is then the only thing to look at, and asking for it ten
-    /// times a second kept this app and the host helper waking up ten times a
-    /// second for nothing. A viewer who connects waits at most this long for
-    /// capture to start, which is inside the tunnel's own handshake.
     private static let emptyPoll = Duration.milliseconds(750)
-    /// The session list and the pasteboard change count keep the slow beat
-    /// whatever the input loop is doing. Neither changes at pointer rate, and
-    /// both cost a round trip through the host.
     private static let bookkeepingInterval: TimeInterval = 0.1
 
     private func run() async {
@@ -85,7 +67,6 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                     }
                 }
             } catch {
-                // hostd may be restarting or no session may exist yet.
                 sessions = []
                 try? await adopt([])
             }
@@ -128,19 +109,10 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 await fail(id, error: error)
             }
         }
-        // A session that stayed but changed hands. Control is flipped on the
-        // live session now, so this is the ordinary way somebody starts
-        // driving, not a rare case: without it the picture rate would stay at
-        // the watching pace for the whole session.
         for session in sessions where !added.contains(session.id) {
             await encoder(for: session.id)?.setControl(session.control)
-            // The viewer can change what it is willing to spend without
-            // reopening the stream, same as it can take the mouse.
             await encoder(for: session.id)?.setProfile(session.profile)
         }
-        // Nobody is driving any more, either because the session ended or
-        // because control went back. A viewer that vanished mid-drag would
-        // otherwise leave this Mac with the mouse button still down.
         if !sessions.contains(where: \.control) { ScreenInput.releaseHeld() }
     }
 
@@ -195,7 +167,6 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     }
 }
 
-/// Serializes asynchronous reconfiguration, including its suspension points.
 private actor ScreenEncoderChanges {
     private var tail: Task<Void, Never>?
     func perform(_ operation: @escaping @Sendable () async throws -> Void) async throws {
@@ -218,40 +189,17 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     private var sourceWidth = 0
     private var sourceHeight = 0
     private var configuration: SCStreamConfiguration?
-    /// The decoder cannot start without SPS/PPS, which only ride on a
-    /// keyframe. The first picture, and the first after a compression
-    /// rebuild, must be one even if VideoToolbox would have waited.
     private var forceKey = true
     private var selectedDisplayID: CGDirectDisplayID?
     var displayID: CGDirectDisplayID? { queue.sync { selectedDisplayID } }
-    /// Whether this session carries mouse and keyboard.
-    ///
-    /// The only thing it changes is how often a picture is taken. See
-    /// `frameRate`.
     private var control = false
-    /// What this session may spend, and how widely it may draw.
-    ///
-    /// Set from the route the viewer reached this machine on, and from the
-    /// quality it asked for. Relay until told otherwise, which is what every
-    /// session used to be.
     private var profile = ScreenQualityProfile.relay
-    /// The adaptive backoff, as a fraction of the profile's width. Congestion
-    /// pulls it down and a long clear run puts it back; it is kept here so a
-    /// profile change does not lose a backoff that is still warranted.
     private var congestionScale: CGFloat = 1
 
     init(output: @escaping @Sendable (Data) -> Void) { self.output = output }
 
-    /// Pictures per second.
-    ///
-    /// The bitrate does not move with it: the cost of a session is the
-    /// profile's budget, and this decides how finely that budget is spread
-    /// over time. Spending the same budget on half as many pictures makes each
-    /// of them better, which is the right trade for watching and the wrong one
-    /// for driving.
     private var frameRate: Int32 { control ? profile.controlFPS : profile.viewingFPS }
 
-    /// The width to encode at, after the profile's cap and any backoff.
     private var targetWidth: CGFloat {
         guard sourceWidth > 0 else { return profile.maxWidth }
         return min(CGFloat(sourceWidth), profile.maxWidth) * congestionScale
@@ -330,12 +278,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         Task { try? await previous?.stopCapture() }
     }
 
-    /// Follow a session that was handed the mouse, or had it taken back.
-    ///
-    /// Control is no longer fixed when a session opens: the viewer flips it on
-    /// the live session rather than reopening the stream. The only thing that
-    /// changes here is the picture rate, so the stream is reconfigured in
-    /// place instead of being torn down.
     func setControl(_ wanted: Bool) async {
         try? await changes.perform { [self] in
             let update: (SCStream, SCStreamConfiguration)? = queue.sync {
@@ -349,11 +291,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         }
     }
 
-    /// Back off, or come back, under congestion.
-    ///
-    /// A fraction of the profile rather than of a fixed 1920, so a direct
-    /// route that turns out to be a poor Wi-Fi link still narrows and a relay
-    /// session behaves exactly as it did.
     func setQuality(_ quality: CGFloat) async {
         try? await changes.perform { [self] in
             let changed = queue.sync {
@@ -365,11 +302,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         }
     }
 
-    /// Move to a different budget on a session that is already running.
-    ///
-    /// The same road `setQuality` takes, because the picture must not stop:
-    /// reconfigure the stream, then rebuild the compression session with a
-    /// keyframe forced, since the decoder cannot start again without SPS/PPS.
     func setProfile(_ next: ScreenQualityProfile) async {
         try? await changes.perform { [self] in
             let changed = queue.sync {
@@ -418,8 +350,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
             outputCallback: { refcon, _, status, _, sample in
                 guard status == noErr, let refcon, let sample else { return }
                 let encoder = Unmanaged<ScreenVideoEncoder>.fromOpaque(refcon).takeUnretainedValue()
-                // VideoToolbox callbacks can use a different queue. Retain the
-                // encoder/sample and order them with capture, reconfigure and stop.
                 encoder.queue.async { encoder.encoded(sample) }
             },
             refcon: Unmanaged.passUnretained(self).toOpaque(),
@@ -429,31 +359,12 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         compression = session
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
-        // 1.5 Mbps, not 4.
-        //
-        // Four megabits is a number for a screen recording somebody keeps.
-        // This is a desktop being watched live, usually on a phone, over a
-        // relay somebody pays for by the gigabyte: four megabits is 1.8 GB an
-        // hour, and the difference on a screen that is mostly text and flat
-        // panels is not something a person notices on a handset.
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: profile.averageBitRate as CFNumber)
-        // A ceiling as well as an average, so a burst of motion cannot spend a
-        // minute's budget in a second. The pair is bytes-per-window: 2x the
-        // average over one second.
         VTSessionSetProperty(
             session,
             key: kVTCompressionPropertyKey_DataRateLimits,
             value: [profile.averageBitRate / 4, 1] as CFArray
         )
-        // Every four seconds rather than every two. A keyframe is the
-        // expensive frame, and on a desktop that is not moving it is the only
-        // traffic there is: halving how often one goes out halves the cost of
-        // a session nobody is touching.
-        //
-        // In seconds, not in frames. A count of frames would have made a
-        // control session's keyframes twice as frequent as a viewing one's
-        // purely because it takes twice as many pictures, which is the one
-        // way raising the frame rate could have cost real money.
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: profile.keyframeSeconds as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (frameRate * profile.keyframeSeconds) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: frameRate as CFNumber)
@@ -485,14 +396,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         )
     }
 
-    /// Whether this encoded sample can start a decoder on its own.
-    ///
-    /// `NotSync` missing means it is a sync sample. `NotSync` present and
-    /// false means the same thing: VideoToolbox does write the key as false
-    /// on IDR frames. Treating "key exists" as "not a keyframe" dropped
-    /// SPS/PPS from every picture, so the viewer decoded nothing and showed
-    /// a black screen while mouse and keyboard still arrived on a side
-    /// channel.
     private func isKeyframe(_ sample: CMSampleBuffer) -> Bool {
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
         guard let value = attachments?.first?[kCMSampleAttachmentKey_NotSync] else { return true }
@@ -623,7 +526,6 @@ private enum ScreenInput {
     /// plain box is enough.
     nonisolated(unsafe) private static var held: Set<CGMouseButton> = []
 
-    /// The drag event for a button that is down, or a plain move.
     private static func moveType() -> (CGEventType, CGMouseButton) {
         if held.contains(.left) { return (.leftMouseDragged, .left) }
         if held.contains(.right) { return (.rightMouseDragged, .right) }
@@ -639,16 +541,12 @@ private enum ScreenInput {
         return down ? .otherMouseDown : .otherMouseUp
     }
 
-    /// Put the pointer somewhere, as a drag when a button is held.
     private static func postMove(_ source: CGEventSource?, to point: CGPoint) {
         let (type, button) = moveType()
         CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
             .post(tap: .cghidEventTap)
     }
 
-    /// Forget every held button. Called when a session ends or hands control
-    /// back, so a viewer that vanished mid-drag cannot leave this Mac
-    /// believing the mouse is still down.
     static func releaseHeld() {
         guard !held.isEmpty else { return }
         let source = CGEventSource(stateID: .hidSystemState)
@@ -671,8 +569,6 @@ private enum ScreenInput {
         var keyCode: UInt16?
         var flags: UInt64?
         var text: String?
-        /// Wheel movement in pixels. A phone sends these from a two-finger
-        /// drag, which has no notion of a wheel detent.
         var dx: Double?
         var dy: Double?
         /// 1 for a click, 2 for a double click. macOS decides what a double
@@ -705,8 +601,6 @@ private enum ScreenInput {
             let down = event.down == true
             if down { held.insert(.left) } else { held.remove(.left) }
             cg = CGEvent(mouseEventSource: source, mouseType: down ? .leftMouseDown : .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-        // A move while a button is held is a drag, and has to be posted as
-        // one. See `held`.
         case "move":
             let (type, button) = moveType()
             cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
@@ -733,8 +627,6 @@ private enum ScreenInput {
                 click?.post(tap: .cghidEventTap)
             }
             return
-        // Two-finger scrolling. Pixel units rather than lines, so the distance
-        // a finger travelled is the distance the content moves.
         case "scroll":
             postMove(source, to: point)
             cg = CGEvent(

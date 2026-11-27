@@ -6,7 +6,6 @@ import Observation
 final class EcosystemNavigation {
     static let shared = EcosystemNavigation()
     var pending: EcosystemRoute?
-    // Prevent relaunch restoration from replacing an explicit system action.
     private(set) var hasRequestedNavigation = false
 
     func open(_ route: EcosystemRoute) {

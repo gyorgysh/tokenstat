@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Managed Claude settings outrank --settings and survive an empty
-//! --setting-sources. They can execute startup hooks or replace the explicit
-//! MCP server. Inspect source presence only; never read managed payloads.
-
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -87,9 +82,7 @@ fn refuse_connection_overrides(paths: &[PathBuf]) -> io::Result<()> {
         let settings: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
         let settings = settings.as_object().ok_or_else(unavailable)?;
-        // Native auth prefers this helper over cached subscription OAuth.
-        // The metadata probe masks callbacks, so refuse the original helper
-        // rather than accidentally selecting another cached account.
+
         if let Some(helper) = settings.get("apiKeyHelper")
             && helper.as_str() != Some("")
         {
@@ -205,9 +198,6 @@ fn matching_mode(original: &Status, guarded: &Status, has_key: bool) -> io::Resu
     Ok(mode)
 }
 
-// These select the original profile/provider only for the metadata probe.
-// Cloud providers are refused explicitly; their credentials are never copied
-// into the guarded first-party process.
 const NATIVE_PROFILE_ENV: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_SECURESTORAGE_CONFIG_DIR",
@@ -283,8 +273,6 @@ fn status(
     };
     let mut args = vec![
         "--settings".into(),
-        // auth status normally retrieves apiKeyHelper. A metadata preflight
-        // must not execute that user callback, even in the original profile.
         r#"{"apiKeyHelper":""}"#.into(),
         "auth".into(),
         "status".into(),
@@ -347,8 +335,7 @@ fn status(
                 .ok()
         })
         .flatten();
-    // A launcher retaining the output pipe must not leave helpers behind on
-    // failure. No metadata, including account identifiers, is logged.
+
     #[cfg(unix)]
     if bytes.is_none() {
         unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
@@ -469,8 +456,6 @@ fn registry_status(status: u32) -> io::Result<()> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn refuse_wsl_registry() -> io::Result<()> {
-    // WSL can opt into the Windows policy chain. Query only key existence
-    // through the native registry API; neither values nor profiles are read.
     let bridge = Path::new("/mnt/c/Windows/System32/reg.exe");
     match fs::symlink_metadata(bridge) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -568,8 +553,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("settings.json");
         let paths = [path.clone()];
-        // Matching masked native status alone would admit this cached Pro
-        // account even though a real invocation would prefer its helper.
+
         let cached = metadata("claude.ai", Some("pro"), "firstParty", None);
         assert_eq!(
             matching_mode(&cached, &cached, false).unwrap(),

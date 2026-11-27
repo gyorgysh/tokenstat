@@ -12,7 +12,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 
-/** Account-owned quota reads shared by Home and chat. A dismissed reader does not cancel other readers. */
 internal class PlanLimitsReader<Owner : Any>(
     private val scope: CoroutineScope,
     private val owner: () -> Owner?,

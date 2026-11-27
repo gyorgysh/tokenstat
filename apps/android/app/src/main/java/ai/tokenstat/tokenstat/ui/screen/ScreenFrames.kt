@@ -12,17 +12,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// The bytes inside a `screen.viewer.read` answer, ported from Apple
-/// `ScreenEncodedFrame` and the `ScreenViewerModel` input shapes in
-/// `ScreenViewerView.swift`.
-///
-/// A frame arrives base64-encoded and starts with a 32-byte header: magic
-/// `TSCR`, version 1, kind 1 (video), a keyframe bit, the sequence, the
-/// presentation time, width and height, and the payload length. The payload is
-/// H.264 Annex B. Metadata and audio arrive on their own fields of the same
-/// answer. Input travels back as base64 JSON through `screen.viewer.input`.
-///
-/// Kept free of Android imports so unit tests pin the same answers.
 object ScreenFrames {
     const val HEADER_LEN = 32
 
@@ -34,9 +23,6 @@ object ScreenFrames {
         val keyframe: Boolean,
         val payload: ByteArray,
     ) {
-        // A data class over a ByteArray gets reference equality for the array,
-        // which is a trap rather than a meaning. Compared by contents or not
-        // at all.
         override fun equals(other: Any?): Boolean =
             other is VideoFrame && sequence == other.sequence &&
                 timestampUs == other.timestampUs && width == other.width &&
@@ -46,8 +32,6 @@ object ScreenFrames {
         override fun hashCode(): Int = sequence.hashCode() * 31 + payload.contentHashCode()
     }
 
-    /// Split the TSCR envelope. Anything that is not kind 1 video answers
-    /// null, the way the Apple decoder declines it.
     fun parse(data: ByteArray): VideoFrame? {
         if (data.size < HEADER_LEN) return null
         if (data[0] != 'T'.code.toByte() || data[1] != 'S'.code.toByte() ||
@@ -84,8 +68,6 @@ object ScreenFrames {
         return out
     }
 
-    /// Split Annex B into NAL units on four-byte start codes, the only form
-    /// the host emits.
     fun splitAnnexB(payload: ByteArray): List<ByteArray> {
         val starts = mutableListOf<Int>()
         var i = 0
@@ -112,14 +94,6 @@ object ScreenFrames {
 
     fun isPicture(unit: ByteArray): Boolean = (nalType(unit) ?: 0) in 1..5
 
-    /// Repack NAL units as Annex B, each behind a four-byte start code.
-    ///
-    /// The one place Android and Apple genuinely differ. VideoToolbox takes
-    /// AVCC, four-byte big-endian lengths, because its format description
-    /// says so. MediaCodec takes the byte stream: start codes in the input
-    /// buffer and start codes in `csd-0` / `csd-1`. Handing it lengths is not
-    /// a slower path, it is not a path at all, and the platform decoder says
-    /// so by logging "No start code is found" over a black surface.
     fun toAnnexB(units: List<ByteArray>): ByteArray {
         var total = 0
         units.forEach { total += START_CODE.size + it.size }
@@ -135,8 +109,6 @@ object ScreenFrames {
 
     private val START_CODE = byteArrayOf(0, 0, 0, 1)
 
-    // Metadata, the side channel the host uses to say what it has and what it
-    // copied. Port of Apple `ScreenMetadata`.
 
     data class Display(val id: Long, val name: String, val width: Int, val height: Int)
 
@@ -171,7 +143,6 @@ object ScreenFrames {
         )
     }
 
-    /// Parse the metadata JSON the host base64s into the read answer.
     fun metadata(bytes: ByteArray): Metadata? = runCatching {
         val element = kotlinx.serialization.json.Json.parseToJsonElement(
             bytes.toString(Charsets.UTF_8)
@@ -179,8 +150,6 @@ object ScreenFrames {
         metadata(element.jsonObject)
     }.getOrNull()
 
-    /// A `TAUD` chunk: header big-endian, interleaved 16-bit samples little
-    /// endian, exactly as `ScreenAudioPCM.encode` writes them.
     data class AudioChunk(val channels: Int, val sampleRate: Int, val frames: Int, val pcm: ByteArray) {
         override fun equals(other: Any?): Boolean =
             other is AudioChunk && channels == other.channels && sampleRate == other.sampleRate &&
@@ -204,9 +173,6 @@ object ScreenFrames {
         return AudioChunk(channels, rate, frames, data.copyOfRange(16, data.size))
     }
 
-    // Input events, in the shapes the host applies. Coordinates are
-    // normalized to the remote display, which is the only thing that
-    // survives two displays of different sizes.
 
     fun move(x: Double, y: Double): String =
         buildJsonObject { put("type", "move"); put("x", x); put("y", y) }.toString()
@@ -231,8 +197,6 @@ object ScreenFrames {
             put("button", 0); put("down", down)
         }.toString()
 
-    /// Wheel movement in pixels on the remote display. The host clamps these
-    /// to whole numbers, so a normalized fraction scrolls nothing at all.
     fun scroll(x: Double, y: Double, dx: Double, dy: Double): String =
         buildJsonObject {
             put("type", "scroll"); put("x", x); put("y", y)
@@ -254,13 +218,9 @@ object ScreenFrames {
     fun clipboard(text: String): String =
         buildJsonObject { put("type", "clipboard"); put("text", text) }.toString()
 
-    /// The "still here" beat. Sent ungated by control mode: a passive
-    /// watcher is the exact case the relay would otherwise cut off.
     fun heartbeat(): String =
         buildJsonObject { put("type", "heartbeat") }.toString()
 
-    /// Missing stays missing: inventing "Encrypted relay" for a path nobody
-    /// observed yet is the same lie the account card refuses to tell.
     fun transportLabel(raw: String?): String = when (raw) {
         "direct" -> L10n.text("android.screenframes.direct_connection.28d0ad54")
         "relay" -> L10n.text("android.screenframes.encrypted_relay.153d7b1c")
@@ -268,10 +228,6 @@ object ScreenFrames {
     }
 }
 
-/// Virtual key codes the key row and the software keyboard send.
-///
-/// macOS numbers, because the host synthesises `CGEvent`s with them. Twin of
-/// Apple `ScreenKey`.
 object ScreenKey {
     const val ESCAPE = 53
     const val TAB = 48
@@ -282,8 +238,6 @@ object ScreenKey {
     const val DOWN = 125
     const val UP = 126
 
-    /// A character typed with command or control has to reach the host as a
-    /// key code, because the host synthesises a key event and not text.
     private val LETTERS = mapOf(
         'a' to 0, 's' to 1, 'd' to 2, 'f' to 3, 'h' to 4, 'g' to 5, 'z' to 6, 'x' to 7,
         'c' to 8, 'v' to 9, 'b' to 11, 'q' to 12, 'w' to 13, 'e' to 14, 'r' to 15,
@@ -294,8 +248,6 @@ object ScreenKey {
     fun code(character: Char): Int? = LETTERS[character.lowercaseChar()]
 }
 
-/// Modifier bits shared with `CGEventFlags` on the host. Twin of Apple
-/// `ScreenFlag`.
 object ScreenFlag {
     const val SHIFT = 1L shl 17
     const val CONTROL = 1L shl 18
@@ -303,27 +255,18 @@ object ScreenFlag {
     const val COMMAND = 1L shl 20
 }
 
-/// How a finger maps onto the remote pointer. Twin of Apple
-/// `ScreenPointerMode`.
 enum class ScreenPointerMode(val title: String) {
-    /// The finger drags the pointer from wherever it already is. What a
-    /// laptop trackpad does, and the default on a phone.
     Trackpad(L10n.text("android.screenframes.trackpad.2fb10776")),
 
-    /// The pointer goes where the finger touched.
     Direct(L10n.text("android.screenframes.direct.002c7c68")),
 }
 
-/// What the picture is asked to be worth. Twin of Apple
-/// `ScreenQualityChoice`.
 enum class ScreenQuality(val title: String, val detail: String) {
     Auto(L10n.text("android.screenframes.automatic.d461a493"), L10n.text("android.screenframes.best_the_connection_allows.6532539b")),
     Sharp(L10n.text("android.screenframes.sharp.1a3c4b30"), L10n.text("android.screenframes.every_detail_on_a_fast_link.ef30d0aa")),
     Smooth(L10n.text("android.screenframes.smooth.da519387"), L10n.text("android.screenframes.steady_over_the_relay.6391fb1b")),
     DataSaver(L10n.text("android.screenframes.data_saver.5b444f24"), L10n.text("android.screenframes.least_data_softest_picture.383ee72b"));
 
-    /// Null for automatic: the absence of a choice, rather than a choice
-    /// called automatic.
     val wire: String?
         get() = when (this) {
             Auto -> null

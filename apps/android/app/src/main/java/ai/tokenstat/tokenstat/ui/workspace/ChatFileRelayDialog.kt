@@ -32,7 +32,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.CancellationException
 
-/** Account counters belong to the device starting the transfer, not its remote host. */
 internal data class ChatRelayAllowance(val used: Long, val limit: Long, val remaining: Long) {
     val fraction: Float get() = if (limit > 0) (used.toDouble() / limit).coerceIn(0.0, 1.0).toFloat() else 0f
 
@@ -59,7 +58,7 @@ internal fun ChatFileRelayDialog(name: String, size: Long?, remaining: Long?, ac
             val fresh = loadAllowance?.invoke()
             if (owner.any { it != null } && identity(fresh) == owner) refreshed = fresh
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { /* Keep the last known counters available. */ }
+        catch (_: Exception) { }
     }
     val usage = ChatRelayAllowance.from(refreshed ?: account)
     val usageLabel = L10n.text("common.chat_files_relay_usage_label")

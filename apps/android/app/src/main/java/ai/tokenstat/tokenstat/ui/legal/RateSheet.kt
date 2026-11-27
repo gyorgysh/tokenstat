@@ -41,19 +41,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.google.android.play.core.review.ReviewManagerFactory
 
-/// When the phone may ask for a Play rating. Port of iOS `ClientReviewPrompt`.
-///
-/// Only somebody who is actually using the app: a linked machine, and real
-/// work since the last ask (messages sent). At most once every fourteen
-/// days, and never in the first week after install. Play applies its own
-/// quota on top and may show nothing at all, which is fine: asking is a
-/// request, not a promise.
 object ReviewPrompt {
     private const val FIRST_SEEN = "firstSeenAt"
     private const val LAST_ASKED = "lastAskedAt"
     private const val USES = "usesSinceAsk"
-    /// Set once the person rated, wrote to us, or said not to ask. The
-    /// automatic ask never comes back; Legal still opens the sheet by hand.
     private const val STOPPED = "never"
     private const val INTERVAL_MS = 14L * 24 * 3600 * 1000
     private const val SETTLE_MS = 7L * 24 * 3600 * 1000
@@ -66,7 +57,6 @@ object ReviewPrompt {
         if (!prefs.contains(FIRST_SEEN)) prefs.edit().putLong(FIRST_SEEN, now).apply()
     }
 
-    /// A message sent.
     fun noteUse(context: Context) {
         val prefs = prefs(context)
         prefs.edit().putInt(USES, prefs.getInt(USES, 0) + 1).apply()
@@ -90,8 +80,6 @@ object ReviewPrompt {
 
     fun isStopped(context: Context) = prefs(context).getBoolean(STOPPED, false)
 
-    /// The automatic ask: Play's own in-app review card, the only one the
-    /// store allows. Failures are silent, there is nothing to tell anyone.
     fun requestPlayReview(activity: Activity) {
         val manager = ReviewManagerFactory.create(activity)
         manager.requestReviewFlow().addOnCompleteListener { request ->
@@ -101,7 +89,6 @@ object ReviewPrompt {
         }
     }
 
-    /// The Play listing, in the store app when it is installed.
     fun openListing(context: Context) {
         val id = context.packageName
         val market = Intent(Intent.ACTION_VIEW, "market://details?id=$id".toUri())
@@ -115,7 +102,6 @@ object ReviewPrompt {
     }
 }
 
-/// The Legal pane's rating card. Opens the sheet by hand.
 @Composable
 fun RateCard(onOpen: () -> Unit) {
     val colors = LocalTsColors.current
@@ -140,11 +126,6 @@ fun RateCard(onOpen: () -> Unit) {
     }
 }
 
-/// Rating and feedback, opened by hand. Port of iOS `ClientReviewSheet`.
-///
-/// Both ways out on equal terms: a rating on Play, or a note to us. Neither
-/// depends on what the person thinks of the app, so nothing here filters who
-/// gets sent to the store. Either choice stops the automatic ask for good.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RateSheet(onDismiss: () -> Unit, onFeedback: () -> Unit) {

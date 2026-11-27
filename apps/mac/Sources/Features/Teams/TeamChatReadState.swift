@@ -3,8 +3,6 @@ import CryptoKit
 import Foundation
 import Observation
 
-/// Device-local read positions, separate from delivery receipts and authority.
-/// Only hashed identifiers and activity times are persisted, never chat text.
 @MainActor @Observable
 final class TeamChatReadState {
     private let defaults: UserDefaults

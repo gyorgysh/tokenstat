@@ -1,19 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! The pull requests each conversation opened or talked about.
-//!
-//! Read from what the person and the agent wrote, and from the address
-//! `gh pr create` prints. Other tool output is not read: one `gh pr list`
-//! would put forty marks on a conversation that was about none of them.
-//!
-//! **Only repositories the person added here count.** A conversation is text
-//! from anywhere, so a link in it must never decide which host is asked, or
-//! which repository a credential is used for.
-//!
-//! Only references are kept here, in a file beside the conversations: no words
-//! from them, and no states. What a pull request is, and whether it exists at
-//! all, is [`crate::pull_states`]' answer, shared with the pull request pages.
-//! A chat list reads both from memory and never waits for the forge.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -25,23 +11,16 @@ use serde_json::{Value, json};
 use tokenstat_sync::forge::Repo;
 
 const FILE: &str = "chat-pulls.json";
-/// The most pull requests one conversation keeps, newest mention first.
 const KEPT: usize = 20;
-/// The most records read the first time a conversation is looked at.
 const FIRST_SCAN: usize = 20_000;
-/// The most conversations of a folder brought up to date in one pass.
 const CHATS_PER_PASS: usize = 40;
-/// How old an open pull request's answer may be before it is asked for again,
-/// by who is looking. Settled ones age far more slowly wherever they show.
 const AFTER_TURN_MS: i64 = 10 * 1000;
 const OPEN_CHAT_MS: i64 = 60 * 1000;
 const LIST_MS: i64 = 10 * 60 * 1000;
 
-/// A pull request as a conversation names it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Key {
-    /// The repository, as [`crate::pull_states::key`] spells it.
     repo: String,
     number: u32,
 }
@@ -55,7 +34,6 @@ impl Key {
     }
 }
 
-/// One reference found in a piece of text, before it is known to be real.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Found {
     Address {
@@ -78,7 +56,6 @@ enum Found {
 #[serde(rename_all = "camelCase")]
 struct Mention {
     pull: Key,
-    /// The agent opened it here, rather than only naming it.
     #[serde(default)]
     opened: bool,
 }
@@ -86,10 +63,8 @@ struct Mention {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Chat {
-    /// The last record read. Sequence numbers outlive history compaction.
     #[serde(default)]
     seq: u64,
-    /// Newest mention first.
     #[serde(default)]
     pulls: Vec<Mention>,
 }
@@ -97,8 +72,6 @@ struct Chat {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Marks {
-    /// The folders holding each repository, as of the last look, so a list
-    /// can say where a pull request opens without running git.
     #[serde(default)]
     folders: HashMap<String, Vec<String>>,
     #[serde(default)]
@@ -107,8 +80,6 @@ struct Marks {
 
 impl Marks {
     fn load(path: &Path) -> Self {
-        // A derived file. One that cannot be read is found again from the
-        // conversations, so it starts empty rather than failing a list.
         std::fs::read(path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -159,8 +130,6 @@ impl Marks {
     }
 }
 
-/// What a chat list shows. Only pull requests the forge has confirmed: a
-/// number in a sentence is not one until it has been looked up.
 fn shown(wanted: &[(Key, bool)], folders: &HashMap<String, Vec<String>>, own: &str) -> Vec<Value> {
     let keys: Vec<(String, u32)> = wanted
         .iter()
@@ -174,7 +143,7 @@ fn shown(wanted: &[(Key, bool)], folders: &HashMap<String, Vec<String>>, own: &s
             let mut row = serde_json::to_value(pull).ok()?;
             row["repo"] = json!(repo);
             row["opened"] = json!(opened);
-            // Its own folder when that is the repository, or another of them.
+
             let folder = folders
                 .get(&key.repo)
                 .and_then(|ids| ids.iter().find(|id| *id == own).or_else(|| ids.first()));
@@ -220,8 +189,7 @@ pub(crate) fn attach(rows: &mut Value) {
         };
         let own = row["workspaceId"].as_str().unwrap_or_default();
         let mut pulls = shown(&marks.wanted(id), &marks.folders, own);
-        // The branch's own pull request is one of them, whether or not
-        // anybody wrote its number down.
+
         if row["pull"].is_object() && !pulls.iter().any(|pull| pull["url"] == row["pull"]["url"]) {
             let mut pull = row["pull"].clone();
             pull["workspaceId"] = row["workspaceId"].clone();
@@ -291,17 +259,13 @@ impl Look {
     }
 }
 
-/// When a look last ran, and whether one is running now or wanted again.
 #[derive(Default)]
 struct Looks {
     folders: HashMap<String, Instant>,
     running: HashMap<String, Option<Look>>,
 }
 
-/// Run one look off the calling thread. Never two of the same at once: a turn
-/// that ends during a look is looked at when that one finishes.
 fn start(look: Look) {
-    // Unit tests read lists all the time and must not start work behind them.
     if cfg!(test) {
         return;
     }
@@ -401,7 +365,6 @@ fn run(look: &Look) {
         by_repo.entry(key.repo).or_default().push(key.number);
     }
     for (name, numbers) in by_repo {
-        // Only while it is still one of the folders here.
         if let Some(repo) = added
             .iter()
             .find(|repo| crate::pull_states::key(repo) == name)
@@ -411,7 +374,6 @@ fn run(look: &Look) {
     }
 }
 
-/// The repository behind every folder added here, by folder.
 fn known_repositories() -> HashMap<String, Repo> {
     let folders: Vec<(String, PathBuf)> = crate::workspaces::read()
         .workspaces
@@ -434,8 +396,6 @@ fn known_repositories() -> HashMap<String, Repo> {
         .collect()
 }
 
-/// Every pull request of an added repository named in these records, oldest
-/// first. Streamed text arrives in pieces, so one run of it is read whole.
 fn mentions(records: &[Value], here: Option<&Repo>, added: &[Repo]) -> Vec<Mention> {
     let mut out = Vec::new();
     let mut run = String::new();
@@ -466,8 +426,6 @@ fn mentions(records: &[Value], here: Option<&Repo>, added: &[Repo]) -> Vec<Menti
             ("agent", "toolEnd") => {
                 let call = event["callId"].as_str().unwrap_or_default();
                 if commands.remove(call) == Some(true) && event["ok"] != json!(false) {
-                    // Only the address it printed. Anything else in there is
-                    // the body of what was written, not what was opened.
                     let detail = event["detail"].as_str().unwrap_or_default();
                     if let Some(line) = detail.lines().rev().find(|line| line.contains("/pull/")) {
                         take(line, true);
@@ -494,7 +452,6 @@ fn opens_a_pull_request(event: &Value) -> bool {
 
 fn resolve(found: Found, here: Option<&Repo>, added: &[Repo]) -> Option<Key> {
     match found {
-        // A bare number only means something in a repository's own folder.
         Found::Here { number } => here.map(|here| Key::new(here, number)),
         Found::Address {
             host,
@@ -522,12 +479,6 @@ fn resolve(found: Found, here: Option<&Repo>, added: &[Repo]) -> Option<Key> {
     }
 }
 
-/// The pull requests a piece of text names, in order.
-///
-/// Three spellings, each unmistakable on its own: an address, `owner/repo#12`,
-/// and a number the words call a pull request ("PR #12", "PRs #12, #13 and
-/// 14", "pull request 12"). A bare `#12` is not one. It is as often an issue,
-/// a colour or a step.
 fn references(text: &str) -> Vec<Found> {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
@@ -622,7 +573,6 @@ fn named(text: &str, inside_a_path: bool) -> Option<(Found, usize)> {
     ))
 }
 
-/// "PR #12", "PRs 12, #13 and #14", "pull request #12", "pull requests 1 & 2".
 fn spoken(text: &str) -> Option<(Vec<u32>, usize)> {
     const WORDS: [&str; 4] = ["pull requests", "pull request", "prs", "pr"];
     let used = WORDS.iter().find_map(|name| {
@@ -644,7 +594,7 @@ fn spoken(text: &str) -> Option<(Vec<u32>, usize)> {
         let Some((number, digits)) = number_at(&rest[mark..]) else {
             break;
         };
-        // A second number has to carry its own mark. "PR 12, 3 files" is one.
+
         if !numbers.is_empty() && mark == 0 {
             break;
         }

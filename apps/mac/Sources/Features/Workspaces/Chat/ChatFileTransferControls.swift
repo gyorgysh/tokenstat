@@ -49,7 +49,6 @@ extension ChatModel {
 
 struct ChatFileTransferControls: ViewModifier {
     @Bindable var model: ChatModel
-    /// A retained mobile session owns disappearance across layout handoffs.
     var cancelOnDisappear = true
     func body(content: Content) -> some View {
         content.modifier(ChatFileRelayConsent(model: model))
@@ -60,7 +59,6 @@ struct ChatFileTransferControls: ViewModifier {
     }
 }
 
-/// Exactly one visible surface presents a transfer's consent request.
 struct ChatFileRelayConsent: ViewModifier {
     @Bindable var model: ChatModel
     var presenter: UUID? = nil

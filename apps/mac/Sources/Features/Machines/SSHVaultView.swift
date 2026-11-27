@@ -7,12 +7,6 @@
 import Observation
 import SwiftUI
 
-/// The vault's state, and the four calls that change it.
-///
-/// A model rather than state on a banner, because the row that reports the
-/// vault and the screen that manages it are two views of one thing, and the
-/// version where each held its own copy is the version where deleting from one
-/// left the other saying "ready".
 @MainActor
 @Observable
 final class SSHVaultModel {
@@ -39,25 +33,15 @@ final class SSHVaultModel {
 
     private(set) var isWorking = false
     var status: SSHVaultStatus?
-    /// Set only between generating a recovery code and confirming it. While
-    /// it holds a code, it has not been written down yet, and that is the
-    /// one vault state that is allowed to look urgent.
     var recovery: String?
     var error: String?
 
     var created: Bool { status?.created == true }
     var enrolled: Bool { status?.enrolled == true }
-    /// The vault exists and this device has no key for it yet, so somebody has
-    /// to type the password before anything can be read here.
     var locked: Bool { created && status?.locked == true }
-    /// Made before password unlock existed. It cannot be opened at all.
     var needsRecreate: Bool { status?.needsRecreate == true }
     var recordCount: Int { status?.recordCount ?? 0 }
-    /// Code generated and not yet confirmed. The only warning here.
     var unconfirmedRecovery: Bool { recovery != nil }
-    /// The account could not be asked. Not the same as having no vault, and
-    /// the screen must not offer to create one while this is set: the vault
-    /// that may already exist is simply out of reach.
     var unreachable: String? { status?.unreachable }
 
     func refresh(allowDuringMutation: Bool = false) async {
@@ -71,13 +55,6 @@ final class SSHVaultModel {
         }
     }
 
-    /// Keep the state honest while somebody is looking at it.
-    ///
-    /// The vault lives on the account, so it changes on other devices. Reading
-    /// it once when the screen appeared meant a vault made on a phone stayed
-    /// invisible on a Mac that had the screen open, for as long as it stayed
-    /// open. Slow on purpose: this is a network call, and nothing here is
-    /// worth a tighter loop than the pace somebody sets up a vault at.
     func watch() async {
         if foreground { await refresh() }
         while ownership.claim() != nil && !Task.isCancelled {
@@ -89,15 +66,7 @@ final class SSHVaultModel {
 
     func setForeground(_ value: Bool) { foreground = value }
 
-    /// Say what this computer is, then ask again.
-    ///
-    /// The vault calls already republish the machine record when the account
-    /// does not recognise it, so this is mostly the same work behind a button.
-    /// It exists because being told your computer is not on your account and
-    /// having nothing to press is the state this screen was in.
     func registerAndRefresh() async {
-        // Vault reads republish the machine with their own captured bearer.
-        // A separate account.registerMachine call could adopt a new account.
         await refresh()
     }
 
@@ -115,7 +84,6 @@ final class SSHVaultModel {
         } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
-    /// Local Lock succeeds even when the following status refresh is offline.
     func lock() async {
         guard !isWorking, let owner = ownership.claim() else { return }
         isWorking = true
@@ -196,10 +164,6 @@ struct SSHVaultRow: View {
                         .lineLimit(1)
                         .transition(.opacity)
                 }
-                // The badge belongs at the trailing edge with the chevron, not
-                // pinned to the end of the sentence. Beside the text it read as
-                // a second half of the label, and the label already said
-                // "locked", so the row said it twice a few points apart.
                 if vault.locked {
                     Text(L10n.text("apple.sshvaultview.locked.a424e33d"))
                         .font(Theme.caption)
@@ -213,11 +177,6 @@ struct SSHVaultRow: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
-            // A row that opens a whole screen has to be comfortable to hit.
-            // At eight points of padding around one line this came out near
-            // 33, under the 44 a finger is entitled to, and it was cramped
-            // with a pointer too. The same number on both: the Mac's rows
-            // are not a different kind of target, they are the same row.
             .frame(minHeight: 44)
             .background(background, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
@@ -236,26 +195,14 @@ struct SSHVaultRow: View {
         vault.unconfirmedRecovery ? L10n.text("apple.sshvaultview.recovery_code_not_confirmed.dc3c61fd") : L10n.text("apple.sshvaultview.encrypted_vault.31939e06")
     }
 
-    /// What this vault is, in the space at the trailing edge. Nil where the
-    /// leading text has already said the whole thing.
     private var detail: String? {
         if vault.unconfirmedRecovery { return nil }
         if vault.needsRecreate { return L10n.text("apple.sshvaultview.has_to_be_recreated.edf77f46") }
-        // No "locked" here: the badge beside this says that, and the row was
-        // saying it twice.
         if vault.locked { return nil }
         if vault.created {
             let records = vault.recordCount == 1 ? L10n.text("apple.sshvaultview.1_record.43507739") : L10n.text("apple.sshvaultview.0_records.2cd6fd62", "\(vault.recordCount)")
-            // A vault that exists on a plan that cannot write it is the state
-            // somebody lands in by letting Supporter lapse, and the row used
-            // to look exactly like a vault that was working. The records are
-            // still there and still readable, and that is worth saying, but
-            // not without saying that nothing new is going into them.
             return canWrite ? records : L10n.text("apple.sshvaultview.0_not_syncing.b60c9633", "\(records)")
         }
-        // Not "Supporter and above", which named a plan and left it to the
-        // reader to work out that this meant off. What is happening here is
-        // that servers saved on this device stay on this device.
         return canWrite ? L10n.text("apple.sshvaultview.not_set_up.ef93782b") : L10n.text("apple.sshvaultview.not_syncing.c0737345")
     }
 
@@ -264,11 +211,6 @@ struct SSHVaultRow: View {
     }
 }
 
-/// Everything the vault can be asked to do, with room to say what each one
-/// costs.
-///
-/// A sheet because it is a set of decisions, and two of them are permanent.
-/// The row that opens it is not a control panel, which is what it had become.
 struct SSHVaultScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -276,8 +218,6 @@ struct SSHVaultScreen: View {
     @Bindable var vault: SSHVaultModel
     let tier: String
     let canWrite: Bool
-    /// What is on this device, so a fresh vault can be filled from it after a
-    /// delete. Nil where the screen was opened without a library beside it.
     var library: SSHLibraryModel?
 
     @State private var showingSetup = false
@@ -301,9 +241,6 @@ struct SSHVaultScreen: View {
                         vault.error = nil
                     }
                 }
-                // What the last sync could not do. It has its own line on
-                // the library screen, which this sheet covers, so a sync
-                // started here would otherwise report nothing at all.
                 if let library, let problem = library.vaultError {
                     InlineBanner(text: L10n.text("apple.sshvaultview.not_everything_synced_0.4b2987c3", "\(FriendlyError.from(problem).message)")) {
                         library.vaultError = nil
@@ -319,10 +256,6 @@ struct SSHVaultScreen: View {
                     ) { showingRecovery = true }
                 }
 
-                // Out of reach beats absent. Offering "set up" here is
-                // what sent people into a create that the account then
-                // refused, and the sentence they got back was about a
-                // machine id rather than about the vault they already had.
                 if let unreachable = vault.unreachable {
                     let friendly = FriendlyError.from(unreachable)
                     action(
@@ -341,11 +274,6 @@ struct SSHVaultScreen: View {
                         prominent: true
                     ) { showingSetup = true }
                 } else if !vault.created {
-                    // A greyed-out "Set up vault" was the whole of this
-                    // screen on a Free plan: the one thing on it did
-                    // nothing when pressed, and pressing a dead button is
-                    // how somebody finds out what their plan does. The
-                    // button that is here now is the one that can help.
                     action(
                         title: L10n.text("apple.sshvaultview.syncing_needs_supporter.00d943e5"),
                         detail: L10n.text("apple.sshvaultview.your_servers_folders_keys_and_snippets_are.be25d97f"),
@@ -380,9 +308,6 @@ struct SSHVaultScreen: View {
                         ) { showingSetup = true }
                     }
                     if canWrite {
-                        // First, because it is the one thing on this
-                        // screen somebody opens it to do. The three below
-                        // it are maintenance.
                         action(
                             title: L10n.text("common.sync_now"),
                             detail: syncDetail,
@@ -390,10 +315,6 @@ struct SSHVaultScreen: View {
                             icon: .refresh,
                             busy: library?.vaultSyncing == true
                         ) {
-                            // The count on this screen is the vault's own
-                            // answer, so it has to be asked again or a
-                            // sync that just carried thirty records across
-                            // still reads "0 records".
                             Task {
                                 await library?.syncNow()
                                 await vault.refresh()
@@ -418,11 +339,6 @@ struct SSHVaultScreen: View {
                             icon: .signOut
                         ) { Task { await vault.lock() } }
                     } else {
-                        // The state a lapsed, refunded or cancelled
-                        // Supporter lands in, and the one this screen used
-                        // to say least about: the vault is still there,
-                        // still readable, and quietly no longer receiving
-                        // anything. Said plainly, with the way back.
                         action(
                             title: L10n.text("apple.sshvaultview.this_vault_has_stopped_syncing.7a4c7ecd"),
                             detail: L10n.text("apple.sshvaultview.it_still_exists_on_your_account_and_this_d.300cb00b"),
@@ -433,15 +349,6 @@ struct SSHVaultScreen: View {
                     }
                 }
 
-                // Outside every branch above, on purpose.
-                //
-                // This used to sit inside the unlocked case, which put the
-                // one way out of a forgotten password behind the door it
-                // is the way out of: a locked device was offered Unlock and
-                // nothing else, and somebody with no other device and no
-                // recovery code had no move left. Deleting needs no
-                // password, no code and no key, so nothing about it
-                // belonged behind an unlock.
                 if vault.created || vault.unreachable != nil {
                     ThemeRule()
                     action(
@@ -489,11 +396,6 @@ struct SSHVaultScreen: View {
             SSHVaultDeleteSheet(vault: vault, tier: tier, canWrite: canWrite, library: library)
         }
         .onChange(of: vault.recovery) { _, value in if value != nil { showingRecovery = true } }
-        // Making a vault, and unlocking one, both end with this device able to
-        // write to a vault it could not write to a moment ago. Neither used to
-        // put anything into it: a fresh vault said "0 records" beside a list of
-        // forty servers, and the only thing that ever went in was the next
-        // record somebody happened to edit.
         .onChange(of: showingSetup) { was, now in
             guard was, !now, vault.created, canWrite, let library else { return }
             Task {
@@ -505,8 +407,6 @@ struct SSHVaultScreen: View {
         #if os(macOS)
         .task { await vault.watch() }
         #endif
-        // Coming back to the app is the moment somebody has most likely just
-        // done something on another device.
         #if os(macOS)
         .onChange(of: scenePhase) { _, phase in
             vault.setForeground(phase == .active)
@@ -515,11 +415,6 @@ struct SSHVaultScreen: View {
         #endif
     }
 
-    /// What deleting costs, said differently depending on what can be opened.
-    ///
-    /// A locked device cannot list what is in the vault, so it must not claim
-    /// to know. What it can promise is the part that matters to somebody stuck:
-    /// the servers on this computer are records, not secrets, and they stay.
     private var startOverDetail: String {
         let kept = L10n.text("apple.sshvaultview.everything_saved_on_this_device_stays_wher.d5485bee")
         if vault.locked || vault.needsRecreate || vault.unreachable != nil {
@@ -528,12 +423,6 @@ struct SSHVaultScreen: View {
         return L10n.text("apple.sshvaultview.the_vault_is_removed_from_the_account_and.c8237a1a", "\(kept)")
     }
 
-    /// What Sync now does, and what the last one did.
-    ///
-    /// The sentence about what it does matters as much as the button: this is
-    /// the screen where somebody who has just made a vault and still sees
-    /// "0 records" comes looking for the thing that carries their servers into
-    /// it, and until now there was nothing here to tell them or to press.
     private var syncDetail: String {
         let what = L10n.text("apple.sshvaultview.puts_anything_saved_on_this_device_that_th.0be965fe")
         guard let library else { return what }
@@ -551,9 +440,6 @@ struct SSHVaultScreen: View {
                 systemImage: "lock.shield.fill"
             )
             .font(Theme.callout.weight(.medium))
-            // It said "can read and write" on every plan, directly above the
-            // paragraph explaining that this plan cannot write. One of the two
-            // had to go, and it was not the paragraph.
             Text(canWrite
                 ? L10n.text("apple.sshvaultview.this_device_is_enrolled_and_can_read_and_w.2ee15a1d")
                 : L10n.text("apple.sshvaultview.this_device_is_enrolled_and_can_read_the_v.2d983d08"))
@@ -561,7 +447,6 @@ struct SSHVaultScreen: View {
         }
     }
 
-    /// One decision: what it is, what it costs, and the button that does it.
     @ViewBuilder
     private func action(
         title: String,
@@ -578,12 +463,6 @@ struct SSHVaultScreen: View {
             Text(detail)
                 .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            // All three at the same size. Prominent and plain were dense and
-            // destructive was not, so Unlock came out visibly smaller than
-            // Delete vault two paragraphs below it and the screen looked like
-            // it had been assembled from two different designs. These are the
-            // one call to action under a paragraph of consequences, which is
-            // the full size everywhere else in the app.
             Group {
                 if destructive {
                     Button(button, icon, action: perform).buttonStyle(DestructiveButtonStyle())
@@ -600,16 +479,6 @@ struct SSHVaultScreen: View {
     }
 }
 
-/// Delete the vault, and offer to make a new one out of what is on this device.
-///
-/// Two halves, because deleting alone is not a way out. Somebody reaches this
-/// screen having forgotten the password with no other device signed in, and
-/// what they want is not an empty account: it is their servers back, syncing
-/// again. The records are still in `connections.json`, so the second half is
-/// possible and the sheet stays open to offer it.
-///
-/// Typed confirmation rather than one tap. This is the one control in the app
-/// that destroys data for every device on the account at once.
 struct SSHVaultDeleteSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -629,8 +498,6 @@ struct SSHVaultDeleteSheet: View {
         typed.trimmingCharacters(in: .whitespaces).uppercased() == Self.word
     }
 
-    /// Keys whose private half only ever lived in the vault. Nothing recovers
-    /// these, so they are named before the button, not after it.
     private var strandedKeys: [SSHKeyRecord] { library?.keysOnlyInTheVault ?? [] }
 
     var body: some View {
@@ -658,8 +525,6 @@ struct SSHVaultDeleteSheet: View {
         .sheet(isPresented: $creating) {
             SSHVaultSetupSheet(tier: tier, status: $vault.status, recovery: $vault.recovery)
         }
-        // The setup sheet only makes the vault. Filling it is this screen's
-        // job, and it can only run once the vault exists to be filled.
         .onChange(of: vault.created) { was, now in
             guard deleted, !was, now, let library else { return }
             Task {
@@ -752,9 +617,6 @@ struct SSHVaultDeleteSheet: View {
             .keyboardShortcut(.cancelAction)
         Spacer()
         if deleted, !canWrite {
-            // The same dead button as the one on the screen behind this,
-            // in the one place somebody arrives at having just lost the
-            // vault they were trying to get back into.
             Button(L10n.text("apple.sshvaultview.see_plans.d9898933"), .plans) { Plans.open(using: openURL) }
                 .buttonStyle(AccentButtonStyle())
         } else if deleted {
@@ -773,18 +635,10 @@ struct SSHVaultDeleteSheet: View {
         vault.error = nil
         let succeeded = await vault.reset()
         working = false
-        // Staying open is the point. A sheet that closed here would leave
-        // somebody on the screen they started from with an empty account and
-        // no hint that their servers are still on the machine.
         if succeeded { deleted = true }
     }
 }
 
-/// Change the vault password, having proved the current one.
-///
-/// A change is not a reset: the records never move, only the wrap around the
-/// key. That is why it does not produce a new recovery code and does not touch
-/// the snapshot revision, so it cannot collide with a device writing a record.
 struct SSHVaultPasswordSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var vault: SSHVaultModel

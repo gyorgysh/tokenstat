@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// Server-owned counters. Calendar-month usage is informational, never a reset.
 struct RelayUsage: Codable, Sendable, Hashable {
     var policy: String
     var windowDays: Int
@@ -32,12 +31,6 @@ struct RelayUsage: Codable, Sendable, Hashable {
         daily.filter { $0.bytes > 0 }
     }
 
-    /// Binary units, spelled the way the plan copy spells them.
-    ///
-    /// `ByteCountFormatter` with `.binary` divides by 1024 and then labels the
-    /// answer GB, so a card sitting under a paywall promising "20 GiB" read
-    /// "20 GB", and the Windows and Android cards for the same number said
-    /// GiB. It is localized too, so the unit moved again on a French device.
     static func bytes(_ value: UInt64) -> String {
         let kibi = 1024.0
         let amount = Double(value)

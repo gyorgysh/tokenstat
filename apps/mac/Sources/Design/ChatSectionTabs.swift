@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Share spare room between tabs without compressing translated or enlarged labels.
 struct ChatSectionTabs<Content: View>: View {
     @ViewBuilder var content: () -> Content
 

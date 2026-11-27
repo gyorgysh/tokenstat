@@ -103,7 +103,6 @@ enum WorkCacheKey {
         ] as CFDictionary)
     }
 
-    /// Base64 for the wire, which takes the key as text beside the call.
     static func encoded(_ key: [UInt8]) -> String {
         Data(key).base64EncodedString()
     }
@@ -152,8 +151,6 @@ enum WorkCacheKey {
     }
 
     private static func nativeStore(scope: String, key: [UInt8]) -> OSStatus {
-        // Readable after first unlock so a cold open in airplane mode still
-        // finds its copies; this device only, so a backup never carries it.
         let status = SecItemAdd([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -222,8 +219,6 @@ enum WorkCacheKey {
             try process.run()
             try input.fileHandleForWriting.write(contentsOf: bytes)
             try input.fileHandleForWriting.close()
-            // The reply is at most a 32-byte key. It cannot fill the pipe while
-            // we wait. A wedged security service must not retain this child.
             let deadline = ProcessInfo.processInfo.systemUptime + 3
             while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.01) }
             if process.isRunning { kill(process.processIdentifier, SIGKILL); process.waitUntilExit(); return (errSecNotAvailable, nil) }
@@ -240,10 +235,6 @@ enum WorkCacheKey {
 
 }
 
-/// A stalled security service cannot retain an unbounded number of saved pages
-/// or block the UI. Concurrent readers share one lookup per scope. After the
-/// deadline, callers fail closed while that lookup finishes; no replacement
-/// lookup is started until it returns. Successful keys are never memoized.
 final class WorkCacheKeyReads: @unchecked Sendable {
     typealias Result = (status: OSStatus, key: [UInt8]?)
     private struct Pending {

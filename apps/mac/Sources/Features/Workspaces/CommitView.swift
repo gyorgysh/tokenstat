@@ -6,24 +6,12 @@
 
 import SwiftUI
 
-/// One commit in the centre pane: a compact summary, then its files in the
-/// same browser the working tree and a turn's edits use.
-///
-/// A commit is read as one change, so it opens on every file at once. The list
-/// beside it (or the picker in a narrow pane) narrows that to one file, with
-/// each file's own line counts so the shape of the change shows before any
-/// diff is read. The message stays on screen in one line and opens in place,
-/// because a history that only shows subjects is a history you have to leave
-/// the app to read.
 struct CommitView: View {
     let detail: CommitDetail
 
-    /// Nil is "All files".
     @State private var selectedPath: String?
     @State private var showsMessage = false
 
-    /// The host lists files with their counts. An older host that sent diffs
-    /// without a file list still gets a list, without counts.
     private var files: [ReviewFileChoice] {
         if !detail.files.isEmpty {
             return detail.files.map { ReviewFileChoice(path: $0.path, added: $0.added, removed: $0.removed) }
@@ -107,8 +95,6 @@ struct CommitView: View {
 
             if showsMessage {
                 if !detail.body.isEmpty {
-                    // Long messages scroll inside a bounded area, so the diff
-                    // below keeps most of the pane.
                     ScrollView {
                         Text(detail.body)
                             .font(Theme.font(13))

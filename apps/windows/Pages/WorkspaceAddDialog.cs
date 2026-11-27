@@ -15,17 +15,8 @@ using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The dialog behind "Add project". The decision is which folder.
-/// Everything else is two facts about that choice: agents work there, and
-/// adding it does not upload it. Mirrors the desktop Mac sheet.
-/// </summary>
 internal static class WorkspaceAddDialog
 {
-    /// <summary>
-    /// Pick a folder, name it, register it. Returns the new workspace id,
-    /// or null when the dialog was dismissed or the add failed.
-    /// </summary>
     public static async Task<string?> ShowAsync(UIElement owner)
     {
         var pathBox = new TextBox
@@ -153,8 +144,6 @@ internal static class WorkspaceAddDialog
             }
             catch
             {
-                // The folder is added with its default name. Renaming is a
-                // nicety, and failing it must not un-add the folder.
             }
         }
         return id;
@@ -228,7 +217,6 @@ internal static class WorkspaceAddDialog
     }
 }
 
-/// Separate branch folders share Git history while preserving each session's files.
 internal static class ProjectWorktreeDialog
 {
     private static string NamespacePreferencePath => System.IO.Path.Combine(

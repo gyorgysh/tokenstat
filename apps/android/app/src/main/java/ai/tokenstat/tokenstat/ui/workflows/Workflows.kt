@@ -129,13 +129,6 @@ fun WorkflowsDialog(
     }
 }
 
-/// The workflows workbench as full pages: list, detail, history, run, and
-/// the editor. Ports `ClientWorkflowWorkspace` (phone list), the detail,
-/// history and run views, and the `ClientWorkflowSession` operation rules.
-///
-/// Saves are `workflow.edit` with the baseline revision on protocol 22+
-/// hosts, `workflow.update` below that, with the re-read-and-compare
-/// recovery instead of a blind retry.
 @Composable
 fun WorkflowsScreen(
     model: AppViewModel,
@@ -146,9 +139,6 @@ fun WorkflowsScreen(
     folderName: String,
     onBack: () -> Unit,
 ) {
-    // This screen brings its own header, its own back and its own add,
-    // so the section header above it steps aside rather than stacking a
-    // second copy of the same title and arrow.
     OwnSectionHeader()
     val scope = rememberCoroutineScope()
     val supportsEdits = HostContracts.supportsWorkflowEditing(protocol)
@@ -277,8 +267,6 @@ fun WorkflowsScreen(
     suspend fun toggleSchedule(graph: WorkflowGraph) {
         if (working || !graph.schedule.repeats) return
         working = true
-        // The host replaces the whole graph. Re-read first so a stale
-        // phone copy cannot wipe a newer edit.
         val fresh = runCatching {
             model.workspaceSection(peer, "workflow.list", buildJsonObject {})
         }.getOrElse {
@@ -1166,12 +1154,8 @@ private fun WorkflowStepTranscript(
     }
 }
 
-/// A client-chosen graph id. Retries reuse the same id and the check reads
-/// it back, so a lost creation reply can never mint a second workflow.
 fun newWorkflowID(): String = "wf-" + UUID.randomUUID().toString().lowercase()
 
-/// Same content, ignoring run metadata the host owns. Port of the
-/// `graphMatches` recovery comparison.
 fun workflowContentMatches(left: WorkflowGraph, right: WorkflowGraph): Boolean =
     left.name == right.name &&
         left.workspaceID == right.workspaceID &&

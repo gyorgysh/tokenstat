@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! What happened to the grants on this machine, and who did it.
-//!
-//! On a machine nobody can walk up to, a record is the substitute for having
-//! been in the room. A server is provisioned from a phone, let a second device
-//! in with a code, and then runs for months: without this there is no way to
-//! answer "when did that device get in, and who let it".
-//!
-//! What it holds is deliberately small: a time, an event, the device key, the
-//! label the account already carries for that device, and which authority
-//! acted. Never a path, never a folder name, never anything a person typed.
-//! The file never leaves the machine.
 
 use std::fs;
 use std::io::Write;
@@ -78,12 +67,6 @@ pub(crate) struct Entry {
     pub by: String,
 }
 
-/// Lines kept before the oldest are dropped.
-///
-/// Append-only in spirit, bounded in fact. An always-on server writing an
-/// unbounded file is a disk somebody else pays for, and the recent history is
-/// what anybody actually reads. The trim keeps the newest half so it happens
-/// rarely rather than on every write.
 const MAX_LINES: usize = 4000;
 static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -108,8 +91,6 @@ fn write(
     label: Option<&str>,
     by: Authority,
 ) -> Result<(), String> {
-    // Append and trim are one transaction. A policy caller may already have
-    // released its lock, and another process may be recording independently.
     let _guard = crate::identity_storage::lock("workspace-access.lock", &WRITES)?;
     let entry = Entry {
         at: jiff::Timestamp::now().to_string(),
@@ -124,8 +105,7 @@ fn write(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    // Create with 0600 from the start: the default umask would leave device
-    // keys world-readable until the chmod below.
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -201,9 +181,6 @@ pub(crate) fn read(limit: usize) -> Result<Vec<Value>, String> {
     Ok(body
         .lines()
         .rev()
-        // A line that will not parse is skipped rather than failing the read:
-        // a truncated write at the end of a file must not hide the history in
-        // front of it.
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .take(limit)
         .collect())

@@ -63,7 +63,6 @@ class PlanLimitsReaderTest {
         var calls = 0
         val reader = PlanLimitsReader(backgroundScope, { owner }, {
             calls++
-            // A native response may return even after its caller was cancelled.
             withContext(NonCancellable) { if (calls == 1) old.await() else fresh.await() }
         }, { results += it.getOrThrow() })
         val first = async { reader.refresh() }; runCurrent()

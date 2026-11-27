@@ -43,19 +43,10 @@ import SwiftUI
 final class RelativeClock {
     static let shared = RelativeClock()
 
-    /// Read this inside a `body` to be re-evaluated on the tick. Reading it is
-    /// the subscription, so a view that formats against it stays current.
     private(set) var now = Date()
 
-    /// Coarse on purpose. See the type's note: the phrasing this drives moves
-    /// at minute boundaries, and anything finer buys nothing but wake-ups.
     private static let tick: Duration = .seconds(15)
 
-    /// Set by `phrase`, cleared by each tick. The tick only writes `now` when
-    /// something read it since the last one, so a window with no relative text
-    /// on screen (or no window at all) costs a wake and nothing else: writing
-    /// an observed property nobody reads would invalidate views for a value
-    /// that changes nothing.
     @ObservationIgnored fileprivate var wasRead = false
 
     private init() {
@@ -72,13 +63,6 @@ final class RelativeClock {
 }
 
 extension RelativeClock {
-    /// "3 minutes ago", or "in 2 hours", current to within a tick.
-    ///
-    /// **Call this from inside a `body`.** Reading `shared.now` is what
-    /// subscribes the view to the tick, so a phrase built anywhere else is a
-    /// snapshot that never updates. That is the one rule this type has, and it
-    /// is the same rule `Text(_, style: .relative)` hides from you at the cost
-    /// of a layout pass per frame.
     static func phrase(
         for date: Date,
         style: RelativeDateTimeFormatter.UnitsStyle = .full
@@ -98,22 +82,11 @@ extension RelativeClock {
         return formatter.localizedString(for: date, relativeTo: now)
     }
 
-    /// Shared because building one is not free and this renders once per row.
-    /// MainActor-isolated with the rest of this file, which is what makes a
-    /// single mutable formatter safe here.
     private static let formatter = RelativeDateTimeFormatter()
 }
 
-/// "3 minutes ago", current to within a tick, without a per-row live clock.
-///
-/// A drop-in for `Text(date, format: .relative(presentation:))`. Where the
-/// phrase has to sit inside a larger sentence, use `RelativeClock.phrase`
-/// directly rather than reaching for the live formatter again.
 struct RelativeTimeText: View {
     let date: Date
-    /// Named for its type, not for Foundation's `.relative(presentation:)`.
-    /// That is the `.named` versus `.numeric` axis and this is the other one,
-    /// so calling this `presentation` invites `.named` and a compile error.
     var unitsStyle: RelativeDateTimeFormatter.UnitsStyle = .full
 
     var body: some View {

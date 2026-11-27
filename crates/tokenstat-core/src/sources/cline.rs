@@ -105,8 +105,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         })
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Project is not recorded; keep the session id's basename as a stand-in so
-    // reports still group somehow without inventing a path.
     let project = session.clone();
 
     let Some(messages) = root.messages else {

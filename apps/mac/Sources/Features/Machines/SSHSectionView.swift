@@ -7,23 +7,10 @@
 import SwiftUI
 
 #if os(macOS)
-/// One SSH section in the content column.
-///
-/// The list only. What is being edited is the inspector's job, and which
-/// section is in front is the sidebar's, so this view has the whole width for
-/// the thing it is actually for: finding a server in a list of forty.
-///
-/// Four sections share one view because they are one screen with a different
-/// list in it. Splitting them would be four copies of the same header, the same
-/// search field, the same empty state and the same add button.
 struct SSHSectionView: View {
     @Bindable var model: SSHLibraryModel
     let section: SSHSection
-    /// The account tier, unfiltered. What may write the vault is decided by
-    /// `SSHLibraryModel.paidTier(for:)`, in one place.
     var vaultTier: String?
-    /// Open a folder in the sidebar's own selection, so clicking a folder in
-    /// the list and clicking it in the sidebar mean the same thing.
     var onOpenFolder: (String) -> Void
 
     @State private var expanded: Set<String> = []
@@ -38,22 +25,13 @@ struct SSHSectionView: View {
             DetailChromeBar {
                 addMenu
             }
-            // Full width, like the search box on Automations. Capped at 420
-            // with a spacer after it, this was the one search field in the app
-            // that stopped halfway across its column and left a strip of empty
-            // background beside itself.
             SearchField(text: $model.search, prompt: L10n.text("apple.sshsectionview.search_0.09ee1648", "\(section.label.lowercased())"))
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.bottom, Theme.Space.s)
-            // The vault belongs to hosts and keys, not to a fingerprint list,
-            // and only when there is an account to hold one.
             if vaultTier != nil, section != .knownHosts {
                 SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.s)
-                // A vault that could not take a copy is a sync problem, and it
-                // belongs on the vault's own row. Across the top of the screen
-                // it read as "your server was not saved", which was never true.
                 if let vaultError = model.vaultError {
                     let friendly = FriendlyError.from(vaultError)
                     InlineBanner(text: L10n.text("apple.sshsectionview.saved_on_this_mac_but_not_synced_0.0300d4b9", "\(friendly.message)")) {
@@ -71,9 +49,6 @@ struct SSHSectionView: View {
             content
         }
         .desktopPaneBackground()
-        // The connect sheet is presented by the window, not by this screen.
-        // Connecting starts from the tab strip and the sidebar as well, and
-        // neither of those is on screen at the same time as this list.
         .sheet(isPresented: $showingVault) {
             SSHVaultScreen(vault: vault, tier: vaultTier ?? "", canWrite: paidVaultTier != nil, library: model)
         }
@@ -81,16 +56,11 @@ struct SSHSectionView: View {
             guard vaultTier != nil else { return }
             await vault.refresh()
         }
-        // Opening the screen loads it. The shell warms the same model at
-        // launch so the sidebar has counts, but that pass waits on the archive
-        // and can fail, and a library that is empty because nothing loaded
-        // must not look like a library with nothing in it.
         .task(id: vaultTier) {
             await model.ensureLoaded(vaultTier: SSHLibraryModel.paidTier(for: vaultTier))
         }
     }
 
-    // MARK: - Chrome
 
     @ViewBuilder
     private var addMenu: some View {
@@ -112,7 +82,6 @@ struct SSHSectionView: View {
         }
     }
 
-    // MARK: - Lists
 
     @ViewBuilder
     private var content: some View {
@@ -178,8 +147,6 @@ struct SSHSectionView: View {
 
     @ViewBuilder
     private var hostsList: some View {
-        // The handful somebody actually returns to, above the tree. Skipped
-        // while searching: a search has already said what it wants.
         if !model.searching, !recentHosts.isEmpty {
             SwiftUI.Section(L10n.text("apple.sshsectionview.recent.690dbe9d")) {
                 ForEach(recentHosts) { host in hostRow(host, depth: 0) }
@@ -197,21 +164,15 @@ struct SSHSectionView: View {
         }
     }
 
-    /// The heading over the tree. A folder route says which folder, because the
-    /// list is filtered to it and a heading saying "All servers" over one
-    /// folder's worth of them is a heading that lies.
     private var sectionTitle: String {
         guard let folderID = section.folderID else { return L10n.text("apple.sshsectionview.all_servers.3205261a") }
         return model.folderName(folderID) ?? L10n.text("apple.sshsectionview.folder.74ccd433")
     }
 
-    /// Favourites first, then most recently connected. Scoped to the folder
-    /// when the route names one.
     private var recentHosts: [SSHHost] {
         model.recentHosts.filter { section.folderID == nil || $0.folderID == section.folderID }
     }
 
-    // MARK: - The host tree
 
     private struct Row: Identifiable {
         enum Kind {
@@ -224,23 +185,12 @@ struct SSHSectionView: View {
         let depth: Int
     }
 
-    /// One row per visible line, with its depth.
-    ///
-    /// Flattened rather than nested disclosure groups: a view that contains
-    /// itself cannot be typed, and indentation reads the same to a person.
     private var rows: [Row] {
-        // A folder route is that folder's contents, flat. The sidebar already
-        // says where you are, so repeating the parent chain here would be the
-        // same information twice.
         if let folderID = section.folderID {
             var out: [Row] = []
             for folder in model.folders(in: folderID) {
                 out.append(Row(id: "folder:\(folder.id)", kind: .folder(folder), depth: 0))
             }
-            // Scoped to the folder even while searching. `hosts(in:)` drops
-            // its folder argument once a query is running, which is right at
-            // the root and wrong here: the sidebar still lights this folder,
-            // so a list holding somebody else's servers is a list that lies.
             for host in model.hosts(in: folderID) where host.folderID == folderID {
                 out.append(Row(id: "host:\(host.id)", kind: .host(host), depth: 0))
             }
@@ -267,7 +217,6 @@ struct SSHSectionView: View {
         return out
     }
 
-    // MARK: - Rows
 
     private func folderRow(_ folder: SSHFolder, depth: Int) -> some View {
         HStack(spacing: Theme.Space.xs) {
@@ -310,9 +259,6 @@ struct SSHSectionView: View {
             .padding(.leading, CGFloat(depth) * 14)
             .listRowBackground(rowBackground(selected: model.selection == .host(host.id)))
             .contentShape(.rect)
-            // Double click connects, single click selects. Declared in this
-            // order because the two-tap gesture has to be offered first or the
-            // single one swallows every click before it can count to two.
             .onTapGesture(count: 2) { model.connectRequest = host }
             .onTapGesture { model.selection = .host(host.id) }
         .accessibilityAction(named: L10n.text("apple.sshsectionview.open_details.67d16bb1")) { model.selection = .host(host.id) }
@@ -418,8 +364,6 @@ struct SSHSectionView: View {
         }
     }
 
-    /// Selection is the accent wash the sidebar uses, so a selected row means
-    /// the same thing in both columns.
     @ViewBuilder
     private func rowBackground(selected: Bool) -> some View {
         if selected {
@@ -429,26 +373,16 @@ struct SSHSectionView: View {
         }
     }
 
-    // MARK: - States
 
     private var addSelection: SSHLibraryRoute {
         switch section {
         case let .hosts(folder): .newHost(folder: folder)
         case .keys: .newKey
         case .snippets: .newSnippet
-        // Trust is earned by connecting, not by typing a fingerprint in. The
-        // add button is hidden for this section, and this is the unreachable
-        // arm the compiler still wants an answer for.
         case .knownHosts: .knownHosts
         }
     }
 
-    /// Whether this section has nothing in it at all.
-    ///
-    /// Counted from the unfiltered lists on purpose. `hosts(in:)` and
-    /// `folders(in:)` narrow to the search, so asking them would tell somebody
-    /// whose query matched nothing that they have never added a server, and
-    /// offer to add their first one over the forty they already have.
     private var isEmpty: Bool {
         switch section {
         case let .hosts(folder):
@@ -463,7 +397,6 @@ struct SSHSectionView: View {
         }
     }
 
-    /// The list has rows in it, but the search hid all of them.
     private var searchedOut: Bool {
         guard model.searching, !isEmpty else { return false }
         switch section {

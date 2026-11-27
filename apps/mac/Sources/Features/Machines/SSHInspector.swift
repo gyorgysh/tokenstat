@@ -7,11 +7,6 @@
 import SwiftUI
 
 #if os(macOS)
-/// What is being edited, beside the list rather than on top of it.
-///
-/// The editors are the ones the library already had: they were written as a
-/// form with a footer, which is exactly the shape an inspector column wants, so
-/// they move here unchanged rather than being rebuilt.
 struct SSHInspector: View {
     @Bindable var model: SSHLibraryModel
     let section: SSHSection
@@ -38,15 +33,11 @@ struct SSHInspector: View {
         .desktopPaneBackground()
     }
 
-    /// The server the inspector is showing, when it is showing one. A new
-    /// server has nothing to connect to yet, so it does not count.
     private var selectedHost: SSHHost? {
         guard case let .host(id) = model.selection else { return nil }
         return model.hosts.first { $0.id == id }
     }
 
-    /// Clearing the selection is what closes an editor. One assignment, so a
-    /// Cancel, a Save and the chrome bar's close all end the same way.
     private func clear() { model.selection = nil }
 
     @ViewBuilder
@@ -55,9 +46,6 @@ struct SSHInspector: View {
         case let .host(id):
             SSHHostEditor(model: model, hostID: id, folderID: nil, onDone: clear).id(id)
         case let .newHost(folder):
-            // Keyed by the folder: without it, "Add server here" on a second
-            // folder reuses the open form, whose `loaded` guard means it never
-            // reads the new folder and files the server under the first one.
             SSHHostEditor(model: model, hostID: nil, folderID: folder, onDone: clear)
                 .id(folder ?? "")
         case let .key(id):
@@ -86,8 +74,6 @@ struct SSHInspector: View {
         }
     }
 
-    /// A trusted server is a fingerprint and one button. It is not a form, so
-    /// it does not get one.
     @ViewBuilder
     private func trustedServer(_ id: String) -> some View {
         if let known = model.knownHosts.first(where: { $0.id == id }) {

@@ -61,20 +61,16 @@ import androidx.core.net.toUri
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
-/// Every pull request a chat opened or talked about, newest first. A host
-/// older than 1.26.0 only knows the branch's own.
 internal fun chatPulls(chat: JsonObject): List<JsonObject> =
     (chat["pulls"] as? JsonArray)?.filterIsInstance<JsonObject>()?.takeIf { it.isNotEmpty() }
         ?: listOfNotNull(chat["pull"] as? JsonObject)
 
-/// The one whose state a row shows: work still open first, then merged.
 internal fun leadPull(pulls: List<JsonObject>): JsonObject? =
     pulls.firstOrNull { it.str("state") == "open" && !it.bol("draft") }
         ?: pulls.firstOrNull { it.str("state") == "open" }
         ?: pulls.firstOrNull { it.str("state") == "merged" }
         ?: pulls.firstOrNull()
 
-/// `owner/repo #53`, read from the address when the host did not say.
 internal fun pullName(pull: JsonObject): String {
     val number = pull.str("number").orEmpty()
     val repo = pull.str("repo")
@@ -82,15 +78,12 @@ internal fun pullName(pull: JsonObject): String {
     return if (repo == null) "#$number" else "$repo #$number"
 }
 
-/// A pull request's state in the colours every forge uses for it. Read by
-/// colour alone, like a diff, so they do not follow the theme.
 internal fun pullTint(pull: JsonObject, colors: TsColors): Color = when (pull.str("state")) {
     "merged" -> if (colors.isDark) Color(0xFFA371F7) else Color(0xFF8250DF)
     "closed" -> if (colors.isDark) Color(0xFFF85149) else Color(0xFFCF222E)
     else -> if (pull.bol("draft")) colors.stateIdle else if (colors.isDark) Color(0xFF3FB950) else Color(0xFF1A7F37)
 }
 
-/// The same drawing as the Apple `PullGlyph`, on its sixteen unit grid.
 @Composable
 internal fun PullGlyph(state: String?, tint: Color, size: Dp, modifier: Modifier = Modifier) {
     Canvas(modifier.size(size)) {
@@ -134,8 +127,6 @@ internal fun PullGlyph(state: String?, tint: Color, size: Dp, modifier: Modifier
     }
 }
 
-/// The mark on a chat row: the state, and how many when there are several.
-/// A tap lists them. Drawing it never asks the forge.
 @Composable
 fun ChatPullMark(chat: JsonObject, peer: String, hostLabel: String = "") {
     val pulls = chatPulls(chat)
@@ -181,7 +172,6 @@ fun ChatPullMark(chat: JsonObject, peer: String, hostLabel: String = "") {
     }
 }
 
-/// Where opening a chat's pull request leads, on this device.
 internal enum class PullOpenChoice(val key: String) {
     Ask("ask"),
     Here("here"),
@@ -207,12 +197,9 @@ internal enum class PullOpenChoice(val key: String) {
     }
 }
 
-/// The pull request somebody asked to see from a chat list. One at a time,
-/// shown over whatever screen they were on.
 internal object PullOpener {
     data class Request(val peer: String, val workspace: String, val hostLabel: String, val pull: JsonObject)
 
-    /// Waiting for the answer about where to open it.
     var asking by mutableStateOf<Request?>(null)
     var request by mutableStateOf<Request?>(null)
 }
@@ -222,7 +209,6 @@ private fun browse(context: Context, pull: JsonObject) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
 }
 
-/// One whose repository is not a folder on that computer only has the browser.
 private fun openPull(context: Context, pull: JsonObject, peer: String, hostLabel: String) {
     val folder = pull.str("workspaceId") ?: return browse(context, pull)
     val request = PullOpener.Request(peer, folder, hostLabel, pull)
@@ -233,7 +219,6 @@ private fun openPull(context: Context, pull: JsonObject, peer: String, hostLabel
     }
 }
 
-/// `Merged  owner/repo #53  +1839 −1391`
 @Composable
 private fun PullSummaryLine(pull: JsonObject) {
     val colors = LocalTsColors.current
@@ -246,8 +231,6 @@ private fun PullSummaryLine(pull: JsonObject) {
     }
 }
 
-/// Asked when a pull request is opened. The answer is kept only when the
-/// person says so.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PullOpenSheet(request: PullOpener.Request) {
@@ -282,7 +265,6 @@ private fun PullOpenSheet(request: PullOpener.Request) {
     }
 }
 
-/// The same choice, in settings.
 @Composable
 internal fun PullOpenCard() {
     val context = LocalContext.current
@@ -298,7 +280,6 @@ internal fun PullOpenCard() {
 
 @Composable
 internal fun PullOpenerHost(model: AppViewModel) {
-    // Leaving the signed-in app must not leave one waiting for the next account.
     DisposableEffect(Unit) { onDispose { PullOpener.request = null; PullOpener.asking = null } }
     PullOpener.asking?.let { PullOpenSheet(it) }
     val request = PullOpener.request ?: return

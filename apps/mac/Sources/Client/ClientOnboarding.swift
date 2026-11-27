@@ -87,8 +87,6 @@ struct ClientOnboarding: View {
         HStack {
             Wordmark()
             Spacer()
-            // A way past the pitch for anyone who does not want it. On the last
-            // page it would duplicate the button below, so it goes.
             if page < Self.pages.count - 1 {
                 Button(L10n.text("common.skip")) { finish() }
                     .font(ClientType.label)
@@ -101,7 +99,6 @@ struct ClientOnboarding: View {
         .padding(.top, Theme.Space.s)
     }
 
-    /// Named steps and a finite rail make the length clear before the first swipe.
     private var progress: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {

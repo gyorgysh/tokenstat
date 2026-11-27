@@ -13,10 +13,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/// Task board models and pure rules. Ports the Apple `TodoCard`,
-/// `TaskEditorDraft`, `TaskBoardFilter`, `TaskResultRoute` and the run
-/// receipt rules in `TaskEditorSession` and `TaskCreationSession`, so both
-/// platforms answer the same questions the same way.
 internal fun JsonObject.optStr(key: String): String? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 
@@ -26,9 +22,6 @@ internal fun JsonObject.optLong(key: String): Long? =
 internal fun JsonObject.optBool(key: String): Boolean? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.booleanOrNull
 
-/// The token a CLI `--model` flag accepts. Drops a tab-separated label or a
-/// mashed id-plus-label leftover from an older picker. Port of
-/// `TodoCard.cleanModelID`.
 fun cleanModelID(raw: String): String {
     val first = raw.split('\t', '\n').firstOrNull() ?: raw
     val trimmed = first.trim()
@@ -40,7 +33,6 @@ fun cleanModelID(raw: String): String {
     return trimmed
 }
 
-/// The live state of a card handed to an agent. Port of `TodoDelegate`.
 data class TaskDelegate(
     val runId: String = "",
     val status: String = "",
@@ -75,7 +67,6 @@ data class TaskDelegate(
     }
 }
 
-/// A card on the kanban board. Port of `TodoCard`.
 data class TaskCard(
     val id: String = "",
     val revision: Long? = null,
@@ -104,7 +95,6 @@ data class TaskCard(
         else -> L10n.text("android.taskmodels.to_do.150d92c4")
     }
 
-    /// What an agent should do. Notes first, title if the notes are empty.
     val promptForRun: String get() {
         val body = notes.trim()
         if (body.isNotEmpty()) return body
@@ -140,7 +130,6 @@ data class TaskCard(
 
 enum class TaskRunPlacement(val raw: String) { BACKGROUND("background"), FOREGROUND("foreground") }
 
-/// The durable answer to one task launch operation. Port of `TaskRunOutcome`.
 data class TaskRunOutcome(
     val operationID: String = "",
     val cardID: String = "",
@@ -170,7 +159,6 @@ data class TaskRunOutcome(
     }
 }
 
-/// A confirmed creation. Port of `TaskCreationOutcome`.
 data class TaskCreationOutcome(
     val operationID: String = "",
     val cardID: String = "",
@@ -187,8 +175,6 @@ data class TaskCreationOutcome(
     }
 }
 
-/// Shared task fields for creation and editing. Seconds remain exact when a
-/// saved budget is not a whole number of minutes. Port of `TaskEditorDraft`.
 data class TaskEditorDraft(
     val title: String = "",
     val prompt: String = "",
@@ -288,7 +274,6 @@ enum class TaskBoardAttention(val label: String) {
     }
 }
 
-/// Which cards the board shows. Port of `TaskBoardFilter`.
 data class TaskBoardFilter(
     val folder: TaskBoardFolder = TaskBoardFolder.All,
     val query: String = "",
@@ -322,8 +307,6 @@ data class TaskBoardFilter(
     }
 }
 
-/// Run readiness: why the saved card cannot start, or null when the checks
-/// this client can see are satisfied. Port of `TaskEditorSession.runReadiness`.
 fun taskRunReadiness(card: TaskCard, folders: List<FolderRef>): String? {
     if (card.workspaceID.trim().isEmpty()) return L10n.text("android.taskmodels.assign_a_folder_before_running_this_task.6d7e591f")
     val folder = folders.firstOrNull { it.id == card.workspaceID }
@@ -355,9 +338,6 @@ data class BackendRef(val id: String = "", val label: String = "", val models: L
     }
 }
 
-/// Accepts a run outcome against the submission that asked for it. A retry
-/// repeats the same durable operation and can never create a second run.
-/// Port of `TaskEditorSession.acceptRun` plus `reconcileRun` outcomes.
 sealed class RunAcceptance {
     data class Accepted(val outcome: TaskRunOutcome) : RunAcceptance()
     data class Rejected(val message: String) : RunAcceptance()
@@ -377,8 +357,6 @@ fun acceptTaskRun(outcome: TaskRunOutcome, operationID: String, cardID: String):
     return RunAcceptance.Accepted(outcome)
 }
 
-/// Fresh operation ids. Creation, run and launch each carry their own prefix
-/// so a receipt can never confirm the wrong kind of request.
 object TaskOperations {
     fun creationID(): String = "task-create-${UUID.randomUUID()}"
     fun runID(): String = "task-run-${UUID.randomUUID()}"
@@ -386,8 +364,6 @@ object TaskOperations {
     fun automationRunID(): String = "automation-run-${UUID.randomUUID()}"
 }
 
-/// One task result: the exact run, and whether its folder can be reviewed.
-/// Port of `TaskResultRoute`.
 data class TaskResultRoute(
     val runID: String = "",
     val workspaceID: String = "",
@@ -436,9 +412,6 @@ data class TaskResultRoute(
     }
 }
 
-/// Live-first run ordering shared by automation, task and workflow history.
-/// Port of `AutomationRunHistory`: live runs stay first so Stop is never
-/// behind Earlier runs, completed runs are newest first.
 data class RunRef(val id: String, val startedAtMs: Long, val live: Boolean)
 
 object RunHistory {
@@ -465,6 +438,4 @@ object RunHistory {
     fun latest(runs: List<RunRef>): RunRef? = ordered(runs).firstOrNull()
 }
 
-/// The row that opens the complete run history from a short preview.
-/// Port of `ClientAllRunsRow`.
 fun allRunsLabel(count: Int): String = if (count == 1) L10n.text("android.taskmodels.all_runs.33866ac3") else L10n.text("android.taskmodels.all_0_runs.8e631c72", "${count}")

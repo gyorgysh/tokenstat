@@ -7,20 +7,11 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Files, Changes and History for the folder behind a chat or a session.
-///
-/// One surface in three presentations: pushed on a phone over the
-/// conversation (which stays mounted underneath, so Back returns to the
-/// same transcript position), a trailing pane on a wide iPad, or a sheet
-/// over a terminal. Each tab names itself; Chat setup stays its own sheet:
-/// agent and persona choices are not workspace tools.
 struct ClientWorkspaceToolsView: View {
     let peer: String
     let workspaceID: String
     let folderName: String
     let hostName: String
-    /// Fixture sessions. Production leaves both nil and the sections load
-    /// through their own services, like everywhere else.
     var session: GitCommitSession?
     var autoCommit: AutoCommitSession?
 

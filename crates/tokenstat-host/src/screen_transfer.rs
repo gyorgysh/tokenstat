@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Resumable files attached to an authorized screen relationship.
 
 use std::collections::{HashMap, hash_map::Entry};
@@ -73,7 +72,6 @@ fn safe_name(name: &str) -> Result<&str, String> {
     Ok(name)
 }
 
-// Windows treats these as devices even when followed by a file extension.
 fn windows_device_name(name: &str) -> bool {
     let stem = name
         .split('.')

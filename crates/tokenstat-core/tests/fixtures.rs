@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-//! Fixture based tests, plus the guard that keeps fixtures safe to publish.
-//!
-//! The guard is the important half. Fixtures are generated from real session
-//! logs by `cargo xtask redact`, and a mistake there would commit somebody's
-//! prompts or source code to a public repository forever. So every committed
-//! fixture is re-checked here on every test run, independently of the tool that
-//! produced it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -31,18 +24,11 @@ fn fixture_files() -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
-        // fixtures/local is real data and git ignored, so it is never checked
-        // and never committed.
         .filter(|p| !p.components().any(|c| c.as_os_str() == "local"))
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
         .collect()
 }
 
-/// Keys any committed Claude Code fixture may contain.
-///
-/// Deliberately duplicated from the redaction tool rather than shared. If the
-/// allowlist there were widened by mistake, a guard importing the same constant
-/// would widen with it and catch nothing.
 const ALLOWED_KEYS: &[&str] = &[
     "type",
     "requestId",
@@ -119,8 +105,6 @@ fn committed_fixtures_contain_no_paths() {
 
 #[test]
 fn committed_fixtures_contain_no_long_strings() {
-    // Prompts and source code are long. Everything legitimately in a fixture,
-    // a timestamp, a model name, an identifier, is short.
     for path in fixture_files() {
         let contents = std::fs::read_to_string(&path).unwrap();
         for (n, line) in contents.lines().enumerate() {
@@ -140,15 +124,6 @@ fn committed_fixtures_contain_no_long_strings() {
     }
 }
 
-/// Keys any committed Pi fixture may contain.
-///
-/// A second list rather than a wider first one. The two tools spell their
-/// counters differently, and a shared list would let a key that is safe in one
-/// of them through in the other, which is the whole failure this guard exists
-/// to prevent.
-///
-/// `cwd` is not here on purpose: Pi's session header carries an absolute path
-/// and no fixture needs one.
 const PI_ALLOWED_KEYS: &[&str] = &[
     "type",
     "id",
@@ -171,12 +146,6 @@ const PI_ALLOWED_KEYS: &[&str] = &[
     "total",
 ];
 
-/// Keys any committed DeepSeek Harness fixture may contain.
-///
-/// Its own list for the same reason Pi has one: this tool nests its counters
-/// under `data`, and a shared list would have to allow both spellings
-/// everywhere, which is how a key that is safe in one tool gets waved through
-/// in another.
 const DSH_ALLOWED_KEYS: &[&str] = &[
     "type",
     "seq",
@@ -198,7 +167,6 @@ const DSH_ALLOWED_KEYS: &[&str] = &[
     "reasoningTokens",
 ];
 
-/// Qwen's separate usage ledger contains counters and identifiers only.
 const QWEN_ALLOWED_KEYS: &[&str] = &[
     "schemaVersion",
     "id",
@@ -215,11 +183,6 @@ const QWEN_ALLOWED_KEYS: &[&str] = &[
     "apiDurationMs",
 ];
 
-/// Which allowlist a fixture is held to, by the directory it sits in.
-///
-/// An unknown directory gets the strictest list rather than a free pass, so
-/// adding fixtures for a new tool without saying what it may contain fails
-/// loudly instead of publishing whatever the redactor happened to keep.
 fn allowlist_for(path: &Path) -> &'static [&'static str] {
     if path.components().any(|c| c.as_os_str() == "pi") {
         PI_ALLOWED_KEYS
@@ -297,8 +260,6 @@ fn pi_fixtures_parse_into_events() {
     }
     assert!(!events.is_empty(), "fixtures produced no events");
 
-    // The redacted files keep the interrupted turns, which is the point: they
-    // are in a real session and must not be counted.
     assert!(
         events
             .iter()
@@ -306,12 +267,9 @@ fn pi_fixtures_parse_into_events() {
         "an all-zero turn became an event"
     );
 
-    // Every event is its own turn. A file re-read must not add a second copy,
-    // which is what the id being the vendor's own event id buys.
     let unique: HashSet<_> = events.iter().map(|e| e.id).collect();
     assert_eq!(unique.len(), events.len(), "two turns share an id");
 
-    // Reasoning is inside output, so it can never exceed it.
     for e in &events {
         if let (Some(reasoning), Some(output)) =
             (e.extras.reasoning_within_output, e.counters.output)
@@ -337,8 +295,6 @@ fn dsh_fixtures_parse_into_events() {
         .filter(|e| e.file_type().is_file())
     {
         let contents = std::fs::read_to_string(path.path()).unwrap();
-        // The committed fixture is plain text; the real file is zstd. This is
-        // the reading half either way.
         let out = dsh::parse_text(path.path(), &dir, &contents);
         assert!(
             out.warnings.is_empty(),
@@ -354,8 +310,6 @@ fn dsh_fixtures_parse_into_events() {
     assert_eq!(unique.len(), events.len(), "two turns share an id");
 
     for e in &events {
-        // Reasoning is inside output for this vendor, so it can never exceed
-        // it, and cache read is beside input rather than part of it.
         if let (Some(reasoning), Some(output)) =
             (e.extras.reasoning_within_output, e.counters.output)
         {
@@ -410,8 +364,6 @@ fn resume_duplicates_collapse_by_request_identity() {
     assert!(!events.is_empty(), "fixture produced no events");
 
     let unique: HashSet<_> = events.iter().map(|e| e.id).collect();
-    // The fixture exists because these files genuinely overlap. If they ever
-    // stop overlapping it is no longer testing deduplication.
     assert!(
         unique.len() < events.len(),
         "expected duplicate rows across files, got {} unique of {}",
@@ -419,13 +371,6 @@ fn resume_duplicates_collapse_by_request_identity() {
         events.len()
     );
 
-    // Rows sharing an id are the same request, so they must agree about the
-    // model and about the prompt, which is fixed before generation starts.
-    //
-    // They may disagree about `output`. Claude Code writes an assistant message
-    // repeatedly while it streams, each copy carrying more generated tokens than
-    // the last. That is why the store resolves a collision by taking the maximum
-    // rather than keeping whichever copy it read first.
     let mut by_id: HashMap<_, &tokenstat_core::UsageEvent> = HashMap::new();
     let mut streaming_partials = 0;
     for e in &events {
@@ -445,7 +390,6 @@ fn resume_duplicates_collapse_by_request_identity() {
         }
     }
 
-    // The store must land on the largest observed output, not the first.
     let tz = jiff::tz::TimeZone::UTC;
     let mut store = tokenstat_core::Store::open_in_memory().unwrap();
     store.insert_events(&events, &tz).unwrap();
@@ -463,8 +407,6 @@ fn resume_duplicates_collapse_by_request_identity() {
         "stored output should be the sum of each request's largest observed value"
     );
 
-    // If this fixture ever stops containing partials, the regression it guards
-    // against would no longer be covered.
     assert!(
         streaming_partials > 0,
         "fixture no longer contains streamed partial rows"
@@ -494,9 +436,6 @@ fn ingesting_a_fixture_twice_changes_no_total() {
 
 #[test]
 fn splitting_a_fixture_across_files_yields_the_same_totals() {
-    // Ingestion order and file boundaries must not affect the result. A session
-    // resume moves rows between files, so this is the property that makes the
-    // archive stable under that.
     let dir = fixtures_root().join("claude_code/resume-duplicates");
     if !dir.is_dir() {
         return;

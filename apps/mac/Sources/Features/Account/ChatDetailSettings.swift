@@ -11,8 +11,6 @@ import SwiftUI
 final class ChatDetailPreference {
     static let shared = ChatDetailPreference()
     static let key = "chat.detailLevel"
-    /// Where the level lived while "minimal" meant a line per step and
-    /// "compact" a line per stretch of work. Those two names swapped.
     static let previousKey = "chat.detail"
 
     var level: ChatDetail {
@@ -31,8 +29,6 @@ final class ChatDetailPreference {
         }
     }
 
-    /// A choice stored under `previousKey`, by what it did rather than what
-    /// it was called, so nobody's transcript changes under them.
     static func renamed(_ raw: String) -> ChatDetail? {
         switch raw {
         case "minimal": .compact
@@ -41,8 +37,6 @@ final class ChatDetailPreference {
         }
     }
 
-    /// Every device starts at Compact: each step one quiet line, the way
-    /// most editors show an agent's work. A choice somebody made is kept.
     static let defaultLevel: ChatDetail = .compact
 
     static func label(_ level: ChatDetail) -> String {
@@ -64,11 +58,7 @@ final class ChatDetailPreference {
     }
 }
 
-/// The detail level, in both Apple settings surfaces. The same choice is one
-/// menu away inside every conversation.
 struct ChatDetailSettings: View {
-    /// The conversation on screen, when this card sits beside one. It adds
-    /// the open-all and fold-all action, which means nothing in Settings.
     var model: ChatModel?
     @State private var preference = ChatDetailPreference.shared
     @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
@@ -158,8 +148,6 @@ struct ChatDetailSettings: View {
     }
 }
 
-/// The detail level as a menu of three, for the View menu and the phone's
-/// chat menu. The same preference as the settings card.
 struct ChatDetailMenuPicker: View {
     @State private var preference = ChatDetailPreference.shared
     @AppStorage("chat.smoothStreaming") private var smoothStreaming = true

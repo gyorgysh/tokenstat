@@ -14,9 +14,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The persona readers must be total: the host answers with shapes older
-/// answers did not carry, and a reader that throws on those is a crash on the
-/// sheet that uses it.
 class PersonaModelsTest {
     private fun personaJson() = buildJsonObject {
         put("id", "p1")

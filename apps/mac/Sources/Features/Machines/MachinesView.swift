@@ -9,25 +9,11 @@ import SwiftUI
 import AppKit
 #endif
 
-/// This machine, who may reach it, and who it can reach.
-///
-/// The screen is ordered by what somebody came here to do: decide about a
-/// machine that is knocking, then read this machine's own two words to compare
-/// with the other end, then add something new.
-///
-/// It says nothing about ports, addresses or keys. A person setting up their
-/// second computer has a laptop and a desktop, not a host and a socket, and the
-/// vocabulary here follows `docs/remote-transport.md`: a name, two words to
-/// compare, and one code to paste. The raw facts stay one disclosure away for
-/// whoever is debugging their own network.
 struct MachinesView: View {
     @State private var confirmForget: Peer?
     @State private var confirmRevoke: Peer?
 
     @Bindable var model: MachinesModel
-    /// Where to send somebody who clicks the SSH card. The shell decides which
-    /// section they land on, because this card asks for "servers" and has no
-    /// business picking between Hosts and Keys.
     var onNavigate: ((NavigationRequest) -> Void)?
     var onInspect: (() -> Void)?
     var onSignIn: (() -> Void)?
@@ -38,17 +24,9 @@ struct MachinesView: View {
     private enum DevicePage: String, CaseIterable { case devices = "Devices", access = "Access" }
     @State private var devicePage: DevicePage = .devices
     @State private var deviceSearch = ""
-    /// The account machine waiting on a Remove confirmation. Destructive on
-    /// the server, so it never happens from a single click.
     @State private var pendingUnlink: Machine?
-    /// Which account device is having its name edited, by machine id. Inline
-    /// rather than a sheet: naming a device is not a decision with
-    /// consequences, it is how the list reads.
     @State private var renamingID: String?
     #if os(macOS)
-    /// Devices asking for something. The same object the toast, the sheet and
-    /// the notification answer through, so all four agree about what is still
-    /// waiting.
     @State private var deviceRequests = DeviceAccessRequests.shared
     #endif
 
@@ -123,9 +101,6 @@ struct MachinesView: View {
         .task {
             if model.identity == nil { await model.load() }
             await model.ensureHelper()
-            // The sleep is where cancellation lands when this screen goes away,
-            // and it throws rather than returning, so the check afterwards is
-            // what stops a final refresh going out on a torn-down view.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { break }
@@ -151,8 +126,6 @@ struct MachinesView: View {
         #endif
     }
 
-    /// A way in, not a place. SSH is a section in the sidebar now, and this
-    /// card is here because Devices is where people looked for it first.
     private var sshAccess: some View {
         #if os(macOS)
         Button { onNavigate?(.ssh) } label: { sshAccessLabel.padding(.vertical, Theme.Space.xs) }
@@ -173,16 +146,9 @@ struct MachinesView: View {
             .help(L10n.text("apple.machinesview.saved_servers_keys_and_command_snippets.0ac59dee"))
     }
 
-    /// The full pairing screen: approvals, this machine, peers, add, e2e.
     @ViewBuilder
     private var remoteReadyContent: some View {
-        // First, because these are the only things here that are waiting on a
-        // person. Everything else can be read at leisure.
         #if os(macOS)
-        // Above pairing, because a device asking for either grant is already
-        // paired: it got far enough to ask. A toast names a request as it
-        // arrives, and this is where somebody who let the toast go, or was
-        // away when it landed, finds the question again.
         if !deviceRequests.pending.isEmpty {
             askingForAccess
         }
@@ -216,11 +182,6 @@ struct MachinesView: View {
         }
     }
 
-    /// Free and Supporter already share usage. The pairing chrome, the
-    /// disabled tunnel switch and a See plans link at the foot of a long
-    /// scroll are the wrong empty state: the action that ends it never
-    /// reaches the first screenful. Match the phone Remote tab: one
-    /// upgrade card, the machine list, then e2e.
     @ViewBuilder
     private var remoteLockedContent: some View {
         remotePlanEmpty
@@ -255,8 +216,6 @@ struct MachinesView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
-    /// Names and presence only. Connect, revoke and forget belong on
-    /// the plan that can actually open a tunnel.
     private var lockedMachineList: some View {
         Card(
             title: L10n.text("apple.machinesview.devices_on_this_account.50d8cf5c"),
@@ -357,12 +316,6 @@ struct MachinesView: View {
                         }
                         if let words = model.words {
                             LabeledContent(L10n.text("apple.machinesview.known_as.9076e6ab")) {
-                                // The comparison a person actually performs.
-                                // The fingerprint and the key still exist and
-                                // are one disclosure away, under Connection
-                                // details. The words are derived from a public
-                                // key: there is nothing private in them, so
-                                // they are shown plain and selectable.
                                 Text(words)
                                     .font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(Theme.accent)
@@ -372,10 +325,6 @@ struct MachinesView: View {
                     }
                     .transition(.smoothIn(reduceMotion: reduceMotion))
                 } else {
-                    // The identity comes from the daemon, so this card is empty
-                    // for a moment on a cold launch. Two grey rows keep the card
-                    // the height it will be rather than letting the whole screen
-                    // shuffle upward when the name arrives.
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Skeleton.Bar(width: 220)
                         Skeleton.Bar(width: 160)
@@ -413,10 +362,6 @@ struct MachinesView: View {
                 let planExpired = status.tunnel
                     && status.tunnelError?.contains("not_on_this_plan") == true
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    // A setting, not a dashboard card. Keeping its label,
-                    // explanation and switch in one compact preference row
-                    // makes the control easy to spot without overpowering the
-                    // identity details above it.
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         HStack(spacing: Theme.Space.s) {
                             Image(systemName: "rectangle.3.group.bubble.left")
@@ -443,10 +388,6 @@ struct MachinesView: View {
                         .disabled(!allowed)
                         .fixedSize()
                     }
-                    // Keep controls in the inspector's shared trailing
-                    // column. `Toggle` does not distribute its label and
-                    // track by itself, so this explicit spacer pins the track
-                    // to the same edge as every other control.
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Label(
@@ -464,11 +405,6 @@ struct MachinesView: View {
                         .foregroundStyle(.tertiary)
 
                     if !allowed {
-                        // The relay enforces the plan at every HELLO; this is
-                        // the courtesy copy of the same gate, so nobody is
-                        // invited to flip a switch the relay will refuse. A
-                        // switch that was left on reads as off until the
-                        // account qualifies again.
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(model.account?.signedIn == true
                                 ? L10n.text("apple.machinesview.this_computer_and_another_device_already_s.c3dc1438")
@@ -491,10 +427,6 @@ struct MachinesView: View {
                     }
 
                     if status.tunnel && status.tunnelOnline == false && !planExpired {
-                        // The toggle is on but the daemon is not holding a
-                        // socket. The plan gate, a revoked token and a dead
-                        // endpoint all land here, and each needs different
-                        // words from "wait".
                         if let raw = status.tunnelError {
                             ErrorBanner(message: raw) {
                                 if FriendlyError.from(raw).requiresSignIn {
@@ -557,10 +489,6 @@ struct MachinesView: View {
     }
 
     #if os(macOS)
-    /// Devices that have asked for something and are still waiting.
-    ///
-    /// The same answers the sheet offers, in the one place somebody would go
-    /// looking after a toast or a banner has gone.
     private var askingForAccess: some View {
         Card(
             title: L10n.text("apple.machinesview.waiting_for_you.9f760ab2"),
@@ -579,10 +507,6 @@ struct MachinesView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: Theme.Space.s)
-                        // Both answers for a screen, whichever was asked for.
-                        // Offering only what the device happened to name left
-                        // no way to hand over the mouse without sending
-                        // somebody back to their phone to ask again.
                         if request.kind == .screen {
                             Button(L10n.text("apple.machinesview.view_only.9b4c6c85"), .preview) {
                                 Task { await deviceRequests.answer(request, view: true, control: false) }
@@ -706,16 +630,6 @@ struct MachinesView: View {
         .animation(.easeOut(duration: 0.22), value: unlistedKnown.isEmpty)
     }
 
-    /// Approved peers that the account list above does not already show.
-    ///
-    /// The same iPhone appeared twice, once as `m_1ab6c8e5d261fdab` under
-    /// Account-linked devices and again as `mellow-zebra-reef` under Your
-    /// devices, with different names and different buttons. One physical
-    /// device, one row.
-    ///
-    /// A peer is only hidden where the row above carries the same actions for
-    /// it, which is why the match is by identity rather than by name: dropping
-    /// a device from here on a weaker match would leave nowhere to revoke it.
     private var unlistedKnown: [Peer] {
         let covered = Set(
             model.listedAccountMachines.compactMap { linkedPeer(for: $0)?.key }
@@ -724,9 +638,6 @@ struct MachinesView: View {
     }
 
     #if os(macOS)
-    /// Whether this Mac stays a host after the app quits. Mirrors the Account
-    /// screen's card so the setting sits where somebody is deciding whether
-    /// other devices may reach this Mac.
     private var alwaysOnHost: some View {
         Card(
             title: L10n.text("apple.machinesview.always_on_host.f7990642"),
@@ -773,8 +684,6 @@ struct MachinesView: View {
 
     private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            // Awake or asleep, as a picture. The paragraph beside it is
-            // accurate and long, and this is the half somebody reads.
             Image(systemName: isOn.wrappedValue ? "bolt.horizontal.circle.fill" : "moon.zzz.fill")
                 .font(Theme.font(22))
                 .foregroundStyle(isOn.wrappedValue ? Theme.accent : Theme.stateIdle)
@@ -800,18 +709,7 @@ struct MachinesView: View {
         Card(title: L10n.text("apple.machinesview.your_devices.555eaa22"), subtitle: L10n.text("apple.machinesview.select_a_device_for_connection_details_pho.2c07fad5"), mark: "mark_device") {
             LazyVStack(spacing: Theme.Space.s) {
                 ForEach(filteredAccountMachines) { machine in
-                    // Phones are shown but never dialled: a client reaches a
-                    // host, not the reverse (P5). Hiding them made a device
-                    // somebody had signed in on look like it was not there.
-                    // "This device" can also be matched by its key: a stale
-                    // record whose id no longer equals thisMachineID must not
-                    // suddenly look like a stranger with Connect buttons.
                     let isSelf = model.isThisMachine(machine)
-                    // The row's title: the machine's own name, or the name we
-                    // know it by (this machine, or an approved peer) when the
-                    // account has never named it. The code stays as the
-                    // subtitle either way, so a resolved title never hides
-                    // which machine the row is.
                     let resolved = model.resolvedName(for: machine)
                     let symbol = ClientDeviceIcon.symbol(for: machine)
                     HStack(alignment: .center, spacing: Theme.Space.m) {
@@ -822,38 +720,19 @@ struct MachinesView: View {
                             .frame(width: 32, height: 32)
                             .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                         if isSelf {
-                            // This machine's own presence: the accent colour
-                            // when the tunnel is actually up (so the row reads
-                            // as "this device, reachable"), grey when remote
-                            // reach is off or the socket is not connected.
                             Circle()
                                 .fill(model.status?.tunnelOnline == true ? Theme.accent : .gray)
                                 .frame(width: 8, height: 8)
                         } else {
-                            // The industry-standard presence light, before the
-                            // name: solid when the machine is reachable right
-                            // now, blinking while its state is not confirmed,
-                            // grey when it is definitively offline.
                             StatusDot(online: machine.online)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            // An unnamed machine is still known by name when it
-                            // is this one or a peer this Mac has approved. Where
-                            // nobody knows it, it gets a description of what it
-                            // is rather than its primary key: `Machine
-                            // m_c9826340c403872c` as a row title is a database
-                            // showing through the window.
                             if renamingID != nil, renamingID == machine.machineID {
                                 AccountNameField(
                                     machine: machine,
                                     placeholder: deviceTitle(resolved: resolved, machine: machine)
                                 ) { name in
                                     renamingID = nil
-                                    // This computer names itself: that writes
-                                    // the local label and tells the account,
-                                    // so the two agree. Renaming only the
-                                    // account row would leave this Mac calling
-                                    // itself one thing and the website another.
                                     if isSelf {
                                         await model.rename(to: name)
                                         await model.load()
@@ -963,30 +842,19 @@ struct MachinesView: View {
         }
     }
 
-    /// The peer record for an account machine, matched on identity only.
-    ///
-    /// Stricter than `MachinesModel.peer(for:)`, which falls back to the
-    /// account record's machine id: only a machine with a public key on this
-    /// account can be the peer that decides which rows to hide.
     private func linkedPeer(for machine: Machine) -> Peer? {
         guard let identity = machine.publicIdentity, !identity.isEmpty else { return nil }
         return model.peers.first { $0.key == identity || $0.fingerprint == identity }
     }
 
-    /// What to call a machine in a list. Never its id: the code sits under the
-    /// title in monospace, where an identifier belongs.
     private func deviceTitle(resolved: String?, machine: Machine) -> String {
         if let resolved, !resolved.isEmpty { return resolved }
         return machine.isHost ? L10n.text("apple.machinesview.unnamed_computer.810da0c7") : L10n.text("apple.machinesview.unnamed_device.6aba593f")
     }
 
-    /// One caption line under a machine's name. The presence light is the
-    /// quick read; this carries the detail, and the two never collide.
     private func statusLine(for machine: Machine, isSelf: Bool) -> String {
         if isSelf { return L10n.text("apple.machinesview.this_device.d052579c") }
         if !machine.isHost {
-            // A phone holds the tunnel only while somebody is using it, so
-            // "offline" here means "not in the app right now", not "broken".
             if machine.online == true { return L10n.text("apple.machinesview.phone_in_the_app_now.49897ae2") }
             if let seen = formatRelativeDate(machine.lastSeenAt) { return L10n.text("apple.machinesview.phone_last_used_0.555b7a23", "\(seen)") }
             return L10n.text("apple.machinesview.phone_signed_in_on_this_account.58d549b8")
@@ -1118,18 +986,11 @@ struct MachinesView: View {
     }
 }
 
-/// What each paired device is allowed to do here.
-///
-/// Not only the screen any more. Being approved is not being let in: every
-/// device on the account is auto-approved on first contact with the tunnel, so
-/// reaching the work on this machine is its own explicit yes, and it is first
-/// because it is the broadest of the three.
 private struct DevicePermissionCard: View {
     let peers: [Peer]
     var localOnly = false
     var fillsHeight = false
     @State private var permissions: [String: ScreenPermission] = [:]
-    /// Peer keys allowed to open the work here.
     @State private var workspaceAllowed: Set<String> = []
     @State private var error: String?
     @State private var transferDestination: String?
@@ -1170,10 +1031,6 @@ private struct DevicePermissionCard: View {
                         }
                     }
                     permissionRow(.accessibility, granted: access.accessibility)
-                    // Directly above Always-on host, which is exactly where
-                    // somebody would assume the opposite. Capture runs in this
-                    // app, not in the helper, so a closed app has no screen to
-                    // share however always-on the helper is.
                     Text(L10n.text("apple.machinesview.capture_runs_in_the_app_so_tokenstat_has_t.e2be3644"))
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1260,8 +1117,6 @@ private struct DevicePermissionCard: View {
     }
 
     #if os(macOS)
-    /// One permission: what it is for, whether it is granted, and a button that
-    /// actually asks rather than pointing at a pane.
     private func permissionRow(_ kind: ScreenAccess.Kind, granted: Bool) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
@@ -1299,16 +1154,10 @@ private struct DevicePermissionCard: View {
         case .accessibility: access.requestAccessibility()
         }
         if answer == .alreadyDecided { access.openSettings(kind) }
-        // Read the real state back. Somebody who answers the prompt straight
-        // away should not have to click away and back for the card to agree.
         Task { await access.refresh() }
     }
     #endif
 
-    /// Whether this device may reach the work here.
-    ///
-    /// One switch, because there is no half of it: a device that can open a
-    /// folder can write to it, start a terminal in it and push it.
     private func workspaceBinding(_ peer: Peer) -> Binding<Bool> {
         Binding {
             workspaceAllowed.contains(peer.key)
@@ -1344,9 +1193,6 @@ private struct DevicePermissionCard: View {
             else { permission.view = enabled; if !enabled { permission.control = false } }
             permissions[peer.key] = permission
             #if os(macOS)
-            // The moment somebody says what they want is the moment to ask for
-            // what it needs. Waiting until a stream starts meant the viewer on
-            // the other device had already failed before the prompt appeared.
             if enabled {
                 if permission.view { _ = access.requestScreenRecording() }
                 if permission.control { _ = access.requestAccessibility() }
@@ -1406,11 +1252,7 @@ private struct DevicePermissionCard: View {
     #endif
 }
 
-/// The presence light before a machine's name: solid when reachable, blinking
-/// while its state is not confirmed yet, grey when offline.
 private struct StatusDot: View {
-    /// nil means presence is not known yet (connecting), which is the state
-    /// that blinks.
     var online: Bool?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1430,7 +1272,6 @@ private struct StatusDot: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            // Scoped to the opacity: see the working dot in `RootView`.
             .animation(pulsing ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : nil) {
                 $0.opacity(pulsing ? 0.3 : 1)
             }
@@ -1463,12 +1304,6 @@ private struct StatusDot: View {
 }
 
 
-/// The machine's name, editable in place.
-///
-/// A text field rather than a sheet, because renaming a computer is not a
-/// decision with consequences: the key is the identity, so this changes only how
-/// the machine reads on somebody else's screen. Committed on return or on losing
-/// focus, and emptying it puts the computer's own name back.
 private struct MachineNameField: View {
     var identity: MachineIdentity
     var rename: (String) async -> Void
@@ -1499,8 +1334,6 @@ private struct MachineNameField: View {
         }
         .onAppear { draft = identity.label }
         .onChange(of: identity.label) { _, new in
-            // Only while nobody is typing, so a refresh underneath somebody
-            // mid-edit does not take the characters back out of the field.
             if !editing { draft = new }
         }
         .onChange(of: editing) { _, focused in
@@ -1515,15 +1348,8 @@ private struct MachineNameField: View {
     }
 }
 
-/// The name of a device on the account, edited where it is read.
-///
-/// Separate from `MachineNameField`, which names *this* machine by writing a
-/// file beside its key. This one writes the account row, which is the only
-/// name a machine you cannot log into has.
 private struct AccountNameField: View {
     var machine: Machine
-    /// What the row says when the name is empty, so the field offers to
-    /// replace what is on screen rather than starting blank with no context.
     var placeholder: String
     var commit: (String) async -> Void
     var onCancel: () -> Void
@@ -1556,8 +1382,6 @@ private struct AccountNameField: View {
 
 private struct PeerRow<Actions: View>: View {
     var peer: Peer
-    /// The account directory's name for this machine, when the peer itself
-    /// was never named. Shown in place of "Unnamed device".
     var resolvedName: String?
     /// SF Symbol: phone for iOS clients, desktop otherwise.
     var symbol: String = "desktopcomputer"
@@ -1574,10 +1398,6 @@ private struct PeerRow<Actions: View>: View {
                         .font(Theme.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
-                // The words rather than the key or the fingerprint: this line
-                // exists to be compared with another screen by a person, and
-                // that is the form they will read whole. They derive from a
-                // public key, so there is nothing to hide.
                 Text(peer.words ?? L10n.text("apple.machinesview.paired_device.b2e5f1e4"))
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
@@ -1639,12 +1459,6 @@ private struct TrustBadge: View {
 }
 
 
-/// Connect to a machine by pasting its pairing code.
-///
-/// One field, whatever the other machine showed. This path works with no
-/// account and no network service at all, which is why it is on the screen
-/// rather than behind an "advanced" disclosure: it is the thing that makes the
-/// privacy claim checkable instead of promised.
 private struct PairingForm: View {
     var showsCard: Bool = true
     var onClose: (() -> Void)? = nil
@@ -1727,8 +1541,6 @@ private struct PairingForm: View {
         .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
-    /// `key@host:port` splits at the last @; a bare key has no address, which
-    /// is right for a machine that only ever connects *to* this one.
     private func splitLink(_ raw: String) -> (String, String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let at = trimmed.lastIndex(of: "@") else { return (trimmed, "") }
@@ -1739,11 +1551,6 @@ private struct PairingForm: View {
     }
 }
 
-/// The chevron at the end of a device row: the row itself opens the details.
-///
-/// A "Details" button on every row doubled each row's controls and read as
-/// one more thing to decide. A chevron is the familiar sign that a row leads
-/// somewhere, and the row's tap target is already all of it.
 private struct DeviceRowDisclosure: View {
     var body: some View {
         Image(systemName: "chevron.right")

@@ -5,11 +5,6 @@
 
 import Foundation
 
-/// Keeps an in-process app useful when the host agent is not installed yet.
-///
-/// Once the app is connected to `hostd`, the daemon owns this work and this
-/// loop exits. The CLI schedule is checked by Rust, so installing the CLI later
-/// hands ownership back without making two uploaders compete.
 enum DesktopSyncScheduler {
     static func start() {
         Task.detached {
@@ -18,8 +13,6 @@ enum DesktopSyncScheduler {
             var hasRead = false
             while !Task.isCancelled {
                 if var info = try? await Bridge.info(), info.hasArchive {
-                    // Hosted scans run in Rust. The fallback app still needs
-                    // local discovery even without an account or an upload.
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                     if !Bridge.isHosted,
                        (try? await Bridge.syncScheduleStatus())?.scheduledNetworkAllowed == true,
@@ -39,9 +32,6 @@ enum DesktopSyncScheduler {
             }
         }
         Task.detached {
-            // The app is choosing its transport. This loop reads through it,
-            // and a tick before the route is settled would schedule in-process
-            // work the daemon ends up owning.
             await BridgeLaunch.wait()
             while !Task.isCancelled {
                 guard !Bridge.isHosted else { return }
@@ -49,8 +39,6 @@ enum DesktopSyncScheduler {
                 do {
                     status = try await Bridge.syncScheduleStatus()
                 } catch {
-                    // The next minute retries. Sync errors belong on the next
-                    // explicit Account or Insights surface, not a timer log.
                     try? await Task.sleep(for: .seconds(60))
                     continue
                 }
@@ -58,23 +46,11 @@ enum DesktopSyncScheduler {
                     try? await Task.sleep(for: .seconds(60))
                     continue
                 }
-                // The daemon refreshes pricing on its own schedule; in-process
-                // this loop is the only scheduler there is. Once up front so a
-                // fresh install without the CLI gets real rates, then on the
-                // same minute cadence as sync.
                 _ = try? await Bridge.pricingRefresh()
                 if status.loggedIn && !status.cliScheduleActive && status.due {
-                    // Re-read due immediately before posting. A Sync now
-                    // that landed while this loop was between ticks would
-                    // otherwise send a second usage POST into the same
-                    // gate the account just accepted.
                     let again = try? await Bridge.syncScheduleStatus()
                     if again?.scheduledNetworkAllowed == true && again?.due == true,
                        (try? await Bridge.sync()) != nil {
-                        // The numbers on screen are now older than the archive.
-                        // A scheduled upload has to refresh them the same way a
-                        // pressed button does, or Home quietly disagrees with
-                        // itself for the rest of the day.
                         await MainActor.run {
                             NotificationCenter.default.post(name: .tokenstatDidSync, object: nil)
                         }

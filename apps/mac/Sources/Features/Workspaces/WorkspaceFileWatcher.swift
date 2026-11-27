@@ -26,7 +26,6 @@ private let watchLog = Logger(subsystem: "ai.tokenstat.tokenstat", category: "Pe
 /// to the `@MainActor` model. Deciding how often to refresh is the model's
 /// debounce, not this class's job.
 final class WorkspaceFileWatcher {
-    /// Folders currently watched, so a re-watch with the same list is a no-op.
     private(set) var paths: [String] = []
     private weak var model: WorkspacesModel?
     private var stream: FSEventStreamRef?
@@ -35,12 +34,6 @@ final class WorkspaceFileWatcher {
         self.model = model
     }
 
-    /// Watch `newPaths`, or keep the current stream when the list has not
-    /// changed. Tearing a stream down on every refresh would be churn for
-    /// nothing: the folder list is stable between edits.
-    ///
-    /// Folders that do not exist are skipped, FSEvents has nothing to watch.
-    /// When such a folder comes back, `load` runs again and re-watches.
     func watch(_ newPaths: [String]) {
         let existing = newPaths.filter { FileManager.default.fileExists(atPath: $0) }
         guard existing != paths else { return }
@@ -48,10 +41,6 @@ final class WorkspaceFileWatcher {
         paths = existing
         guard !existing.isEmpty else { return }
 
-        // Unretained on purpose. Retaining here would make the stream own the
-        // watcher, `deinit` would never run, and the stream it is meant to tear
-        // down would outlive everything. The pointer is safe because `stop()`
-        // runs from `deinit`, before this object goes away.
         var context = FSEventStreamContext(
             version: 0,
             info: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
@@ -66,13 +55,8 @@ final class WorkspaceFileWatcher {
             existing as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
-            // Paths as CFStrings, so the callback can tell which folder
-            // changed and whether it was only build output.
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
         ) else {
-            // A failed create must not leave `paths` claiming this list is
-            // watched: the next `watch` with the same folders would skip the
-            // retry. Clearing it lets the next sync try again.
             paths = []
             return
         }
@@ -91,15 +75,11 @@ final class WorkspaceFileWatcher {
 
     deinit { stop() }
 
-    /// FSEvents' own callback. The context pointer is this watcher, which the
-    /// model owns, so the pointer stays valid for the stream's whole life.
     private static let eventCallback: FSEventStreamCallback = { _, info, _, eventPaths, _, _ in
         guard let info else { return }
         let watcher = Unmanaged<WorkspaceFileWatcher>.fromOpaque(info).takeUnretainedValue()
         let paths = (Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as NSArray)
             as? [String] ?? []
-        // The stream's dispatch queue is the main queue, so this runs on the
-        // main thread, which is where the actor lives.
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOKENSTAT_LOG_ALL_CALLS"] != nil {
             watchLog.debug("fs events \(paths.joined(separator: " | "), privacy: .public)")
@@ -108,8 +88,6 @@ final class WorkspaceFileWatcher {
         MainActor.assumeIsolated {
             switch WorkspaceChangeFilter.classify(paths, among: watcher.paths) {
             case .none:
-                // A build writing into target/, git packing objects: nothing
-                // that shows in a folder's status.
                 break
             case let .roots(roots):
                 watcher.model?.scheduleRefresh(roots: roots)

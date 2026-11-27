@@ -2,8 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Only project metadata is polled here. A row does not create a transcript
-/// model, load setup, or warm message pages to draw a title.
 struct ClientProjectChatRows: View {
     let peer: String
     let hostName: String

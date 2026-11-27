@@ -50,10 +50,6 @@ enum PersonaRenderer {
             context.stroke(outline, with: .color(tint), lineWidth: max(1, unit * 0.020))
         }
 
-        // Both clipped to the body, so a heavy squash or a melt pushes them
-        // around inside the creature rather than letting an eye escape it.
-        // Screen light is clipped there too: it falls on the face, and light
-        // spilling past the silhouette would be a lamp, not a screen.
         context.drawLayer { layer in
             layer.clip(to: outline)
             drawHighlight(in: &layer, rect: rect, bounds: bounds)
@@ -68,7 +64,6 @@ enum PersonaRenderer {
         }
     }
 
-    // MARK: - Body
 
     private static func drawShadow(
         in context: inout GraphicsContext,
@@ -77,8 +72,6 @@ enum PersonaRenderer {
         unit: CGFloat,
         hue: Color
     ) {
-        // Contact shadow: it shrinks and fades as the body leaves the ground,
-        // which is most of what sells a jump as a jump.
         let air = max(0, PersonaStage.floor - bounds.maxY)
         let closeness = max(0.30, 1 - air * 2.6)
         let width = bounds.width * rect.width * 0.80 * closeness
@@ -91,8 +84,6 @@ enum PersonaRenderer {
     }
 
     private static func drawHighlight(in context: inout GraphicsContext, rect: CGRect, bounds: CGRect) {
-        // Placed off the middle rather than off the bounding box, so a squash
-        // slides it across the body instead of pinning it to a corner.
         let width = bounds.width * rect.width * 0.155
         let height = bounds.height * rect.height * 0.085
         let frame = CGRect(
@@ -101,8 +92,6 @@ enum PersonaRenderer {
             width: width,
             height: height
         )
-        // A soft gradient rather than a flat ellipse: at 20% white a hard
-        // edge reads as a scuff on the surface instead of light on it.
         context.fill(
             Path(ellipseIn: frame).applying(
                 CGAffineTransform(translationX: frame.midX, y: frame.midY)
@@ -125,8 +114,6 @@ enum PersonaRenderer {
         unit: CGFloat,
         tint: Color
     ) {
-        // Rooted in the crown node, so it whips with the squash instead of
-        // floating over a rectangle the body no longer fills.
         let crown = body.crown
         let root = CGPoint(x: rect.minX + crown.x * rect.width, y: rect.minY + crown.y * rect.height)
         let lean = (crown.x - body.centroid.x) * rect.width
@@ -146,7 +133,6 @@ enum PersonaRenderer {
         )
     }
 
-    // MARK: - Face
 
     private static func drawFace(
         _ engine: PersonaEngine,
@@ -163,32 +149,18 @@ enum PersonaRenderer {
         let centroid = body.centroid
         let crown = body.crown
 
-        // The face borrows the body's own squash rather than being animated
-        // separately. Wide and flat means narrow eyes further apart, tall and
-        // thin means round eyes closer together. It costs one divide and it
-        // is the single biggest reason the character reads as one material.
         let aspect = clamp(bounds.height / max(bounds.width, 1e-4), 0.45, 1.7)
 
-        // Lean, taken from where the crown sits relative to the middle, plus
-        // the head following the eyes. The face tilts with the body for free,
-        // in every mood, and tips toward whatever it is looking at.
         let lean = clamp(atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4)) * 0.25, -0.12, 0.12)
         let tilt = lean + engine.headTilt
 
         let heightPoints = bounds.height * rect.height
-        // Eyes just above the middle. Low, wide-set features are most of
-        // what reads as young and friendly; high ones read as a forehead.
         let anchorHeight = heightPoints * (0.05 + face.lift)
         let origin = CGPoint(
             x: rect.minX + centroid.x * rect.width,
             y: rect.minY + centroid.y * rect.height
         )
 
-        // The features sit on the body as if it were a ball. Looking to one
-        // side turns that ball a little, so the eyes slide toward the edge,
-        // the far one narrows and the whole face comes round, which is what
-        // makes a glance read as the creature turning rather than as two dots
-        // moving. A turn past the edge hides a feature behind the body.
         let sphereX = max(1, bounds.width * rect.width * 0.5)
         let sphereY = max(1, heightPoints * 0.5)
         let gazeX = clamp(face.gaze.x + engine.look.x, -1.3, 1.3)
@@ -213,9 +185,6 @@ enum PersonaRenderer {
         context.translateBy(x: -origin.x, y: -origin.y)
 
         let count = traits.eyeCount
-        // Small marks need proportionally bigger features or the face turns
-        // into two specks. Three fixed steps, not a curve, so the 26pt seat
-        // beside a message and the 30pt header look like the same creature.
         let lod: CGFloat = unit < 24 ? 1.28 : unit < 34 ? 1.12 : 1.0
         let radius = unit * 0.060 * lod * clamp(face.eyeScale, 0.8, 1.25)
         let spread = unit * 0.25 * clamp(face.spread, 0.85, 1.15) / max(sqrt(aspect), 0.6)
@@ -287,14 +256,6 @@ enum PersonaRenderer {
         )
     }
 
-    /// One eye: a solid shape with its lids cut out of it.
-    ///
-    /// Every expression is lid positions, not a different drawing. The upper
-    /// lid comes down to shut it, tips inward for focus and outward for a
-    /// sorry droop. The lower lid rises flat for a squint and as a curve for
-    /// a smile, and pushed all the way it leaves a crescent. Because they are
-    /// all numbers the eye can travel from any of them to any other, which is
-    /// what lets a face change its mind on screen instead of swapping.
     private static func drawEye(
         in context: inout GraphicsContext,
         centre: CGPoint,
@@ -313,14 +274,10 @@ enum PersonaRenderer {
     ) {
         let wide = clamp(face.openness, 0, 1.3)
         let closing = clamp(blink, 0, 1)
-        // A blink squeezes the eye a little wider as it shuts, and its small
-        // overshoot on the way out (a negative blink) opens it a little taller.
         let width = radius * 2 * (shape == .oval ? 0.86 : 1) * widthScale * (1 + closing * 0.10)
         let height = radius * 2 * (shape == .oval ? 1.14 : 1)
             * min(1.4, heightScale * max(1, wide)) * (1 - min(0, blink) * 0.9)
         let open = clamp(min(wide, 1) * (1 - closing), 0, 1)
-        // A squint is a small smile of the lower lid, not a flat cut: a flat
-        // one squared the eye off and every busy mood looked cross.
         let squint = clamp(face.squint, 0, 0.8)
         let smile = clamp(max(cheer, squint * 0.45), 0, 1)
         let focus = clamp((face.brow - 0.15) / 0.85, 0, 1) * (1 - clamp(face.droop, 0, 1)) * 0.55
@@ -336,9 +293,6 @@ enum PersonaRenderer {
                 : Path(ellipseIn: frame)
             layer.fill(eye, with: .color(ink))
 
-            // Two catchlights, a big one high and a small one low on the far
-            // side. The single most effective thing for making a dark eye
-            // look wet and alive, and the lids cut them like the eye.
             if unit >= 22, open > 0.3 {
                 let size = min(width, height)
                 let big = size * 0.30
@@ -351,7 +305,6 @@ enum PersonaRenderer {
                     width: small, height: small)), with: .color(.white.opacity(0.62)))
             }
 
-            // Where the lids meet when shut: below the middle, as on a face.
             let meet = frame.minY + height * 0.68
             let shut = 1 - open
             let upper = frame.minY + (meet - frame.minY) * shut
@@ -367,10 +320,6 @@ enum PersonaRenderer {
             var upperLid = Path()
             upperLid.move(to: CGPoint(x: left, y: frame.minY - height))
             upperLid.addLine(to: CGPoint(x: right, y: frame.minY - height))
-            // The lid's edge arches, most of all half way down, so a heavy
-            // lid leaves a rounded eye rather than one sliced off with a
-            // ruler. Fully open or fully shut it is straight, so a blink
-            // still closes.
             upperLid.addLine(to: CGPoint(x: right, y: lidY(right)))
             upperLid.addQuadCurve(
                 to: CGPoint(x: left, y: lidY(left)),
@@ -395,9 +344,6 @@ enum PersonaRenderer {
             layer.fill(lowerLid, with: .color(.black))
             layer.blendMode = .normal
 
-            // A shut eye is still an expression: a curve up when pleased, down
-            // when content or asleep. It fades in as the lids close, so a
-            // blink and a smile both pass through it without a cut.
             let line = clamp((0.24 - open) / 0.18, 0, 1)
             if line > 0 {
                 let sag = height * 0.22 * (smile > 0.5 ? -1 : 1) - height * 0.10 * droop
@@ -456,8 +402,6 @@ enum PersonaRenderer {
         amount: CGFloat,
         side: CGFloat
     ) {
-        // The inner end drops for strain and rises for surprise. Which end is
-        // inner depends on which eye this is, so one number does both brows.
         let inner: CGFloat = side <= 0 ? 1 : -1
         let width = radius * 1.5
         let lift = radius * (1.55 + max(0, -amount) * 0.5)
@@ -483,13 +427,6 @@ enum PersonaRenderer {
         face: PersonaFacePose,
         traits: PersonaTraits
     ) {
-        // A mouth is one closed path with two curved edges: the top edge
-        // carries the smile, the gap between the edges carries the speech.
-        // Interpolating those two numbers covers a line, a grin, a frown and
-        // an open vowel without a case for each.
-        // The persona's own mouth is a bias on the mood's, not a replacement
-        // for it: a naturally glum character still smiles when it wins, it
-        // just does not smile as widely as a naturally cheerful one.
         let resting: CGFloat = switch traits.mouth {
         case .smile: 0.34
         case .frown: -0.34
@@ -497,8 +434,6 @@ enum PersonaRenderer {
         case .dot, .none: 0
         }
         let curve = min(max(face.mouthCurve + resting, -1.1), 1.1)
-        // An open mouth widens as it opens. Without it a loud syllable is a
-        // tall narrow wedge rather than a vowel.
         let half = unit * 0.052 * min(face.mouthWidth, 1.2) * traits.mouthWidth
             * (1 + min(max(face.mouthOpen, 0), 1.2) * 0.22)
         let open = min(max(0, face.mouthOpen), 0.8) * unit * 0.065
@@ -506,9 +441,6 @@ enum PersonaRenderer {
 
         let left = place(-half, baseY)
         let right = place(half, baseY)
-        // A quadratic reaches half its control offset, so the gap between the
-        // two edges is half of `open`. Doubled here rather than in the moods,
-        // where "one" should mean a wide open mouth and not half of one.
         let bow = place(0, baseY + curve * unit * 0.080)
         let sag = place(0, baseY + curve * unit * 0.080 + open * 2)
 
@@ -528,9 +460,6 @@ enum PersonaRenderer {
         context.fill(path, with: .color(ink.opacity(0.72)))
 
         guard face.tongue > 0.02 else { return }
-        // Clipped to the mouth, so a tongue never escapes the face however
-        // wide the mood asked for it. It hangs from the lower edge, which is
-        // where the bottom curve already is.
         context.drawLayer { inner in
             inner.clip(to: path)
             let reach = min(max(face.tongue, 0), 1)
@@ -548,7 +477,6 @@ enum PersonaRenderer {
         }
     }
 
-    // MARK: - What is in the air
 
     private static func drawMotes(
         _ engine: PersonaEngine,
@@ -734,17 +662,7 @@ enum PersonaRenderer {
     }
 }
 
-// MARK: - Held things
 
-/// The newspaper, from our side of it.
-///
-/// We are looking at the back. The print faces the character, which is the
-/// only arrangement that makes sense and also the one everybody draws: a wide
-/// blank sheet held up, a fold down the middle, and two eyes over the top
-/// edge. Column rules on our side would mean he was reading it backwards.
-///
-/// It is held and it drifts, and that is all it does. Reading is somebody
-/// absorbed and barely moving, so the sheet has no events on it.
 private func drawPaper(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -761,8 +679,6 @@ private func drawPaper(
         layer.rotate(by: .radians(tilt))
         layer.translateBy(x: -frame.midX, y: -frame.midY)
 
-        // The top edge dips at the fold and lifts at the corners, because a
-        // sheet held at two points hangs, and a straight edge reads as card.
         var sheet = Path()
         sheet.move(to: CGPoint(x: frame.minX, y: frame.minY + height * 0.06))
         sheet.addQuadCurve(
@@ -785,12 +701,9 @@ private func drawPaper(
         sheet.closeSubpath()
         layer.fill(sheet, with: .color(.white.opacity(0.90)))
 
-        // Everything that happens on the paper happens inside the paper.
         layer.drawLayer { inked in
             inked.clip(to: sheet)
 
-            // The fold: what turns two flat halves into one sheet with a
-            // crease in it.
             var fold = Path()
             fold.move(to: CGPoint(x: frame.midX, y: frame.minY + height * 0.16))
             fold.addQuadCurve(
@@ -800,8 +713,6 @@ private func drawPaper(
             inked.stroke(fold, with: .color(hue.opacity(0.35)), lineWidth: max(1, unit * 0.016))
 
             guard unit >= 44 else { return }
-            // The print, showing faintly through the paper. Enough to say
-            // there is something on the other side, not enough to read.
             var bleed = Path()
             for line in 0..<4 {
                 let y = frame.minY + height * (0.34 + CGFloat(line) * 0.16)
@@ -817,16 +728,10 @@ private func drawPaper(
             )
         }
 
-        // The outline last, so nothing drawn on the sheet can sit on top of
-        // its own edge.
         layer.stroke(sheet, with: .color(hue.opacity(0.95)), lineWidth: max(1, unit * 0.024))
     }
 }
 
-/// The light a screen throws back at whoever is looking into it.
-///
-/// This is how the game is shown. The screen faces the character, so the only
-/// honest way to put it on our side of the picture is the glow on his face.
 private func drawGlow(
     in context: inout GraphicsContext,
     mote: PersonaMote,
@@ -855,11 +760,6 @@ private func drawGlow(
     )
 }
 
-/// The back of something handheld.
-///
-/// No screen and no buttons on this side: they face the character. What we
-/// get is the shape, the tilt, and the fact that it never stops moving, which
-/// is what somebody playing actually looks like from across a room.
 private func drawConsole(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -887,8 +787,6 @@ private func drawConsole(
         layer.stroke(shell, with: .color(.white.opacity(0.30)), lineWidth: max(1, unit * 0.014))
 
         guard unit >= 44 else { return }
-        // One moulding line across the back. It is what stops a rounded
-        // rectangle reading as a card, and it is all the detail this side has.
         var seam = Path()
         seam.move(to: CGPoint(x: frame.minX + width * 0.16, y: frame.midY + height * 0.16))
         seam.addLine(to: CGPoint(x: frame.maxX - width * 0.16, y: frame.midY + height * 0.16))
@@ -900,13 +798,6 @@ private func drawConsole(
     }
 }
 
-/// A keyboard lying on the floor, seen from slightly above and in front.
-///
-/// `point` is the middle of its front edge, and that edge sits exactly on the
-/// floor line. It was drawn as a flat rounded rectangle centred on its point,
-/// which is a keyboard photographed from directly overhead and pasted into a
-/// side view: it hung in the air with nothing holding it up. A near edge, a
-/// narrower far edge and a front lip is the whole trick.
 private func drawKeyboard(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -921,8 +812,6 @@ private func drawKeyboard(
     let topY = point.y - thickness
     let backY = topY - depth
 
-    // The lip. It is the only part with any height, and it is what says the
-    // thing is resting on something rather than floating over it.
     var lip = Path()
     lip.move(to: CGPoint(x: point.x - front / 2, y: topY))
     lip.addLine(to: CGPoint(x: point.x + front / 2, y: topY))
@@ -942,8 +831,6 @@ private func drawKeyboard(
     context.stroke(lip, with: .color(hue.opacity(0.85 * opacity)), lineWidth: max(1, unit * 0.016))
 
     guard unit >= 32 else { return }
-    // Three rows, each narrower and shorter than the one in front of it,
-    // because that is what rows going away from you do.
     for row in 0..<3 {
         let along = CGFloat(row) / 3
         let rowWidth = front + (back - front) * along
@@ -960,8 +847,6 @@ private func drawKeyboard(
     }
 }
 
-/// A sheet of paper lying on the floor, in the same shallow perspective as the
-/// keyboard: near edge wide and on the floor line, far edge narrower.
 private func drawSheet(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1015,8 +900,6 @@ private func drawSprout(
     opacity: CGFloat
 ) {
     let reach = unit * 0.13 * scale
-    // A little mound of soil first. Without it a stem meeting the floor line
-    // reads as a plant stuck onto the picture rather than growing out of it.
     drawSoil(in: &context, at: point, unit: unit, width: reach * 1.5, opacity: opacity)
     var stem = Path()
     stem.move(to: point)
@@ -1033,12 +916,6 @@ private func drawSprout(
     }
 }
 
-/// A brush, held handle-up with the bristles down on the paper.
-///
-/// Drawn along +x, so the caller's angle points the working end. The bristles
-/// are a splayed bundle of separate tapered hairs rather than one rounded
-/// blob: a blob at this size reads as a rubber tip, and the whole point of a
-/// brush is that the end of it is soft and comes apart.
 private func drawPaintBrush(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1053,7 +930,6 @@ private func drawPaintBrush(
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(tilt))
 
-        // A tapered handle: thick where it is held, thinner at the ferrule.
         var shaft = Path()
         shaft.move(to: CGPoint(x: -handle * 0.58, y: -width * 0.42))
         shaft.addLine(to: CGPoint(x: handle * 0.24, y: -width * 0.26))
@@ -1070,9 +946,6 @@ private func drawPaintBrush(
         ), cornerRadius: width * 0.16)
         layer.fill(ferrule, with: .color(.white.opacity(0.62 * opacity)))
 
-        // Five hairs, splayed and bent. They fan wider than the ferrule and
-        // each comes to a point, which is what makes the end look loaded and
-        // soft rather than moulded.
         let root = handle * 0.34
         let tip = handle * 0.62
         for index in 0..<5 {
@@ -1099,10 +972,7 @@ private func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFl
     min(upper, max(lower, value))
 }
 
-// MARK: - The small props
 
-/// What the sprout becomes. Five petals and a middle, because four reads as a
-/// propeller and six reads as a snowflake.
 private func drawFlower(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1112,7 +982,6 @@ private func drawFlower(
     opacity: CGFloat
 ) {
     let reach = unit * 0.105 * scale
-    // The same patch of soil the sprout came out of, and the stalk it kept.
     let root = CGPoint(x: point.x, y: point.y + reach * 1.9)
     drawSoil(in: &context, at: root, unit: unit, width: reach * 1.5, opacity: opacity)
     var stalk = Path()
@@ -1142,7 +1011,6 @@ private func drawFlower(
     )
 }
 
-/// One piece of punctuation, floating. The only text this cast is allowed.
 private func drawMark(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1174,8 +1042,6 @@ private func drawMark(
     )
 }
 
-/// The bead of sweat. It flies off the head rather than running down it, which
-/// is the cartoon version and the one that reads at this size.
 private func drawSweat(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1244,8 +1110,6 @@ private func drawHeart(
     }
 }
 
-/// A star with a tail behind it. `tilt` is the direction it is travelling, so
-/// the tail always trails rather than pointing wherever it was drawn.
 private func drawShootingStar(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1278,8 +1142,6 @@ private func drawShootingStar(
     context.fill(star, with: .color(Theme.warning.opacity(opacity)))
 }
 
-/// One scrap, tumbling. Colour comes off the brand arc rather than the party
-/// shop, so a celebration still looks like this app celebrating.
 private func drawConfetti(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1295,8 +1157,6 @@ private func drawConfetti(
     context.drawLayer { layer in
         layer.translateBy(x: point.x, y: point.y)
         layer.rotate(by: .radians(tilt))
-        // Squashed by its own spin, so a flat scrap turns edge-on to us
-        // halfway round instead of sliding sideways.
         layer.scaleBy(x: 1, y: max(0.15, abs(cos(tilt * 1.7))))
         layer.fill(
             Path(roundedRect: CGRect(x: -size * 0.5, y: -size * 0.85, width: size, height: size * 1.7), cornerRadius: size * 0.22),
@@ -1305,8 +1165,6 @@ private func drawConfetti(
     }
 }
 
-/// A wet stroke of paint. Fat in the middle and tapered at both ends, because
-/// that is what a brush pressed and lifted leaves behind.
 private func drawStroke(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1330,8 +1188,6 @@ private func drawStroke(
     }
 }
 
-/// A soap bubble: mostly nothing, with a rim and one highlight. It has to be
-/// see-through or it is a ball, and a ball is a different mood entirely.
 private func drawBubble(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1363,8 +1219,6 @@ private func drawBubble(
     )
 }
 
-/// A biscuit, with bites taken out of it. `tilt` counts the bites, so the same
-/// prop covers the whole snack from whole to nearly gone.
 private func drawCookie(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1386,13 +1240,8 @@ private func drawCookie(
             )
         )
     }
-    // The persona's own colour, like every other prop it holds. It was the
-    // warning amber, which in an app that uses that colour to mean "your turn"
-    // made a snack look like a fault.
     context.fill(biscuit, with: .color(hue.opacity(0.62 * opacity)))
     context.stroke(biscuit, with: .color(hue.opacity(0.95 * opacity)), lineWidth: max(1, unit * 0.014))
-    // The chips. Fixed offsets rather than random ones, so a biscuit does not
-    // reshuffle itself every frame.
     for offset in [CGPoint(x: -0.34, y: 0.18), CGPoint(x: 0.22, y: 0.36), CGPoint(x: 0.05, y: -0.30)] {
         context.fill(
             Path(ellipseIn: CGRect(
@@ -1423,8 +1272,6 @@ private func drawSoil(
     context.fill(mound, with: .color(.black.opacity(0.30 * opacity)))
 }
 
-/// The hammer, pivoting where the character holds it. `tilt` is the swing, so
-/// the head is drawn at the far end of a handle that rotates around the grip.
 private func drawHammer(
     in context: inout GraphicsContext,
     at point: CGPoint,
@@ -1445,8 +1292,6 @@ private func drawHammer(
             with: .color(hue.opacity(0.95 * opacity)),
             style: StrokeStyle(lineWidth: max(2, unit * 0.042), lineCap: .round)
         )
-        // The head is deliberately heavy. A light one swings like a stick, and
-        // the whole point of this mood is that the thing has weight.
         let head = CGRect(
             x: handle - unit * 0.030,
             y: -unit * 0.075,
@@ -1464,8 +1309,6 @@ private func drawHammer(
     }
 }
 
-/// A nail in the floor, most of the way in by the end of a cycle. `showing` is
-/// how much of the shank is still above the boards.
 private func drawNail(
     in context: inout GraphicsContext,
     at point: CGPoint,

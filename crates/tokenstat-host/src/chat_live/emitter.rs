@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Bounded output forwarding with cancellable backpressure and a final flush.
 use super::input::{self, Completed, Failure, Input};
 use serde_json::Value;
 use std::io::Write;

@@ -20,11 +20,6 @@ internal class TeamAskModel(private val storage: TeamAskRecoveryStore, private v
     var fence by mutableStateOf<JsonObject?>(null); private set
     var error by mutableStateOf<String?>(null); private set
     private var saved: TeamAskRecoveryStore.Snapshot? = null
-    /**
-     * The sharing computer holds this request until its owner answers. The
-     * same request is sent again while this screen is open, until it starts,
-     * is declined, or the owner's window to answer has passed.
-     */
     var awaitingApproval by mutableStateOf(false); private set
     private var approvalSince: Long? = null
     val pending get() = saved != null && fence == null
@@ -60,7 +55,7 @@ internal class TeamAskModel(private val storage: TeamAskRecoveryStore, private v
             val response = call("team.chat.ask", original.record.input)
             val running = response["fence"] as? JsonObject
             if (response["state"] == JsonPrimitive("running") && running != null && TeamAskRecord.validFence(running)) {
-                fence = running // Retain Stop if saving the running reply fails.
+                fence = running
                 replace(original.record.copy(fence = running)); text = ""
             } else if (original.record.terminal(response, target.share)) { replace(null); text = "" }
             else error = "ask_unconfirmed"

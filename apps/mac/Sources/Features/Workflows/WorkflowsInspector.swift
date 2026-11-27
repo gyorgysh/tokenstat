@@ -312,7 +312,6 @@ private struct FollowTranscript: View {
     }
 }
 
-/// Minutes on the working graph. 0 means no limit.
 private struct WorkflowBudgetField: View {
     @Bindable var model: WorkflowsModel
     @State private var minutes = ""
@@ -364,7 +363,6 @@ private struct WorkflowBudgetField: View {
     }
 }
 
-/// Fields for the selected node. Pickers write immediately. Text is one undo.
 private struct WorkflowNodeInspector: View {
     @Bindable var model: WorkflowsModel
     @AppStorage("workflows.followLive") private var followLive = true

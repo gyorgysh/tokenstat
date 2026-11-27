@@ -44,9 +44,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 
-/// The tail, not the whole line. A full SHA256 fingerprint is wider than a
-/// phone, so the row prints what comes after the `SHA256:` prefix, which is
-/// the part you compare against. Port of `SSHLibraryView.shortFingerprint`.
 fun shortFingerprint(value: String?): String? {
     if (value.isNullOrEmpty()) return null
     val separator = value.indexOf(":")
@@ -86,14 +83,6 @@ private fun SshRowShell(
     }
 }
 
-/// One saved server: its color strip, its platform mark, its name, and a
-/// Connect button that stays visible. The long-press menu is a popup:
-/// connect, favourites, edit, delete. Port of `SSHHostRow` plus `hostRow`'s
-/// context menu.
-///
-/// The address is deliberately not here. The Apple row shows the name and the
-/// confirmed platform only; the address lives in the editor, which is the
-/// detail side. A row must never print a bare IP.
 @Composable
 fun SshHostRow(
     host: JsonObject,
@@ -175,9 +164,6 @@ fun SshHostRow(
     }
 }
 
-/// One saved key: its label and the fingerprint tail. Copying the public key
-/// is the reason to open one at all, so it has a shortcut rather than hiding
-/// behind the editor. Port of `keyRow`.
 @Composable
 fun SshKeyRow(
     key: JsonObject,
@@ -207,7 +193,6 @@ fun SshKeyRow(
     )
 }
 
-/// One saved command. Port of `snippetRow`.
 @Composable
 fun SshSnippetRow(
     snippet: JsonObject,

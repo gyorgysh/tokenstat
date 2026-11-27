@@ -5,9 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// A finished turn needs no banner over the transcript it finished in, but
-/// everything else still notifies: another machine's chat, a run, or an
-/// unnamed push that cannot be attributed to what is on screen.
 class VisibleChatTest {
     @Test
     fun `finished turn on the open machine stays quiet`() {

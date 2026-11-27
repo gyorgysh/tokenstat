@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Every identifier is copied only by its own explicit button. Long native
-/// session IDs retain their complete value while the row truncates visually.
 struct SessionIdentityRows: View {
     let entries: [SessionIdentityEntry]
     var truncated = false

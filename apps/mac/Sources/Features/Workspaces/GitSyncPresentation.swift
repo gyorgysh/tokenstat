@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A window owns the dialog so an auto-hiding inspector can remove its
-/// controls without dismissing an in-progress review or operation.
 struct GitSyncPresentation: Identifiable {
     let id = UUID()
     let target: GitCommitTarget

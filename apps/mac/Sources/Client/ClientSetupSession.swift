@@ -3,7 +3,6 @@
 import SwiftUI
 import Observation
 
-/// Scene/account-owned setup, independent of the adaptive content branches.
 @MainActor @Observable
 final class ClientSetupSession {
     struct Presentation: Identifiable { let id = UUID() }
@@ -40,7 +39,6 @@ final class ClientSetupSession {
         preparation = nil
     }
 
-    /// Cancellation of a remounted view's waiter cannot cancel setup loading.
     func prepare() async {
         guard presentation != nil, ownership.claim() != nil, !model.prepared else { return }
         if let current = preparation { await current.1.value; return }

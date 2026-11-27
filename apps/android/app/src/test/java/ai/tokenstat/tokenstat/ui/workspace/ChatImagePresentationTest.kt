@@ -98,7 +98,6 @@ class ChatImagePresentationTest {
             val open = chatImageRows(foldTranscript(raw, level, false) { true }, raw)
             assertEquals(listOf("tool-one", "tool-two"), open.toolImages.keys.toList())
         }
-        // A tool outside the loaded page is never guessed from a nearby step.
         val orphan = image("orphan", "missing")
         assertTrue(chatImageRows(listOf(one, orphan), listOf(one, orphan)).rows.last() is ChatDisplayItem.ImageGallery)
     }

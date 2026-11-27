@@ -12,54 +12,12 @@ import AppKit
 import UIKit
 #endif
 
-/// The two typefaces the app is drawn in, and the one place that knows their
-/// names.
-///
-/// # Why bundled rather than the system font
-///
-/// tokenstat is one product across a Mac app, an iPhone, an Android phone and
-/// a website, and the system font is a different typeface on each of them. The
-/// same screen cannot be the same screen if the words in it change shape
-/// depending on which of your devices you are holding.
-///
-/// Manrope for everything a person reads as language: navigation, controls,
-/// body text, headings, labels. JetBrains Mono for everything read character by
-/// character, where a lowercase l and a digit 1 have to be different pictures:
-/// terminals, commands, model identifiers, and numbers in a column.
-///
-/// # Why registered in code
-///
-/// `UIAppFonts` and `ATSApplicationFontsPath` are two different keys, spelled
-/// differently, doing the same job on the two platforms, and both of them
-/// depend on where in the bundle the resource phase happened to put the file.
-/// One call that asks the bundle for the file by name is the same code on both
-/// and cannot be broken by moving a folder.
-///
-/// # Why both are variable files
-///
-/// One file per family instead of seven. A variable font carries every weight
-/// between 200 and 800 in one outline set, so the bundle pays 165 KB for
-/// Manrope rather than seven static faces, and a weight that is not one of the
-/// named instances is interpolated rather than faked by smearing.
 enum AppFonts {
     static let interface = "Manrope"
     static let mono = "JetBrains Mono"
 
-    /// Whether the bundled faces actually registered.
-    ///
-    /// Read before every font is made, and false is not a theoretical state: a
-    /// resource that failed to copy, or a file this version of CoreText will
-    /// not parse, would otherwise render the entire app in whatever the system
-    /// falls back to, which is a worse outcome than the system font chosen on
-    /// purpose. See `Theme.font`.
     private(set) nonisolated(unsafe) static var registered = false
 
-    /// Register the bundled faces with this process.
-    ///
-    /// Idempotent, and called before the first view is built. Registering into
-    /// the process rather than the user's font book: these are the app's
-    /// copies, and installing typefaces on somebody's Mac because they opened
-    /// an app is not a thing an app should do.
     static func register() {
         struct Once { nonisolated(unsafe) static var done = false }
         guard !Once.done else { return }
@@ -74,9 +32,6 @@ enum AppFonts {
             }
             var error: Unmanaged<CFError>?
             if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
-                // Already registered is a success, not a failure: the same
-                // file can be registered by a preview host before the app
-                // itself gets to it.
                 var alreadyThere = false
                 if let failure = error?.takeRetainedValue() {
                     alreadyThere = CFErrorGetCode(failure)

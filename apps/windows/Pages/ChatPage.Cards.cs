@@ -14,11 +14,6 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Transcript cards and the follow pill. Same behaviour as the Mac ToolRow,
-/// ChatFileEditRow and TranscriptFollowPill: collapse first, then Follow,
-/// then the 150-row window in RebuildTranscript.
-/// </summary>
 internal sealed partial class ChatPage
 {
     private const int ToolSnippetLines = 60;
@@ -29,11 +24,6 @@ internal sealed partial class ChatPage
     private const double WorkingSeatHeight = 34;
 
     private readonly Dictionary<string, bool> _expandedCards = [];
-    /// <summary>
-    /// Every step group starts open (Expand all) or closed. A group in
-    /// <see cref="_toggledGroups"/> is the other way, because somebody opened
-    /// or closed it by hand.
-    /// </summary>
     private bool _groupsOpen;
     private readonly HashSet<string> _toggledGroups = [];
     private readonly Border _followPillHost = new()
@@ -79,14 +69,8 @@ internal sealed partial class ChatPage
     private List<string> _drawnRows = [];
     private int _drawnPrefix;
     private bool _moving, _earlierFailed;
-    /// <summary>How near an edge, in points, before the next rows come in.</summary>
     private const double EdgeDistance = 400;
 
-    /// <summary>
-    /// Older rows come in as the reader nears the top, and newer ones as they
-    /// come back down. Only once the scroll has come to rest, so moving the
-    /// window never fights a hand or a wheel.
-    /// </summary>
     private void MoveWindowAtEdge()
     {
         if (_scroll is null || _moving || _followEnd || _historyLoading || _scroll.ScrollableHeight <= 0) return;
@@ -95,7 +79,6 @@ internal sealed partial class ChatPage
             Move(() => _sliceOlder = Math.Max(0, _sliceOlder - SliceStep));
     }
 
-    /// <summary>Redraw another part of the conversation with the reader's line where it was.</summary>
     private void Move(Action change)
     {
         if (_scroll is not { } scroll) return;
@@ -136,8 +119,6 @@ internal sealed partial class ChatPage
         _lastScrollable = _scroll.ScrollableHeight;
         if (_followEnd)
         {
-            // Content growth while pinned is not a user scroll. Stay with the
-            // live turn instead of unpinning because the height moved.
             if (grew)
             {
                 _scroll.ChangeView(null, _scroll.ScrollableHeight, null, true);
@@ -158,11 +139,6 @@ internal sealed partial class ChatPage
         if (settled) MoveWindowAtEdge();
     }
 
-    /// <summary>
-    /// Stay on the newest message while following. Called after layout, when
-    /// <c>ScrollableHeight</c> already counts what was just added; asking from
-    /// the rebuild itself read the old height and stopped one reply short.
-    /// </summary>
     private void KeepFollowing()
     {
         if (_scroll is null || _openId is null || !_followEnd || _sliceOlder != 0) return;
@@ -300,12 +276,6 @@ internal sealed partial class ChatPage
     private readonly Dictionary<string, string> _questionWriting = [];
     private readonly Dictionary<string, List<string>> _questionPicks = [];
 
-    /// <summary>
-    /// A question the agent asked, drawn where it asked it, like the Mac's
-    /// ChatQuestionCard. Choices answer in one click, a multiple-choice
-    /// question collects its picks first, and the field takes an answer of
-    /// the person's own. Once answered it says what was sent, nothing more.
-    /// </summary>
     private UIElement QuestionCard(ChatQuestionItem question)
     {
         var body = new StackPanel { Spacing = Theme.SpaceS };
@@ -378,7 +348,6 @@ internal sealed partial class ChatPage
             if (question.Multiple)
             {
                 sendPicked = Buttons.Primary(L10n.Text("windows.chatquestion.send_choices"), ActionIcon.Send,
-                    // Quoted, so a comma inside a choice cannot read as two.
                     async (_, _) => await AnswerQuestionAsync(question, string.Join(", ", picked.Select(choice => $"“{choice}”"))), small: true);
                 sendPicked.IsEnabled = !sending && picked.Count > 0;
                 body.Children.Add(sendPicked);
@@ -421,10 +390,6 @@ internal sealed partial class ChatPage
         Child = body,
     };
 
-    /// <summary>
-    /// Send one answer. The host records it and the card turns answered on the
-    /// next read of the transcript, on every device at once.
-    /// </summary>
     private async Task AnswerQuestionAsync(ChatQuestionItem question, string answer)
     {
         answer = answer.Trim();
@@ -440,8 +405,6 @@ internal sealed partial class ChatPage
                 ["questionId"] = question.Id,
                 ["text"] = answer,
             });
-            // An answer to an idle chat started a turn. Follow it the way a
-            // sent message is followed; the other deliveries ride the poll.
             if (generation == _openGeneration && _openId == chat && result["conversation"] is JsonObject updated)
             {
                 _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
@@ -536,7 +499,6 @@ internal sealed partial class ChatPage
         return button;
     }
 
-    /// <summary>What a group row shows, so it is rebuilt only when that changes.</summary>
     private static string StepGroupKey(ChatStepGroup? group) => group is null ? ""
         : $"{group.Style}|{group.Open}|{group.Steps}|{group.Files}|{group.Added}|{group.Removed}|{group.Reads}|{group.Searches}|{group.Pages}|{group.Failures}|{group.Running}|{group.LiveVerb}|{group.LiveTarget}|{group.StartedAt}|{group.EndedAt}|{group.Cost}|{group.Preview}|{group.Plain}|{group.Verb}|{group.Subject}";
 
@@ -601,11 +563,6 @@ internal sealed partial class ChatPage
         return button;
     }
 
-    /// <summary>
-    /// The files a finished turn changed, under its last reply. Port of
-    /// ChatTurnChangesCard.swift: the first four files, the rest one press
-    /// away, and Review opens the folder's Changes beside the chat.
-    /// </summary>
     private readonly Dictionary<string, IReadOnlyList<ChangedFile>> _turnReviews = new();
 
     private void ReviewTurnChanges(string id, string? path)
@@ -613,12 +570,6 @@ internal sealed partial class ChatPage
         if (_turnReviews.TryGetValue(id, out var files)) ReviewTurnChangesRequested?.Invoke(files, path);
     }
 
-    /// <summary>
-    /// The point where a conversation changed hands, and what the incoming
-    /// agent was told. A banner in the brand gradient rather than a divider:
-    /// people missed the thin caption, and a change of agent changes what
-    /// every reply below it can know. The same banner as the Mac and phones.
-    /// </summary>
     private UIElement HandoffBanner(DisplayItem item)
     {
         var expanded = _expandedCards.TryGetValue(item.Id, out var open) && open;
@@ -1308,11 +1259,6 @@ internal sealed partial class ChatPage
         };
     }
 
-    /// <summary>
-    /// A side with nothing in it is left out, so a new file reads "+22"
-    /// rather than "+22 −0". <paramref name="plain"/> sets it in the line's
-    /// own type, for the quiet Compact lines.
-    /// </summary>
     private static FrameworkElement DiffStat(long added, long removed, bool plain = false)
     {
         var row = new StackPanel
@@ -1342,11 +1288,6 @@ internal sealed partial class ChatPage
         return row;
     }
 
-    /// <summary>
-    /// What one step produced, below its open Compact line. The line above
-    /// already says what the step was, so there is no card, no second header
-    /// and no show button. Port of ChatStepDetail.swift.
-    /// </summary>
     private static UIElement PlainStepDetail(DisplayItem item)
     {
         var stack = new StackPanel { Spacing = 2, Padding = new Thickness(Theme.SpaceS, 2, Theme.SpaceS, 2) };

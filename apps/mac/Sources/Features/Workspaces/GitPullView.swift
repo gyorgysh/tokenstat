@@ -2,14 +2,10 @@
 
 import SwiftUI
 
-/// Pull beside Push, on the desktop and the phone. Drawing it reads nothing
-/// remote: the sheet it opens is what fetches, because a person pressed it.
 struct GitPullControl: View {
     let target: GitCommitTarget
     let folderName: String
     let hostName: String
-    /// Commits the folder's last status said the upstream has. Only as fresh
-    /// as the last fetch, which is why the sheet fetches again.
     let incoming: UInt32
     var onPulled: () async -> Void
     @State private var presenting = false
@@ -164,7 +160,6 @@ struct GitPullSheet: View {
         outcome = nil
         do {
             review = try await service.pullReview()
-            // The fetch moved ahead and behind, so the folder's numbers move too.
             await onPulled()
         } catch {
             review = nil
@@ -182,9 +177,6 @@ struct GitPullSheet: View {
             outcome = try await service.pull(reviewed)
             await onPulled()
         } catch {
-            // A refused pull (the branch moved, HEAD detached) would refuse
-            // again with the same review. Drop it so the sheet offers Check
-            // again instead of the same Pull.
             review = nil
             self.error = error.localizedDescription
         }
@@ -198,7 +190,6 @@ struct GitPullSheet: View {
         error = nil
         do {
             _ = try await service.setupLFS(allowInstall: !lfs.installed && lfs.canInstall)
-            // Setup can take time; get a fresh review before offering Pull.
             await check()
         } catch {
             self.error = error.localizedDescription
@@ -206,8 +197,6 @@ struct GitPullSheet: View {
     }
 }
 
-/// A pending remote check fills the sheet's content area instead of leaving
-/// a spinner stranded at the upper-left corner of an otherwise empty sheet.
 struct GitSyncLoadingView: View {
     let message: String
     var detail: String? = nil
@@ -250,8 +239,6 @@ extension BranchPull {
     var tint: Color { ChatPull(self).tint }
 }
 
-/// The branch's pull request, or the way to open one. Beside Pull and Push
-/// in Changes, so review, commit, push and the pull request are one place.
 struct GitBranchPullControl: View {
     let workspaceID: String
     let peer: String?
@@ -328,8 +315,6 @@ struct ChatGitStatusStrip: View {
     }
 }
 
-/// The pull request for the branch a chat is on, as a small chip. Opens it
-/// on the forge.
 struct BranchPullChip: View {
     let pull: BranchPull
     @Environment(\.openURL) private var openURL
@@ -362,8 +347,6 @@ struct BranchPullChip: View {
     }
 }
 
-/// "Changes +382 −236" above the composer: the folder's uncommitted work,
-/// one press from being reviewed beside the chat.
 struct ChatChangesPill: View {
     let git: GitStatus
     let review: () -> Void

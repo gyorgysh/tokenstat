@@ -41,11 +41,8 @@ final class TranscriptProbe {
 
     func noteViewportReset() { viewportResets += 1 }
 
-    /// Opt-in, bounded diagnostics. No conversation identifiers or text leave
-    /// the model. Run-loop work is responsiveness evidence, not rendered FPS.
     private var cpuStarted = 0.0
 
-    /// The calling thread's CPU time. Recording starts and stops on main.
     private static func threadCPUMilliseconds() -> Double {
         var time = timespec()
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
@@ -68,16 +65,10 @@ final class TranscriptProbe {
 
     func noteResize() { if recording { resizeCount += 1 } }
 
-    /// Every geometry sample while recording: time, offset from the top,
-    /// distance from the end, content height. A pull back against a scroll
-    /// shows as the offset reversing.
     private var recordedOffsets: [[Double]] = []
     private var rowHeights: [String: Double] = [:]
-    /// Every height a row has reported, recording or not (`key heights`).
     private(set) var measuredHeights: [String: Double] = [:]
     private var recordedRows: [String] = []
-    /// The row whose on-screen position is recorded on every frame while
-    /// recording (`key track`), as `tracked` in the report.
     var trackedRow: String?
     private var recordedTrack: [[Double]] = []
     func noteTracked(_ id: String, top: Double) {
@@ -85,7 +76,6 @@ final class TranscriptProbe {
         recordedTrack.append([(ProcessInfo.processInfo.systemUptime - recordingStarted) * 1000, top])
     }
 
-    /// A row whose height changed while recording, by how much.
     func noteRow(_ id: String, height: Double) {
         measuredHeights[id] = height
         guard recording else { return }
@@ -122,8 +112,6 @@ final class TranscriptProbe {
             "turns": sorted.count, "p50_ms": percentile(0.5),
             "elapsed_ms": (stopped - recordingStarted) * 1000,
             "total_work_ms": sorted.reduce(0, +), "resize_requests": resizeCount,
-            // CPU time the main thread actually ran. Wall-clock turn times
-            // grow when other processes load the machine; this does not.
             "main_cpu_ms": Self.threadCPUMilliseconds() - cpuStarted,
             "p95_ms": percentile(0.95), "p99_ms": percentile(0.99),
             "max_ms": sorted.last ?? 0,
@@ -141,20 +129,14 @@ final class TranscriptProbe {
         }
     }
 
-    /// What the transcript is holding. Written on change, not per frame.
     var rows = 0
     var built = 0
     var pinned = true
     var scrolling = false
 
-    /// The last programmatic scroll, and when. A hang that always follows one
-    /// is a different bug from a hang that never does.
     private var lastScroll = "none"
     private var lastScrollAt: CFAbsoluteTime = 0
 
-    /// A turn slower than this is worth a line. Well above a dropped frame,
-    /// well below anything a person would sit through.
-    /// `TOKENSTAT_SLOW_TURN_MS` lowers it for a measurement session.
     private static let slowTurn: CFAbsoluteTime = ProcessInfo.processInfo
         .environment["TOKENSTAT_SLOW_TURN_MS"].flatMap(Double.init).map { $0 / 1000 } ?? 0.25
 
@@ -178,8 +160,6 @@ final class TranscriptProbe {
         lastScrollAt = ProcessInfo.processInfo.systemUptime
     }
 
-    /// One scroll-geometry callback. Counted per turn, because a turn holding
-    /// dozens of them is a feedback loop and a turn holding one is not.
     func noteMetrics() {
         metricsThisTurn += 1
     }

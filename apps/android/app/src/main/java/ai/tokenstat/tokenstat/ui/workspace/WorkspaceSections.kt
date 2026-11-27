@@ -138,8 +138,6 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
-/// Shared JSON readers for the workspace sections. Internal so each section
-/// file reads the host answers the same way.
 internal fun JsonObject.str(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull
 
@@ -148,9 +146,7 @@ internal fun JsonObject.bol(key: String): Boolean = (this[key] as? JsonPrimitive
 internal fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
 
 internal fun asObjects(element: JsonElement?): List<JsonObject> =
-    (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()/// One workspace section, rendered as its own surface instead of a raw JSON
-/// dump. Each section reaches the real remote method over the tunnel; the
-/// renderers mirror their Apple counterparts' content and colour rules.
+    (element as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WorkspaceSection(
@@ -196,8 +192,6 @@ fun WorkspaceSection(
             .onFailure { if (it is CancellationException) throw it; error = TunnelCopy.display(it.message ?: L10n.text("android.workspacesections.the_request_failed.db4fb447"), hostLabel) }
         loading = false
     }
-    // PullsSection owns its filtered, cached and paged reads. Loading the
-    // legacy first page here duplicated the request every time it opened.
     LaunchedEffect(peer, workspace, section) { if (section != "Pulls") load() }
 
     val reload: () -> Unit = { scope.launch { load() } }
@@ -281,9 +275,6 @@ private fun SessionsSection(
                 .getBoolean("bypass.$workspace", false),
         )
     }
-    // The agent login the next launch uses. Remembered per folder; until one
-    // is picked it follows the default for new chats, and a repository lock
-    // always wins, so a terminal and a chat in one folder share a login.
     val agentProfiles = rememberAgentProfiles(model, peer, protocol)
     val profilePrefs = remember(context) {
         context.getSharedPreferences("tokenstat.launchprofile.v1", android.content.Context.MODE_PRIVATE)
@@ -297,9 +288,6 @@ private fun SessionsSection(
         if (profileLock != null) return null
         return (chosenProfile ?: profiles.defaultId).takeIf { it != "system" && profiles.byId(it) != null }
     }
-    // A model on the host's own LM Studio or Ollama for the agents launched
-    // here, remembered per folder. The host turns the pick into each tool's
-    // own flags and environment, so this only names it.
     val modelPrefs = remember(context) {
         context.getSharedPreferences("tokenstat.launchmodel.v1", android.content.Context.MODE_PRIVATE)
     }
@@ -336,12 +324,9 @@ private fun SessionsSection(
             catalog = asObjects(element).mapNotNull { ai.tokenstat.tokenstat.ui.logic.LaunchCatalog.parse(it) }
             catalogLoaded = true
         }.onFailure {
-            // A host that predates the launcher still gets the shell tile.
             catalogLoaded = true
         }
     }
-    // The Chat tile's badge counts the workspace's conversations, like the
-    // iOS destination tile. A failed count hides the badge, not the tile.
     var chatCount by remember(peer, workspace) { mutableStateOf(0) }
     LaunchedEffect(peer, workspace) {
         loadCatalog()
@@ -514,11 +499,6 @@ private fun SessionsSection(
         if (!catalogLoaded) {
             item { SkeletonRows(count = 2) }
         } else {
-            // The rest of the catalog is the last cell of the grid, a dashed
-            // `+` tile, exactly where the Apple grid puts it. A bordered
-            // "More agents (1)" chip underneath read as a filter on the list
-            // above rather than as one more thing you can open, and it broke
-            // the grid's shape at the bottom.
             val cells = grid.size + if (extra.isNotEmpty()) 1 else 0
             itemsIndexed((0 until cells).toList().chunked(2)) { _, pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -790,8 +770,6 @@ private fun LaunchTile(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
-    // The hide lives on a long press like the iOS context menu, not as a
-    // button inside the tile. The shell fallback is never hideable.
     var menu by remember { mutableStateOf(false) }
     Box(
         modifier
@@ -974,8 +952,6 @@ private fun TodoSection(
         }
         itemsIndexed(cards) { _, card ->
             val id = card.str("id") ?: return@itemsIndexed
-            // The host column for put-away cards is "archive"
-            // (`TodoCard.isArchived`); "archived" never matches.
             val archived = (card.str("column") ?: "") == "archive"
             Column(
                 Modifier
@@ -1014,9 +990,6 @@ private fun TodoSection(
                             onChanged()
                         }
                     }) {
-                        // Outlined and tinted like every other glyph here. The
-                        // filled Material pair drew a solid black square in a
-                        // row of thin accent marks.
                         Icon(
                             if (archived) ActionIcon.Restore.vector else ActionIcon.Archive.vector,
                             if (archived) L10n.text("common.restore") else L10n.text("common.archive"),
@@ -1059,8 +1032,6 @@ private fun TodoSection(
                             put("column", "backlog")
                             put("backend", "")
                             put("workspaceId", workspace)
-                            // A note is never delegated, so its budget is moot;
-                            // a task gets the Mac's default three hours.
                             put("budgetSeconds", if (kindTask) 180 * 60 else 0)
                         })
                     }.onSuccess { composer = false; onChanged() }
@@ -1339,9 +1310,6 @@ private fun AutomationsSection(
             val colors = LocalTsColors.current
             val enabled = automation.bol("enabled")
             val id = automation.str("id") ?: return@itemsIndexed
-            // The host sends the structured schedule from `ScheduleSpec`
-            // (kind, weekday, weekdays); the ring reads those, like Apple's
-            // `CadenceGlyph`, rather than a summary string the host never sends.
             val schedule = automation["schedule"] as? JsonObject
             val scheduleKind = schedule?.str("kind").orEmpty()
             val scheduleWeekday = schedule?.get("weekdays")?.jsonPrimitive?.intOrNull ?: 0
@@ -1460,8 +1428,6 @@ private fun BrowserSection(
                 }
                 error = null
                 busy = true
-                // A listener result can arrive after this section disappears.
-                // Keep its cleanup alive and retain the original owner.
                 model.viewModelScope.launch {
                     runCatching {
                         val ownsContext = {
@@ -1486,12 +1452,6 @@ private fun BrowserSection(
 }
 
 
-/// The dashed `+` cell that opens the rest of the catalog. Port of
-/// `ClientMoreTile`.
-///
-/// Dashed and half-toned on purpose: it sits in the same grid as the tiles
-/// that launch something, and it has to read as "there are more of these"
-/// rather than as another agent.
 @Composable
 private fun MoreLaunchTile(showing: Boolean, onTap: () -> Unit, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -1544,9 +1504,6 @@ internal fun sessionBelongsToFolder(cwd: String, folder: String): Boolean {
     return path.equals(root, ignoreCase = windows) || path.startsWith("$root/", ignoreCase = windows)
 }
 
-/// One setting for the next launch, in the same card as Bypass: what it is,
-/// what it is set to, and the whole card opens the choices. A setting with
-/// nothing to choose (a locked repository) says why instead.
 @Composable
 private fun LaunchChoiceCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,

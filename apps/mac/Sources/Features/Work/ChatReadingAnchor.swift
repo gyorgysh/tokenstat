@@ -1,22 +1,14 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A partial page can begin halfway through a streamed message. Once older
-/// deltas are loaded its visible row uses an earlier start, but the marked
-/// archive event still belongs to that same readable message.
 enum ChatReadingAnchor {
     static func resolve(_ eventID: String, items: [ChatDisplayItem], events: [ChatTimelineEvent]) -> String? {
-        // A collapsed header is named after its first member. Reading marks
-        // name drawn rows, while restoration searches the unfolded archive.
-        // Resolve the member too when an older page changed its text start.
         let eventID = eventID.hasPrefix("g:") ? String(eventID.dropFirst(2)) : eventID
         if items.contains(where: { $0.id == eventID }) { return eventID }
         for (prefix, kind) in [("text-s", "text"), ("think-s", "thinking")] where eventID.hasPrefix(prefix) {
             guard let position = UInt64(eventID.dropFirst(prefix.count)),
                   events.contains(where: { $0.seq == position && $0.event?.kind == kind }) else { return nil }
             return items.first { row in
-                // `firstSequence` first: a row can keep an older id after a
-                // page brought its earlier deltas (see `ChatRowContinuity`).
                 guard row.id.hasPrefix(prefix),
                       let start = row.firstSequence ?? UInt64(row.id.dropFirst(prefix.count)),
                       let end = row.lastSequence else { return false }

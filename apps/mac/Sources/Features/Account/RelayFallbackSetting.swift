@@ -2,7 +2,6 @@
 
 import SwiftUI
 
-/// This device's outbound route choice, beside the account relay allowance.
 struct RelayFallbackSetting: View {
     let enabled: Bool?
     let change: (Bool) async throws -> Void

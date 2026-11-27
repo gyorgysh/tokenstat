@@ -3,72 +3,21 @@
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
-
 //! Is this session working, or is it just sitting there.
-//!
-//! `alive` answers whether a process exists, which is not the question anyone
-//! looking at a sidebar is asking. This module answers the real one, from
-//! three sources in decreasing order of authority:
-//!
-//! 1. **Hook records.** An agent that supports lifecycle hooks says outright
-//!    what it is doing. Nothing beats being told.
-//! 2. **Transcript writes.** The agent appended to its session log moments
-//!    ago, so it is mid-turn. tokenstat already knows where every one of
-//!    those logs lives, because parsing them is what it does.
-//! 3. **Subtree CPU.** Everything else, measured against a level the session
-//!    itself teaches us.
-//!
-//! Point 3 is the hard one and the thresholds here are not invented. An idle
-//! `claude` sits near 0-2% of a core, an idle `grok` near 2-3%, and an editor
-//! agent animating its spinner burns 6-12% while doing nothing at all, so a
-//! fixed "busy" line is wrong for every agent at once. Each session instead
-//! learns its own idle level as a decaying minimum of its smoothed CPU, and
-//! working means the average rose a dead band above that, with hysteresis so
-//! a session hovering at the boundary does not flicker. An absolute floor
-//! catches a session that was already busy when first seen, whose baseline
-//! would otherwise be learned at the working level.
-//!
-//! The release grace is what makes it usable: a model turn spends most of its
-//! time waiting on a network round trip at zero CPU, and without the grace
-//! every agent would blink idle between tokens.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-/// How far above its own baseline (percent of one core) a session's smoothed
-/// CPU must rise to count as working.
 const ON_DELTA_PERCENT: f64 = 4.0;
-/// How far above the baseline it must stay to keep counting as working. The
-/// gap between this and `ON_DELTA_PERCENT` is the hysteresis dead band.
 const OFF_DELTA_PERCENT: f64 = 1.5;
-/// Smoothed CPU at which a session is working whatever its baseline says. No
-/// agent idles this hot, and this is what catches a session first sampled
-/// mid-task, whose learned baseline is already at the working level.
 const HARD_WORKING_FLOOR_PERCENT: f64 = 20.0;
-/// How fast the learned baseline drifts upward per tick. It snaps downward
-/// instantly, because a new low is new information about the idle level,
-/// while a rise has to be earned.
 const BASELINE_CREEP_PER_TICK: f64 = 0.05;
-/// Smoothing weight for each new sample. At one sample a second this settles
-/// a real change within a few seconds while damping the large tick-to-tick
-/// noise of an animated terminal UI.
 const ALPHA: f64 = 0.25;
-/// How long a session stays "working" after the evidence stops.
-///
-/// Three minutes. A minute would bridge a typical network wait but not a slow
-/// model turn or a long tool call, and a row that says Idle while the agent
-/// is mid-thought is worse than one that lags going quiet.
 const GRACE: Duration = Duration::from_secs(180);
-/// How recently a transcript must have been written to count as proof of
-/// work.
 const EVIDENCE_FRESH: Duration = Duration::from_secs(15);
-/// How long a hook record may go unwritten before it is ignored. A crashed
-/// agent leaves its last record on disk saying "working" forever.
 const HOOK_STALE: Duration = Duration::from_secs(900);
-/// How often the sampler runs. One `ps` per second for the whole process
-/// table, which is what the smoothing constants above are tuned against.
 const TICK: Duration = Duration::from_secs(1);
 
 /// What a session is doing, as reported to a front end.
@@ -123,21 +72,10 @@ pub struct Reading {
     pub attention: Option<Attention>,
 }
 
-/// Per-session smoothing state.
-///
-/// Keyed by pid and rebuilt from the live set on every tick, so a pid that
-/// the system reuses for an unrelated process starts from nothing rather
-/// than inheriting a dead session's learned baseline.
 #[derive(Debug, Clone, Copy, Default)]
 struct State {
     average: Option<f64>,
-    /// The learned idle level: a decaying minimum of `average`.
     baseline: Option<f64>,
-    /// Lowest average seen during the current working episode, the ceiling
-    /// the baseline may creep toward while working. Bursty real work keeps
-    /// its headroom this way, while an idle level that genuinely rose during
-    /// the episode (a leftover dev server the agent started) is eventually
-    /// adopted, so the session is allowed to go idle again.
     episode_floor: Option<f64>,
     working: bool,
 }
@@ -155,7 +93,6 @@ pub struct Watch {
 
 struct Tracker {
     states: HashMap<u32, State>,
-    /// Last moment each pid had positive evidence, for the release grace.
     last_working: HashMap<u32, Instant>,
     readings: HashMap<u32, Reading>,
 }
@@ -199,8 +136,6 @@ pub fn start() {
         .ok();
 }
 
-/// Which sessions to watch, taken from the pty manager on every tick so a
-/// spawn is picked up without anything having to register itself.
 fn watches() -> Vec<Watch> {
     tokenstat_pty::manager()
         .list()
@@ -220,23 +155,13 @@ fn watches() -> Vec<Watch> {
         .collect()
 }
 
-/// The harness a command belongs to, by the name it was launched under.
-///
-/// Deliberately matched on the executable name rather than on a launcher id:
-/// a session adopted from a daemon that outlived the app has a command line
-/// and nothing else.
 fn harness_of(command: &str) -> Option<String> {
     let name = command.rsplit(['/', '\\']).next().unwrap_or(command).trim();
     let name = name.strip_suffix(".exe").unwrap_or(name);
-    // Every session gets a name, not only the three with transcripts we know
-    // how to find. The name is what stops one agent's hook record from being
-    // adopted by a different agent running in the same directory, so a shell
-    // being called "zsh" is exactly as useful here as an agent being called
-    // "claude".
+
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Advance every watched session by one sample.
 fn tick() {
     let watches = watches();
     if watches.is_empty() {
@@ -247,9 +172,6 @@ fn tick() {
         return;
     }
 
-    // A failed `ps` is not "everything is at 0%". Treating it as quiet would
-    // pull every EMA toward zero, learn a false idle baseline, and drop a
-    // working session after the grace for no reason. Keep prior readings.
     let Some(table) = process_table() else {
         return;
     };
@@ -285,10 +207,6 @@ fn tick() {
             hook_working,
         );
 
-        // Grace bridges quiet stretches between tokens for the CPU and
-        // transcript heuristics. It must not override a hook that said idle:
-        // hooks beat every measurement, and a three-minute Working after the
-        // agent has asked the user a question is worse than a brief flap.
         let previous = t.last_working.get(&w.pid).copied();
         let hook_says_idle = hook_working == Some(false);
         let within_grace = previous.is_some_and(|at| now.duration_since(at) < GRACE);
@@ -299,7 +217,6 @@ fn tick() {
             last_working.insert(w.pid, at);
         }
 
-        // A lifecycle clear wins over an old prompt still in scrollback.
         let attention = reported_attention(hook, || permission_prompt_for(w.pid));
         readings.insert(
             w.pid,
@@ -336,8 +253,6 @@ fn reported_activity(working: bool, within_grace: bool, hook_says_idle: bool) ->
     }
 }
 
-/// One decision step. Pure, so the thresholds can be tested without a
-/// process table.
 fn step(state: State, sample: f64, fresh_evidence: bool, hook: Option<bool>) -> State {
     let mut next = state;
     let clamped = sample.max(0.0);
@@ -347,10 +262,6 @@ fn step(state: State, sample: f64, fresh_evidence: bool, hook: Option<bool>) -> 
     };
     next.average = Some(average);
 
-    // Learn the idle level while idle: snap down to any new minimum, drift
-    // up slowly toward the observed average. While working it never snaps
-    // down, because a dip mid-task is not a new idle level, and it creeps up
-    // only toward the lowest average this episode has seen.
     let mut baseline = state.baseline.unwrap_or(average);
     if state.working {
         let floor = state.episode_floor.unwrap_or(average).min(average);
@@ -382,19 +293,12 @@ fn step(state: State, sample: f64, fresh_evidence: bool, hook: Option<bool>) -> 
     next
 }
 
-/// One row of `ps` output.
 struct Proc {
     ppid: u32,
     pcpu: f64,
-    /// Resident set size in kilobytes, as `ps` reports it.
     rss: f64,
 }
 
-/// Every process with its parent and CPU share, in one call.
-///
-/// One `ps` for the whole table rather than one per session: the cost is the
-/// same whether one agent is running or ten, and a per-session call would
-/// scale a once-a-second sample by however many terminals are open.
 #[cfg(not(windows))]
 fn process_table() -> Option<HashMap<u32, Proc>> {
     let out = std::process::Command::new("ps")
@@ -428,8 +332,6 @@ fn process_table() -> Option<HashMap<u32, Proc>> {
     windows_processes::table()
 }
 
-/// CPU uses 100 ns process ticks and wall time, expressed as percent of one
-/// core like ps. Creation time prevents a recycled PID from inheriting usage.
 #[cfg(any(windows, test))]
 fn process_cpu_percent(
     previous: Option<(u64, u64)>,
@@ -464,7 +366,7 @@ mod windows_processes {
     pub(super) fn table() -> Option<HashMap<u32, Proc>> {
         static PREVIOUS: OnceLock<Mutex<Option<Samples>>> = OnceLock::new();
         let mut previous = PREVIOUS.get_or_init(|| Mutex::new(None)).lock().ok()?;
-        // The snapshot owns its kernel handle for exactly this enumeration.
+
         let snapshot = unsafe { win32::handle_to_owned(win32::CreateToolhelp32Snapshot(2, 0)) }?;
         let now = Instant::now();
         let elapsed = previous
@@ -519,8 +421,7 @@ mod windows_processes {
                     rss = memory.working_set as f64 / 1024.0;
                 }
             }
-            // Keep inaccessible parents in the tree so accessible descendants
-            // still belong to the terminal that started them.
+
             table.insert(
                 entry.pid,
                 Proc {
@@ -580,12 +481,6 @@ fn children_index(table: &HashMap<u32, Proc>) -> HashMap<u32, Vec<u32>> {
     children
 }
 
-/// CPU of a process and everything descended from it.
-///
-/// The subtree and not the process alone, because an agent's real work is
-/// mostly its children: a build, a test run, a language server. The agent
-/// process itself can sit at nothing while the machine is flat out on its
-/// behalf.
 fn subtree_usage(
     table: &HashMap<u32, Proc>,
     children: &HashMap<u32, Vec<u32>>,
@@ -600,8 +495,7 @@ fn subtree_usage(
         if !pids.insert(pid) {
             continue;
         }
-        // A malformed table could in principle describe a cycle, and this
-        // runs every second in a daemon. Bound it.
+
         seen += 1;
         if seen > 10_000 {
             break;
@@ -621,27 +515,16 @@ fn subtree_usage(
     }
 }
 
-/// What one session's process subtree is using, and which processes it is.
 #[derive(Default)]
 struct Usage {
     cpu_percent: f64,
     memory_mb: f64,
-    /// Every pid in the subtree, so a hook record can be checked against the
-    /// processes this session actually owns rather than against a name.
     pids: HashSet<u32>,
 }
 
-/// How long ago the harness last wrote to its transcript for this directory.
-///
-/// The paths are per-harness and awkward, which is exactly why they are worth
-/// having: an agent appends to its session log the moment a turn starts, well
-/// before any of it reaches the terminal.
 fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
-    // Not `$HOME`: a daemon started as a systemd system service has none, and
-    // every transcript path below would be built from an empty string.
     let home = tokenstat_paths::home_dir()?.display().to_string();
     let dir: PathBuf = match harness {
-        // ~/.claude/projects/<cwd with every non-alphanumeric as "-">/
         "claude" => {
             let slug: String = cwd
                 .chars()
@@ -653,10 +536,7 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
             let encoded = percent_encoded_directory(cwd);
             format!("{home}/.grok/sessions/{encoded}").into()
         }
-        // Codex keys its rollouts by date, not by workspace. A machine-wide
-        // newest mtime would mark every codex session Working whenever any
-        // one of them wrote, so transcript evidence is not used here until a
-        // per-session path exists. CPU and hooks still cover it.
+
         "codex" => return None,
         _ => return None,
     };
@@ -676,9 +556,6 @@ fn percent_encoded_directory(cwd: &str) -> String {
         .collect()
 }
 
-/// The 1 Hz sampler used to walk the same Claude project dir once per live
-/// session. Share one mtime for a short tick so four Claudes in one folder
-/// do not do four `read_dir`s.
 fn newest_write_cached(dir: &str, depth: usize) -> Option<SystemTime> {
     struct Cached {
         at: Instant,
@@ -706,9 +583,6 @@ fn newest_write_cached(dir: &str, depth: usize) -> Option<SystemTime> {
     value
 }
 
-/// Newest modification time under a directory, descending at most `depth`
-/// levels. Errors are absence: a harness that is not installed has no
-/// directory, and that is not a failure.
 fn newest_write(dir: &str, depth: usize) -> Option<SystemTime> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut newest: Option<SystemTime> = None;
@@ -733,19 +607,12 @@ struct HookRecord {
     observed_at_ms: u64,
     cwd: Option<String>,
     agent: Option<String>,
-    /// The pid the record is about, and the pid that owns it (an editor or
-    /// app hosting the agent). Either being inside a session's own process
-    /// subtree is proof the record belongs to that session.
     agent_pid: Option<u32>,
     owner_pid: Option<u32>,
     working: bool,
-    /// The hook said the agent is waiting on the person.
     attention: Option<Attention>,
 }
 
-/// Strings a permission prompt actually prints. Conservative on purpose:
-/// matching "permission" in a file the agent is editing would light every
-/// session that touched an auth crate. These are UI phrases, not topics.
 const PERMISSION_MARKERS: &[&str] = &[
     "Do you want to proceed",
     "Yes, and don't ask again",
@@ -755,37 +622,17 @@ const PERMISSION_MARKERS: &[&str] = &[
     "Do you want to allow",
 ];
 
-/// Look at the live pty tail for a permission prompt. In memory only.
-///
-/// Only output printed since the last keystroke counts: see
-/// `tail_since_input_for_pid`. A prompt the person has already answered is
-/// still in the buffer, and treating it as live is what left rows stuck on
-/// Needs attention until the agent happened to print enough to push it out.
 fn permission_prompt_for(pid: u32) -> Option<Attention> {
     let bytes = tokenstat_pty::manager().tail_since_input_for_pid(pid, 8 * 1024)?;
     let tail = String::from_utf8_lossy(&bytes);
     permission_prompt_in(&tail).then_some(Attention::Permission)
 }
 
-/// True when the text contains a known permission prompt.
 fn permission_prompt_in(tail: &str) -> bool {
     PERMISSION_MARKERS.iter().any(|m| tail.contains(m))
 }
 
 impl HookRecord {
-    /// Does this record describe this session.
-    ///
-    /// Process identity first, and it is the only answer worth trusting. A
-    /// directory routinely has several agents in it, and often several of the
-    /// *same* agent: a second Claude Code in the same folder, or one running
-    /// outside tokenstat entirely. Matching on directory and name meant every
-    /// one of them adopted the busiest record in the folder, so a freshly
-    /// opened agent sitting at an empty prompt reported Working because
-    /// something else nearby was mid-turn.
-    ///
-    /// A record that names no pid falls back to directory and agent name,
-    /// which is weak evidence but better than none, and cannot be worse than
-    /// the CPU heuristic it is standing in for.
     fn matches(&self, watch: &Watch, subtree: &HashSet<u32>) -> bool {
         if self.observed_at_ms < watch.started_at_ms
             || self.attention.is_some() && self.observed_at_ms <= watch.last_input_at_ms
@@ -804,20 +651,12 @@ impl HookRecord {
         match (&self.agent, &watch.harness) {
             (Some(a), Some(b)) => a == b,
             (Some(_), None) => false,
-            // The record does not say which agent it is, so the directory is
-            // all there is to go on.
+
             (None, _) => true,
         }
     }
 }
 
-/// Hook records written by Keepresso, when it is installed.
-///
-/// Read, never written. Keepresso installs the hooks, owns the format, and
-/// keeps the files current; tokenstat is a reader of somebody else's data
-/// here, exactly like every log it parses. Nothing is required: with no
-/// Keepresso on the machine this is an empty list and the CPU heuristic
-/// decides on its own.
 fn hook_records() -> Vec<HookRecord> {
     let Some(home) = tokenstat_paths::home_dir() else {
         return Vec::new();
@@ -830,8 +669,7 @@ fn hook_records() -> Vec<HookRecord> {
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let Ok(meta) = entry.metadata() else { continue };
-        // A crashed agent never writes its closing record, so an old file
-        // would claim "working" until someone deleted it.
+
         if meta
             .modified()
             .ok()
@@ -851,9 +689,7 @@ fn hook_records() -> Vec<HookRecord> {
         };
         let state = value.get("state").and_then(|v| v.as_str()).unwrap_or("");
         let detail = value.get("detail").and_then(|v| v.as_str());
-        // "waiting" is the agent asking the person something. That is
-        // Needs Attention, not Working: a row that stays accent-coloured
-        // while it waits for a yes is why nobody trusted the old indicator.
+
         let waiting = state == "waiting" || detail == Some("waiting-approval");
         out.push(HookRecord {
             observed_at_ms: meta
@@ -941,8 +777,6 @@ mod tests {
         assert!(state.working);
     }
 
-    /// The point of the learned baseline: an agent that idles hot must not
-    /// read as working just because its floor is high.
     #[test]
     fn hot_idle_session_still_reads_idle() {
         let mut state = State::default();
@@ -952,8 +786,6 @@ mod tests {
         assert!(!state.working);
     }
 
-    /// A session first seen mid-task learns its baseline at the working
-    /// level, so only the absolute floor can catch it.
     #[test]
     fn session_born_busy_reads_working() {
         let mut state = State::default();
@@ -1068,7 +900,6 @@ mod tests {
         pids.iter().copied().collect()
     }
 
-    /// Two agents in one directory is the normal case, not the exotic one.
     #[test]
     fn a_hook_record_belongs_to_one_agent() {
         let none = subtree(&[]);
@@ -1091,9 +922,6 @@ mod tests {
         assert!(!record(Some("claude")).matches(&elsewhere, &subtree(&[])));
     }
 
-    /// The case that made a freshly opened agent claim to be working: another
-    /// Claude Code, in the same folder, mid-turn. Same directory, same agent
-    /// name, different process.
     #[test]
     fn two_of_the_same_agent_in_one_folder_do_not_share_a_verdict() {
         let mut theirs = record(Some("claude"));
@@ -1108,7 +936,6 @@ mod tests {
         );
     }
 
-    /// An agent hosted by an editor reports the host's pid, not its own.
     #[test]
     fn an_owner_pid_also_identifies_a_session() {
         let mut hosted = record(None);
@@ -1128,8 +955,6 @@ mod tests {
         assert!(state.working);
     }
 
-    /// Grace is for quiet stretches between tokens, not for overruling a
-    /// lifecycle hook that said the agent is waiting on the user.
     #[test]
     fn grace_does_not_override_hook_idle() {
         assert_eq!(

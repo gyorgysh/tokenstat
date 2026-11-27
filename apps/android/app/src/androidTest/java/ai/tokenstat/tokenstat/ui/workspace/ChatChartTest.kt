@@ -22,7 +22,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The real Android WebView, local data and a fixture Activity. No host/account is opened. */
 @RunWith(AndroidJUnit4::class)
 class ChatChartTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()

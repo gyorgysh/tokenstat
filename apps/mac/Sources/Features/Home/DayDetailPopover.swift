@@ -6,11 +6,6 @@
 
 import SwiftUI
 
-/// The day hover card, the same information the profile page shows.
-///
-/// Presented at the window root rather than inside the heatmap card, so it
-/// always draws above the sidebar and every pane, and placed beside the cell
-/// on whichever side has room.
 struct DayDetailPopover: View {
     var detail: DayDetail?
     var isLoading: Bool
@@ -19,9 +14,6 @@ struct DayDetailPopover: View {
     var windowSize: CGSize
 
     private let margin: CGFloat = 8
-    /// Side clearance, so the card never touches the window edge. Larger than
-    /// a hairline inset: at compact window sizes the card must still read as
-    /// floating rather than flush against the chrome.
     private let edgeInset: CGFloat = 16
 
     var body: some View {
@@ -34,22 +26,15 @@ struct DayDetailPopover: View {
                 EmptyView()
             }
         }
-        // `.position` centres the view at the point, so the offset math below
-        // has to work in the card's own half-extents.
         .position(
             x: clampedX,
             y: clampedY
         )
-        // Track the pointer/scroll directly; animated anchors trail behind it.
         .animation(nil, value: anchor)
         .allowsHitTesting(false)
     }
 
-    // MARK: - Placement
 
-    /// Preferred side: the popover opens away from the window's middle, so a
-    /// cell on the left gets its card on the right and vice versa. Falls back
-    /// to the other side when the preferred one is too narrow.
     private var preferredLeft: Bool {
         guard let anchor else { return false }
         return anchor.frame.midX > windowSize.width * 0.5
@@ -66,10 +51,6 @@ struct DayDetailPopover: View {
     private var clampedX: CGFloat {
         guard let anchor else { return windowSize.width / 2 }
         let width = cardWidth
-        // `.position` centres the card, so the candidate is the card's centre
-        // for a card that sits fully beside the cell: half the card's width
-        // beyond the margin, not the margin itself. Treating the margin as the
-        // centre is what made the card straddle the cell.
         let candidate = preferredLeft
             ? anchor.frame.minX - margin - width / 2
             : anchor.frame.maxX + margin + width / 2
@@ -80,10 +61,6 @@ struct DayDetailPopover: View {
             && candidate + width / 2 <= windowSize.width - edgeInset)
             ? candidate
             : flipped
-        // Last resort: a window narrower than the card. Clamp rather than run
-        // off either edge. `position` takes the card's center, not its leading
-        // edge. Keeping the half-width in these bounds is what leaves the
-        // intended margin on both sides at a compact resolution.
         let minimum = edgeInset + width / 2
         let maximum = max(minimum, windowSize.width - edgeInset - width / 2)
         return min(max(x, minimum), maximum)
@@ -91,11 +68,6 @@ struct DayDetailPopover: View {
 
     private var clampedY: CGFloat {
         guard let anchor else { return windowSize.height / 2 }
-        // Vertically centred on the hovered row, so the card reads as
-        // belonging to the day under the pointer whatever its height. This is
-        // the placement that felt closest; earlier "edge below the cell"
-        // versions drifted hundreds of points down because the loading card
-        // is much shorter than the full one.
         let desired = anchor.frame.midY
         let minimum = edgeInset + cardHeight / 2
         let maximum = max(minimum, windowSize.height - edgeInset - cardHeight / 2)
@@ -153,8 +125,6 @@ struct DayDetailPopover: View {
 
     @ViewBuilder
     private func rows(_ detail: DayDetail) -> some View {
-        // The rows area is the only part that scrolls: a day with many
-        // model × harness slices must not push the card past the window.
         ScrollView {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(detail.rows.prefix(Self.maxRows))) { part in
@@ -244,11 +214,9 @@ struct DayDetailPopover: View {
         .shadow(color: Theme.shadow(0.22), radius: 18, y: 6)
     }
 
-    // MARK: - Helpers
 
     private static func dotColor(_ part: DayPart) -> Color {
         let palette = [Theme.accent, Theme.heat[4], Theme.heat[3], Theme.heat[2], Theme.heat[1]]
-        // Stable per pair, so a row keeps its colour when the list reorders.
         let seed = abs(part.id.hashValue) % palette.count
         return palette[seed]
     }
@@ -270,12 +238,7 @@ struct DayDetailPopover: View {
     }
 }
 
-/// Moving the pointer must invalidate only the popover, not the window shell.
 extension EnvironmentValues {
-    /// Where the heatmap reports its hovered cell. Handed down rather than
-    /// collected as a preference at the window's root: a preference read at
-    /// the root is re-reduced across the whole window on every update, and
-    /// that cost landed on every chat switch while Home was not even shown.
     @Entry var heatmapHover: HeatmapHoverState?
 }
 

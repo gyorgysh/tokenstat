@@ -26,16 +26,11 @@ import SwiftUI
 ///   to a half it already filled does not SIGWINCH.
 struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
     let sessions: [Session]
-    /// Left / top session when split, or the only visible session when not.
     let leading: Session?
     var trailing: Session? = nil
     var focused: Session? = nil
-    /// `nil` is a single pane. Horizontal is side by side, vertical is stacked.
     var splitAxis: Axis? = nil
-    /// Leading (left / top) share of the column, 0.2...0.8.
     var fraction: CGFloat = 0.5
-    /// Whether this stack may claim first responder. False while the workspace
-    /// surface is kept mounted under another destination (Home, Insights, …).
     var claimsFocus: Bool = true
     /// Whether the terminal layer is what the person should see.
     ///
@@ -62,8 +57,6 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
 
     func updateNSView(_ nsView: TerminalStackView, context: Context) {
         context.coordinator.parent = self
-        // Only sessions that already have an emulator. Pending ones have no
-        // view on purpose: the pane draws a starting state over them instead.
         let loaded = sessions.compactMap(\.terminalViewIfLoaded)
         nsView.onReturnToFront = { [sessions] view in
             sessions.first(where: { $0.terminalViewIfLoaded === view })?
@@ -93,9 +86,6 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
         }
 
         func activate(view: TerminalView) {
-            // The click monitor is not actor-isolated. Sessions live on the
-            // main actor. A mouse-down is already on the main thread, so this
-            // hop is a hop in name only.
             Task { @MainActor in
                 if let session = self.parent.sessions.first(where: {
                     $0.terminalViewIfLoaded === view
@@ -108,23 +98,13 @@ struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
 }
 
 final class TerminalStackView: NSView {
-    /// The view that was in front last time, so focus is claimed on a change
-    /// rather than on every update. Claiming it every time would pull the
-    /// keyboard out of whatever else the user was typing in.
     private weak var shown: NSView?
-    /// Last value of `claimsFocus` seen by `sync`. Falling edge clears
-    /// `shown` so rising edge reclaims the keyboard when the surface returns.
     private var lastClaimsFocus = false
     /// Full buffer paint waiting for a non-zero layout. Re-parent can run
     /// while the stack still has a zero frame (fresh `makeNSView`); painting
     /// then marks an empty rect and the buffer never appears.
     private var needsFullPaint = false
-    /// Which of the visible halves took the last click. Set by the
-    /// representable, which is the only piece that knows about sessions.
     var onViewClicked: ((TerminalView) -> Void)?
-    /// A view flipped from hidden to visible, or the whole surface came back
-    /// from under another destination. Set by the representable with a
-    /// session lookup; the stack itself only knows views.
     var onReturnToFront: ((TerminalView) -> Void)?
     private weak var leadingView: TerminalView?
     private weak var trailingView: TerminalView?
@@ -161,9 +141,6 @@ final class TerminalStackView: NSView {
         if isHidden != !surfaceVisible {
             isHidden = !surfaceVisible
         }
-        // A chat can display one of these same emulators beside its composer.
-        // An inactive stack must leave its hierarchy and frames alone instead
-        // of taking the view back from the visible pane on every model update.
         if !surfaceVisible {
             leadingView = nil
             trailingView = nil
@@ -176,22 +153,12 @@ final class TerminalStackView: NSView {
             return
         }
 
-        // Views just re-parented into this stack need a repaint even when they
-        // stay visible: a fresh TerminalStackView after a folder switch hands
-        // the same emulator instance into a new hierarchy, and without a
-        // display the screen shows only a caret until the process prints.
         var reparented = Set<ObjectIdentifier>()
         for view in views where view.superview !== self {
-            // No autoresizing: split frames are set in `layout` (and, for
-            // newcomers, in `targetFrame` below).
             view.autoresizingMask = []
             addSubview(view)
             reparented.insert(ObjectIdentifier(view))
         }
-        // Place newcomers now, not on the next layout pass. A view keeps its
-        // creation frame until `layout` runs, and output arriving in between
-        // paints at that size in that spot: the terminal opening small in a
-        // corner until a resize moves it.
         if bounds.width > 1, bounds.height > 1 {
             for view in views where reparented.contains(ObjectIdentifier(view)) {
                 if let frame = targetFrame(
@@ -202,7 +169,6 @@ final class TerminalStackView: NSView {
                 }
             }
         }
-        // A session closed elsewhere leaves a view here with nothing behind it.
         for sub in subviews where !views.contains(where: { $0 === sub }) {
             sub.removeFromSuperview()
         }
@@ -239,13 +205,6 @@ final class TerminalStackView: NSView {
         lastClaimsFocus = true
         installClickMonitor()
 
-        // A return can leave everything above untouched: kept mounted under
-        // another destination (Home, Chat, Tasks, …), the surface is the
-        // same stack holding the same still-unhidden views, so no flip and
-        // no re-parent fired. Its buffer can still be stale — an occluded
-        // subtree is not drawn — and a quiet session has no output coming to
-        // heal it. Do what a flip would have done: replay each visible
-        // session's size and repaint, the same thing a window resize forces.
         if focusReturning {
             for view in views where !view.isHidden {
                 if !flippedVisible.contains(ObjectIdentifier(view)) {
@@ -293,10 +252,6 @@ final class TerminalStackView: NSView {
         super.layout()
         guard !isHidden else { return }
         guard bounds.width > 1, bounds.height > 1 else {
-            // No valid size yet (fresh mount with a zero frame). Leave the
-            // pending full paint queued and the frames alone: collapsing a
-            // visible terminal to zero resizes its pty to nothing, and the
-            // session stays blank until something forces another layout.
             return
         }
         let gap = Self.splitGap
@@ -304,14 +259,7 @@ final class TerminalStackView: NSView {
             let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: gap)
             if let view = leadingView, view.frame != lead { view.frame = lead }
             if let view = trailingView, view.frame != trail { view.frame = trail }
-            // Hidden views keep the last frame they were shown at. Resizing
-            // them here would SIGWINCH a session nobody can see.
         } else {
-            // Visible views only. Hidden ones keep the frame they were shown
-            // at: resizing them here would SIGWINCH a session nobody can see.
-            // (A zero-bounds pass returns at the guard above for the same
-            // reason: collapsing the pty leaves the session broken until a
-            // resize forces a repaint.)
             for sub in subviews where !sub.isHidden {
                 if sub.frame != bounds { sub.frame = bounds }
             }
@@ -321,8 +269,6 @@ final class TerminalStackView: NSView {
         }
     }
 
-    /// Where `view` belongs right now. Mirrors `layout()`, so a view added
-    /// between layout passes never paints its creation frame first.
     private func targetFrame(
         for view: TerminalView,
         leading: TerminalView?,
@@ -343,9 +289,6 @@ final class TerminalStackView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
-        // Freshly mounted with a zero frame, the first `sync` had nothing to
-        // lay out against. Ask again now that a window exists, so the terminal
-        // does not wait for a manual resize to appear.
         needsLayout = true
     }
 

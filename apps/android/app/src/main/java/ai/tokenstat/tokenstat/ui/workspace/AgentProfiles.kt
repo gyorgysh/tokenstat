@@ -61,7 +61,6 @@ internal fun rememberAgentProfiles(model: AppViewModel, peer: String, protocol: 
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // The normal agent controls are still available.
         }
     }
     return value
@@ -107,11 +106,6 @@ internal fun AgentProfilePicker(profiles: AgentProfiles, selected: String?, lock
     }
 }
 
-/// Which logins the listed agents use, as one full-width row a finger can
-/// hit. It shows as soon as the host lists profiles, even with only Main,
-/// because the menu is also where somebody finds out profiles exist. A
-/// locked repository shows its profile with a lock and no menu. Port of the
-/// Apple `profileRow`.
 @Composable
 internal fun AgentProfileRow(profiles: AgentProfiles, selected: String?, lock: String?,
     enabled: Boolean, onChange: (String) -> Unit,
@@ -187,8 +181,6 @@ internal fun AgentProfileRow(profiles: AgentProfiles, selected: String?, lock: S
             )
         }
     }
-    // Profiles belong to the computer the agents run on, and its host takes
-    // profile changes only from its own app, so the phone says where to go.
     if (explaining) androidx.compose.material3.AlertDialog(
         onDismissRequest = { explaining = false },
         title = { Text(L10n.text("common.profiles.add")) },

@@ -8,7 +8,6 @@
 import SwiftUI
 import UIKit
 
-/// A folder's jobs keep the same session across phone and iPad layouts.
 struct ClientAutomationWorkspace: View {
     let peer: String
     let workspaceID: String

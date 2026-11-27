@@ -24,8 +24,6 @@ struct SidebarHoverState {
         if let row {
             if row.insetBy(dx: -4, dy: -4).contains(point) { return true }
             if let card {
-                // The popover can flip to the left at a screen edge. The
-                // crossing corridor stays within the row's vertical band.
                 let left = card.midX >= row.midX ? row.maxX : card.maxX
                 let right = card.midX >= row.midX ? card.minX : row.minX
                 let bottom = max(row.minY, card.minY)

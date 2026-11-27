@@ -10,7 +10,6 @@ using WinRT.Interop;
 
 namespace Tokenstat.Design;
 
-/// <summary>Mode and themes, as one card. Mirrors the Mac AppearancePicker.</summary>
 internal static class AppearanceSettings
 {
     public static UIElement Card()

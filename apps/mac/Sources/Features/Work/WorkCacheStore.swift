@@ -19,16 +19,11 @@ final class WorkCacheStore {
 
     init(settings: WorkCacheSettings = .shared) { self.settings = settings }
 
-    /// Whether the host on this transport can keep copies at all. An older
-    /// helper refuses with `unknown_method`, which is unavailability rather
-    /// than emptiness: the caller keeps the live conversation and tries
-    /// again another time.
     static func isUnavailable(_ error: Error) -> Bool {
         if case let BridgeError.core(code, _) = error { return code == "unknown_method" }
         return false
     }
 
-    /// Keep this conversation's newest page under the scope's key.
     func saveConversation(reference: WorkReference, title: String, page: ChatEventPage, backend: String? = nil, sendRevision: UInt64? = nil) async {
         guard await WorkCacheAccess.canSave(reference), settings.saves(reference), reference.kind == .conversation,
               let recordID = WorkCache.recordID(for: reference),
@@ -53,7 +48,6 @@ final class WorkCacheStore {
         )
     }
 
-    /// Disabling future saving does not hide copies that are already kept.
     func savedConversation(for reference: WorkReference) async -> CachedRecordPayload? {
         guard await WorkCacheAccess.canRead(reference), reference.kind == .conversation, let recordID = WorkCache.recordID(for: reference) else { return nil }
         let scope = WorkCache.scope(for: reference.scope)
@@ -66,7 +60,6 @@ final class WorkCacheStore {
         return record.payload
     }
 
-    /// Drop one conversation's copy, for a folder that has left.
     func removeConversation(for reference: WorkReference) async {
         guard let recordID = WorkCache.recordID(for: reference) else { return }
         _ = try? await Bridge.cacheRemove(scope: WorkCache.scope(for: reference.scope), id: recordID)

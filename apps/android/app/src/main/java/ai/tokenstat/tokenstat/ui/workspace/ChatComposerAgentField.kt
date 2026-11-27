@@ -32,11 +32,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
 
-/// What this chat runs on, as the iPhone composer shows it: the agent's mark,
-/// then "model · effort", sized to its words rather than to the row. The
-/// spoken label names the agent too. A dot on the corner says this agent has
-/// an update, and the picker it opens has the button. Port of
-/// `ChatAgentField(compactLabel: true)`.
 @Composable
 internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject?, onOpen: () -> Unit,
                                     enabled: Boolean, modifier: Modifier = Modifier, profileTitle: String? = null) {
@@ -69,10 +64,6 @@ internal fun ChatComposerAgentField(backends: List<JsonObject>, chat: JsonObject
     }
 }
 
-/// The row above the field, in the iPhone's order: the agent on the left,
-/// then setup, the limits ring, Hide keyboard while it is open, Stop while a
-/// turn runs, and the expand toggle. One row, so the field keeps its height.
-/// Port of `ChatComposerControls(condensed:)` with its chrome.
 @Composable
 internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, locked: Boolean,
                                 expanded: Boolean, onAgent: () -> Unit, onSetup: () -> Unit,
@@ -102,10 +93,6 @@ internal fun ChatComposerToolbar(backends: List<JsonObject>, chat: JsonObject?, 
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        // Keep the usual three actions on one line on phones. The chip can
-        // ellipsize its visible label while its accessibility label stays full.
-        // Give it a separate line if extra actions or large text leave too
-        // little room for a usable selector.
         val actionCount = 3 + (if (keyboardOpen) 1 else 0) + (if (running) 1 else 0)
         if (maxWidth < (120 + actionCount * 48).dp || LocalDensity.current.fontScale > 1.3f) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {

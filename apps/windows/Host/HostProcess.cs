@@ -14,24 +14,14 @@ namespace Tokenstat.Host;
 
 internal static class HostProcess
 {
-    /// <summary>
-    /// Kept next to <c>tokenstat_host::PROTOCOL_VERSION</c>. Bump both in the
-    /// same change, or this app will restart a helper that already speaks the
-    /// methods it was built for, or leave one that does not.
-    /// </summary>
     private const string ExpectedProtocolVersion = "57";
 
     public static void EnsureRunning() => EnsureRunning(replaceOld: true);
 
-    // An ordinary request timeout is not evidence of an outdated helper.
-    // Recovery must never terminate a busy helper and its running terminals.
     public static void RecoverIfMissing() => EnsureRunning(replaceOld: false);
 
     private static void EnsureRunning(bool replaceOld)
     {
-        // A pipe that answers is not enough: the scheduled task can be running
-        // a helper from an older install, and every method added since would
-        // come back as "unknown method".
         var answering = PipeUp();
         if (answering && !replaceOld) return;
         if (answering && SpeaksThisVersion())
@@ -44,19 +34,11 @@ internal static class HostProcess
         if (hostd is null)
         {
             Log("Host executable not found beside the app or in the install directories.");
-            // Nothing to replace it with. An old helper still answering is
-            // better than no helper at all.
             return;
         }
 
         if (answering)
         {
-            // Unregistering the task does not stop what it already started, and
-            // the replacement cannot bind a pipe the old helper still holds. So
-            // stop it first, and only once there is something to put in its
-            // place. This ends its terminals, which is the same price the Mac
-            // pays for `kickstart -k`, and the alternative is an app that never
-            // sees the methods it was built for.
             StopOldHelper();
         }
 
@@ -75,7 +57,6 @@ internal static class HostProcess
         catch (Exception ex)
         {
             Log("Direct host launch failed: " + ex.Message);
-            // The scheduled task may already have started it.
         }
 
         var deadline = DateTime.UtcNow.AddSeconds(8);
@@ -101,17 +82,9 @@ internal static class HostProcess
                 File.Move(path, Path.Combine(directory, "app-host.previous.log"), overwrite: true);
             File.AppendAllText(path, DateTimeOffset.Now.ToString("O") + " " + message + Environment.NewLine);
         }
-        catch { /* Logging must not prevent recovery. */ }
+        catch { }
     }
 
-    /// <summary>
-    /// Re-register legacy task actions. Direct actions show a console;
-    /// detached wrappers lose failure status, and tree waits can block
-    /// recovery on surviving terminals. The current wrapper tracks hostd. The task itself is
-    /// the source of truth, so this heals exactly once: after re-registering,
-    /// the action reads back hidden and this becomes a quiet query per
-    /// launch. It never touches the running helper, only the registration.
-    /// </summary>
     private static void RefreshTaskShape()
     {
         try
@@ -125,7 +98,6 @@ internal static class HostProcess
         }
         catch
         {
-            // A visible helper still answers the pipe. Leave it.
         }
     }
 
@@ -148,7 +120,7 @@ internal static class HostProcess
             var output = query.StandardOutput.ReadToEndAsync();
             if (!query.WaitForExit(8000))
             {
-                try { query.Kill(entireProcessTree: true); } catch { /* Already exited. */ }
+                try { query.Kill(entireProcessTree: true); } catch { }
                 return false;
             }
             if (query.ExitCode != 0)
@@ -163,14 +135,6 @@ internal static class HostProcess
                 return false;
             }
             var command = xml.Substring(open + "<Command>".Length, close - open - "<Command>".Length);
-            // Repair both old direct actions and hidden wrappers that exit
-            // before hostd or wait for its surviving descendants. Both can
-            // prevent restart-on-failure from working. Also wrappers that
-            // still start hostd inside the install folder, which pins the
-            // folder against an update's swap.
-            // Quoted the way the script writes it, then as the task XML may
-            // escape it, so a path with an apostrophe or ampersand still reads
-            // as current instead of re-registering on every launch.
             var expected = "-WorkingDirectory '" + SelfInstall.HostWorkingDirectory.TrimEnd('\\').Replace("'", "''") + "'";
             var current = xml.Contains(expected, StringComparison.OrdinalIgnoreCase)
                 || xml.Contains(System.Security.SecurityElement.Escape(expected), StringComparison.OrdinalIgnoreCase);
@@ -184,18 +148,8 @@ internal static class HostProcess
         }
     }
 
-    /// <summary>
-    /// Stop a helper from an earlier install so a current one can take the pipe.
-    /// </summary>
     private static void StopOldHelper()
     {
-        // The helper holding this user's pipe is the one in the way. A copy
-        // left running from a development build would otherwise keep the
-        // pipe, every replacement would exit with "another host is already
-        // listening", and this app would keep talking to a helper from another
-        // release. A helper some other installer supervises is left alone: its
-        // supervisor would only start it again and the two would trade the
-        // pipe on every launch.
         if (PipeServerProcessId() is int owner)
         {
             try
@@ -211,7 +165,6 @@ internal static class HostProcess
             }
             catch
             {
-                // Already gone, or not ours to stop.
             }
         }
         foreach (var process in Process.GetProcessesByName("tokenstat-hostd"))
@@ -228,8 +181,6 @@ internal static class HostProcess
             }
             catch
             {
-                // Another user's helper, or one already gone. Either way there
-                // is nothing here to do about it.
             }
             finally
             {
@@ -254,14 +205,6 @@ internal static class HostProcess
                 && string.Equals(full, Path.GetFullPath(candidate), StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Whether the helper answering the pipe was built from this release.
-    /// </summary>
-    /// <remarks>
-    /// Cheap: <c>protocol</c> is answered without opening an archive. Anything
-    /// that is not a clear match, including a helper too old to know the
-    /// method, counts as a mismatch, which is the right reading of both.
-    /// </remarks>
     private static bool SpeaksThisVersion()
     {
         try
@@ -350,7 +293,6 @@ internal static class HostProcess
         }
         catch
         {
-            // First launch still works if we spawned hostd ourselves.
         }
     }
 }

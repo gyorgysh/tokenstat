@@ -9,8 +9,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/// The host shares one listener per endpoint. Retirement and reacquisition
-/// must finish in order, and releasing a lease twice must be harmless.
 class BrowserListenerPool {
     data class Endpoint(val peer: String, val host: String, val port: Int)
     class Lease internal constructor(val endpoint: Endpoint, val listenerUrl: String, val accountScope: String)
@@ -29,14 +27,11 @@ class BrowserListenerPool {
         listen: suspend () -> String,
         retire: suspend () -> Unit,
     ): Lease? = gate.withLock {
-        // An earlier close can hold the gate while the owner changes.
         if (!current()) return@withLock null
         require(accountScope.isNotBlank() && endpoint.peer.isNotBlank() && endpoint.host in setOf("127.0.0.1", "localhost") && endpoint.port in 1..65535)
         val existing = held[endpoint]
         var entry = existing
         if (existing != null && (existing.accountScope != accountScope || existing.leases.isEmpty())) {
-            // The physical endpoint has no account namespace at the host.
-            // Retire it before the next account may publish a replacement.
             withContext(NonCancellable) { existing.retire() }
             held.remove(endpoint)
             entry = null
@@ -71,8 +66,6 @@ class BrowserListenerPool {
         gate.withLock {
             val entry = held[lease.endpoint] ?: return@withLock
             if (!entry.leases.remove(lease) || entry.leases.isNotEmpty()) return@withLock
-            // Keep the gate until the old host registration is retired.
-            // Retain a failed retirement for a later account's retry.
             if (runCatching { entry.retire() }.isSuccess) held.remove(lease.endpoint)
         }
     }
@@ -84,8 +77,6 @@ class BrowserListenerPool {
     }.getOrDefault(false)
 }
 
-/// One screen holds at most one endpoint; old listener addresses remain only
-/// as canonical mappings so WebView Back can acquire a fresh listener.
 class BrowserListenerSession(
     target: BrowserTarget,
     initial: BrowserListenerPool.Lease,
@@ -122,8 +113,6 @@ class BrowserListenerSession(
         if (!wanted()) return@withLock null
         val old = live
         suspend fun retireUnpublished(next: BrowserListenerPool.Lease) {
-            // A revoked request can leave a reused listener with its screen.
-            // A newly acquired lease still needs to be released.
             if (next !== old || !isCurrent) {
                 if (live === next) live = null
                 pool.release(next)

@@ -51,8 +51,6 @@ pub fn exchange(
     let request = json!({"id": 1, "method": method, "params": params});
     serde_json::to_writer(&mut stream, &request).map_err(|e| e.to_string())?;
     stream.write_all(b"\n").map_err(|e| e.to_string())?;
-    // Limit the reader, not a buffer checked after allocation. A broken
-    // helper must not make a caller allocate without a bound.
     let mut response = Vec::new();
     BufReader::new(stream)
         .take(MAX_RESPONSE_BYTES + 1)
@@ -122,7 +120,6 @@ mod tests {
             reply(b"{\"id\":1,\"ok\":true,\"result\":{\"saved\":true}}\n").unwrap(),
             json!({"saved":true})
         );
-        // Older helpers omit the id; the result still counts.
         assert_eq!(
             reply(b"{\"ok\":true,\"result\":{\"saved\":true}}\n").unwrap(),
             json!({"saved":true})

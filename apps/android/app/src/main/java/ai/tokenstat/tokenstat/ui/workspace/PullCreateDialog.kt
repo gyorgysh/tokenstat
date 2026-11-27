@@ -94,8 +94,6 @@ fun PullCreateDialog(model: AppViewModel, peer: String, workspace: String, proto
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(L10n.text("android.pullcreate.new"), style = MaterialTheme.typography.titleLarge)
-                // An unknown protocol is an old host until it says otherwise,
-                // like every other feature newer than the client's first read.
                 if (!supportsCreation) Text(L10n.text("android.pullcreate.update_host"))
                 else if (result != null) {
                     val number = result?.get("number")?.jsonPrimitive?.content ?: ""

@@ -2,12 +2,6 @@
 import Foundation
 
 extension ChatDisplayItem {
-    /// A name for a row that survives an older page arriving in front of it.
-    ///
-    /// The record's place in the archive when the host reports one, which is
-    /// fixed for the life of that record. Without it the row is named by its
-    /// position in the list, which is what it always was, and what makes a
-    /// prepend re-identify every row below it.
     private static func stamp(_ event: ChatTimelineEvent, _ position: Int) -> String {
         if let seq = event.seq { return "s\(seq)" }
         return "\(event.atMs ?? 0)-\(position)"
@@ -17,24 +11,10 @@ extension ChatDisplayItem {
         var items: [ChatDisplayItem] = []
         var latestPlanID: String?
         var supersededPlanIDs: Set<String> = []
-        // Completed history does not participate in live-tool closure or
-        // fallback edit matching. Keep only the rows still running.
         var runningIndexes: Set<Int> = []
-        // Every row a call id has started, oldest first. A call id is not
-        // unique on every backend (Antigravity sends `call_id: "tool"` for
-        // all of them), so an End has to close the oldest row still running
-        // under that name rather than keep overwriting the newest start.
         var toolIndexes: [String: [Int]] = [:]
-        // How many times each call id has already started a tool in this
-        // conversation. An agent is supposed to name every call something of
-        // its own, and most do, but Antigravity sends `call_id: "tool"` for
-        // all of them.
         var toolStarts: [String: Int] = [:]
-        // A completion may belong to a different backend than the last text
-        // event in a mixed-provider transcript. Keep each start's provenance.
         var toolBackends: [Int: String] = [:]
-        // Same duplicate-id hazard as tools, for edits that carry a reused
-        // call id (or none and the same path twice). Row ids feed ForEach.
         var editStarts: [String: Int] = [:]
         var approvalIndex: [String: Int] = [:]
         var questionIndex: [String: Int] = [:]
@@ -145,8 +125,6 @@ extension ChatDisplayItem {
             return nil
         }
 
-        /// Remember a row as the newest one this call id names. An id that
-        /// already named the row is moved to the back rather than repeated.
         func noteToolIndex(_ index: Int, callId: String) {
             guard !callId.isEmpty else { return }
             var indexes = toolIndexes[callId] ?? []
@@ -155,9 +133,6 @@ extension ChatDisplayItem {
             toolIndexes[callId] = indexes
         }
 
-        /// The row an End closes: the oldest one still running under this
-        /// call id, or, for a repeat End with nothing left running, the
-        /// newest row the id named.
         func toolEndIndex(callId: String) -> Int? {
             guard !callId.isEmpty, let indexes = toolIndexes[callId] else { return nil }
             let running = indexes.first { index in
@@ -175,8 +150,6 @@ extension ChatDisplayItem {
             if event.kind == "user" {
                 flushText()
                 flushThinking()
-                // A new user turn bounds any tools left open by an interrupted
-                // older turn, including histories recorded by older hosts.
                 if event.steer != true {
                     latestPlanID = nil
                     closeRunningTools(failed: false, at: event.atMs, detail: L10n.text("apple.chatmodel.interrupted.132d124d"))
@@ -200,18 +173,12 @@ extension ChatDisplayItem {
                         kind: .handoff(to: event.to ?? "", brief: event.brief ?? "")
                     )
                 )
-                // The separator would say the same thing twice, less well.
                 lastBackend = event.to ?? lastBackend
                 continue
             }
             if let approval = event.approval {
                 flushText()
                 flushThinking()
-                // The timeline records an approval twice: once when the agent
-                // paused, and again with the answer. Keep the row in the place
-                // it happened and let the later state win, so a conversation
-                // reopened tomorrow shows the outcome rather than a question
-                // that looks like it is still waiting.
                 let rowID = "approval-\(approval.id)"
                 if let at = approvalIndex[rowID] {
                     items[at] = ChatDisplayItem(id: rowID, kind: .approval(approval))
@@ -239,10 +206,6 @@ extension ChatDisplayItem {
                 continue
             }
             if event.kind == "answer" || event.kind == "answerWithdrawn" {
-                // Lands on its question's card. An answer whose question is
-                // on an older page than this one waits for that page. A
-                // withdrawn answer never reached the agent, so the card opens
-                // again.
                 if let questionID = event.questionID, let at = questionIndex[questionID],
                    case var .question(question) = items[at].kind {
                     let withdrawn = event.kind == "answerWithdrawn"
@@ -298,14 +261,10 @@ extension ChatDisplayItem {
                 flushText()
                 flushThinking()
                 let callId = agent.callId ?? "tool-\(stamp(event, items.count))"
-                // Archive positions keep a tool's row stable when older
-                // pages bring another use of the same call ID. Legacy hosts
-                // without positions keep the occurrence-based fallback.
                 let occurrence = (toolStarts[callId] ?? 0) + 1
                 toolStarts[callId] = occurrence
                 let rowID = event.seq != nil ? "tool-\(stamp(event, items.count))"
                     : (occurrence == 1 ? "tool-\(callId)" : "tool-\(callId)#\(occurrence)")
-                // Empty when the event named no tool. The row then says Working.
                 let verb = agent.verb ?? ""
                 let target = ChatToolState.clip(agent.target ?? "")
                 noteToolIndex(items.count, callId: callId)
@@ -338,10 +297,6 @@ extension ChatDisplayItem {
                                 ChatToolState(
                                     callId: callId,
                                     verb: verb,
-                                    // Same reason as the snippet: a shell "target"
-                                    // is the whole command, and a heredoc makes
-                                    // that a document. `lineLimit` bounds what
-                                    // is drawn, not what is measured.
                                     target: target,
                                     running: true,
                                     failed: false,
@@ -408,7 +363,6 @@ extension ChatDisplayItem {
                     )
                 } else {
                     let fallback = callId.isEmpty ? "end-\(stamp(event, items.count))" : callId
-                    // Empty when the event named no tool. The row then says Worked.
                     let presentation = MuseToolPresentation.completed(
                         backend: eventBackend, verb: agent.verb ?? "",
                         target: agent.target ?? "", detail: agent.detail
@@ -534,10 +488,6 @@ extension ChatDisplayItem {
                 flushText()
                 flushThinking()
                 let status = agent.status ?? ""
-                // Only the host's process outcome can fail a turn. Older hosts
-                // may still carry a backend-level "cancelled" marker from
-                // grok; that describes its tool stream, not the person
-                // pressing Stop and not a failed process.
                 let failed = status == "error"
                 closeRunningTools(failed: failed, at: event.atMs, detail: failed ? status : nil)
             default:
@@ -546,13 +496,9 @@ extension ChatDisplayItem {
         }
         flushText()
         flushThinking()
-        // Tool logs are history; only the host knows whether a process lives.
         if !running {
             closeRunningTools(failed: false, at: nil, detail: L10n.text("apple.chatmodel.ended_without_a_tool_result.da8d3680"))
         }
-        // Tool rows are reconstructed as results arrive. Apply their original
-        // backend after closure so image attribution never follows the last
-        // backend that happened to emit an event with the same call id.
         for (index, backend) in toolBackends where items.indices.contains(index) {
             items[index].sourceBackend = backend.isEmpty ? nil : backend
         }

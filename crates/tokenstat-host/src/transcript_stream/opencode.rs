@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Join native v2 deltas with CLI completion/recovery snapshots.
-
 use super::{Prefix, delta_event, identity};
 use crate::transcript::Event;
 use serde_json::Value;
@@ -36,8 +34,6 @@ impl Parts {
             && let Some(id) = identity(&value["tokenstatStep"])
         {
             if self.steps.iter().any(|seen| seen == id) {
-                // A late CLI echo must not replace the latest native prompt
-                // footprint in the inspection snapshot either.
                 value["type"] = Value::String("tokenstat.opencode.duplicate".into());
                 return Some(Vec::new());
             }
@@ -55,8 +51,6 @@ impl Parts {
         let text = value["part"]["text"].as_str()?;
         let native = value["tokenstatNative"] == true;
         let Some(part) = self.part(id) else {
-            // If too many parts are active, keep CLI snapshots as the
-            // fallback. Never emit an untracked native prefix twice.
             return (partial || native).then(Vec::new);
         };
         if partial {

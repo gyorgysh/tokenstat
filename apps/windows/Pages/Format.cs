@@ -12,7 +12,6 @@ namespace Tokenstat.Pages;
 
 internal static class Format
 {
-    /// <summary>List-rate micros as a dollar figure. Never a charge.</summary>
     public static string ListRate(long micros)
     {
         var dollars = micros / 1_000_000d;
@@ -77,7 +76,6 @@ internal static class Format
     public static bool Flag(JsonNode? node, string name) =>
         (node as JsonObject)?[name] is JsonValue v && v.GetValueKind() == JsonValueKind.True;
 
-    /// <summary>Binary units, matching the Mac Account card.</summary>
     public static string DataSize(long bytes)
     {
         if (bytes < 0) bytes = 0;
@@ -97,11 +95,6 @@ internal static class Format
         return bytes.ToString(CultureInfo.InvariantCulture) + " B";
     }
 
-    /// <summary>
-    /// Human label for a connection path. Empty or unknown stays unknown:
-    /// Account must not invent a relay just because the host omitted the route.
-    /// Screen passes "relay" as the JSON fallback when the field is missing.
-    /// </summary>
     public static string Transport(string raw) => raw switch
     {
         "direct" => L10n.Text("windows.format.direct_connection.28d0ad54"),
@@ -116,8 +109,6 @@ internal static class Format
             return fallback;
         }
         var value = node?[name];
-        // JsonValue<string> can serialize just to discover GetValueKind().
-        // Read text directly for both UI-created and parsed values.
         if (value is JsonValue text && text.TryGetValue<string>(out var content)) return content ?? fallback;
         if (value is null || value.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
         {
@@ -131,9 +122,6 @@ internal static class Format
         return string.IsNullOrEmpty(printed) ? fallback : printed;
     }
 
-    /// <summary>
-    /// JSON array of 0–255 numbers, as the SSH session methods speak them.
-    /// </summary>
     public static byte[] Bytes(JsonNode? node)
     {
         if (node is not JsonArray array)
@@ -175,7 +163,6 @@ internal static class Format
         return array;
     }
 
-    /// <summary>Host list methods return a bare array or a named wrapper.</summary>
     public static JsonArray? Items(JsonNode? node, params string[] keys)
     {
         if (node is JsonArray array)
@@ -203,10 +190,6 @@ internal static class Format
             ?? node["sessions"] as JsonArray;
     }
 
-    /// <summary>
-    /// Folder filter used by Tasks and Notes: an empty workspace id is
-    /// unscoped and still belongs on this folder's board.
-    /// </summary>
     public static bool InWorkspace(JsonNode? item, string? workspaceId, bool includeUnscoped)
     {
         if (string.IsNullOrEmpty(workspaceId))
@@ -224,11 +207,6 @@ internal static class Format
     public static bool IsLegend(string? tier) =>
         string.Equals(tier?.Trim(), "legend", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// A server moment in the user's own reading: minutes, hours, days ago.
-    /// Empty or unparsable means never, which is a fact about the account
-    /// rather than a failure to read it.
-    /// </summary>
     public static string Relative(string? value)
     {
         if (string.IsNullOrEmpty(value)
@@ -263,7 +241,6 @@ internal static class Format
         return moment.LocalDateTime.ToString("d");
     }
 
-    /// <summary>One line for an automation schedule, matching the Mac summary.</summary>
     public static string Cadence(JsonNode? item)
     {
         var written = Text(item, "cadence");

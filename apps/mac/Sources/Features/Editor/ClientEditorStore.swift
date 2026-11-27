@@ -3,7 +3,6 @@
 import Foundation
 import Observation
 
-/// File identity includes the host because local workspace IDs can repeat.
 struct ClientEditorKey: Hashable {
     let peer: String
     let workspace: String
@@ -31,8 +30,6 @@ final class ClientEditorTab: Identifiable {
     fileprivate let ownerSession: AnyHashable?
     var isSaving = false
     var errorMessage: String?
-    /// Host content that arrived while the draft was dirty. Saving stays off
-    /// until the person chooses a copy.
     var conflictHostContent: String?
 
     init(id: ClientEditorKey, content: String, ownerSession: AnyHashable? = nil) {
@@ -42,7 +39,6 @@ final class ClientEditorTab: Identifiable {
     }
 }
 
-/// Owned by the client root, so layout and workspace changes preserve buffers.
 @Observable
 @MainActor
 final class ClientEditorStore {
@@ -82,8 +78,6 @@ final class ClientEditorStore {
         return true
     }
 
-    /// Replace a clean buffer with a fresh host read. Dirty and in-flight
-    /// saves keep what the person is looking at.
     func adoptSaved(_ key: ClientEditorKey, content: String) {
         guard let tab = tab(for: key) else {
             open(key, content: content)
@@ -113,7 +107,6 @@ final class ClientEditorStore {
         select(tab)
     }
 
-    /// Dirty buffers need explicit discard. An in-flight save cannot be closed.
     @discardableResult
     func close(_ tab: ClientEditorTab, discard: Bool = false) -> Bool {
         guard tab.ownerSession == sessionID(), tabs.contains(where: { $0 === tab }),
@@ -137,9 +130,6 @@ final class ClientEditorStore {
         tab.isSaving = true
         tab.errorMessage = nil
         defer { tab.isSaving = false }
-        // The host file may have moved since this buffer opened: another
-        // window, the Mac, or a run writing output. Re-read before writing
-        // so a stale draft cannot silently overwrite newer host content.
         let host: String
         do {
             host = try await read(tab.id.peer, tab.id.workspace, tab.id.path)
@@ -155,8 +145,6 @@ final class ClientEditorStore {
             return
         }
         if host == draft {
-            // Already there: a lost acknowledgement or a matching remote
-            // edit. Mark it saved without writing the same bytes again.
             tab.document.markSaved(content: draft)
             return
         }
@@ -175,8 +163,6 @@ final class ClientEditorStore {
         }
     }
 
-    /// Choose a copy after a conflict. Reloading adopts the host and clears
-    /// the draft; keeping writes the draft through explicitly.
     func resolveConflict(_ tab: ClientEditorTab, keepMine: Bool) async {
         let owner = sessionID()
         guard owns(tab, session: owner), !tab.isSaving,
@@ -206,14 +192,11 @@ final class ClientEditorStore {
         }
     }
 
-    /// Signing out removes account-owned file contents from the session.
     func reset() {
         tabs = []
         selections = [:]
     }
 
-    /// Resetting the store or changing accounts retires an in-flight save.
-    /// In particular, a host read must not resume by writing into a new session.
     private func owns(_ tab: ClientEditorTab, session owner: AnyHashable?) -> Bool {
         !Task.isCancelled && tab.ownerSession == owner && sessionID() == owner
             && tabs.contains(where: { $0 === tab })

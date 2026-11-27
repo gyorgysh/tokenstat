@@ -3,7 +3,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Explicit desktop navigation. URLs cannot carry shell commands.</summary>
 internal sealed record DesktopOpenRequest(DesktopWorkbenchTool Tool, string WorkspaceId,
     string? InspectorTab, Uri? BrowserUrl, string? SessionId, bool NewTerminal, string? CommitId)
 {
@@ -53,8 +52,6 @@ internal sealed record DesktopOpenRequest(DesktopWorkbenchTool Tool, string Work
     }
     private static bool ValidSessionId(string value) => value.Length is > 0 and <= 512
         && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' or ':');
-    // Registry IDs are paths. Exact registered-project lookup, rather than
-    // an ASCII session-ID grammar, proves ownership before navigation.
     private static bool ValidWorkspaceId(string value) => !string.IsNullOrWhiteSpace(value)
         && System.Text.Encoding.UTF8.GetByteCount(value) <= 4096
         && !value.Any(c => c < 32 || c is >= '\u007f' and <= '\u009f');

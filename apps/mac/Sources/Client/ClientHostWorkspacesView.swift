@@ -8,32 +8,18 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// One host's folders and running sessions, opened from that device's page.
-///
-/// The Workspaces tab is the same machine plane reached the other way round:
-/// pick a host, then a folder. Somebody who arrived at a device from the
-/// account list is already holding the answer to "which machine", so this
-/// screen dials it on appearance instead of asking again.
 struct ClientHostWorkspacesView: View {
     let peerKey: String
     let hostName: String
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientHostWorkspacesModel()
-    /// Which folder chooser is showing, if any. Chats and sessions live
-    /// inside folders, so starting one means picking the folder first.
     @State private var starting: WorkspaceSection?
     @State private var search = ""
     @State private var customizing = false
     @State private var layout = WorkspacesLayout.shared
-    /// The approval explainer. Opening it is part of asking: the request fires
-    /// and the sheet shows where it went and what answers it.
     @State private var showApproval = false
 
-    /// Whether the host reports no display layer, which changes what "it is
-    /// not answering" means and what somebody can do about it. Probed live:
-    /// the account record carries no platform, which is only the fallback
-    /// when the host cannot answer.
     @State private var isHeadless = false
 
     private var accountPlatform: String? {
@@ -42,9 +28,6 @@ struct ClientHostWorkspacesView: View {
             .platform
     }
 
-    // A first access request cannot ask the host whether it has a display:
-    // that RPC is itself behind the host's approval gate. Use the account
-    // platform (or a recognizable Linux host name) until the probe answers.
     private var showsHeadlessInstructions: Bool {
         isHeadless || isHeadlessPlatform(accountPlatform) || isHeadlessPlatform(hostName)
     }
@@ -56,10 +39,6 @@ struct ClientHostWorkspacesView: View {
                 ClientHostHeader(
                     name: hostName,
                     peerKey: peerKey,
-                    // Unknown until a call has actually come back. Reporting
-                    // awake while the first connect is still in flight told
-                    // somebody a sleeping computer was up for as long as the
-                    // attempt took to fail.
                     online: model.reachedHost,
                     showsOpenWork: false
                 )
@@ -74,10 +53,6 @@ struct ClientHostWorkspacesView: View {
                 if model.isConnecting {
                     ClientWireframe.Page()
                 } else if model.isAllowed == false {
-                    // Not an error. Every device on an account used to reach
-                    // every machine on it the moment it signed in; now each one
-                    // is let in by name, and this is the screen a device sees
-                    // until somebody says yes.
                     VStack(spacing: Theme.Space.s) {
                         ClientEmptyState(
                             kind: .nothingYet,
@@ -117,9 +92,6 @@ struct ClientHostWorkspacesView: View {
                                 .font(ClientType.label.weight(.semibold))
                                 .tint(Theme.accent)
                             Spacer(minLength: 0)
-                            // The code path lives beside the request path, not
-                            // below two paragraphs: it is the alternative, and
-                            // on a server with no SSH it is the only one.
                             NavigationLink {
                                 ClientAddThisDevice(peer: peerKey, hostName: hostName) {
                                     Task { await model.connect(peerKey: peerKey, name: hostName) }
@@ -147,10 +119,6 @@ struct ClientHostWorkspacesView: View {
                     }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
                     if let message = model.errorMessage {
-                        // Only the relay's "never registered" failure is a
-                        // Remote Reach setup problem. A timeout, refusal, or
-                        // LAN drop where Reach is already on needs wake/retry,
-                        // not the 2-step setup card.
                         let lower = message.lowercased()
                         if lower.contains("no_such_peer") || lower.contains("no direct address")
                             || lower.contains("peer_not_found") || lower.contains("no such peer") {
@@ -169,9 +137,6 @@ struct ClientHostWorkspacesView: View {
                             }
                         }
                     } else {
-                        // Not "no folders". A machine with none is a machine
-                        // waiting to be given one, and both ways to do that
-                        // are here rather than described.
                         VStack(spacing: Theme.Space.s) {
                             ClientEmptyState(
                                 kind: .nothingYet,
@@ -380,10 +345,6 @@ struct ClientHostWorkspacesView: View {
         }
     }
 
-        /// Open a folder's section to start something there. The launch tiles and
-    /// the chat composer already live in the folder; this only gets there.
-    /// Both roads: `open` for the sidebar layout, the push for the tab
-    /// layout, which observes the destination but not the folder.
     private func open(_ folder: WorkspaceFolder, section: WorkspaceSection) {
         let raw = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
         navigation.open(folderID: "remote:\(peerKey):\(raw)", section: section)
@@ -400,19 +361,10 @@ final class ClientHostWorkspacesModel {
     private(set) var recentChats: [ChatRecentConversation] = []
     private(set) var errorMessage: String?
     private(set) var isConnecting = false
-    /// Whether a call to this host has come back. Nil until one has, so the
-    /// header can say "not known yet" rather than guessing awake.
     private(set) var reachedHost: Bool?
-    /// Whether that computer has let this device open its work. Nil until the
-    /// question has been asked once, so the screen does not flash a refusal at
-    /// somebody who is simply still connecting.
     private(set) var isAllowed: Bool?
-    /// What came back from asking, kept apart from `errorMessage`.
     private(set) var requestNotice: String?
     private(set) var isRequesting = false
-    /// The watch that reloads on its own once the answer lands, so somebody
-    /// who walks over, approves and comes back is not looking at the same
-    /// refusal with no sign that anything changed.
     private var accessWatch: Task<Void, Never>?
     var activeTerminal: ClientTerminalSession?
     private let owner = WorkSessionContext.shared.scope
@@ -434,10 +386,6 @@ final class ClientHostWorkspacesModel {
             try requireCurrent()
             _ = try await Bridge.setTunnel(true)
             try requireCurrent()
-            // Asked before anything is loaded. Being paired is not being let
-            // in: that computer allows each device to open its work
-            // explicitly, and a device that has not been allowed should get
-            // the screen that says so rather than a list that fails.
             let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
             try requireCurrent()
             isAllowed = allowed
@@ -446,9 +394,6 @@ final class ClientHostWorkspacesModel {
                 folders = []
                 sessions = []
                 recentChats = []
-                // Opening this screen is somebody saying they want in, so the
-                // asking happens without a second press. The button stays, for
-                // asking again once a request has gone stale.
                 if requestNotice == nil {
                     await requestAccess(peerKey: peerKey)
                 }
@@ -473,18 +418,10 @@ final class ClientHostWorkspacesModel {
             sessions = []
             recentChats = []
             reachedHost = false
-            // Unknown again, not refused. A host that could not be reached
-            // this time must not be described as having turned this device
-            // away: those are different screens with different answers.
             isAllowed = nil
         }
     }
 
-    /// Ask that computer to let this device in.
-    ///
-    /// The answer is kept apart from `errorMessage`, which is why the screen
-    /// could not be loaded. An outcome written into a field something else
-    /// reads is how a message ends up changing a state nobody meant it to.
     func requestAccess(peerKey: String) async {
         guard isCurrent, !isRequesting else { return }
         isRequesting = true
@@ -503,7 +440,6 @@ final class ClientHostWorkspacesModel {
         }
     }
 
-    /// Poll for the answer, then load. Stops as soon as it succeeds.
     private func watchForAccess(peerKey: String, name: String) {
         accessWatch?.cancel()
         accessWatch = Task { [weak self] in
@@ -515,7 +451,6 @@ final class ClientHostWorkspacesModel {
                       allowed
                 else { continue }
                 guard self.isCurrent else { return }
-                // Released before reconnecting, for the reason `connect` gives.
                 self.accessWatch = nil
                 await self.connect(peerKey: peerKey, name: name)
                 return

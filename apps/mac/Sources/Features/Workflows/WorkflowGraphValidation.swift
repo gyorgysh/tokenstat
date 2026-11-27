@@ -2,11 +2,6 @@
 
 import Foundation
 
-/// Host graph limits and the messages a person sees before Save.
-///
-/// Keep the numbers and the legal shapes in step with
-/// `tokenstat-host::workflows::validate`. Wording is product copy, not the
-/// host's lowercase internals.
 enum WorkflowGraphRules {
     static let maxNodes = 64
     static let maxEdges = 128
@@ -18,15 +13,10 @@ enum WorkflowGraphRules {
     static let originX = 80.0
     static let originY = 80.0
 
-    /// Kinds a person can add. MCP is reserved on the host.
     static let authorableKinds: [WorkflowNodeKind] = [
         .input, .agent, .automation, .http, .command, .gate, .condition, .loop,
     ]
 
-    /// How an outgoing connection is named on the step list and detail.
-    ///
-    /// If uses Then/Else. Loop uses Body for the repeated work and After last
-    /// pass for the way out. Other steps use Then, On error and Always.
     static func outgoingRole(kind: WorkflowNodeKind, when: WorkflowEdgeWhen) -> String {
         switch (kind, when) {
         case (.condition, .ok): return L10n.text("apple.workflowgraphvalidation.then.0597f441")
@@ -264,8 +254,6 @@ enum WorkflowGraphRules {
         return node
     }
 
-    /// Cycles are allowed only when every cycle passes through a loop node.
-    /// Edges that touch a loop are dropped from the walk, matching the host.
     static func hasIllegalCycle(nodes: [WorkflowNode], edges: [WorkflowEdge]) -> Bool {
         let loops = Set(nodes.filter { $0.kind == .loop }.map(\.id))
         var adj: [String: [String]] = [:]
@@ -296,8 +284,6 @@ enum WorkflowGraphRules {
 }
 
 extension WorkflowGraph {
-    /// Node and edge problems the host would refuse. Name, folder and
-    /// schedule stay with the metadata editor.
     var stepsIssue: String? {
         WorkflowGraphRules.stepsIssue(nodes: nodes, edges: edges)
     }

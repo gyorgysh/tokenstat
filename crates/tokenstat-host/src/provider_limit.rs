@@ -21,8 +21,7 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         ("claude", "result") if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
             value
         }
-        // The Antigravity CLI ends a refused run with a `result` record
-        // whose status is ERROR and whose `error` is the server's message.
+
         ("agy", "result") => {
             let result = value.get("result")?;
             let status = result.get("status").and_then(Value::as_str)?;
@@ -31,7 +30,7 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
             }
             result
         }
-        // Unknown vendor error formats stay manual until verified.
+
         _ => return None,
     };
     let text = error
@@ -42,8 +41,7 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         .and_then(Value::as_str)
         .or_else(|| error.as_str())
         .unwrap_or("");
-    // Claude Code puts the API's own code beside the record type, so
-    // `type` would only ever say "result" for a refused turn.
+
     let code = error
         .get("api_error")
         .or_else(|| error.get("code"))
@@ -51,8 +49,7 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         .and_then(Value::as_str)
         .unwrap_or("");
     let lower = text.to_lowercase();
-    // Codex exec 0.162 emits its protocol UsageLimitReached Display in its
-    // own error/turn.failed envelope. No timestamp is inferred from prose.
+
     let exhausted = matches!(
         code,
         "usage_limit_reached" | "usage_limit_exceeded" | "quota_exceeded" | "insufficient_quota"
@@ -84,7 +81,7 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
         "authentication_error" | "invalid_api_key" | "unauthorized"
     ) || (provider == "claude"
         && lower.starts_with("not logged in · please run /login"));
-    // Other provider-owned errors are visible in routing history but stay manual.
+
     if !exhausted && !throttle && !unavailable && !authentication && text.is_empty() {
         return None;
     }
@@ -129,8 +126,6 @@ pub fn from_record(provider: &str, value: &Value, now: i64) -> Option<Limit> {
     })
 }
 
-/// The Antigravity CLI states the reset as a duration inside its own error,
-/// as in "Resets in 4h49m51s.", and nowhere else.
 fn agy_resets_in(lower: &str, now: i64) -> Option<i64> {
     let rest = &lower[lower.find("resets in ")? + "resets in ".len()..];
     let mut seconds: i64 = 0;
@@ -155,10 +150,6 @@ fn agy_resets_in(lower: &str, now: i64) -> Option<i64> {
     (seen && seconds > 0).then(|| now.saturating_add(seconds * 1000))
 }
 
-/// Claude Code reports the refused window's reset beside the refusal, as
-/// `api_error_params.rate_limit_info.resetsAt` on the synthetic assistant
-/// message and as a `rate_limit_event` whose status is `rejected`. The final
-/// `result` record carries neither, so the parser keeps the last one seen.
 fn claude_resets_at<'a>(provider: &str, value: &'a Value) -> Option<&'a Value> {
     if provider != "claude" {
         return None;
@@ -180,8 +171,6 @@ pub fn reset_hint(provider: &str, value: &Value, now: i64) -> Option<i64> {
     plausible_reset(at, now).then_some(at)
 }
 
-/// Providers send epoch seconds or milliseconds. Anything past 2001 in
-/// milliseconds is already milliseconds.
 fn epoch_ms(n: i64) -> Option<i64> {
     if n > 1_000_000_000_000 {
         Some(n)
@@ -190,7 +179,6 @@ fn epoch_ms(n: i64) -> Option<i64> {
     }
 }
 
-/// A reset in the past or more than a year out is a misread, not a plan.
 fn plausible_reset(at: i64, now: i64) -> bool {
     at > now && at < now.saturating_add(366 * 86400 * 1000)
 }
@@ -352,7 +340,7 @@ mod tests {
     fn reset_is_an_instant_and_throttling_is_distinct() {
         let e = json!({"type":"turn.failed","error":{"code":"usage_limit_reached","message":"limit","resets_at":1700000000}});
         let limit = from_record("codex", &e, 1000).unwrap();
-        assert_eq!(limit.resets_at_ms, None); // unreasonable distant future
+        assert_eq!(limit.resets_at_ms, None);
         let limit = from_record("codex", &e, 1699999999000).unwrap();
         assert_eq!(limit.resets_at_ms, Some(1700000000000));
         assert_eq!(limit.kind, "usage");

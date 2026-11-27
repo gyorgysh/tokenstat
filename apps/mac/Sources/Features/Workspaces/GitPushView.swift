@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// The same host-owned Push entry in desktop and mobile Changes. Loading this
-/// control restores an operation identity; it never reads a remote or pushes.
 struct GitPushControl: View {
     let target: GitCommitTarget
     let folderName: String

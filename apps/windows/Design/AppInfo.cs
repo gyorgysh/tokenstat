@@ -8,7 +8,6 @@ using System.Reflection;
 
 namespace Tokenstat.Design;
 
-/// <summary>Static app metadata. Same facts as the Mac About window.</summary>
 internal static class AppInfo
 {
     public const string Product = "tokenstat";

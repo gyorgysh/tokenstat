@@ -111,7 +111,6 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
     };
     let snapshot = parse_snapshot(&body)?;
     let large_moves = detect_large_moves(path, &snapshot);
-    // Age is measured before the write, against the book we are about to replace.
     let today = jiff::Timestamp::now()
         .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .date();
@@ -151,9 +150,6 @@ fn local_age(path: &Path) -> Option<Duration> {
 /// Pure so the age policy is unit-tested without touching the network.
 fn age_allows_large_moves(local_age: Option<Duration>) -> bool {
     match local_age {
-        // No prior book: detect_large_moves returns empty, so this branch is
-        // not the write gate in practice. Treat as accept so a missing file
-        // never blocks.
         None => true,
         Some(age) => age >= STALE_ACCEPT_LARGE_MOVES,
     }

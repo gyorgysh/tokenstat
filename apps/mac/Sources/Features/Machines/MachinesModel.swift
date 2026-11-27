@@ -6,20 +6,12 @@
 
 import Foundation
 import Observation
-// The pasteboard is the only platform API this model touches, and the two
-// frameworks spell it differently. Guarded rather than abstracted: one call
-// site does not earn a wrapper.
 #if os(macOS)
 import AppKit
 #else
 import UIKit
 #endif
 
-/// This machine, the machines it knows, and whether it can be reached.
-///
-/// Everything here goes through the local daemon. The app never speaks the
-/// machine-to-machine protocol, which is why there is no key material in this
-/// process and nothing to get wrong in Swift.
 @MainActor
 @Observable
 final class MachinesModel {
@@ -34,24 +26,14 @@ final class MachinesModel {
     private(set) var hostPolicy: HostPolicy?
     var isSavingHostPolicy = false
     #endif
-    /// What the inspector is showing. Keys only, so a refresh cannot pin a
-    /// stale Peer or Machine value.
     private(set) var selectedKind: DeviceKind?
     var errorMessage: String?
-    /// Set after an action that worked, so the screen confirms rather than
-    /// leaving somebody wondering whether the button did anything.
     var noticeMessage: String?
     private var noticeGeneration = 0
     private var connectionGeneration: [String: UInt64] = [:]
 
-    /// Peers whose workspaces are listed in the sidebar right now. Set by the
-    /// explicit Connect and kept in sync when the peer sweep or a Disconnect
-    /// changes the sidebar, so the row can offer Disconnect instead of
-    /// Connect once a machine is actually reachable from here.
     private(set) var connectedPeerKeys: Set<String> = []
 
-    /// Peers waiting on a decision, which is the thing somebody opened this
-    /// screen to do.
     enum DeviceKind: Equatable {
         case thisMachine
         case peer(String)
@@ -95,8 +77,6 @@ final class MachinesModel {
 
     var tunnelConnected: Bool { status?.tunnelOnline == true }
 
-    /// Whether this account may use remote reach. The server's explicit
-    /// capability takes precedence over the tier fallback for older servers.
     var remoteReachAllowed: Bool {
         if let remote = account?.canRemote { return remote }
         guard account?.signedIn == true, let tier = account?.tier?.lowercased() else {
@@ -109,9 +89,6 @@ final class MachinesModel {
         account?.vaultTierForSsh
     }
 
-    /// Whether an account machine's workspaces are in the sidebar, which is
-    /// what "Connected" means on this screen: not just reachable, but dialled
-    /// from here.
     func isConnected(_ machine: Machine) -> Bool {
         guard let peer = peer(for: machine) else { return false }
         return connectedPeerKeys.contains(peer.key)
@@ -136,14 +113,6 @@ final class MachinesModel {
         }
     }
 
-    /// The best name this machine has for an account machine.
-    ///
-    /// A machine that was never named on the server shows only its code, which
-    /// is a row of strangers on a screen meant to answer "which one is my
-    /// other computer". The app knows two of them by a name anyway: this
-    /// machine's own identity, and any peer it has already approved. Those
-    /// resolved names are used in place of "Device abc" / "Unnamed device";
-    /// nil means nobody here knows it yet and the code stays the title.
     func isThisMachine(_ machine: Machine) -> Bool {
         (machine.machineID != nil && machine.machineID == account?.thisMachineID)
             || (machine.publicIdentity != nil && machine.publicIdentity == identity?.key)
@@ -165,9 +134,6 @@ final class MachinesModel {
         return nil
     }
 
-    /// The account directory's name for a peer, when the peer itself is
-    /// unnamed. Mirrors `peer(for:)` in reverse, so the two directions agree
-    /// on which keys identify the same machine.
     func accountName(for peer: Peer) -> String? {
         accountMachines.first { machine in
             let identity = machine.publicIdentity ?? machine.machineID
@@ -175,9 +141,6 @@ final class MachinesModel {
         }?.label
     }
 
-    /// Keep a device in the same place while presence and connection status
-    /// refresh. Sorting by online/last seen made rows jump under the pointer
-    /// as a tunnel connected or a phone went idle.
     var listedAccountMachines: [Machine] {
         accountMachines.sorted { lhs, rhs in
             let lhsCurrent = isThisMachine(lhs)
@@ -191,8 +154,6 @@ final class MachinesModel {
         }
     }
 
-    /// Phone / tablet / computer icon for a peer row. Uses the account machine
-    /// when one matches, otherwise a name heuristic (iPad before iPhone).
     func peerSymbol(for peer: Peer) -> String {
         if let machine = accountMachines.first(where: {
             let identity = $0.publicIdentity ?? $0.machineID
@@ -204,9 +165,6 @@ final class MachinesModel {
         return ClientDeviceIcon.symbol(name: name, isHost: true)
     }
 
-    /// The key plus the best live LAN hint when one exists. An old receiver
-    /// accepts the same `key@host:port` form, and a bare key remains right when
-    /// this machine has no direct listener.
     var pairingCode: String? {
         guard let key = identity?.key else { return nil }
         guard let address = status?.directCandidates?
@@ -216,11 +174,6 @@ final class MachinesModel {
         return "\(key)@\(address)"
     }
 
-    /// Copy this machine's connection invite to the pasteboard.
-    ///
-    /// Nobody has to read the invite. It contains the public key and, while a
-    /// listener is live, a LAN address hint that is accepted only after Noise
-    /// proves the key.
     func copyInvite() {
         guard let code = pairingCode else { return }
         #if os(macOS)
@@ -233,8 +186,6 @@ final class MachinesModel {
         showNotice(L10n.text("apple.machinesmodel.invite_copied_on_the_other_device_choose_a.ff13a35e"))
     }
 
-    /// The two words for this machine, which is what a person compares against
-    /// the other screen.
     var words: String? { identity?.words ?? status?.words }
 
     private var loadGeneration: UInt64 = 0
@@ -242,15 +193,10 @@ final class MachinesModel {
     func load() async {
         loadGeneration &+= 1
         let generation = loadGeneration
-        // Already warm from Home's post-heatmap pass: do not flip the loading
-        // banner for a refresh that will paint the same content.
         let quiet = identity != nil
         if !quiet { loading = true }
         defer { if generation == loadGeneration { loading = false } }
         do {
-            // These four do not depend on each other. Sequential awaits made
-            // the first Machines open pay four host RTTs; in parallel it is
-            // one slowest-call, which is what the warm cache also wants.
             async let identityResult = Bridge.machineIdentity()
             async let statusResult = Bridge.remoteStatus()
             async let peersResult = Bridge.peers()
@@ -262,8 +208,6 @@ final class MachinesModel {
             identity = values.0
             status = values.1
             peers = values.2
-            // A transient account read failure is not a sign-out. Keep the
-            // last successful account until the server explicitly replaces it.
             if let freshAccount {
                 account = freshAccount.signedIn ? freshAccount : nil
                 accountMachines = freshAccount.signedIn ? freshAccount.machines : []
@@ -279,12 +223,8 @@ final class MachinesModel {
         }
     }
 
-    /// True once identity has been fetched at least once (warm or user open).
     var isWarmed: Bool { identity != nil }
 
-    /// Provision the tokenstat-owned helper when this screen is opened. It is
-    /// safe to repeat: the installer repairs the launch agent and reconnects
-    /// the bridge instead of asking the user to restart the app.
     func ensureHelper() async {
         #if os(macOS)
         guard !Bridge.isHosted, !settingUpHelper else { return }
@@ -292,8 +232,6 @@ final class MachinesModel {
         #endif
     }
 
-    /// Keep the device list live while the screen is open. In particular this
-    /// catches a launch agent that comes up after the initial bridge probe.
     func refresh() async {
         if !Bridge.isHosted {
             Bridge.reconnect()
@@ -379,12 +317,6 @@ final class MachinesModel {
         #endif
     }
 
-    /// Call this machine something, or clear the name to get the computer's own
-    /// name back.
-    ///
-    /// The name reaches a paired machine and nowhere else. It is not synced and
-    /// it is not part of the identity: the key is what is pinned, so renaming a
-    /// machine never changes who it is to a peer that already trusts it.
     func rename(to name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != identity?.label else { return }
@@ -399,12 +331,6 @@ final class MachinesModel {
         }
     }
 
-    /// Call another device on this account something.
-    ///
-    /// Renames the account row, not that machine's own file: the point is that
-    /// a headless server nobody can log into is still nameable from here. The
-    /// list is reloaded rather than patched, because the server decides what
-    /// the name ends up as when the field is cleared.
     func renameAccountMachine(_ machine: Machine, to name: String) async {
         guard let id = machine.machineID, !id.isEmpty else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -424,11 +350,6 @@ final class MachinesModel {
         }
     }
 
-    /// Refresh the peer list alone.
-    ///
-    /// Separate from `load` because a machine that just connected appears here
-    /// and nowhere else, and re-reading the identity to find that out would be
-    /// three calls to answer one question.
     func refreshPeers() async {
         do {
             peers = try await Bridge.peers()
@@ -477,9 +398,6 @@ final class MachinesModel {
     }
 
     func revoke(_ peer: Peer) async {
-        // Revoke ends trust and any workspace listing for this peer. Leaving
-        // Connected set after revoke made the row offer Disconnect for a
-        // machine that could no longer answer.
         let changed = await change(peer) { try await Bridge.revoke(key: peer.key) }
         guard changed else { return }
         clearConnection(peer.key)
@@ -494,9 +412,6 @@ final class MachinesModel {
     }
 
     func connect(_ peer: Peer) async {
-        // The tunnel is the reliable introduction path. Once connected, a
-        // screen session exchanges and tries direct candidates before carrying
-        // its high-bandwidth stream through the relay.
         guard status?.tunnel == true else {
             errorMessage = L10n.text("apple.machinesmodel.turn_on_reach_devices_from_anywhere_before.4930ed6e", "\(peer.label)")
             return
@@ -504,12 +419,6 @@ final class MachinesModel {
         await dial(peer)
     }
 
-    /// Connect to a machine that belongs to this account.
-    ///
-    /// The account record carries the public key, so this is the same exchange
-    /// as nearby discovery — pin the identity, dial, and let the far end
-    /// decide — without anybody copying or comparing anything. Direct when the
-    /// network allows it, tunnel otherwise.
     func connect(_ machine: Machine) async {
         guard machine.machineID == nil || machine.machineID != account?.thisMachineID else { return }
         if let peer = peer(for: machine) {
@@ -538,18 +447,10 @@ final class MachinesModel {
         }
     }
 
-    /// Remove a machine from the account directory. Destructive on the
-    /// server: the machine's uploaded history is deleted, which is exactly
-    /// what a stale machine id (a reinstall) needs so a live machine can use
-    /// its slot.
     func unlink(_ machine: Machine) async {
         guard let id = machine.machineID else { return }
         do {
             try await Bridge.unlinkMachine(id: id)
-            // An unlinked machine is gone for good: record the denial for its
-            // host and drop what it left here, so a sealed copy does not stay
-            // readable at the model layer until the directory refresh lands.
-            // This mirrors the revocation path in Bridge.workspaceAccessAllowed.
             if let host = machine.publicIdentity, !host.isEmpty,
                let scope = WorkSessionContext.shared.scope {
                 clearConnection(host)
@@ -568,9 +469,6 @@ final class MachinesModel {
         connectionGeneration[peer.key, default: 0] &+= 1
         let generation = connectionGeneration[peer.key]
         func isCurrent() -> Bool { !Task.isCancelled && connectionGeneration[peer.key] == generation }
-        // Only mark Connected after the dial works. Inserting the key first
-        // left Disconnect on a row that never finished connecting, and a
-        // failed dial under an offline machine looked like a stuck connection.
         do {
             _ = try await Bridge.remoteWorkspaces(peer: peer)
             guard isCurrent() else { return }
@@ -581,9 +479,6 @@ final class MachinesModel {
         } catch {
             guard isCurrent() else { return }
             connectedPeerKeys.remove(peer.key)
-            // First contact always ends with the far end being asked to
-            // approve this machine. That is the point, not a failure to
-            // present as one: the other screen shows this machine waiting.
             let text = error.localizedDescription
             if text.contains("has not approved") || text.contains("not approved") {
                 showNotice(L10n.text("apple.machinesmodel.0_has_been_asked_to_let_this_device_in_app.6f734666", "\(peer.label)"))
@@ -594,10 +489,6 @@ final class MachinesModel {
                 showNotice(L10n.text("apple.machinesmodel.0_has_been_asked_to_let_this_device_open_i.961b2eaf", "\(peer.label)"))
                 errorMessage = nil
             } else if text.contains("closed before the answer arrived") {
-                // A drop mid-answer is the peer's daemon swapping its tunnel
-                // listener or a connection that died between two machines that
-                // are both retrying. It resolves itself; naming it as a hard
-                // failure would send somebody down a debugging rabbit hole.
                 showNotice(L10n.text("apple.machinesmodel.the_connection_to_0_dropped_mid_answer_it.0e22c33a", "\(peer.label)"))
                 errorMessage = nil
             } else if text.localizedCaseInsensitiveContains("offline")
@@ -612,14 +503,6 @@ final class MachinesModel {
         }
     }
 
-    /// Flip a peer's auto-connect from Devices, beside the connection itself.
-    ///
-    /// Only Disconnect disconnects. Turning the switch off merely stops the
-    /// sweep dialling on its own; a live connection stays up with whatever
-    /// it last read. On dials when the machine looks reachable; otherwise
-    /// the sweep picks it up when it wakes, which is what the switch
-    /// promises. Without a machine record there is no reachability to
-    /// check, so the dial is attempted and reports honestly.
     func setAutoConnect(_ on: Bool, peer: Peer, machine: Machine? = nil) {
         WorkspacesModel.setAutoConnect(on, for: peer.key)
         if on {
@@ -630,10 +513,6 @@ final class MachinesModel {
         }
     }
 
-    /// Drop the peer's workspaces from the sidebar and mark the row back to
-    /// Connect. The connection itself is a tunnel channel that ends when its
-    /// last use does; what the user asked for is that the machine stops
-    /// appearing as connected here.
     private func clearConnection(_ key: String) {
         connectionGeneration[key, default: 0] &+= 1
         connectedPeerKeys.remove(key)
@@ -641,27 +520,16 @@ final class MachinesModel {
     }
 
     func disconnect(_ peer: Peer) {
-        // One broadcast: RootView drops workspaces (and suppresses re-dial),
-        // and this screen's own listener clears any stale Connected mark.
         clearConnection(peer.key)
         showNotice(L10n.text("apple.machinesmodel.disconnected_from_0_its_workspaces_are_no.3ecfb24d", "\(peer.label)"))
     }
 
-    /// Whether Connect is honest for this account machine right now.
-    ///
-    /// Presence can lag behind wake or sign-in. Keep the explicit action
-    /// available and report the actual connection result.
     func canConnect(_ machine: Machine) -> Bool {
         if machine.machineID != nil, machine.machineID == account?.thisMachineID { return false }
         if let key = identity?.key, machine.publicIdentity == key { return false }
-        // Presence may be stale after wake or sign-in. An explicit attempt
-        // reports missing reachability settings instead of hiding the action.
         return machine.kind != "client"
     }
 
-    /// After a purchase the 5s refresh sees `canRemote`, but hostd may still
-    /// be sitting on a `not_on_this_plan` stop. Remint when the switch is on
-    /// and the last answer was a plan refusal or the socket is down.
     private func reconsiderPlanIfNeeded() async {
         guard remoteReachAllowed, status?.tunnel == true else { return }
         let planError = status?.tunnelError.map {
@@ -669,7 +537,6 @@ final class MachinesModel {
                 || $0.contains("paid-plan")
                 || $0.localizedCaseInsensitiveContains("not on this plan")
         } ?? false
-        // Only a leftover plan refusal. A connecting socket is not a remint.
         guard planError else { return }
         let generation = loadGeneration
         _ = try? await Bridge.reconsiderPlan()

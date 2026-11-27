@@ -11,11 +11,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>
-/// One folder on another machine, as the sidebar lists it. The id is the
-/// shared remote namespace, remote:peer:inner, so a terminal spawned in the
-/// folder and the folder itself group under the same peer.
-/// </summary>
 internal sealed record RemoteFolder(
     string Id,
     string InnerId,
@@ -26,34 +21,18 @@ internal sealed record RemoteFolder(
     JsonNode? Git = null,
     bool IsGeneral = false)
 {
-    /// <summary>How the row reads, matching the desktop Mac sidebar.</summary>
     public string DisplayName =>
         string.IsNullOrEmpty(MachineLabel) ? Name : MachineLabel + " / " + Name;
 }
 
-/// <summary>
-/// Whether an explicit Connect worked, and what to tell the person. A refusal
-/// is a notice rather than an error: the other screen shows this machine
-/// waiting, which is the point, not a failure.
-/// </summary>
 internal sealed record RemoteConnectResult(bool Connected, string Message, bool IsNotice);
 
-/// <summary>
-/// Folders on other machines, read through this PC's daemon. Mirrors the
-/// desktop Mac split: the daemon answers remote.call, and this store keeps
-/// the merged list, the per-peer backoff, and the explicit Disconnect.
-///
-/// A peer that is offline does not make local folders disappear: its failure
-/// is remembered rather than raised, and its last known folders stay listed
-/// until it has missed twice in a row.
-/// </summary>
 internal static class RemoteWorkspaces
 {
     static RemoteWorkspaces() => AppServices.AccountChanged += ResetForAccountChange;
 
     public const string Prefix = "remote:";
 
-    /// <summary>Raised on a background thread when the cached list changes.</summary>
     public static event Action? Changed;
 
     private static readonly object Gate = new();
@@ -67,15 +46,12 @@ internal static class RemoteWorkspaces
     private static readonly HashSet<string> AskedWorkspace = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Connected = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Stale = new(StringComparer.Ordinal);
-    // A remote.call cannot be cancelled after it has reached the daemon.
-    // Each host revision fences its answer against a newer local decision.
     private static readonly Dictionary<string, long> Revisions = new(StringComparer.Ordinal);
     private static readonly HostAutoConnectPreferences AutoConnect = new(
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect-scoped.json"),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "remote-autoconnect.json"));
     private static string? _accountScope;
 
-    /// <summary>Forget every host snapshot when the account identity changes.</summary>
     public static void ResetForAccountChange()
     {
         lock (Gate)
@@ -103,10 +79,6 @@ internal static class RemoteWorkspaces
     public static bool IsRemote(string id) =>
         id.StartsWith(Prefix, StringComparison.Ordinal);
 
-    /// <summary>
-    /// Split remote:peer:inner into its peer key and the folder id on that
-    /// machine. False for a local id.
-    /// </summary>
     public static bool TrySplit(string id, out string peer, out string inner)
     {
         peer = "";
@@ -134,11 +106,6 @@ internal static class RemoteWorkspaces
     private static long AdvanceRevisionLocked(string peer) =>
         Revisions[peer] = RevisionLocked(peer) + 1;
 
-    /// <summary>
-    /// A host answered, and the answer was no. Connection failures and a
-    /// phone that cannot host a folder are different, and must not raise a
-    /// permission request. Same three strings the desktop Mac matches.
-    /// </summary>
     public static bool IsWorkspaceRefusal(string message)
     {
         var lower = message.ToLowerInvariant();
@@ -147,10 +114,6 @@ internal static class RemoteWorkspaces
             || lower.Contains("open its work");
     }
 
-    /// <summary>
-    /// Ask a peer a question, through this machine's daemon. The result is
-    /// the peer's own, unwrapped: a failure over there is a failure here.
-    /// </summary>
     public static Task<JsonNode> CallOnPeerAsync(string peer, string method, JsonNode? parameters = null, TimeSpan? patience = null) =>
         AppServices.Host.CallAsync(
             "remote.call",
@@ -161,12 +124,6 @@ internal static class RemoteWorkspaces
                 ["params"] = parameters ?? new JsonObject(),
             }, patience);
 
-    /// <summary>
-    /// One workspace method against a local or remote folder id. A remote id
-    /// travels as remote.call with the peer's own id, the way the desktop Mac
-    /// routes every workspace read. The params object is copied, never
-    /// mutated, so a retry cannot forward an already rewritten id.
-    /// </summary>
     public static Task<JsonNode> CallWorkspaceAsync(string id, string method, JsonNode? parameters = null, TimeSpan? patience = null)
     {
         if (!TrySplit(id, out var peer, out var inner))
@@ -177,7 +134,6 @@ internal static class RemoteWorkspaces
         return CallOnPeerAsync(peer, method, forwarded, patience);
     }
 
-    /// Publish the confirmed response without waiting for the next quiet sweep.
     public static void RememberRegisteredProject(string peer, string hostName, JsonNode folder)
     {
         var inner = Format.Text(folder, "id");
@@ -197,7 +153,6 @@ internal static class RemoteWorkspaces
         Changed?.Invoke();
     }
 
-    /// <summary>Reflect a confirmed folder mutation without waiting for backoff.</summary>
     public static void ProjectChanged(string id, string? name = null)
     {
         if (!TrySplit(id, out var peer, out _)) return;
@@ -218,7 +173,6 @@ internal static class RemoteWorkspaces
         Changed?.Invoke();
     }
 
-    /// <summary>Whether the row offers Disconnect instead of Connect.</summary>
     public static bool IsConnected(string peerKey)
     {
         lock (Gate)
@@ -227,7 +181,6 @@ internal static class RemoteWorkspaces
         }
     }
 
-    /// <summary>A cached folder is retained, but its host missed a refresh.</summary>
     public static bool IsStale(string peerKey)
     {
         lock (Gate) return Stale.Contains(peerKey);
@@ -251,11 +204,6 @@ internal static class RemoteWorkspaces
         }
     }
 
-    /// <summary>
-    /// Dial one peer now, on an explicit Connect. Marks the row connected
-    /// only after the dial works: a failed dial under an offline machine
-    /// must not look like a stuck connection.
-    /// </summary>
     public static async Task<RemoteConnectResult> ConnectAsync(
         string peerKey, string label, bool tunnelOn, bool? online)
     {
@@ -283,8 +231,6 @@ internal static class RemoteWorkspaces
         }
         try
         {
-            // Foreground Connect should repair a relay that failed to start
-            // at login, rather than immediately reusing that startup failure.
             await AppServices.Host.CallAsync("remote.nudge");
             var folders = await ReadPeerFoldersAsync(peerKey, label);
             if (account != AppServices.AccountGeneration)
@@ -302,9 +248,6 @@ internal static class RemoteWorkspaces
                 FoldersByPeer[peerKey] = folders;
                 Connected.Add(peerKey);
                 Stale.Remove(peerKey);
-                // Keep the preference write with the publication. A
-                // Disconnect between these two steps used to re-enable a
-                // host that the person had just disconnected.
                 AutoConnect.Set(_accountScope, peerKey, true);
             }
             Changed?.Invoke();
@@ -348,8 +291,6 @@ internal static class RemoteWorkspaces
                 }
                 catch
                 {
-                    // The question may already stand over there. The notice
-                    // below still says what to do about it.
                 }
                 return new RemoteConnectResult(
                     true,
@@ -382,7 +323,6 @@ internal static class RemoteWorkspaces
     private static RemoteConnectResult ConnectionChangedResult() =>
         new(false, L10n.Text("windows.remoteworkspaces.connection_changed"), true);
 
-    /// <summary>Set the verified account before reading or writing reconnect choices.</summary>
     public static void SetAccountScope(JsonNode status, long accountGeneration)
     {
         var scope = BrowserProjectMemory.Scope(status);
@@ -399,11 +339,6 @@ internal static class RemoteWorkspaces
         }
     }
 
-    /// <summary>
-    /// Drop the peer's folders from the sidebar now. The connection itself is
-    /// a tunnel channel that ends when its last use does; what was asked for
-    /// is that the machine stops appearing as connected here.
-    /// </summary>
     public static void Disconnect(string peerKey)
     {
         lock (Gate)
@@ -417,22 +352,14 @@ internal static class RemoteWorkspaces
             Stale.Remove(peerKey);
             AutoConnect.Set(_accountScope, peerKey, false);
         }
-        // A manual Disconnect must survive restart. An explicit Connect or
-        // newly registered project opts this host back into auto-connect.
         Changed?.Invoke();
     }
 
-    /// <summary>
-    /// A folder was registered or cloned on this peer. Fetch now rather than
-    /// on the next sweep, so the sidebar shows what was just made.
-    /// </summary>
     public static void RefreshPeer(string peerKey)
     {
         lock (Gate)
         {
             AdvanceRevisionLocked(peerKey);
-            // Registering a folder is an explicit return to this computer,
-            // even if it was disconnected earlier in the session.
             Suppressed.Remove(peerKey);
             Failures.Remove(peerKey);
             NextDial.Remove(peerKey);
@@ -441,15 +368,8 @@ internal static class RemoteWorkspaces
         _ = SweepAsync();
     }
 
-    /// <summary>
-    /// Folders on other machines, read through the local daemon. Runs on the
-    /// slow sidebar tick, never on a file change: every peer here is a dial
-    /// with a connect timeout and a handshake.
-    /// </summary>
     public static async Task SweepAsync()
     {
-        // Boot, the sidebar timer and workspace creation can request a sweep
-        // together. One pass owns the retry counters and peer requests.
         if (Interlocked.Exchange(ref _sweeping, 1) != 0)
         {
             return;
@@ -490,8 +410,6 @@ internal static class RemoteWorkspaces
                     continue;
                 }
                 var address = Format.Text(peer, "address");
-                // A peer without an address is dialled through the tunnel.
-                // Without it the sweep would never reach a machine behind NAT.
                 if (string.IsNullOrEmpty(address) && !tunnelOn)
                 {
                     continue;
@@ -501,8 +419,6 @@ internal static class RemoteWorkspaces
         }
         catch
         {
-            // Not surfaced. The peer list failing is not a reason to put an
-            // error over a screen full of working local folders.
             return;
         }
 
@@ -527,10 +443,6 @@ internal static class RemoteWorkspaces
             }
         }
         if (changed) Changed?.Invoke();
-        // Each host has its own transport slot and retry clock. A serial
-        // sweep made one sleeping host hold up every healthy host behind it.
-        // Bound the dials so a ten-host account does not start ten handshakes
-        // at once, while still letting independent hosts make progress.
         await BoundedHostSweep.RunAsync(peers, 4, async peer =>
         {
             if (await SweepPeerAsync(peer.Key, peer.Label, now, account))
@@ -568,9 +480,6 @@ internal static class RemoteWorkspaces
                 {
                     return false;
                 }
-                // A steady refresh must not rebuild the sidebar: the
-                // folders are records, so a value compare says whether
-                // anything actually moved.
                 var newlySeen = !FoldersByPeer.ContainsKey(key);
                 var same = !newlySeen
                     && FoldersByPeer[key].Count == folders.Count
@@ -599,11 +508,6 @@ internal static class RemoteWorkspaces
                     !IsAutoConnectEnabledLocked(key)) return false;
                 if (IsWorkspaceRefusal(text))
                 {
-                    // Reached a host that has not let this device in. Ask
-                    // once per session, then back off like any refusal, so
-                    // a machine whose owner said no is not asked twice a
-                    // minute for the rest of the session. A revoked grant
-                    // must remove folders cached under the old grant.
                     if (AskedWorkspace.Add(key))
                     {
                         var askKey = key;
@@ -632,11 +536,6 @@ internal static class RemoteWorkspaces
                 }
                 var failures = Failures.TryGetValue(key, out var n) ? n + 1 : 1;
                 Failures[key] = failures;
-                // A machine that answered before is worth asking again
-                // soon: it is probably asleep and will be back. One that
-                // never answered is usually a phone or a tablet, which
-                // cannot host a folder, and asking it every thirty seconds
-                // is three pointless tunnel dials a minute, forever.
                 var neverAnswered = !EverAnswered.Contains(key);
                 NextDial[key] = now + (neverAnswered && failures >= BackOffAfter
                     ? ColdRetryAfter : RetryAfter);
@@ -709,10 +608,6 @@ internal static class RemoteWorkspaces
             if (accountGeneration.HasValue && accountGeneration != AppServices.AccountGeneration) return;
             AdvanceRevisionLocked(peerKey);
             AutoConnect.Set(_accountScope, peerKey, on);
-            // Turning the switch back on is an explicit reconnect choice.
-            // Without this, a prior manual Disconnect kept the host in the
-            // in-memory suppressed set until app restart even though the
-            // saved preference now said to reconnect.
             if (on) Suppressed.Remove(peerKey);
         }
     }

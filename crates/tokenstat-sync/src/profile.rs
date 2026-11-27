@@ -184,10 +184,6 @@ fn refusal_error(text: &str, status: u16) -> ProfileError {
         error: None,
         message: None,
     });
-    // The one refusal with a fix the caller can perform itself. The machine
-    // is not on the account: re-registering it (PUT /api/v1/machines/me) is
-    // exactly the repair, and the caller needs the structured signal to know
-    // to do it rather than give up.
     if body.error.as_deref() == Some("machine_not_registered") {
         return ProfileError::MachineNotRegistered;
     }
@@ -208,8 +204,6 @@ fn refusal_error(text: &str, status: u16) -> ProfileError {
 fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(app) = crate::app_info::current() {
-        // Validated at the local app boundary. These headers are used only
-        // for this account API, never for vendor requests.
         if let Ok(version) = reqwest::header::HeaderValue::from_str(&app.version) {
             headers.insert("x-tokenstat-app-version", version);
         }
@@ -224,7 +218,6 @@ fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
     Ok(crate::http::client_builder()
         .default_headers(headers)
         .timeout(Duration::from_secs(60))
-        // A dead network must fail fast, not eat the whole request timeout.
         // `timeout` covers connect, but the OS default connect phase can be
         // far longer than ten seconds on a network that drops packets.
         .connect_timeout(Duration::from_secs(10))
@@ -291,10 +284,6 @@ pub fn login_with_code(host_flag: Option<&str>, code: &str) -> Result<LoginResul
     }
     keychain::store_token(&host, &ok.token)?;
     config::set_sync_host(&host)?;
-    // Say what this machine is, now that there is an account to tell. Signing
-    // in is the explicit act that permits it, and without this a CLI-only
-    // install sits in everybody's device list as a row of hex. Best effort: an
-    // account that could not be told the name is still an account.
     let _ = publish_machine_profile(Some(&host));
     Ok(LoginResult {
         host,
@@ -406,8 +395,6 @@ pub fn device_start_kind(host_flag: Option<&str>, kind: &str) -> Result<DeviceLo
     let client = http_client()?;
     let kind = if kind == "client" { "client" } else { "host" };
 
-    // Learn the server range early so a hopeless mismatch fails before the
-    // browser dance.
     let envelope = schema::fetch_schema(&client, &host)?;
     let _ = envelope.choose_payload_v()?;
 
@@ -426,7 +413,6 @@ pub fn device_start_kind(host_flag: Option<&str>, kind: &str) -> Result<DeviceLo
     }
 
     let device: DeviceCodeResponse = serde_json::from_str(&limited_text(resp)?)?;
-    // Refuse phishing / non-HTTPS schemes before any UI opens a browser.
     crate::host::assert_safe_verification_url(&device.verification_uri, &host)
         .map_err(|e| ProfileError::Message(e.to_string()))?;
     if let Some(ref complete) = device.verification_uri_complete {
@@ -467,8 +453,6 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
         || text.contains("authorization_pending")
         || text.contains("slow_down")
     {
-        // `slow_down` is the server asking for more room, so widen rather than
-        // keep hammering at the original interval.
         let interval = if text.contains("slow_down") {
             login.interval.saturating_add(5)
         } else {
@@ -488,8 +472,6 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
             .map_err(|e| ProfileError::LoginStorage(format!("credential file: {e}")))?;
         config::set_sync_host(&login.host)
             .map_err(|e| ProfileError::LoginStorage(format!("account host setting: {e}")))?;
-        // Same as the pairing path: name this machine on the account it just
-        // joined, and do not fail the login if that call does not land.
         let _ = publish_machine_profile(Some(&login.host));
         return Ok(DeviceStatus::Confirmed(Box::new(LoginResult {
             host: login.host.clone(),
@@ -562,22 +544,18 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
 /// or expired token is treated the same as success.
 pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
     let host = resolve_api_host(host_flag)?;
-    if let Some(token) = keychain::load_token(&host)? {
-        // Dedicated client with a short budget. Reusing `http_client` meant a
-        // dropped path could hold the whole logout for 60 seconds, and the
-        // keychain only cleared after that.
-        if let Ok(client) = crate::http::client_builder()
+    if let Some(token) = keychain::load_token(&host)?
+        && let Ok(client) = crate::http::client_builder()
             .timeout(Duration::from_secs(4))
             .connect_timeout(Duration::from_secs(2))
             .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-        {
-            let _ = client
-                .post(format!("{host}/api/v1/logout"))
-                .header("authorization", format!("Bearer {token}"))
-                .send();
-        }
+    {
+        let _ = client
+            .post(format!("{host}/api/v1/logout"))
+            .header("authorization", format!("Bearer {token}"))
+            .send();
     }
     keychain::delete_token(&host)?;
     Ok(host)
@@ -825,10 +803,6 @@ pub fn register_machine_identity_kind(
             "public_identity": public_identity,
             "label": label,
             "kind": kind,
-            // What this machine is, in the words a person reads: "Ubuntu 24.04
-            // · x86_64". Coarse on purpose, and the machine's own answer
-            // rather than a name, so it is refreshed on every registration
-            // while a name somebody typed is not.
             "platform": tokenstat_identity::platform().pretty(),
             "app_version": app.as_ref().map(|a| &a.version),
             "app_build": app.as_ref().and_then(|a| a.build.as_deref()),
@@ -928,10 +902,6 @@ pub fn rename_machine(
             "could not rename the device on the account ({status}): {text}"
         )));
     }
-    // Clearing only drops the choice. The row is now nameless until the named
-    // machine registers again, which on a machine with remote reach off may be
-    // never, so this machine says its own name straight away. Only for itself:
-    // clearing another device's name cannot be answered with this one's.
     if label.is_empty() && crate::config::ensure_machine_id().is_ok_and(|mine| mine == machine_id) {
         publish_machine_profile(host_flag)?;
     }
@@ -1063,8 +1033,6 @@ pub(crate) fn decode_tunnel_response(
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
-    // Only a missing route means "this host predates tunnel tokens". Every
-    // other refusal is a real answer and must reach the caller intact.
     if status.as_u16() == 404 || status.as_u16() == 405 {
         return Err(ProfileError::Unsupported(format!(
             "this account host has no tunnel token endpoint ({status})"
@@ -1319,8 +1287,6 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
             .date()
             .to_string();
         let cursor = config::cursor_for(&host)?;
-        // Local models found since the last sync priced their older days as
-        // cloud models on the account. Send the history again, once.
         let relabel = cursor
             .as_ref()
             .is_some_and(|c| local_models_known > c.local_models.unwrap_or(0));
@@ -1446,8 +1412,6 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     let last_sync_at = jiff::Timestamp::now()
         .strftime("%Y-%m-%dT%H:%M:%SZ")
         .to_string();
-    // The success body carries the plan's interval and the next slot, so a
-    // scheduled run can pace itself without a second request.
     let pacing = pacing_from_body(&response_text, None);
     config::record_sync_cursor(
         &host,
@@ -1458,8 +1422,6 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
         local_models_known,
     )?;
 
-    // Opt-in plan limits post (P2). Failures are not a failed sync: the
-    // counters already landed, and a vendor that is down must not block that.
     if config::limits_sync_enabled() {
         let _ = post_limits(Some(&host), None);
     }
@@ -1549,9 +1511,6 @@ pub fn post_limits(
                         "percent": w.percent,
                         "resets_at_ms": w.resets_at_ms,
                     });
-                    // Only send a scope when the vendor named one. The
-                    // account plane used to drop it, so two weekly figures
-                    // arrived on the phone both reading "weekly".
                     if let Some(scope) = w.scope.as_deref().filter(|s| !s.is_empty()) {
                         window["scope"] = serde_json::Value::String(scope.to_string());
                     }
@@ -1589,9 +1548,6 @@ pub fn post_limits(
     };
     let (mut status, mut text) = send(&body_providers)?;
     let mut count = body_providers.len();
-    // Older servers reject profile fields and limit the number of readings.
-    // Keep their existing machine-account upload working, without ever
-    // relabeling a profile's quota as the machine's.
     if status == reqwest::StatusCode::BAD_REQUEST
         && body_providers.iter().any(|p| !p["profile_id"].is_null())
         && serde_json::from_str::<serde_json::Value>(&text).is_ok_and(|error| {
@@ -1768,9 +1724,6 @@ pub fn sync_scheduled(
         && let Some(next) = cursor.next_allowed_at.as_deref()
         && let Ok(next_ts) = next.parse::<jiff::Timestamp>()
     {
-        // Measured from when the POST would land, and with the same
-        // grace the server allows, so a couple of seconds of timer drift
-        // never costs a whole interval.
         let at = jiff::Timestamp::now() + Duration::from_secs(sleep_secs);
         let grace = Duration::from_secs(SERVER_GRACE_SECS);
         if at + grace < next_ts {
@@ -1800,8 +1753,6 @@ pub fn sync_scheduled_now(
         return Ok(ScheduledOutcome::NotLoggedIn);
     }
 
-    // Read pacing under the shared lock. Another scheduler may have finished
-    // an upload since this process last checked the cursor.
     let Some(_lock) = try_sync_lock()? else {
         return Ok(ScheduledOutcome::Deferred {
             reason: "another sync is already running".into(),
@@ -2081,8 +2032,6 @@ fn read_capped(mut resp: impl std::io::Read, max: usize) -> Result<Vec<u8>, Prof
 /// that calls this already prints the address for the user to open themselves.
 /// A client that cannot exec is not a client that cannot sign in.
 fn open_browser(url: &str) -> Result<(), ProfileError> {
-    // Named with a leading underscore so the platforms below can use it and
-    // the ones with no branch do not warn about it.
     let _url = url;
     #[cfg(target_os = "macos")]
     {
@@ -2224,7 +2173,6 @@ mod tests {
 
     #[test]
     fn a_posted_window_keeps_its_scope() {
-        // Two weekly figures without a scope both read "weekly" on the phone.
         let reading = tokenstat_core::limits::ProviderLimits {
             profile_id: None,
             source: "codex".into(),
@@ -2276,8 +2224,6 @@ mod tests {
 
     #[test]
     fn different_machines_land_on_different_offsets() {
-        // Not a guarantee for any two ids, but a spread this coarse would show up
-        // as an outright collision across a handful of them.
         let offsets: Vec<u64> = [
             "m_0000000000000001",
             "m_0000000000000002",
@@ -2308,7 +2254,6 @@ mod tests {
 
     #[test]
     fn retry_after_stands_in_for_a_missing_body() {
-        // An intermediary can rate-limit us without speaking our JSON.
         let p = pacing_from_body("Too many requests", Some(120));
         assert_eq!(p.min_interval, None);
         assert!(p.next_allowed_at.is_some());
@@ -2398,8 +2343,6 @@ mod auth_state_tests {
 
     #[test]
     fn the_signed_out_messages_are_recognised_as_signed_out() {
-        // A GUI shows a sign-in button for these and an error banner for
-        // anything else, so the two must not drift apart.
         assert!(ProfileError::Message(NOT_LOGGED_IN.into()).is_unauthenticated());
         assert!(ProfileError::Message(TOKEN_REVOKED.into()).is_unauthenticated());
     }

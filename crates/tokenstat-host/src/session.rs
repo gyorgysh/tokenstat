@@ -4,26 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Whatever state a conversation needs, and an archive only if there is one.
-//!
-//! Deliberately a plain struct with no global. The C ABI keeps one in a static,
-//! the socket server keeps one behind its own lock, and a test makes as many as
-//! it likes. That last one matters: while the session was a process-wide
-//! singleton, every test that touched it had to take a lock and run serially.
-//!
-//! # Why the archive is optional
-//!
-//! iOS and iPadOS keep no session logs, because nothing on them can run an
-//! agent. A mobile client is a client of the account and of machines that do,
-//! so it needs prices and a timezone and no `Engine` at all.
-//!
-//! The account grid already worked that way before this split:
-//! [`crate::account_activity::calendar`] takes a price book and a timezone and
-//! never touches a store. It was only reachable through a session that insisted
-//! on opening SQLite first. Holding the price book and the zone here, rather
-//! than reaching through the engine for them, is what lets that path run on a
-//! machine with nothing to open.
 
 use serde::Deserialize;
 use tokenstat_core::{Engine, PriceTable};
@@ -54,15 +35,8 @@ pub struct OpenParams {
 /// git rather than the archive and must not queue behind a scan. See that
 /// module for why.
 pub struct Session {
-    /// Absent on a client build. Reach it through [`Session::engine`] rather
-    /// than matching on it, so the refusal is worded once.
     engine: Option<Engine>,
     pub prices: PriceTable,
-    /// The zone every day boundary is drawn in.
-    ///
-    /// Held here rather than read back off the engine because the account grid
-    /// needs it on a machine that has no engine, and because two copies of the
-    /// same fact eventually disagree.
     timezone: jiff::tz::TimeZone,
     /// Device authorization awaiting confirmation.
     ///

@@ -8,11 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Folders and running sessions on a host that is awake (P5 machine plane).
-///
-/// Account plane answers spend and limits while every laptop is asleep. This
-/// tab is the opposite: it needs a live tunnel to a host. Once connected,
-/// folders open into a Terminus-style surface: sessions, files, ports, tty.
 struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -30,17 +25,9 @@ struct ClientWorkspacesView: View {
     @State private var expandedHostFolders: Set<String> = []
     @State private var expandedHostSessions: Set<String> = []
     @State private var expandedHostList = false
-    /// The folder handoff this view has already pushed, so a reconnect does
-    /// not push it again after somebody backed out of it.
     @State private var handledFolderHandoff: String?
-    /// Which folder chooser is showing, if any. Same question as the device
-    /// page: chats and sessions live inside folders.
     @State private var starting: WorkspaceSection?
     @State private var startingOnHost: String?
-    // Per-host, not global: each host card owns its row. A global key would
-    // make every toggle move together, which is the extra card in the
-    // screenshot. The rule itself lives on the model, because the iPad's
-    // sidebar owns a model without ever mounting this view.
     private func autoConnectBinding(for peerKey: String) -> Binding<Bool> {
         Binding(
             get: { model.isAutoConnectEnabled(for: peerKey) },
@@ -52,11 +39,6 @@ struct ClientWorkspacesView: View {
         model.isAutoConnectEnabled(for: peerKey)
     }
 
-    /// Both layouts pass the root's model, so the sidebar's tree and this
-    /// screen are one connection, and a change of layout keeps it.
-    ///
-    /// Tab mode has this view consume notification taps. The sidebar handles
-    /// those itself, so two surfaces do not open the same thread.
     private let handlesNotifications: Bool
 
     @MainActor
@@ -133,9 +115,6 @@ struct ClientWorkspacesView: View {
                                 art: .remoteGate
                             )
                         } else if model.hosts.isEmpty {
-                            // Not "no hosts". The hole is a machine, and the thing
-                            // that fills it is one button away rather than three
-                            // sentences of instructions about another computer.
                             ClientEmptyState(
                                 kind: .nothingYet,
                                 title: L10n.text("apple.clientworkspacesview.no_machine_yet.3ea83dc9"),
@@ -165,9 +144,6 @@ struct ClientWorkspacesView: View {
                             peerName: model.hosts.count == 1
                                 ? model.hosts.first { $0.peerKey == model.connectedKey }?.name : nil
                         )
-                        // Under the computer that was tapped and above the work
-                        // lists. At the top of the page it sat out of view of the
-                        // row that asked, and nothing said a request had gone.
                         if let host = model.awaitingAccessHost {
                             ClientAwaitingAccessCard(
                                 hostName: host,
@@ -221,8 +197,6 @@ struct ClientWorkspacesView: View {
                     .padding(.top, Theme.Space.s)
                     .padding(.bottom, 96)
                 }
-                // Asking can start from a row far down a long list. Bring the
-                // card that says what happens next into view.
                 .onChange(of: model.awaitingAccessHost) { _, host in
                     guard host != nil else { return }
                     withAnimation { scroller.scrollTo(Self.accessCardID) }
@@ -305,16 +279,9 @@ struct ClientWorkspacesView: View {
                 guard handlesNotifications else { return }
                 Task { await fulfillNotification() }
             }
-            // When the host list refreshes and the last host comes online
-            // after being offline (Mac wakes, lid opens), try again. This is
-            // what makes "keep trying until online" work without a timer.
             .onChange(of: model.hosts) { _, _ in
                 Task { await model.autoConnectLastHost() }
             }
-            // A handoff can set only the folder, with no push (setup ends by
-            // opening a project). The sidebar reads `folderID` itself; this
-            // layout has no such read, so turn it into the push this stack
-            // understands once the host has answered and the folder is known.
             .onChange(of: navigation.folderID, initial: true) { _, _ in
                 openFolderHandoff()
             }
@@ -363,9 +330,6 @@ struct ClientWorkspacesView: View {
         return account.account?.machines.first { $0.machineID == id }
     }
 
-    /// Whether the waiting host is a headless server, so the waiting card can
-    /// offer SSH approval instead of GUI steps. Matched by name: the model's
-    /// `awaitingAccessHost` is the display name the card already shows.
     private func isHeadlessHost(named host: String) -> Bool {
         let machines = account.account?.machines ?? []
         let platform = machines.first {
@@ -374,33 +338,14 @@ struct ClientWorkspacesView: View {
         return isHeadlessPlatform(platform) || isHeadlessPlatform(host)
     }
 
-    /// A tap on a push. A terminal that needs the person opens here. Chat
-    /// is the fallback, over the app because this layout has no sidebar.
-    ///
-    /// Peek first, consume only once the tap resolves: taking up front and
-    /// then failing (host offline, connect busy) lost the tap with no
-    /// feedback. A request that never resolves stays pending for the next
-    /// tap rather than vanishing.
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request,
               let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         guard let opened = await model.targetFromNotification(request, account: account.account) else {
-            // A cancelled attempt is not a failed one. This runs from a
-            // `.task`, which the system cancels the moment the view goes
-            // away, and `targetFromNotification` answers nil for that too.
-            // Acting on it would drop the tap and pull somebody back to
-            // Workspaces at the moment they navigated off it.
             guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
-            // Otherwise: not yet, or not ever, and this cannot tell the two
-            // apart. Keep the tap for the next attempt until it goes stale,
-            // then land on the machine list rather than leave somebody
-            // looking at whatever was on screen with nothing to say why.
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
-        // Compare before consuming. `take` always clears, so a newer tap that
-        // arrived while this one resolved would be swallowed by the equality
-        // check and both would be dropped. Peeking leaves it for its own turn.
         guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
               NotificationOpen.shared.request == request else { return }
         _ = NotificationOpen.shared.take()
@@ -412,8 +357,6 @@ struct ClientWorkspacesView: View {
                 landAfterFailedTap()
                 return
             }
-            // Same thread, phone was just locked: bring that window
-            // forward. Presenting again remounts the transcript on top.
             if navigation.isShowing(peer: peer, workspaceID: chat.workspaceID, chatID: chat.id) {
                 if navigation.destination != .workspaces {
                     navigation.destination = .workspaces
@@ -431,26 +374,12 @@ struct ClientWorkspacesView: View {
         }
     }
 
-    /// Where a tap ends up when what it named cannot be found.
-    ///
-    /// Workspaces, not Home: every notification this app sends is about work
-    /// on a machine, so the machine list is both where the tap was heading
-    /// and the screen that can say the host is offline. It is also where the
-    /// root already sent them on the way in, so this is a landing rather than
-    /// a second move.
     private func landAfterFailedTap() {
         if navigation.destination != .workspaces {
             navigation.destination = .workspaces
         }
     }
 
-    /// Turn a folder named without a push into the push this layout uses.
-    ///
-    /// Setup ends by calling `open(folderID:section:)`, which is all the
-    /// sidebar needs: it reads `folderID` for its own detail. The tab stack
-    /// has no such read, so the same handoff landed on the host list. Resolve
-    /// it once the connected host's folder list contains it, and only once per
-    /// value, so a reconnect cannot reopen what somebody just backed out of.
     private func openFolderHandoff() {
         guard handlesNotifications,
               let folderID = navigation.folderID,
@@ -468,8 +397,6 @@ struct ClientWorkspacesView: View {
             folder: folder,
             section: navigation.section
         )
-        // A chooser already pushed this exact folder. Marking it handled is
-        // enough; a second push would stack the same screen twice.
         guard navigation.workspacesPath.last != push else { return }
         navigation.pushFolder(
             peerKey: peer,
@@ -609,14 +536,8 @@ struct ClientWorkspacesView: View {
             .padding(.top, Theme.Space.xs)
     }
 
-    /// This phone, on the screen that lists the devices it can reach.
-    ///
-    /// It has no Connect button because a phone cannot dial itself, and it is
-    /// never drawn as offline: the app asking the question is running on it.
     @ViewBuilder
     private var thisDeviceRow: some View {
-        // This row opens nothing. In the multi-host list it shares the host
-        // surface but keeps its own non-navigating appearance.
         if let name = model.thisDeviceName {
             HStack(spacing: Theme.Space.s) {
                 Circle()
@@ -642,12 +563,7 @@ struct ClientWorkspacesView: View {
         }
     }
 
-    /// A device is a connection, not a page-sized card. When several hosts
-    /// are available, keep their state and controls in one scannable list so
-    /// the projects can start immediately below it.
     private var compactHostList: some View {
-        // Keep account order while presence and reconnect results change.
-        // Moving a host to the top after a dial makes the rows jump under a tap.
         let ordered = model.hosts
         let shown = expandedHostList ? ordered : Array(ordered.prefix(3))
         return VStack(spacing: 0) {
@@ -765,9 +681,6 @@ struct ClientWorkspacesView: View {
         .padding(.trailing, Theme.Space.xs)
     }
 
-    /// Keep each computer and its work together. A folder, chat or terminal
-    /// always carries the peer it belongs to; changing a hidden default host
-    /// is not needed to open any of them.
     private var multiHostWork: some View {
         let readyHosts = model.hosts.filter {
             model.loadedHostKeys.contains($0.peerKey) &&
@@ -988,11 +901,7 @@ struct ClientWorkspacesView: View {
                 .foregroundStyle(Theme.accent)
             }
             if model.connectedKey == host.peerKey {
-                // What the machine is doing, rather than a sentence saying it
-                // is connected. The row already says that: the dot is lit and
-                // the button says Disconnect.
                 HostStatsStrip(peer: host.peerKey)
-                // Per-host, on by default, same line-height as Disconnect.
                 HStack(spacing: 6) {
                     Text(L10n.text("apple.clientworkspacesview.auto_connect.45b6d201"))
                         .font(ClientType.caption.weight(.medium))
@@ -1027,15 +936,9 @@ struct ClientWorkspacesView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
-        // No card-wide tap gesture: the card holds Connect/Disconnect, Open
-        // device and an Auto-connect toggle, and a parent `onTapGesture` fires
-        // for taps on those controls too, pushing to Devices mid-action. The
-        // explicit "Open device" row above is the way in.
     }
 }
 
-/// The dot in a computer row means online presence. Connection route and
-/// power are named separately so the accent color is not mistaken for Direct.
 private struct ClientHostConnectionSummary: View {
     let peer: String
     @State private var route: String?
@@ -1118,7 +1021,6 @@ private struct ClientHostConnectionSummary: View {
     }
 }
 
-/// A host device the phone can dial (account machine that is not a client).
 struct ClientHost: Identifiable, Hashable {
     var id: String { peerKey }
     var peerKey: String
@@ -1166,23 +1068,11 @@ final class ClientWorkspacesModel {
     private(set) var recentChats: [ChatRecentConversation] = []
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
-    /// An explicitly tapped host waiting for the dial while another attempt
-    /// is still running. The row spins on this as well as on `isConnecting`,
-    /// and the auto path stays out while it is set, so a tap can never lose
-    /// to an auto-connect with nothing on screen saying why.
     private(set) var pendingPeer: String?
-    /// The machine somebody picked by hand, until they pick another or
-    /// disconnect. It outlives the attempt on purpose: waiting for approval,
-    /// a refusal and an error all clear `connectedKey`, which handed the auto
-    /// path a free run at the remembered machine while the card for the one
-    /// they tapped was still on screen. That is what connected the first tap
-    /// on a second machine to the first one.
     private(set) var chosenPeer: String?
     @ObservationIgnored private var remoteLoadGeneration = UUID()
     @ObservationIgnored private let ownerScope = WorkSessionContext.shared.scope
     private(set) var errorMessage: String?
-    /// What this phone is called. It is never in the host list (it cannot dial
-    /// itself), so it gets one line of its own.
     private(set) var thisDeviceName: String?
     var activeTerminal: ClientTerminalSession?
     @ObservationIgnored private var lastRecoverAt = Date.distantPast
@@ -1196,10 +1086,6 @@ final class ClientWorkspacesModel {
         refreshGeneration = generation
         let thisID = account?.thisMachineID
         let machines = account?.machines ?? []
-        // Who this phone is, from the host rather than from the account. A
-        // record registered before the server knew about client machines still
-        // carries no kind and would otherwise list this phone as a host that
-        // is asleep, which is the one device on the list that certainly is not.
         let identity = try? await Bridge.machineIdentity()
         guard !Task.isCancelled, !retired, refreshGeneration == generation,
               ownerScope == WorkSessionContext.shared.scope else { return }
@@ -1247,26 +1133,11 @@ final class ClientWorkspacesModel {
         }
     }
 
-    /// Soft guidance (approve on host), not a hard failure banner.
     private(set) var infoMessage: String?
-    /// The computer this device has asked to be let into, while that request
-    /// is still standing. Named rather than a bool, because the card says
-    /// which machine somebody has to walk to.
     private(set) var awaitingAccessHost: String?
     private(set) var awaitingAccessPeerKey: String?
-    /// The watch that connects on its own once the answer lands.
-    ///
-    /// The waiting card shows a picture that keeps moving, and a picture that
-    /// keeps moving is a promise that something is still happening. It was not:
-    /// somebody who walked over, approved the device and came back found the
-    /// same card, with nothing telling them to press Connect again.
     private var accessWatch: Task<Void, Never>?
 
-    /// Explicit, from a tap or a notification. Queues behind an in-flight
-    /// dial instead of dropping: dropping is what let an auto-connect steal
-    /// the first tap on a cold start, landing the detail column on a machine
-    /// nobody asked for. The latest tap wins; a tap on the host already
-    /// dialling or already queued is a no-op.
     func connect(_ host: ClientHost) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         backgroundTickets.removeValue(forKey: host.peerKey)
@@ -1290,11 +1161,6 @@ final class ClientWorkspacesModel {
         }
         if isConnecting == host.peerKey || pendingPeer == host.peerKey { return }
         pendingPeer = host.peerKey
-        // Wait out the in-flight dial however long its ladder takes. The old
-        // fixed twenty-second cap dropped the tap while a dial that had not
-        // answered was still running, and a dial can take a minute or more.
-        // Nothing else may start while this is queued, so once the field is
-        // clear this attempt is the one that dials.
         while !Task.isCancelled, pendingPeer == host.peerKey, isConnecting != nil {
             try? await Task.sleep(for: .milliseconds(250))
         }
@@ -1305,9 +1171,6 @@ final class ClientWorkspacesModel {
         await dial(host, recovering: false)
     }
 
-    /// Change the context for new chats and terminals without changing the
-    /// connection preference. A host can remain live with auto-connect off;
-    /// merely viewing its folders must not silently turn that switch on.
     func focusLoadedHost(_ host: ClientHost) {
         guard host.online != false, !staleHostKeys.contains(host.peerKey),
               let snapshot = hostSnapshots[host.peerKey] else { return }
@@ -1324,9 +1187,6 @@ final class ClientWorkspacesModel {
         if let key = lastConnectedHostKey { UserDefaults.standard.set(host.peerKey, forKey: key) }
     }
 
-    /// The auto path. Never queues and never preempts: while an explicit tap
-    /// is waiting or dialling, this drops, so redialling the last host cannot
-    /// undo a machine somebody just picked.
     private func autoDial(_ host: ClientHost) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         guard isConnecting == nil, pendingPeer == nil else { return }
@@ -1351,9 +1211,6 @@ final class ClientWorkspacesModel {
         return UserDefaults.standard.string(forKey: key)
     }
 
-    /// Every host this account connected to or explicitly re-enabled. The
-    /// last active host comes first for navigation; the per-host switch and
-    /// current account directory still decide which ones may auto-connect.
     var rememberedHosts: [ClientHost] {
         guard let key = rememberedHostsKey else { return [] }
         let saved = UserDefaults.standard.stringArray(forKey: key) ?? []
@@ -1375,9 +1232,6 @@ final class ClientWorkspacesModel {
         hostPreferencePrefix.map { "\($0).auto.\(WorkReferenceKey.encode(peerKey))" }
     }
 
-    /// An older build used one global preference. Move it to the first
-    /// signed-in account that actually lists this host, and remove the
-    /// global copy so another account cannot inherit its disconnect choice.
     private func migrateLegacyHost() {
         guard let key = lastConnectedHostKey,
               UserDefaults.standard.object(forKey: key) == nil,
@@ -1395,14 +1249,6 @@ final class ClientWorkspacesModel {
         UserDefaults.standard.removeObject(forKey: oldAutoKey)
     }
 
-    /// Whether this host may be dialled without being asked.
-    ///
-    /// Missing means on, and that is the intended default rather than an
-    /// oversight: nothing dials on its own until somebody has connected to a
-    /// machine by hand once, because the auto path needs
-    /// the account's last connected host and only a successful connection writes it.
-    /// So the switch is an opt out of redialling the machine you were last
-    /// on, not an opt in to being dialled.
     func isAutoConnectEnabled(for peerKey: String) -> Bool {
         guard let key = autoConnectKey(for: peerKey) else { return false }
         return UserDefaults.standard.object(forKey: key) as? Bool ?? true
@@ -1415,28 +1261,8 @@ final class ClientWorkspacesModel {
         else { backgroundTickets.removeValue(forKey: peerKey) }
     }
 
-    /// The one place that dials without being asked.
-    ///
-    /// On the model rather than on a screen, because the iPad's sidebar owns
-    /// one of these and draws the folder tree from it without ever mounting
-    /// `ClientWorkspacesView`. With this on the view, a keyboard iPad opened
-    /// to an empty tree and stayed there until somebody tapped Workspaces,
-    /// which is the surface that happened to hold the code.
-    ///
-    /// Several things want it: a screen appearing, the host list changing as
-    /// a machine wakes, coming back to the foreground, and now two surfaces
-    /// doing each of those. They overlap constantly, and `connectedKey` is
-    /// only set once a connection has finished, so callers cannot use it to
-    /// tell whether one is already under way. `autoDial` dropping while
-    /// anything is under way or queued is what makes the overlap harmless.
-    ///
-    /// `connectedKey` is in-memory, so a cold start has nothing to recover:
-    /// the last peer that was connected is remembered on disk instead.
     func autoConnectLastHost() async {
         warmRememberedHosts()
-        // Approval is already pending on the host. A foreground/host-list
-        // refresh must not send another access request while the watch polls
-        // for the original answer (the host rate-limits repeated asks).
         guard connectedKey == nil, isConnecting == nil, pendingPeer == nil,
               awaitingAccessHost == nil else { return }
         guard let last = lastConnectedHost,
@@ -1448,15 +1274,10 @@ final class ClientWorkspacesModel {
         await autoDial(host)
     }
 
-    /// Revisit saved hosts while this app stays in the foreground. The sweep
-    /// still applies each host's snapshot age and retry clock.
     func revisitRememberedHosts() {
         warmRememberedHosts()
     }
 
-    /// Keep saved computers ready behind the currently selected one. The
-    /// foreground dial owns one slot; this sweep uses at most three more.
-    /// Each peer retains its own loaded lists and retry clock.
     private func warmRememberedHosts(forceRefresh: Bool = false) {
         guard !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         if backgroundSweep != nil {
@@ -1555,13 +1376,7 @@ final class ClientWorkspacesModel {
         if hostSnapshots[peer] != nil { staleHostKeys.insert(peer) }
     }
 
-    /// Redial the current host after a path change. Keeps the connected
-    /// surface up and retries `no_such_peer` at 1/2/4s instead of pinning
-    /// a red error that only a force-quit used to clear.
     func recoverAfterNetworkChange(account: Account?) async {
-        // An attempt already running is the recovery. Its ladder outlasts the
-        // path change that woke this, so redialling on top of it only refreshes
-        // the list twice. A queued explicit tap wins over the recovery too.
         let now = Date()
         if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
         lastRecoverAt = now
@@ -1575,16 +1390,6 @@ final class ClientWorkspacesModel {
         activeTerminal?.clearTransientTunnelError()
     }
 
-    /// One attempt at a time, for the whole model.
-    ///
-    /// `connectedKey` is not set until a connection has finished, so it
-    /// cannot stand in for "busy": every caller that checked it was free to
-    /// start a second attempt while the first was still on its retry ladder,
-    /// and the two would pair, raise a tunnel and load the remote side twice.
-    /// `isConnecting` is set for the whole run, including the sleeps, so this
-    /// is the check that actually holds. Private: explicit taps enter through
-    /// `connect`, which queues, and the auto path through `autoDial`, which
-    /// drops. Both end up here, never two at once.
     private func dial(_ host: ClientHost, recovering: Bool) async {
         guard !Task.isCancelled, !retired, ownerScope != nil, ownerScope == WorkSessionContext.shared.scope else { return }
         backgroundTickets.removeValue(forKey: host.peerKey)
@@ -1617,8 +1422,6 @@ final class ClientWorkspacesModel {
         if !recovering {
             errorMessage = nil
             infoMessage = nil
-            // A fresh attempt asks again rather than leaving the old card up,
-            // so pressing Connect always means something happened.
             stopWatchingForAccess()
         }
         let delays: [UInt64] = [0, 1, 2, 4]
@@ -1640,30 +1443,14 @@ final class ClientWorkspacesModel {
                 guard stillCurrent() else { return }
                 _ = try await Bridge.setTunnel(true)
                 guard stillCurrent() else { return }
-                // Asked before anything is loaded, and asked *for* rather than
-                // reported. Connect used to walk straight into the refusal and
-                // show it as a failure with a Try again that could never
-                // succeed: there was no way to ask from this screen, only from
-                // the device's own page. Pressing Connect is somebody saying
-                // they want in, so this asks on their behalf and waits.
                 let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
                 guard stillCurrent() else { return }
                 if !allowed {
                     dropHostSnapshot(host.peerKey)
                     deniedHostKeys.insert(host.peerKey)
-                    // A failed ask must run through the dial's retry ladder.
-                    // Swallowing it left this screen saying it was waiting on
-                    // the host even though no request had reached the host.
                     let request = try await Bridge.askWorkspaceAccess(peer: host.peerKey)
                     guard stillCurrent() else { return }
-                    // A grant can land before the ask replies, and the review
-                    // demo host grants during the ask. Finish this Connect tap
-                    // without making the person return and try again.
                     if request.granted == true { continue }
-                    // Its own state, not `infoMessage`. Waiting on a person at
-                    // another computer is the one thing on this screen where
-                    // nothing will change until they act, and a line of grey
-                    // caption is not enough to say so.
                     awaitingAccessHost = host.name
                     awaitingAccessPeerKey = host.peerKey
                     infoMessage = nil
@@ -1754,11 +1541,6 @@ final class ClientWorkspacesModel {
             || lower.contains("not_approved")
     }
 
-    /// Wait for the answer, then connect without being asked again.
-    ///
-    /// The same cadence the Mac polls its own pending list on. Cheap: one
-    /// small call to the host that already answered, and it stops the moment
-    /// it succeeds or the screen goes away.
     private func watchForAccess(_ host: ClientHost) {
         accessWatch?.cancel()
         let ownerScope = WorkSessionContext.shared.scope
@@ -1772,22 +1554,12 @@ final class ClientWorkspacesModel {
                 guard ownerScope == WorkSessionContext.shared.scope, ecosystemLease == EcosystemPublisher.lease,
                       self.remoteLoadGeneration == loadGeneration,
                       self.chosenPeer == nil || self.chosenPeer == host.peerKey else { return }
-                // The key is already known, so this asks one small question
-                // and nothing else. Re-pairing on every tick would rewrite
-                // this device's peer store every five seconds to learn a
-                // string it was already holding.
                 guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: host.peerKey),
                       allowed
                 else { continue }
                 guard !Task.isCancelled, !retired, self.ownerScope == ownerScope, ownerScope == WorkSessionContext.shared.scope,
                       ecosystemLease == EcosystemPublisher.lease, self.remoteLoadGeneration == loadGeneration,
                       self.chosenPeer == nil || self.chosenPeer == host.peerKey else { return }
-                // Let go of the handle before connecting. The dial stops the
-                // watch on its way in, and a task that cancels itself
-                // mid-flight would take the retry ladder's own sleeps with it.
-                // `autoDial`, not `connect`: the person may have tapped
-                // another machine since, and the watch must not queue the old
-                // one back up behind it.
                 self.accessWatch = nil
                 await self.autoDial(host)
                 return
@@ -1802,8 +1574,6 @@ final class ClientWorkspacesModel {
         awaitingAccessPeerKey = nil
     }
 
-    /// A row spins while its host is dialling or queued for the dial. One
-    /// helper so the sidebar and the host card cannot disagree about it.
     func isBusy(with peerKey: String) -> Bool {
         isConnecting == peerKey || pendingPeer == peerKey
     }
@@ -1827,8 +1597,6 @@ final class ClientWorkspacesModel {
     }
 
     func disconnect(manual: Bool = true) {
-        // A tapped Disconnect is a persistent choice. Teardown for account
-        // change only retires this model and must not change that choice.
         let peer = connectedKey ?? isConnecting ?? pendingPeer ?? chosenPeer
         if manual, let peer {
             setAutoConnect(false, for: peer)
@@ -1908,8 +1676,6 @@ final class ClientWorkspacesModel {
         }
     }
 
-    /// The sidebar stays mounted while project detail owns its own loader.
-    /// Keep its terminal tree current without reloading the account or chats.
     func refreshSessions(peer: String) async {
         let generation = remoteLoadGeneration
         guard !Task.isCancelled, !retired, ownerScope != nil,
@@ -2013,12 +1779,6 @@ final class ClientWorkspacesModel {
         case chat(peer: String, hostName: String, folder: WorkspaceFolder?, chat: ChatRecentConversation)
     }
 
-    /// Dial the machine the push named, then pick what needs the person.
-    ///
-    /// A named session always wins. The any-attention fallback applies to
-    /// session requests and to pushes naming nothing (a push carries only a
-    /// machine id): a chat request must reach its conversation rather than
-    /// diverting to an unrelated waiting terminal.
     func targetFromNotification(
         _ request: NotificationOpen.Request,
         account: Account?

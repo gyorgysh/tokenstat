@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/// The live seat uses the same sentences on every client.
 class ChatSeatTest {
     private fun phrase(verb: String?, target: String?, expected: String) {
         assertEquals(expected, ChatSeat.phrase(verb, target))

@@ -7,7 +7,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-/** Coordinates stay in the viewport, independent of the image's graphics layer. */
 internal data class ChatImageTransform(val scale: Float = 1f, val offset: Offset = Offset.Zero) {
     fun zoomedTo(next: Float, anchor: Offset, pan: Offset, viewport: Size, image: Size): ChatImageTransform {
         if (!next.isFinite() || !anchor.x.isFinite() || !anchor.y.isFinite() || !pan.x.isFinite() || !pan.y.isFinite()) return this

@@ -8,11 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// What did I spend, everywhere, with every laptop asleep.
-///
-/// Account plane only, and that is the rule to hold hardest. A phone is what
-/// you have precisely when the Mac is closed, so a Home screen that needs the
-/// Mac awake is blank exactly when it is wanted. See `docs/mobile-app.md`.
 struct ClientHomeView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(AccountModel.self) private var account
@@ -20,13 +15,9 @@ struct ClientHomeView: View {
     @Environment(\.openClientAccount) private var openAccount
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(HomeModel.self) private var model
     @State private var layout = HomeLayout.shared
-    /// The day whose detail sheet is open. A sheet rather than the Mac's hover
-    /// popover, because a finger has no hover.
     @State private var selectedDay: HeatCell?
-    /// A finger is holding the heatmap, so this page does not scroll.
     @State private var pickingADay = false
     @State private var customizing = false
 
@@ -34,13 +25,7 @@ struct ClientHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 greeting
-                // Outside the arrangement, deliberately. Whether the account
-                // could be read at all is the screen talking, not a card
-                // somebody chose to keep, and hiding Activity must not hide
-                // "you are offline".
                 status
-                // In the order this device was arranged in. A card with
-                // nothing to say draws nothing and keeps its place.
                 ForEach(layout.sections) { section in
                     view(for: section)
                 }
@@ -54,22 +39,14 @@ struct ClientHomeView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
-            // Clear of the floating tab bar. The bar is chrome over content,
-            // so the content has to end above it rather than under it.
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        // Always, not based on size. `basedOnSize` stops a short screen from
-        // bouncing, and a screen that cannot bounce cannot be pulled: the
-        // refresh gesture quietly disappeared exactly when the page was empty,
-        // which is when somebody most wants to pull it.
         .scrollBounceBehavior(.always, axes: .vertical)
         .scrollDisabled(pickingADay)
         .simultaneousGesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { value in
-                    // A deliberate rightward edge swipe opens the same sheet
-                    // as the avatar, leaving vertical scroll and card gestures alone.
                     guard !pickingADay, selectedDay == nil, !customizing,
                           value.startLocation.x <= 44,
                           value.translation.width >= 80,
@@ -84,8 +61,6 @@ struct ClientHomeView: View {
             }
         }
         .task {
-            // Account scope always. There is no local archive to fall back to,
-            // and asking for one would only produce a refusal to render.
             model.scope = .allMachines
             await model.load()
         }
@@ -100,9 +75,6 @@ struct ClientHomeView: View {
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }
-        // The connection came back. Fetch now rather than leaving somebody
-        // looking at an offline card on a phone that is plainly online again,
-        // which is the moment they would otherwise force-quit the app.
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await model.refresh() }
         }
@@ -115,9 +87,6 @@ struct ClientHomeView: View {
         .sheet(isPresented: $customizing) {
             ClientHomeEditor(layout: layout, emptyReason: emptyReason)
         }
-        // Search asked for the editor by name. `initial` because Home may
-        // have been the screen behind search all along, in which case nothing
-        // changes here except the flag.
         .onChange(of: navigation.homeEditorRequested, initial: true) { _, requested in
             guard requested else { return }
             navigation.homeEditorRequested = false
@@ -125,7 +94,6 @@ struct ClientHomeView: View {
         }
     }
 
-    // MARK: - Sections
 
     @ViewBuilder
     private func view(for section: HomeSection) -> some View {
@@ -149,9 +117,6 @@ struct ClientHomeView: View {
                 ClientWireframe.Heatmap()
             }
         case .limits:
-            // Below the grid, and only once there is an account behind it.
-            // `model.calendar` being nil means the load failed or has not
-            // landed, and this has nothing to say then.
             if model.calendar != nil {
                 ClientLimitsCard(
                     providers: model.planLimits,
@@ -176,10 +141,6 @@ struct ClientHomeView: View {
         }
     }
 
-    /// What happened to the account read, when something did.
-    ///
-    /// A quiet, locked or cached grid still belongs to an existing account.
-    /// Setup requires a successful empty response.
     @ViewBuilder
     private var status: some View {
         if model.calendar != nil || model.isLoading {
@@ -187,14 +148,6 @@ struct ClientHomeView: View {
         } else if model.hasConfirmedEmptyActivity {
             ClientGettingStarted()
         } else if let message = model.errorMessage {
-            // A failed load replaces the wireframe with the reason. A
-            // skeleton that never resolves is a lie told slowly.
-            //
-            // Offline gets its own words. Every screen here is account
-            // plane, so with no network there is nothing to fetch and
-            // nothing anybody can do about it: the honest line is "you
-            // are offline", not the transport error underneath it,
-            // which reads like the product is broken.
             ClientEmptyState(
                 kind: .unreachable,
                 title: connectivity.isOffline ? L10n.text("apple.clienthomeview.you_are_offline.4d5c9439") : L10n.text("apple.clienthomeview.could_not_load_your_activity.83f3bb60"),
@@ -206,8 +159,6 @@ struct ClientHomeView: View {
                 action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
             )
         } else {
-            // No authoritative empty answer yet. Recovery and stale
-            // or fallback calendars must not send an account to setup.
             ClientEmptyState(
                 kind: .unreachable,
                 title: L10n.text("apple.clienthomeview.activity_is_unavailable.05583cc4"),
@@ -219,8 +170,6 @@ struct ClientHomeView: View {
         }
     }
 
-    /// Every card switched off. Not an error, and not empty space with
-    /// nothing to press: the way back is right here.
     private var clearHome: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text(L10n.text("apple.clienthomeview.your_home_is_clear.9ae93db2"))
@@ -235,8 +184,6 @@ struct ClientHomeView: View {
         .cardSurface()
     }
 
-    /// At the bottom, under everything it arranges. A control for changing
-    /// the furniture does not belong above the furniture.
     private var customizeButton: some View {
         Button(L10n.text("apple.clienthomeview.customize_home.642cec6e"), .layout) { customizing = true }
             .buttonStyle(.plain)
@@ -246,10 +193,7 @@ struct ClientHomeView: View {
             .padding(.top, Theme.Space.xs)
     }
 
-    // MARK: - Pieces
 
-    /// Same line the website and the Mac home use: a local-clock phrase,
-    /// the first name, and the star / badge / crown next to it.
     @ViewBuilder
     private var greeting: some View {
         if account.signedIn {
@@ -266,9 +210,6 @@ struct ClientHomeView: View {
         }
     }
 
-    /// The greeting keeps its phrase when the account has no name to
-    /// greet by. A missing display name and handle say nothing about
-    /// the session, so the line stays and only the name drops out.
     private var greetingLine: String {
         if let name = account.account?.title, !name.isEmpty {
             HomeGreeting.line(name: name, hasHistory: hasHistory)
@@ -320,9 +261,6 @@ struct ClientHomeView: View {
                     guard !day.isLocked else { return }
                     selectedDay = day
                 },
-                // The page holds still while a day is being picked. A grid
-                // scrubbed with a finger inside a page that scrolls under it
-                // is two gestures fighting over one touch.
                 onScrub: { pickingADay = $0 }
             )
             if calendar.isHistoryLocked {
@@ -333,13 +271,7 @@ struct ClientHomeView: View {
         .cardSurface()
     }
 
-    // MARK: - Figures
 
-    /// The most recent day the grid carries.
-    ///
-    /// Taken from the calendar rather than from a day report, because the day
-    /// report reads the local archive and the client has none. Same numbers,
-    /// one source, no disagreement between the grid and the figure above it.
     private func todayValue(_ calendar: ActivityCalendar) -> UInt64 {
         days(calendar).last { $0.date == calendar.last }?.value ?? 0
     }
@@ -349,14 +281,10 @@ struct ClientHomeView: View {
     }
 
     private func days(_ calendar: ActivityCalendar) -> [HeatCell] {
-        // Column-major: the grid is seven rows of weeks, so reading rows in
-        // order gives every Monday before any Tuesday. Sorting by the date
-        // string is safe because it is `YYYY-MM-DD`.
         calendar.rows.flatMap { $0.compactMap { $0 } }.sorted { $0.date < $1.date }
     }
 }
 
-/// One large figure with its label. Two of these are the top of Home.
 private struct TotalTile: View {
     let label: String
     let micros: UInt64
@@ -376,10 +304,7 @@ private struct TotalTile: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            // Top trailing, the way every other figure card on the client
-            // carries its mark. See `ClientStatPanels`.
             FeatureMark(name: mark, size: 26)
-                // The label beside it already says which period this is.
                 .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -390,8 +315,6 @@ private struct TotalTile: View {
     }
 }
 
-/// A sentence the host sent about why this is not the answer that was asked
-/// for, with a sign-in button when signing in is the fix.
 private struct NoticeCard: View {
     @Environment(AccountModel.self) private var account
     let text: String

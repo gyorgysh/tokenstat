@@ -12,12 +12,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The reviewed pull for one workspace, matching the Mac. Opening the dialog
-/// is what fetches, because a person pressed Pull. Applying moves the branch
-/// to exactly the reviewed commit, fast-forward only, and never merges,
-/// rebases or touches uncommitted work.
-/// </summary>
 internal static class WorkspacePullDialog
 {
     public static async Task ShowAsync(UIElement owner, string workspaceId, string folderName)
@@ -126,8 +120,6 @@ internal static class WorkspacePullDialog
             }
             catch (Exception ex)
             {
-                // A refused pull would refuse again with the same review.
-                // Drop it so the dialog offers Check again, not the same Pull.
                 review = null;
                 error = ex.Message;
             }

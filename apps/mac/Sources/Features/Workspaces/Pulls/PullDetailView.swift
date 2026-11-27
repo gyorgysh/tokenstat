@@ -3,9 +3,6 @@
 import Observation
 import SwiftUI
 
-/// A pull request as part of the workspace, not a small GitHub-shaped web page.
-/// Conversation is the default; expensive diff bytes arrive only when Changes
-/// is opened, and the inspector yields below the reading column on a phone.
 struct PullDetailView: View {
     let workspaceID: String
     let peer: String?
@@ -18,11 +15,8 @@ struct PullDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var descriptionExpanded = false
     #if os(macOS)
-    /// Which of the page's own tabs is behind Changes.
     @State private var pageTab: PullDetailTab = .conversation
     @State private var visitedChanges = false
-    /// The project's tabs take the bar's spare width first, so a button that
-    /// measured itself would keep its name and push the last control out.
     @State private var hasRoomForLabels = true
     #endif
 
@@ -35,8 +29,6 @@ struct PullDetailView: View {
             }) {
                 detailActions
             }
-            // Both stay once visited. Building either one again costs a tenth
-            // of a second or more, which is what made the tabs feel stuck.
             ZStack {
                 let showsChanges = model.tab == .changes && model.detail != nil
                 page
@@ -70,7 +62,6 @@ struct PullDetailView: View {
         .onChange(of: summary.number) { _, _ in descriptionExpanded = false }
         #if DEBUG && os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
-            // `pulltab:<conversation|changes|checks>` and `pullfile:<n>`.
             let parts = (note.object as? String ?? "").split(separator: ":").map(String.init)
             guard parts.count == 2 else { return }
             switch (parts[0], parts[1]) {
@@ -133,10 +124,6 @@ struct PullDetailView: View {
                         if let error = model.actionError {
                             actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") { model.actionError = nil }
                         }
-                        // Measuring two copies of an entire PR conversation on
-                        // every layout pass is expensive, especially when one
-                        // contains a long Dependabot body. Read the actual
-                        // width once and build only the layout that can fit.
                         WidthReader { width in
                             if width >= 760 && !dynamicTypeSize.isAccessibilitySize {
                                 HStack(alignment: .top, spacing: Theme.Space.l) {
@@ -154,11 +141,6 @@ struct PullDetailView: View {
                         pullDetailSkeleton
                     }
                 }
-                // A pull request is a workspace view: tables, release notes,
-                // diff tabs and the inspector all benefit from the width the
-                // window has. Only prose within a card chooses a narrow
-                // measure; the detail surface itself should not leave a dead
-                // right-hand lane on a wide desktop window.
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.xl)
                 .frame(maxWidth: .infinity, alignment: ReadingRoom.alignment)
@@ -198,8 +180,6 @@ struct PullDetailView: View {
     private var detailActions: some View {
         if let raw = model.detail?.url, let url = URL(string: raw) {
             #if os(macOS)
-            // Named like the tabs across the bar. An arrow alone did not say
-            // where it leads.
             githubButton(url, showsLabel: hasRoomForLabels)
             #else
             Button { openURL(url) } label: { ActionIcon.external.label(L10n.text("apple.pulldetailview.open_on_github.03f69885")) }
@@ -318,7 +298,6 @@ struct PullDetailView: View {
 
     @ViewBuilder private func selectedContent(_ detail: PullDetail) -> some View {
         #if os(macOS)
-        // The conversation keeps its built cards behind Checks, at no height.
         ZStack(alignment: .top) {
             conversation(detail)
                 .frame(height: pageTab == .conversation ? nil : 0, alignment: .top)
@@ -475,11 +454,6 @@ struct PullDetailView: View {
     }
 
     #if os(macOS)
-    /// Changes as a page of its own: the files on one side and the diff filling
-    /// the rest, the way the working tree review does it. The diff has to own
-    /// its scroll view to build only the lines on screen. Nested in the page's
-    /// scroll it built every one of them, and a large dependency bump held the
-    /// app for seconds.
     private func changesPage(_ detail: PullDetail) -> some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -608,9 +582,6 @@ struct PullDetailView: View {
             .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(tint.opacity(0.16)))
     }
-    /// Keep the cold detail view shaped like the content that will replace it.
-    /// Widths are caps rather than fixed frames so an iPhone never grows its
-    /// vertical scroll view wider than the viewport while the request loads.
     private var pullDetailSkeleton: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -1119,7 +1090,6 @@ final class PullDetailModel {
         guard isCurrentSession else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
-        // A first-page refresh supersedes any in-flight older timeline page.
         timelineGeneration &+= 1
         timelineNeedsRefresh = true
         loadingTimeline = false
@@ -1132,8 +1102,6 @@ final class PullDetailModel {
             guard generation == loadGeneration, isCurrentSession else { return }
             self.detail = loaded
             lastLoadedAt = Date()
-            // Turn the prose into blocks now, off the main thread, rather than
-            // on the frame each card first scrolls into view.
             MarkdownText.warm([loaded.body])
             if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
         } catch {
@@ -1203,8 +1171,6 @@ final class PullDetailModel {
         }
     }
 
-    /// Keep a quick first-page return and drafts, but not potentially huge
-    /// diffs or every older timeline page while this detail is off screen.
     func prepareForCache() {
         retirementGeneration &+= 1
         loadGeneration &+= 1
@@ -1334,8 +1300,6 @@ final class PullDetailModel {
         actionBusy = true
         actionError = nil
         actionNotice = nil
-        // If this view retires while the write is in flight, its next open
-        // must not reuse a pre-write timeline as though it were current.
         if refresh { timelineNeedsRefresh = true }
         defer {
             actionBusy = false

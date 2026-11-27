@@ -11,9 +11,6 @@ struct InsightsView: View {
     @Bindable var model: InsightsModel
     @AppStorage("activity.scope") private var scope: ActivityScope = .allMachines
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Leave a day-focused view and return to Home, which is where it came
-    /// from. Nil when Insights was opened directly, so there is no back arrow
-    /// for a journey nobody took.
     var accountIdentity: String = ""
     var onBackToHome: (() -> Void)?
 
@@ -25,13 +22,8 @@ struct InsightsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Same chrome row as Home: toggles (from RootView) left, actions
-            // right. Tabs are a full-width strip under that row.
             DetailChromeBar(
                 leading: {
-                    // Back first, where a hand goes to leave. The device
-                    // picker sits after the sidebar toggle, the way Home
-                    // draws the same picker.
                     if model.focusedDay != nil && scope == .thisMachine {
                         ToolbarIconButton(
                             systemImage: "chevron.left",
@@ -103,9 +95,6 @@ struct InsightsView: View {
                 if let message = model.errorMessage {
                     ErrorBanner(message: message)
                 }
-                // A day arrived from Home's heatmap. It has to be visible and
-                // dismissable, or every figure on the screen is quietly about
-                // one day and the period control says otherwise.
                 if let day = model.focusedDay {
                     HStack(spacing: Theme.Space.s) {
                         Label(day, systemImage: "calendar")
@@ -122,10 +111,6 @@ struct InsightsView: View {
                 }
 
                 if isWarming {
-                    // The shape of the screen that is coming, not a spinner in
-                    // the middle of an empty pane. The report is a chart over
-                    // three lists, and saying so while it loads is more use
-                    // than saying "wait".
                     placeholder
                 } else {
                     switch model.tab {
@@ -137,16 +122,10 @@ struct InsightsView: View {
                             rows: model.rows,
                             selected: $model.selected,
                             showsValue: model.tab == .models,
-                            // A session id or a project path is read character
-                            // by character. A harness has a name, not an id.
                             monospaced: model.tab != .harnesses && model.tab != .profiles,
                             isHarness: model.tab == .harnesses,
                             isProfile: model.tab == .profiles
                         )
-                        // A fresh page window per breakdown and per period.
-                        // Without the id the table is the same view across
-                        // tabs, so "showing 80 of 3000 sessions" would carry
-                        // over to a models list with nine rows in it.
                         .id("\(model.tab.rawValue)-\(model.period.rawValue)")
                         .transition(.smoothIn(reduceMotion: reduceMotion))
                     }
@@ -157,18 +136,11 @@ struct InsightsView: View {
         }
     }
 
-    /// Waiting on the first report of the session.
-    ///
-    /// Only the first. A period change re-reads the archive with the whole
-    /// screen already drawn, and blanking it out to redraw the same layout
-    /// makes a fast query look slower than it is.
     private var isWarming: Bool {
         model.isLoading && model.totals == nil && model.errorMessage == nil
     }
 
     private var placeholder: some View {
-        // Sharp wireframe of the overview. Real content replaces it with
-        // `.smoothIn` when the first report lands; no blur veil.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Card(title: L10n.text("apple.insightsview.usage_over_time.56d901b0"), subtitle: L10n.text("apple.insightsview.daily_tokens_cache_included.57801e52"), mark: "mark_insights") {
                 Skeleton.Bar(width: nil, height: 260)
@@ -265,10 +237,7 @@ struct InsightsView: View {
 
 }
 
-// MARK: - Table
 
-/// The full breakdown for a tab. No sort controls: the archive already returns
-/// rows largest first, which is the order anyone wants.
 @MainActor
 private func profileTitle(_ id: String) -> String {
     if let title = AgentProfileCatalog.shared.value?.profile(id)?.title { return title }
@@ -335,11 +304,6 @@ private struct BreakdownTable: View {
         }
     }
 
-    /// The footer that hands out the next page.
-    ///
-    /// Two choices on purpose. The step is the one to press, and "Show all" is
-    /// there for the rare read of a whole archive, with its cost written on it
-    /// rather than hidden behind a scroll that never ends.
     private var revealMore: some View {
         HStack(spacing: Theme.Space.m) {
             Button(L10n.text("apple.insightsview.show_0_more.b91c3640", "\(min(Self.pageStep, hidden))"), .more) {
@@ -395,8 +359,6 @@ private struct BreakdownRow: View {
     var showsValue: Bool
     var monospaced: Bool
     var isSelected: Bool
-    /// Harness rows carry the tool's mark and its proper name. Every other
-    /// dimension is a raw id and stays one.
     var isHarness: Bool = false
 
     var title: String? = nil
@@ -434,9 +396,6 @@ private struct BreakdownRow: View {
         .padding(.vertical, Theme.Space.s)
         .background(isSelected ? Theme.rowHighlight : .clear)
         .overlay(alignment: .bottomLeading) {
-            // Share of the largest row, as a hairline along the bottom rather
-            // than its own column. The comparison is the point, the exact
-            // percentage is not.
             GeometryReader { geo in
                 Rectangle()
                     .fill(Theme.accent.opacity(0.55))
@@ -520,7 +479,6 @@ private struct DailyChart: View {
     @State private var selectedDay: String?
     @State private var showsValue = false
 
-    /// Every nth day, so labels never collide however long the period is.
     private var labelledDays: [String] {
         guard !rows.isEmpty else { return [] }
         let stride = max(1, Int((Double(rows.count) / 8).rounded(.up)))
@@ -560,10 +518,6 @@ private struct DailyChart: View {
                 BarMark(
                     x: .value(L10n.text("apple.insightsview.day.8f2364e1"), row.key),
                     y: .value(L10n.text("apple.insightsview.usage.8d59829c"), showsValue ? Double(row.valueMicros) / 1_000_000 : Double(row.counters.total)),
-                    // Capped, not proportional. A categorical axis gives every
-                    // bar an equal share of the plot, so filtering to one day
-                    // drew a single bar the width of the card: a block, with no
-                    // shape to read and nothing to compare it against.
                     width: rows.count > 12 ? .automatic : .fixed(36)
                 )
                 .foregroundStyle(Theme.accent.gradient)
@@ -586,12 +540,6 @@ private struct DailyChart: View {
                 }
             }
             .chartXSelection(value: $selectedDay)
-            // The hovered day's summary, drawn in the chart's topmost layer.
-            // It used to be an annotation on the RuleMark, which rendered
-            // behind the bars: the label's material sat under the marks and
-            // the text was unreadable. The overlay is composited above
-            // everything, and being outside the chart's layout it also cannot
-            // rescale the axis the way an annotation could.
             .chartOverlay { proxy in
                 GeometryReader { geo in
                     if let frame = proxy.plotFrame {
@@ -618,10 +566,6 @@ private struct DailyChart: View {
                        let plotFrame = proxy.plotFrame,
                        let x = proxy.position(forX: row.key) {
                         let plot = geo[plotFrame]
-                        // `position(forX:)` is relative to the plot area, so
-                        // the plot's origin has to come back on. The label is
-                        // centred on the bar near the plot's top and clamped
-                        // to the chart's edges so it never hangs off.
                         let halfWidth: CGFloat = 58
                         let centerX = min(
                             max(plot.minX + x, plot.minX + halfWidth + 4),
@@ -662,8 +606,6 @@ private struct DailyChart: View {
 }
 
 struct EmptyHint: View {
-    /// The symbol in the soft accent seat. The app's empty states are drawn in
-    /// the brand language, never as a bare system placeholder.
     var symbol: String = "chart.bar.xaxis"
     var title: String = L10n.text("apple.insightsview.nothing_here_yet.49abaf80")
     var text: String
@@ -691,7 +633,6 @@ struct EmptyHint: View {
     }
 }
 
-/// Account aggregates share the same data contract and cache as the mobile client.
 private struct AccountInsightsContent: View {
     @State private var model = ClientInsightsModel()
     @State private var search = ""

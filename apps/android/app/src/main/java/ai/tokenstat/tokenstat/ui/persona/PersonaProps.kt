@@ -12,7 +12,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** Props face the character; their backs face us. Small marks omit them. */
 internal fun DrawScope.drawPersonaProps(mood: PersonaMood, time: Double, hue: Color, opacity: Float) {
     val ink = hue.copy(alpha = opacity * 0.90f)
     val fill = hue.copy(alpha = opacity * 0.28f)

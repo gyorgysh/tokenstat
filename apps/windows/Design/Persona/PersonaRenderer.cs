@@ -9,13 +9,6 @@ using Windows.UI;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// Everything a persona looks like, drawn in one pass. Nothing in here decides
-/// anything. It reads the engine and paints it, which is why a new mood needs
-/// no drawing code: it moves the body, and the body is what this file draws.
-/// Paths stay attached to the visual tree across frames; only their paint and
-/// geometry change as the body, face and motes move.
-/// </summary>
 internal static class PersonaRenderer
 {
     public static void Draw(PersonaEngine engine, PersonaScene canvas, double width, double height)
@@ -61,13 +54,7 @@ internal static class PersonaRenderer
                 outline, null, PersonaDraw.Solid(stain), Math.Max(1, unit * 0.020));
         }
 
-        // Face, highlight and screen light are clipped to the body, so a heavy
-        // squash pushes them around inside the creature rather than letting an
-        // eye escape it.
         DrawHighlight(canvas, bounds, width, height, outline);
-        // Turning is drawn inside the face now: each feature is placed on the
-        // body as if it were a ball, so a turn or a glance slides it round
-        // and narrows it. Only the roll is left to apply to the whole face.
         int firstFaceElement = canvas.Count;
         DrawFace(engine, canvas, width, height, unit, ink, outline);
         if (Math.Abs(engine.Roll) > 1e-4)
@@ -97,11 +84,6 @@ internal static class PersonaRenderer
         }
     }
 
-    /// <summary>
-    /// The silhouette, as one closed path of cubic segments. Catmull-Rom
-    /// through the smoothed ring, converted to Beziers, which is what keeps a
-    /// heavy squash from creasing.
-    /// </summary>
     public static PathGeometry OutlineGeometry(PersonaSoftBody body, double width, double height)
     {
         var points = body.Outline(width, height);
@@ -142,16 +124,12 @@ internal static class PersonaRenderer
 
     private static void DrawHighlight(PersonaScene canvas, PRect bounds, double width, double height, Geometry clip)
     {
-        // Placed off the middle rather than off the bounding box, so a squash
-        // slides it across the body instead of pinning it to a corner.
         double w = bounds.Width * width * 0.155;
         double h = bounds.Height * height * 0.085;
         double cx = bounds.MidX * width - w * 1.55 + w / 2;
         double cy = (bounds.MinY + bounds.Height * 0.17) * height + h / 2;
         var geometry = new PathGeometry();
         PersonaDraw.EllipseRotated(geometry, cx, cy, w / 2, h / 2, -0.5);
-        // A soft gradient rather than a flat ellipse: at low opacity a hard
-        // edge reads as a scuff on the surface instead of light on it.
         canvas.Paint(
             geometry,
             PersonaDraw.Radial(
@@ -163,8 +141,6 @@ internal static class PersonaRenderer
     private static void DrawAntenna(
         PersonaScene canvas, PersonaSoftBody body, double width, double height, double unit, Color tint)
     {
-        // Rooted in the crown node, so it whips with the squash instead of
-        // floating over a rectangle the body no longer fills.
         var crown = body.Crown;
         double rootX = crown.X * width;
         double rootY = crown.Y * height;
@@ -194,26 +170,16 @@ internal static class PersonaRenderer
         var centroid = body.Centroid;
         var crown = body.Crown;
 
-        // The face borrows the body's own squash rather than being animated
-        // separately. Wide and flat means narrow eyes further apart, tall and
-        // thin means round eyes closer together.
         double aspect = Math.Clamp(bounds.Height / Math.Max(bounds.Width, 1e-4), 0.45, 1.7);
 
-        // Lean from where the crown sits, plus the head following the eyes.
         double lean = Math.Clamp(Math.Atan2(crown.X - centroid.X, Math.Max(centroid.Y - crown.Y, 1e-4)) * 0.25, -0.12, 0.12);
         double tilt = lean + engine.HeadTilt;
 
         double heightPoints = bounds.Height * height;
-        // Eyes just above the middle. Low, wide-set features are most of what
-        // reads as young and friendly; high ones read as a forehead.
         double anchorHeight = heightPoints * (0.05 + face.Lift);
         double originX = centroid.X * width;
         double originY = centroid.Y * height;
 
-        // The features sit on the body as if it were a ball. Looking to one
-        // side turns that ball a little, so the eyes slide toward the edge,
-        // the far one narrows and the whole face comes round. A turn past the
-        // edge hides a feature behind the body.
         double sphereX = Math.Max(1, bounds.Width * width * 0.5);
         double sphereY = Math.Max(1, heightPoints * 0.5);
         double gazeX = Math.Clamp(face.Gaze.X + engine.Look.X, -1.3, 1.3);
@@ -233,8 +199,6 @@ internal static class PersonaRenderer
         PPoint OnFace(double dx, double dy) => Place(Project(dx, dy).Point);
 
         int count = traits.EyeCount;
-        // Small marks need proportionally bigger features or the face turns
-        // into two specks. Three fixed steps, not a curve.
         double lod = unit < 24 ? 1.28 : unit < 34 ? 1.12 : 1.0;
         double radius = unit * 0.060 * lod * Math.Clamp(face.EyeScale, 0.8, 1.25);
         double spread = unit * 0.25 * Math.Clamp(face.Spread, 0.85, 1.15) / Math.Max(Math.Sqrt(aspect), 0.6);
@@ -283,14 +247,6 @@ internal static class PersonaRenderer
         }
     }
 
-    /// <summary>
-    /// One eye: a solid shape seen through the gap its lids leave. Every
-    /// expression is lid positions, not a different drawing. The upper lid
-    /// comes down to shut it, tips inward for focus and outward for a sorry
-    /// droop. The lower lid rises for a squint and curves for a smile, and
-    /// pushed all the way it leaves a crescent. Because they are all numbers
-    /// the eye can travel from any of them to any other.
-    /// </summary>
     private static void DrawEye(
         PersonaScene canvas, PPoint centre, double radius, double widthScale, double heightScale,
         double side, PersonaFacePose face, double blink, double cheer, double tilt, double unit,
@@ -298,23 +254,17 @@ internal static class PersonaRenderer
     {
         double wide = Math.Clamp(face.Openness, 0, 1.3);
         double closing = Math.Clamp(blink, 0, 1);
-        // A blink squeezes the eye a little wider as it shuts, and its small
-        // overshoot on the way out (a negative blink) opens it a little taller.
         double w = radius * 2 * (shape == PersonaTraits.EyeShape.Oval ? 0.86 : 1) * widthScale * (1 + closing * 0.10);
         double h = radius * 2 * (shape == PersonaTraits.EyeShape.Oval ? 1.14 : 1)
             * Math.Min(1.4, heightScale * Math.Max(1, wide)) * (1 - Math.Min(0, blink) * 0.9);
         double open = Math.Clamp(Math.Min(wide, 1) * (1 - closing), 0, 1);
-        // A squint is a small smile of the lower lid, not a flat cut: a flat
-        // one squared the eye off and every busy mood looked cross.
         double squint = Math.Clamp(face.Squint, 0, 0.8);
         double smile = Math.Clamp(Math.Max(cheer, squint * 0.45), 0, 1);
         double droop = Math.Clamp(face.Droop, 0, 1);
         double focus = Math.Clamp((face.Brow - 0.15) / 0.85, 0, 1) * (1 - droop) * 0.55;
 
-        // Points are laid out in the eye's own frame and turned by the tilt.
         PPoint Local(double x, double y) => PersonaDraw.Rot(centre.X + x, centre.Y + y, centre.X, centre.Y, tilt);
         double minX = -w / 2, maxX = w / 2, minY = -h / 2, maxY = h / 2;
-        // Where the lids meet when shut: below the middle, as on a face.
         double meet = minY + h * 0.68;
         double shut = 1 - open;
         double upper = minY + (meet - minY) * shut;
@@ -325,14 +275,11 @@ internal static class PersonaRenderer
         double LidY(double x) => innerY + (outerY - innerY) * (x - innerX) / (outerX - innerX);
         double left = minX - w;
         double right = maxX + w;
-        // The lid's edge arches, most of all half way down, so a heavy lid
-        // leaves a rounded eye. Fully open or fully shut it is straight.
         double arch = LidY(0) - h * (1.6 * shut * (1 - shut) + 0.26 * Math.Min(1, focus + droop));
         double lowerBase = maxY - (maxY - meet) * shut - h * 0.30 * squint;
         double lowerEdge = Math.Max(lowerBase - h * 0.10 * smile, Math.Max(LidY(left), LidY(right)));
         double lowerPeak = Math.Max(lowerBase - h * 1.35 * smile, arch);
 
-        // The gap between the lids, which the eye and its lights show through.
         var gap = new PathGeometry();
         var figure = PersonaDraw.Figure(Local(left, LidY(left)));
         PersonaDraw.Quad(figure, Local(right, LidY(right)), Local(0, arch));
@@ -346,8 +293,6 @@ internal static class PersonaRenderer
             PersonaDraw.EllipseRotated(eye, centre.X, centre.Y, w / 2, h / 2, tilt);
             canvas.Paint(eye, PersonaDraw.Solid(ink), clip: clip, mask: gap).Opacity = opacity;
 
-            // Two catchlights, a big one high and a small one low on the far
-            // side. The lids cut them like the eye.
             if (unit >= 22 && open > 0.3)
             {
                 double size = Math.Min(w, h);
@@ -362,9 +307,6 @@ internal static class PersonaRenderer
             }
         }
 
-        // A shut eye is still an expression: a curve up when pleased, down
-        // when content or asleep. It fades in as the lids close, so a blink
-        // and a smile both pass through it without a cut.
         double line = Math.Clamp((0.24 - open) / 0.18, 0, 1);
         if (line > 0)
         {
@@ -404,8 +346,6 @@ internal static class PersonaRenderer
         PersonaScene canvas, PPoint centre, double radius, double unit, Color ink,
         double amount, double side, Geometry clip)
     {
-        // The inner end drops for strain and rises for surprise. Which end is
-        // inner depends on which eye this is, so one number does both brows.
         double inner = side <= 0 ? 1 : -1;
         double w = radius * 1.5;
         double lift = radius * (1.55 + Math.Max(0, -amount) * 0.5);
@@ -426,9 +366,6 @@ internal static class PersonaRenderer
         double radius, double unit, Color ink, PersonaFacePose face,
         PersonaTraits traits, Geometry clip)
     {
-        // A mouth is one closed path with two curved edges: the top edge
-        // carries the smile, the gap between the edges carries the speech.
-        // The persona's own mouth is a bias on the mood's, not a replacement.
         double resting = traits.Mouth switch
         {
             PersonaTraits.MouthShape.Smile => 0.34,
@@ -437,8 +374,6 @@ internal static class PersonaRenderer
             _ => 0,
         };
         double curve = Math.Clamp(face.MouthCurve + resting, -1.1, 1.1);
-        // An open mouth widens as it opens. Without it a loud syllable is a
-        // tall narrow wedge rather than a vowel.
         double half = unit * 0.052 * Math.Min(face.MouthWidth, 1.2) * traits.MouthWidth
             * (1 + Math.Clamp(face.MouthOpen, 0, 1.2) * 0.22);
         double open = Math.Clamp(face.MouthOpen, 0, 0.8) * unit * 0.065;
@@ -446,8 +381,6 @@ internal static class PersonaRenderer
 
         var left = place(-half, baseY);
         var right = place(half, baseY);
-        // A quadratic reaches half its control offset, so the gap between the
-        // two edges is half of open. Doubled here rather than in the moods.
         var bow = place(0, baseY + curve * unit * 0.080);
         var sag = place(0, baseY + curve * unit * 0.080 + open * 2);
 
@@ -474,8 +407,6 @@ internal static class PersonaRenderer
         {
             return;
         }
-        // Clipped to the mouth, so a tongue never escapes the face however
-        // wide the mood asked for it.
         double reach = Math.Clamp(face.Tongue, 0, 1);
         var tip = place(0, baseY + curve * unit * 0.080 + open * 2 * (1 - reach * 0.55));
         double tw = half * 0.86;

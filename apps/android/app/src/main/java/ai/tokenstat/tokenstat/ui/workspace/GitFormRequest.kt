@@ -7,7 +7,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-/** A native read can finish after dismissal; it must not update the closed form. */
 internal suspend fun gitFormRequest(
     request: suspend (String, JsonObject) -> JsonElement,
     method: String,

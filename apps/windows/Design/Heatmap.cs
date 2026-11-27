@@ -16,33 +16,12 @@ using Microsoft.UI.Xaml.Shapes;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// One day of the activity grid, as the host calendar payload carries it.
-/// Same keys the page already reads: date, value in microdollars at list
-/// rates, level 0 to 4, and the optional locked flag.
-/// </summary>
 internal sealed record HeatDay(string Date, long Value, int Level, bool Locked);
 
-/// <summary>
-/// A month label and the week column it sits over, from the host.
-/// </summary>
 internal sealed record HeatMonth(int Column, string Name);
 
-/// <summary>
-/// The activity grid: a year of days, a column per week.
-/// A port of the Mac HeatmapView anatomy and math. Constants are transcribed,
-/// not tuned: gutter 30, gap as 0.2 of a cell, corner radius 2.5, cell capped
-/// at 16, gap capped at half a cell, width quantised to 4.
-/// </summary>
 internal static class Heatmap
 {
-    /// <summary>
-    /// The grid fed from the host calendar payload the page already parses.
-    /// </summary>
-    /// <param name="calendar">The activity.calendar answer, rows built by the core.</param>
-    /// <param name="selectedDate">The pinned day, YYYY-MM-DD, so the grid can ring it.</param>
-    /// <param name="onSelect">Clicking a day pins it in the inspector.</param>
-    /// <param name="onHover">The pointer moved over or off a day.</param>
     public static HeatmapView View(
         JsonNode calendar,
         string? selectedDate = null,
@@ -51,13 +30,6 @@ internal static class Heatmap
         new(calendar, selectedDate, onSelect, onHover);
 }
 
-/// <summary>
-/// The activity grid as one control: month strip, weekday gutter, a canvas of
-/// day squares, hover and selection rings, and the Less to More footer.
-/// Drawing only. It never packs days into columns itself: the archive stores
-/// only days that had events, so packing them together draws a plausible
-/// calendar with every date in the wrong place.
-/// </summary>
 internal sealed class HeatmapView : StackPanel
 {
     private const double Gutter = 30;
@@ -136,9 +108,6 @@ internal sealed class HeatmapView : StackPanel
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // Quantised before anything derives from it, like the Mac: a live drag
-        // hands this a new sub-pixel width every frame, and rounding to 4
-        // turns most frames of a drag into the same grid.
         double width = Quantised(ActualWidth);
         if (Math.Abs(width - _builtWidth) < 0.01)
         {
@@ -148,8 +117,6 @@ internal sealed class HeatmapView : StackPanel
         Relayout();
     }
 
-    // Keep keyboard focus, accessibility peers and drawing objects alive while
-    // resizing. Only a new calendar payload needs a new visual tree.
     private void Relayout()
     {
         if (_dayCanvas is null || _gridContent is null || _gridRow is null ||
@@ -204,10 +171,6 @@ internal sealed class HeatmapView : StackPanel
         _gap = GapSizeFor(width, _cell, _snap.Weeks);
         _stride = _cell + _gap;
 
-        // Centred, not leading. Once the cell and the gap are both at their
-        // ceilings a very wide card has width left over, and all of it
-        // collecting on one side reads as the grid having failed to reach
-        // the edge.
         var content = _gridContent = new StackPanel { Spacing = _gap };
         content.Children.Add(MonthStrip());
         var row = _gridRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = _gap };
@@ -225,9 +188,6 @@ internal sealed class HeatmapView : StackPanel
 
     private UIElement MonthStrip()
     {
-        // Absolute placement rather than a stack of spacers: a month label is
-        // wider than the column it belongs to, so laying them out in sequence
-        // pushes every later one out of alignment with its week.
         var strip = _monthStrip = new Canvas { Height = MonthStripHeight };
         foreach (var month in _snap.Months)
         {
@@ -523,8 +483,6 @@ internal sealed class HeatmapView : StackPanel
         {
             return null;
         }
-        // Reject the gap band between cells so moving through a gutter clears
-        // the hover rather than sticking to the previous day.
         double localX = x - column * _stride;
         double localY = y - row * _stride;
         if (localX > _cell || localY > _cell)
@@ -541,8 +499,6 @@ internal sealed class HeatmapView : StackPanel
 
     private void SetHovered(Slot? slot)
     {
-        // Avoid thrashing the parent hover handler when the pointer stays
-        // inside the same square.
         if (Equals(slot, _hovered))
         {
             return;
@@ -620,11 +576,6 @@ internal sealed class HeatmapView : StackPanel
         return column >= 0 && column < cells.Count ? cells[column] : null;
     }
 
-    /// <summary>
-    /// Square size that makes the week columns span the width, up to MaxCell.
-    /// Solved rather than guessed. With gap as a fraction of cell the width is
-    /// gutter plus gap plus weeks times cell plus gap, which rearranges to this.
-    /// </summary>
     private static double CellSizeFor(double width, int weeks)
     {
         if (weeks <= 0 || width <= 0)
@@ -636,11 +587,6 @@ internal sealed class HeatmapView : StackPanel
         return Math.Clamp(fitted, 7, MaxCell);
     }
 
-    /// <summary>
-    /// Gap that spends whatever width the capped cells did not. Widening the
-    /// gaps keeps the grid spanning the card without making it taller. Capped
-    /// in turn, or a very wide window scatters the squares.
-    /// </summary>
     private static double GapSizeFor(double width, double cell, int weeks)
     {
         if (weeks <= 0 || width <= 0)
@@ -663,10 +609,6 @@ internal sealed class HeatmapView : StackPanel
         _ => "",
     };
 
-    /// <summary>
-    /// How current the account grid is, in the same words the limit cards use.
-    /// Absent on a local grid, which is read from disk and never remembered.
-    /// </summary>
     private string? Freshness()
     {
         if (_snap.FetchedAtMs <= 0)
@@ -762,8 +704,6 @@ internal sealed class HeatmapView : StackPanel
             width = Math.Max(width, cells.Count);
         }
         var declaredWeeks = Long(calendar, "weeks");
-        // Metadata cannot create billions of empty columns on the UI thread.
-        // The supplied rows are the source of truth for available cells.
         snap.Weeks = declaredWeeks > 0 ? (int)Math.Min(declaredWeeks, width) : width;
 
         if (calendar["months"] is JsonArray months)
@@ -794,11 +734,6 @@ internal sealed class HeatmapView : StackPanel
         return snap;
     }
 
-    /// <summary>
-    /// Month labels from the days themselves, for a host old enough to send no
-    /// month strip. The first column whose week holds the first of a month gets
-    /// the label, spaced so neighbours cannot overlap.
-    /// </summary>
     private static List<HeatMonth> DeriveMonths(Snapshot snap)
     {
         string[] names = [L10n.Text("windows.heatmap.jan.5c5db120"), L10n.Text("windows.heatmap.feb.caf71b3f"), L10n.Text("windows.heatmap.mar.b4b7d381"), L10n.Text("windows.heatmap.apr.617531b4"), L10n.Text("windows.heatmap.may.8c78fe5b"), L10n.Text("windows.heatmap.jun.b27fd46e"), L10n.Text("windows.heatmap.jul.c43f56b9"), L10n.Text("windows.heatmap.aug.41e1d82a"), L10n.Text("windows.heatmap.sep.451e2b71"), L10n.Text("windows.heatmap.oct.6877e849"), L10n.Text("windows.heatmap.nov.3e630d29"), L10n.Text("windows.heatmap.dec.f2a0cfbc")];
@@ -828,11 +763,6 @@ internal sealed class HeatmapView : StackPanel
         return labels;
     }
 
-    /// <summary>
-    /// List-rate micros as a dollar figure. Never a charge. The grid sends one
-    /// number per day and the card above it already carries the qualifiers, so
-    /// this is the plain figure like the Mac formatSpend.
-    /// </summary>
     private static string ListRate(long micros) =>
         (micros / 1_000_000d).ToString("C2", CultureInfo.GetCultureInfo("en-US"));
 
@@ -870,8 +800,6 @@ internal sealed class HeatmapView : StackPanel
         return moment.LocalDateTime.ToString("d");
     }
 
-    // Small JSON readers mirroring the page Format helpers. Design stays
-    // independent of Pages, so they live here rather than being shared.
     private static string Text(JsonNode? node, string name, string fallback = "")
     {
         if (node is not JsonObject)

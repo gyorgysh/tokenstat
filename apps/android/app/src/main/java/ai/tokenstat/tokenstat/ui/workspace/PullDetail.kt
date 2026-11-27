@@ -100,9 +100,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
-/// Which part of a pull request is on show. The same three the Apple client
-/// has, in the same order and with the same words, so a person who knows one
-/// phone knows the other.
 internal enum class PullTab(val title: String) {
     Conversation(L10n.text("android.pulldetail.conversation.ccca1817")),
     Changes(L10n.text("android.pulldetail.changes.bbd4b6a8")),
@@ -117,13 +114,6 @@ internal enum class PullTab(val title: String) {
         }
 }
 
-/// One pull request as a full management page, port of `PullDetailView`.
-///
-/// Conversation is the default and the only tab loaded at open; the diff is
-/// several hundred kilobytes on a Dependabot bump, so it is fetched the first
-/// time Changes is opened and not before. The inspector and the actions panel
-/// sit below the reading column, which is where the Apple layout puts them on
-/// a phone.
 @Composable
 internal fun PullDetailPage(
     model: AppViewModel,
@@ -132,8 +122,6 @@ internal fun PullDetailPage(
     hostLabel: String,
     number: Long,
     modifier: Modifier = Modifier,
-    /// The row that was tapped, so the loading page can already carry the
-    /// title and the author instead of a bare spinner.
     summary: JsonObject? = null,
     onBack: () -> Unit,
 ) {
@@ -224,11 +212,7 @@ internal fun PullDetailPage(
         loading = false
     }
     LaunchedEffect(peer, workspace, number) { load() }
-    // Opening Changes is what pays for the diff, exactly as on the Apple
-    // client: the bytes are the expensive part of this page.
     LaunchedEffect(tab) { if (tab == PullTab.Changes) loadDiff() }
-    // Back belongs to the pull request first: it returns to the list, rather
-    // than closing the whole section from under the person.
     BackHandler { onBack() }
 
     suspend fun act(label: String, method: String, params: JsonObjectBuilder.() -> Unit): Boolean {
@@ -401,9 +385,6 @@ internal fun PullDetailPage(
     }
 }
 
-/// Title, who opened it and when, then the state, the two branches and what
-/// the change weighs. Accent-edged rather than hairline: it is the one card
-/// on the page that says what this pull request *is*.
 @Composable
 private fun PullHero(view: JsonObject, number: Long) {
     val colors = LocalTsColors.current
@@ -467,9 +448,6 @@ private fun PullHero(view: JsonObject, number: Long) {
                     Text(L10n.text("android.pulldetail.opened_0.095c9540", "${number}"), style = TsType.footnote, color = colors.textSecondary)
                     pullEpochMillis(view.str("createdAt"))?.let {
                         Text("·", style = TsType.footnote, color = colors.textTertiary)
-                        // The iPhone's abbreviated formatter writes "3d ago",
-                        // which is what `compact` writes here; Android's
-                        // `abbreviated` is the longer macOS phrasing.
                         RelativeTimeText(
                             epochMillis = it,
                             style = TsType.footnote,
@@ -693,8 +671,6 @@ private fun PullConversationCard(
     }
 }
 
-/// A comment or a review is a card; everything else on the timeline is one
-/// line with a glyph, the way the Apple timeline draws it.
 @Composable
 private fun PullTimelineEntry(event: JsonObject) {
     val colors = LocalTsColors.current
@@ -742,8 +718,6 @@ private fun PullTimelineEntry(event: JsonObject) {
                     timelineIcon(kind),
                     contentDescription = null,
                     tint = colors.accent,
-                    // The fallback is a dot, not a glyph, so it is drawn at
-                    // dot size rather than shrunk to fit.
                     modifier = Modifier.size(if (named) 13.dp else 7.dp),
                 )
             }
@@ -849,9 +823,6 @@ private fun PullCommentComposer(
     }
 }
 
-/// The diff: one chip per file, then the file that is selected. Nothing is
-/// fetched until this tab is opened, so its empty and loading states are its
-/// own rather than the page's.
 @Composable
 private fun PullChangesTab(
     diffs: List<JsonObject>,
@@ -1055,9 +1026,6 @@ private fun PullCheckRow(check: JsonObject) {
     }
 }
 
-/// Who is reviewing, who it is assigned to, what it is labelled, and whether
-/// it can merge. Port of `PullInspector`; on a phone it reads under the
-/// conversation rather than beside it.
 @Composable
 private fun PullInspectorCard(view: JsonObject) {
     val colors = LocalTsColors.current
@@ -1457,15 +1425,11 @@ private fun PullContentSkeleton() {
     }
 }
 
-/// GitHub stamps every date as ISO 8601 in UTC. Null rather than a number
-/// when one is missing or malformed: a row without a date should say nothing
-/// rather than say 1970.
 internal fun pullEpochMillis(iso: String?): Long? {
     val text = iso?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     return runCatching { java.time.Instant.parse(text).toEpochMilli() }.getOrNull()
 }
 
-/// How long a check run took, word for word with `PullCheck.durationText`.
 internal fun checkDurationText(startedAt: String?, completedAt: String?): String? {
     val started = pullEpochMillis(startedAt) ?: return null
     val completed = pullEpochMillis(completedAt) ?: return null
@@ -1476,9 +1440,6 @@ internal fun checkDurationText(startedAt: String?, completedAt: String?): String
     return "${minutes / 60}h ${minutes % 60}m"
 }
 
-/// "dependabot opened the pull request", from the event kinds the host
-/// decoder keeps. Unknown kinds get the neutral sentence rather than the raw
-/// word, which is what the Apple timeline does.
 internal fun timelineSentence(kind: String, actor: String, subject: String?): String {
     val verb = when (kind) {
         "committed" -> L10n.text("android.pulldetail.committed.cc962289")
@@ -1499,8 +1460,6 @@ internal fun timelineSentence(kind: String, actor: String, subject: String?): St
     return "$actor $verb$suffix"
 }
 
-/// "3 of 31 checks passed", or the sentence for a head commit that publishes
-/// no check suite at all.
 internal fun checksHeadline(passed: Int, total: Int): String =
     if (total == 0) L10n.text("android.pulldetail.no_checks_reported.8454518f") else L10n.text("android.pulldetail.0_of_1_checks_passed.17ecc810", "${passed}", "${total}")
 
@@ -1525,10 +1484,6 @@ private fun timelineIcon(kind: String): ImageVector = when (kind) {
     else -> Icons.Default.Circle
 }
 
-/// Pull bodies are markdown with raw HTML mixed in: a Dependabot release note
-/// is mostly `<details>`, `<h3>`, `<li>` and `<a>`. Stripping the tags loses
-/// the structure, so turn the block HTML into the markdown it stands for and
-/// let the renderer read it as prose. Port of `convertHTMLBlocks`.
 internal fun pullBodyMarkdown(body: String): String {
     var text = body.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
     text = anchorRegex.replace(text) { match ->
@@ -1536,8 +1491,6 @@ internal fun pullBodyMarkdown(body: String): String {
         val label = match.groupValues[2].replace(tagRegex, "").trim().replace(Regex("\\s+"), " ")
         when {
             label.isEmpty() -> href
-            // Only a real web address becomes a link. Anything else keeps its
-            // words and loses its destination, which is the safe way round.
             !href.startsWith("http://", true) && !href.startsWith("https://", true) -> label
             label.contains('[') || label.contains(']') -> "$label ($href)"
             else -> "[$label]($href)"
@@ -1563,15 +1516,10 @@ internal fun pullBodyMarkdown(body: String): String {
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
-    // Source indentation beside a tag is not content. One blank line between
-    // blocks: compact on screen, still enough for the parser to end one block
-    // before the next begins.
     return text
         .lines()
         .joinToString("\n") { it.trim() }
         .replace(Regex("\n{3,}"), "\n\n")
-        // Consecutive `<li>` rows are one list, not eighty-one one-row lists
-        // separated by card-sized paragraph spacing.
         .replace(Regex("\n{2,}(?=- )"), "\n")
         .trim()
 }
@@ -1581,6 +1529,4 @@ private val anchorRegex = Regex(
     setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
 )
 
-/// Only things actually shaped like a tag. `<https://example.com>` is an
-/// autolink and `a < b` is prose, and neither is markup.
 private val tagRegex = Regex("</?[A-Za-z][A-Za-z0-9-]*(?:\\s[^<>]*)?/?>")

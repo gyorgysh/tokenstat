@@ -40,7 +40,6 @@ public partial class App : Application
             }
             catch
             {
-                // Logging must not become a second crash.
             }
             e.Handled = true;
         };
@@ -76,7 +75,7 @@ public partial class App : Application
                     ["version"] = Tokenstat.Design.AppInfo.Version,
                 });
             }
-            catch { /* Older helpers do not report front-end versions. */ }
+            catch { }
             await AppServices.Update.CheckAndInstallAsync();
         });
     }

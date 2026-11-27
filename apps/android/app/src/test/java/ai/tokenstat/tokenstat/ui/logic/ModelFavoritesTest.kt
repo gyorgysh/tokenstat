@@ -6,8 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The four models somebody actually uses belong above the forty they do
-/// not. Pin order is use order, and the rest stay as the host listed them.
 class ModelFavoritesTest {
     @Test
     fun `pinned models come first in pin order`() {

@@ -10,11 +10,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// Which machines a report counts. Mirrors the Mac ActivityScope: this device
-/// is the local archive on this disk, all devices is every machine on the
-/// account. The wire values are what the host calls them.
-/// </summary>
 internal enum DeviceScope
 {
     ThisDevice,
@@ -62,12 +57,6 @@ internal static class DeviceScopeNames
     };
 }
 
-/// <summary>
-/// Per-page inspector content. A page that has something to say beside itself
-/// implements this and the shell shows Inspector in the trailing column. Pages
-/// that do not implement it, or return null, get no column: the default is
-/// none, and the content keeps the full width.
-/// </summary>
 internal interface IInspectorContent
 {
     UIElement? Inspector { get; }
@@ -85,33 +74,15 @@ internal interface IInspectorDismissRequest
     event Action? DetailsDismissRequested;
 }
 
-/// <summary>
-/// Pages whose numbers depend on the toolbar scope implement this. The shell
-/// pushes the current scope on navigation and on every change, so the page
-/// never reads the toolbar directly.
-/// </summary>
 internal interface IScopeAware
 {
     void ApplyScope(DeviceScope scope);
 }
 
-/// <summary>
-/// The content body: the page plus a trailing inspector column, mirroring the
-/// Mac detail column. One star column for the content, a 1px rule, and a fixed
-/// pane on the sidebar tone. The column shows only when every gate agrees: the
-/// user has it open, the route allows one, the window fits it, and the page
-/// offered content. Otherwise the content keeps the full width.
-/// </summary>
 internal sealed class InspectorHost : Grid
 {
-    /// <summary>How wide the inspector column is when it shows.</summary>
     public const double InspectorWidth = ShellWidths.InspectorDefault;
 
-    /// <summary>
-    /// Content areas narrower than this hide the inspector rather than squeezing the
-    /// content for its sake. The user's open choice stands, so widening brings
-    /// the column back.
-    /// </summary>
     public const double FitEdge = ShellWidths.ContentMinimum + 6 + InspectorWidth;
 
     private readonly Border _rule;
@@ -125,16 +96,12 @@ internal sealed class InspectorHost : Grid
     private readonly Border _pane;
     private readonly ScrollViewer _scroller;
 
-    /// <summary>What the user asked for with the toggle. Starts open, like the Mac.</summary>
     public bool IsOpen { get; set; } = true;
 
-    /// <summary>Whether this route may show an inspector. Account never does.</summary>
     public bool RouteAllowsInspector { get; set; }
 
-    /// <summary>Whether the window is wide enough to carry the column at all.</summary>
     public bool FitsWidth { get; set; } = true;
 
-    /// <summary>Whether the column is on screen right now.</summary>
     public bool IsInspectorVisible { get; private set; }
 
     public InspectorHost(ShellWidths? widths = null)
@@ -191,11 +158,6 @@ internal sealed class InspectorHost : Grid
         Refresh();
     }
 
-    /// <summary>
-    /// Mount the content element in the star column. Called once, by the
-    /// shell; a second call replaces the old child rather than stacking a
-    /// new one over it.
-    /// </summary>
     public void SetContent(FrameworkElement content)
     {
         if (content.Parent == this)
@@ -217,7 +179,6 @@ internal sealed class InspectorHost : Grid
         Children.Add(content);
     }
 
-    /// <summary>Show this in the inspector column, or hide the column when null.</summary>
     public void SetInspector(UIElement? inspector, bool ownsScrolling = false)
     {
         _scroller.VerticalScrollBarVisibility = ownsScrolling ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
@@ -228,7 +189,6 @@ internal sealed class InspectorHost : Grid
         Refresh();
     }
 
-    /// <summary>Reapply the gates after a toggle, a route change, or a resize.</summary>
     public void Refresh()
     {
         bool show = IsOpen && RouteAllowsInspector && FitsWidth && _scroller.Content is not null;
@@ -241,7 +201,6 @@ internal sealed class InspectorHost : Grid
         _pane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>Repaint the rule and the pane from the theme tokens.</summary>
     public void ApplyTheme()
     {
         _rule.Background = Theme.BorderBrush;

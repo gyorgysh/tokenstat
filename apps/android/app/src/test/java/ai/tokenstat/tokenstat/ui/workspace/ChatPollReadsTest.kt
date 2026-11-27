@@ -11,7 +11,7 @@ class ChatPollReadsTest {
     @Test fun independentReadsOverlapWithoutChangingTheCatchupHint() = runTest {
         val started = currentTime
         val more = chatPollReads(
-            events = { delay(200); true }, // History and approval round trips.
+            events = { delay(200); true },
             status = { delay(100) },
         )
         assertTrue(more)

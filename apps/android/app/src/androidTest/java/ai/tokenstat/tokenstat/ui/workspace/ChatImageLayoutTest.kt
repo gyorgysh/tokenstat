@@ -36,7 +36,6 @@ import org.junit.runners.model.Statement
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Render production components with local fixtures; no account or host is used. */
 @RunWith(AndroidJUnit4::class)
 class ChatImageLayoutTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
@@ -169,8 +168,6 @@ class ChatImageLayoutTest {
         assertTrue("Collapsed activity is one row: ${heights[0]}", heights[0] <= 56.dp)
         assertTrue("Context summary keeps its token/capacity rows: ${heights[1]}", heights[1] <= 112.dp)
         assertTrue("Collapsed MCP summary is one row: ${heights[2]}", heights[2] <= 56.dp)
-        // The original 190dp budget covered Context + MCP. Activity adds one
-        // independently bounded row, rather than relaxing either old card.
         assertTrue(heights[1] + heights[2] + 8.dp < 190.dp)
         compose.onNodeWithText(L10n.text("common.chat.stats.connection_summary", "2", "1")).assertIsDisplayed()
         compose.onNodeWithText(L10n.text("common.chat.stats.last_window")).assertDoesNotExist()

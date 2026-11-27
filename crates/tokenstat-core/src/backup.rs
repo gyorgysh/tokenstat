@@ -30,15 +30,10 @@ use crate::error::CoreError;
 /// noticed when the numbers look odd on Friday, not within the hour.
 pub const KEEP: usize = 7;
 
-/// One day, in milliseconds. The rotation is daily rather than per scan
-/// because scans run hourly, and twenty-four copies of the same day would push
-/// the only pre-mistake copy off the end within a day.
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Archive key holding when the last copy was taken.
 const STAMP: &str = "last_backup_ms";
 
-/// `path` with `.N` appended, the numbering `rotate` shifts through.
 fn slot(path: &Path, n: usize) -> PathBuf {
     let mut s = path.as_os_str().to_os_string();
     s.push(format!(".{n}"));
@@ -48,19 +43,11 @@ fn slot(path: &Path, n: usize) -> PathBuf {
 /// True when no copy exists yet, or the newest one is a day old.
 pub fn is_due(last_backup_ms: Option<i64>, now_ms: i64) -> bool {
     match last_backup_ms {
-        // A stamp in the future means the clock moved backwards, which is a
-        // reason to take a copy rather than to skip one indefinitely.
         Some(t) => now_ms.saturating_sub(t) >= DAY_MS || t > now_ms,
         None => true,
     }
 }
 
-/// Shift every copy one slot older, dropping the last, then leave slot 0 free.
-///
-/// Renames rather than copies, so the cost does not grow with the number kept
-/// and no slot is ever briefly absent while a copy is in flight. Walks
-/// backwards for the obvious reason: forwards would overwrite each slot with
-/// the one behind it and leave seven copies of the same day.
 fn rotate(path: &Path, keep: usize) -> std::io::Result<()> {
     let oldest = slot(path, keep - 1);
     if oldest.exists() {
@@ -99,9 +86,6 @@ pub fn run(
         return Ok(None);
     }
 
-    // The app and helper can back up the same archive at once. Hold a stable
-    // lock across both VACUUM and rotation so neither deletes the other's
-    // partial copy or moves a slot out from under it.
     let lock_path = slot(path, keep).with_extension("lock");
     let lock = std::fs::OpenOptions::new()
         .read(true)
@@ -124,8 +108,6 @@ pub fn run(
         let _ = std::fs::remove_file(&tmp);
     }
     if let Err(e) = conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()]) {
-        // Leave no half-written file behind to be mistaken for a copy, and
-        // leave the existing copies exactly as they were.
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
@@ -161,13 +143,6 @@ pub fn stamp_key() -> &'static str {
 mod tests {
     use super::*;
 
-    /// A scratch directory, and a teardown that cannot fail the test.
-    ///
-    /// Removal is best effort on purpose. Windows refuses to delete a
-    /// directory while any handle into it is open, and SQLite keeps one until
-    /// its connection is dropped, so an unwrap here turns "the OS held a file
-    /// a moment longer" into a red build about something the test was not
-    /// checking.
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ts-backup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -186,7 +161,6 @@ mod tests {
         assert!(is_due(Some(1_000), 1_000 + DAY_MS));
     }
 
-    /// A clock that jumped backwards must not park the rotation forever.
     #[test]
     fn a_stamp_from_the_future_is_due_now() {
         assert!(is_due(Some(10 * DAY_MS), 0));
@@ -209,8 +183,6 @@ mod tests {
         cleanup(&dir);
     }
 
-    /// The copy has to be openable and hold the same rows, which is the whole
-    /// point and the thing a byte copy of a WAL database silently fails at.
     #[test]
     fn a_copy_is_a_readable_archive_with_the_same_contents() {
         let dir = scratch("run");
@@ -231,10 +203,6 @@ mod tests {
         cleanup(&dir);
     }
 
-    /// The failure that matters: a copy that cannot be written must leave the
-    /// copies that already exist untouched. Rotating first would have deleted
-    /// the oldest and produced nothing in its place, once an hour, until none
-    /// were left.
     #[test]
     fn a_failed_copy_destroys_nothing() {
         let dir = scratch("fail");
@@ -244,8 +212,6 @@ mod tests {
         for n in 0..3 {
             std::fs::write(slot(&db, n), format!("gen{n}")).unwrap();
         }
-        // A directory where the copy wants to write is a write that cannot
-        // succeed, without needing to fill a disk to prove it.
         std::fs::create_dir_all(slot(&db, 3).with_extension("part")).unwrap();
 
         assert!(run(&conn, &db, None, 0, 3).is_err());

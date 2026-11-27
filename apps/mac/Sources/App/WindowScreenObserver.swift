@@ -88,8 +88,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             detach()
             guard let window else { return }
             self.window = window
-            // The frame paints only its gutters black, leaving the native
-            // sidebar backdrop free of an opaque window-wide backing.
             if #available(macOS 26, *) {
                 window.isOpaque = false
                 window.backgroundColor = .clear
@@ -201,8 +199,6 @@ struct WindowScreenObserver: NSViewRepresentable {
                 }
             })
 
-            // Neutralise the stock toggle before it is inserted, so it
-            // cannot paint a second sidebar mark next to the traffic lights.
             observers.append(center.addObserver(
                 forName: NSToolbar.willAddItemNotification,
                 object: nil,
@@ -280,8 +276,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             }
         }
 
-        /// Publish after the current display cycle, not on `Task.yield()`.
-        /// A yield can resume inside the next `NSDisplayCycleFlush`.
         private func schedulePublish() {
             // AppKit still lays out the content continuously. While dragging,
             // the shell hears the width coarsely (see `scheduleLivePublish`)
@@ -301,15 +295,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             }
         }
 
-        /// The width only, a few times a second and in 40 point steps, while
-        /// the window is being dragged.
-        ///
-        /// Holding everything until the mouse came up left a sidebar that
-        /// should fold away on screen for the whole drag, then jumped. Mac
-        /// apps fold it as the edge crosses the line. This follows the drag
-        /// the same way without rebuilding the shell on every frame: a
-        /// structural decision changes at most a few times a second, and only
-        /// when the width moved far enough to matter.
         private func scheduleLivePublish() {
             guard livePublish == nil else { return }
             livePublish = Task { @MainActor [weak self] in
@@ -428,9 +413,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             observers.forEach(NotificationCenter.default.removeObserver)
         }
 
-        /// Run `body` on the main actor. Uses a Task hop when the caller is
-        /// not already on the main thread. `nonisolated` so a notification
-        /// callback can call it without already being on the actor.
         nonisolated private func onMain(_ body: @escaping @MainActor () -> Void) {
             if Thread.isMainThread {
                 MainActor.assumeIsolated(body)
@@ -439,8 +421,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             }
         }
 
-        /// Like `onMain`, but never hops. Full-screen willEnter/willExit must
-        /// finish before the callback returns.
         nonisolated private func onMainSync(_ body: @escaping @MainActor () -> Void) {
             if Thread.isMainThread {
                 MainActor.assumeIsolated(body)
@@ -477,9 +457,6 @@ struct WindowScreenObserver: NSViewRepresentable {
             return false
         }
 
-        /// Make a stock toggle impossible to render before it is inserted.
-        /// Size is zeroed so the toolbar does not keep a blank slot beside
-        /// the traffic lights after the item is later removed.
         private static func neutraliseSidebarToggle(_ item: NSToolbarItem) {
             item.isEnabled = false
             item.image = nil
@@ -562,9 +539,6 @@ struct ViewerWindowBridge: NSViewRepresentable {
     final class Coordinator {
         private weak var attached: NSWindow?
         private var observers: [NSObjectProtocol] = []
-        /// The behaviour the window had before `attach` added fullscreen
-        /// support, so `detach` can put it back instead of leaving every
-        /// window it ever touched opting into fullscreen.
         private var previousBehavior: NSWindow.CollectionBehavior?
         var window: Binding<NSWindow?>?
         var isFullScreen: Binding<Bool>?

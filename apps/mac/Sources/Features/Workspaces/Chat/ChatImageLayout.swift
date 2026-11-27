@@ -9,8 +9,6 @@ struct ChatImageDimensions: Equatable, Sendable {
     var aspect: CGFloat { min(2.2, max(0.65, width / height)) }
 }
 
-/// Geometry is computed from the parent's proposal, never from a measured
-/// child frame. Loading metadata can refine it once without a layout loop.
 struct ChatImageGalleryGeometry {
     let frames: [CGRect]
     let size: CGSize
@@ -33,13 +31,11 @@ struct ChatImageGalleryGeometry {
             let sum = aspects.reduce(0, +)
             var height = min(count == 1 ? 300 : 240, (width - gaps) / sum)
             if count == 1, let native = dimensions[0] {
-                // Small originals need a useful target, not a gratuitous upscale.
                 height = min(height, native.height, native.width / aspects[0])
             }
             height = max(44, height)
             let contentWidth = min(width - gaps, max(CGFloat(aspects.count) * 44, height * sum))
             var widths = aspects.map { contentWidth * $0 / sum }
-            // Preserve touch targets even in a narrow, mixed-aspect row.
             var fixed: Set<Int> = []
             while let small = widths.indices.first(where: { !fixed.contains($0) && widths[$0] < 44 }) {
                 fixed.insert(small)
@@ -63,8 +59,6 @@ struct ChatImageGalleryGeometry {
     }
 }
 
-/// Metadata only: ImageIO reads dimensions without decompressing full images.
-/// The actor keeps at most 256 small entries and never retains image bytes.
 actor ChatImageMetadata {
     static let shared = ChatImageMetadata()
     private enum Key: Hashable { case data(Data), file(ChatImageFileIdentity) }
@@ -75,10 +69,6 @@ actor ChatImageMetadata {
     func dimensions(data: Data?, file: URL?) -> ChatImageDimensions? {
         let key: Key
         if let data {
-            // A hashValue is a bucket hint, not content identity. Some
-            // Foundation versions sample bytes, so equal-size images whose
-            // EXIF metadata differs can otherwise share cached dimensions.
-            // Retain only the fixed-size digest, never the original pixels.
             key = .data(Data(SHA256.hash(data: data)))
         }
         else if let file, let identity = ChatImageFileIdentity(file) { key = .file(identity) }

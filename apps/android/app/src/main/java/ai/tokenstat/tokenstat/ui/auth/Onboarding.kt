@@ -48,9 +48,6 @@ private data class OnboardingPage(
     val body: String,
 )
 
-// The six pages of `ClientOnboarding.swift`, same copy, same order. The only
-// words that differ name this device: the client it was written for says
-// "iPhone or iPad" where this one says "Android phone or tablet".
 private val onboardingPages = listOf(
     OnboardingPage(
         OnboardingArtKind.Intro,
@@ -90,10 +87,6 @@ private val onboardingPages = listOf(
     ),
 )
 
-/// The first thing a new install shows: six short pages that explain the work
-/// first, then the machine that holds it, the numbers, and the privacy
-/// boundary. Sign-in stays a deliberate next step. Shown once; a second launch
-/// goes straight to the sign-in card.
 @Composable
 fun Onboarding(onFinished: () -> Unit) {
     val colors = LocalTsColors.current
@@ -101,8 +94,7 @@ fun Onboarding(onFinished: () -> Unit) {
     val pagerState = rememberPagerState(pageCount = { onboardingPages.size })
     val page = pagerState.currentPage
     // Edge-to-edge draws behind the status bar; safeDrawing keeps the
-    // wordmark and Skip clear of the clock. Sections cap at a phone-like
-    // width so a tablet reads as a centred column, not a stretched row.
+    // wordmark and Skip clear of the clock.
     Column(
         Modifier.fillMaxSize().background(colors.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),

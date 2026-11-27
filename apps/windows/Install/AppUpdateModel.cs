@@ -9,16 +9,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Install;
 
-/// <summary>
-/// Finding a new version, fetching it, and putting it in place.
-///
-/// The whole thing happens without being asked, and then stops. Downloading
-/// and verifying is work nobody wants to watch, so it runs quietly.
-/// Restarting is not: an application that relaunches itself under somebody
-/// who is halfway through a sentence has taken a decision that was not its
-/// to take. So the last step is a button, and the account page carries it
-/// until it is pressed. Mirrors the Mac model stage for stage.
-/// </summary>
 internal sealed class AppUpdateModel
 {
     public static readonly string UpToDateMessage = L10n.Text("windows.appupdatemodel.you_are_on_the_latest_version.eeced728");
@@ -27,9 +17,7 @@ internal sealed class AppUpdateModel
     {
         Idle,
         Checking,
-        /// <summary>Fetching the zip. The host checks its checksum.</summary>
         Downloading,
-        /// <summary>Verifying the staged app and putting it in place.</summary>
         Installing,
         ReadyToRelaunch,
         Failed,
@@ -54,7 +42,6 @@ internal sealed class AppUpdateModel
 
     public bool IsRateLimited => RetryAfter is not null && RetryAfter > DateTimeOffset.Now;
 
-    /// <summary>Hide this notice without skipping a release or clearing the cooldown.</summary>
     public void DismissFailure()
     {
         FailureDismissed = true;
@@ -67,12 +54,6 @@ internal sealed class AppUpdateModel
     private int _noticeGeneration;
     private int _checkInProgress;
 
-    /// <summary>
-    /// Check because a person asked. Separate from the quiet check only in
-    /// that it forgets the skipped version first: pressing Check means now.
-    /// A check somebody pressed says what happened and then goes away, or the
-    /// button reads as broken.
-    /// </summary>
     public async Task CheckNowAsync()
     {
         if (IsChecking || IsReady)
@@ -114,12 +95,6 @@ internal sealed class AppUpdateModel
         _ = ClearNoticeLater(generation);
     }
 
-    /// <summary>
-    /// Check, and install what is found. Failure is quiet in the sense that it
-    /// never interrupts, but it is not swallowed: the card offers the manual
-    /// download instead, so an update that cannot be automated still reaches
-    /// the user.
-    /// </summary>
     public async Task CheckAndInstallAsync() => await TryCheckAndInstallAsync();
 
     private async Task<bool> TryCheckAndInstallAsync()
@@ -172,28 +147,19 @@ internal sealed class AppUpdateModel
                 Changed?.Invoke();
                 return;
             }
-            // Host returns the older of app and hostd as `current`, so a tip
-            // hostd cannot hide an older app (or the reverse).
             CurrentVersion = Str(found, "current") ?? AppInfo.Version;
             Latest = Str(found, "latest") ?? "";
             HtmlUrl = Str(found, "htmlUrl") ?? "";
             WinZipUrl = Str(found, "winZipUrl");
             Newer = found["newer"] is JsonValue flag && flag.GetValue<bool>();
-            // A -dev. zip is an Actions artifact, never an update.
             if (Newer && !ChannelAccepts(SelfInstall.IsPreviewChannel, Latest))
             {
                 Newer = false;
             }
-            // The host reports the older of itself and this app. The zip
-            // replaces both, but only a release newer than this app is worth
-            // fetching: an outdated helper still holding the pipe would
-            // otherwise make an up-to-date app download itself forever.
             if (Newer && AppInstaller.CompareVersions(Latest, AppInfo.Version) <= 0)
             {
                 Newer = false;
             }
-            // Compare the skip against the fresh release, so skipping one
-            // version still lets automatic checks discover later versions.
             if (!Newer || string.IsNullOrEmpty(Latest) || IsSkipped)
             {
                 Current = Stage.Idle;
@@ -209,8 +175,6 @@ internal sealed class AppUpdateModel
             return;
         }
 
-        // Already downloaded, verified, and waiting from an earlier check or an
-        // earlier launch: offer the restart instead of fetching it again.
         if (await Task.Run(AppInstaller.ReadyStagedVersion) is string staged
             && AppInstaller.CompareVersions(staged, Latest) >= 0)
         {
@@ -242,11 +206,6 @@ internal sealed class AppUpdateModel
         Changed?.Invoke();
     }
 
-    /// <summary>
-    /// Try the automatic path again after a failure. The card shows progress
-    /// and the button cannot be pressed twice. Failure keeps the card with
-    /// both actions on it.
-    /// </summary>
     public async Task RetryAsync()
     {
         if (Current != Stage.Failed || IsChecking || IsRetrying || IsRateLimited)
@@ -266,13 +225,6 @@ internal sealed class AppUpdateModel
         }
     }
 
-    /// <summary>
-    /// Restart to update. When work is still running, <paramref name="confirm"/>
-    /// is asked first: the swap stops the helper that owns those sessions,
-    /// and that is the person's call. A null confirm means nobody is there
-    /// to ask, so the restart proceeds. When the swap cannot start, the
-    /// failure lands on the card rather than leaving a button that does nothing.
-    /// </summary>
     public async Task RelaunchAsync(Func<long, Task<bool>>? confirm = null)
     {
         long live = 0;
@@ -283,7 +235,6 @@ internal sealed class AppUpdateModel
         }
         catch
         {
-            // An older helper without the method, or none at all: nothing to ask about.
         }
         if (live > 0 && confirm is not null && !await confirm(live))
         {
@@ -307,11 +258,6 @@ internal sealed class AppUpdateModel
         }
     }
 
-    /// <summary>
-    /// A <c>-dev.</c> zip is an Actions artifact, never an update. Both
-    /// official installs and unsigned Actions builds read the latest GitHub
-    /// Release, so a leftover Preview feed cannot land on anyone.
-    /// </summary>
     internal static bool ChannelAccepts(bool previewInstall, string latest)
     {
         if (string.IsNullOrEmpty(latest)) return false;
@@ -379,7 +325,6 @@ internal sealed class AppUpdateModel
         }
         catch
         {
-            // A stale skip only hides one version from quiet checks.
         }
     }
 

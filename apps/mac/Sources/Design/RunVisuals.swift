@@ -20,12 +20,6 @@ enum RunOutcome {
     }
 }
 
-/// The last handful of outcomes as ticks, newest on the right.
-///
-/// A job whose last three runs failed should look wrong from across the room.
-/// Before this, that fact lived in a shared "Recent runs" list at the bottom of
-/// the screen, detached from the job it belonged to, so nobody read it as a
-/// trend.
 struct RunHistoryStrip: View {
     struct Tick: Identifiable {
         var id: String
@@ -33,23 +27,15 @@ struct RunHistoryStrip: View {
         var label: String
     }
 
-    /// Oldest first. The view reverses nothing, it just trims the front.
     var ticks: [Tick]
     var limit: Int = RunHistoryStrip.slots
     var height: CGFloat = 14
     var width: CGFloat = 4
     var onSelect: ((Tick) -> Void)?
 
-    /// Slots always drawn, so the strip reads as a track that is filling up.
-    ///
-    /// Two amber ticks on their own are a pause glyph, and next to a Run button
-    /// that is exactly how they were read. Empty slots behind them give the
-    /// filled ones something to be part of.
     static let slots = 8
 
     private var shown: [Tick] {
-        // `suffix` of a negative length traps; a caller passing a bad limit
-        // gets an empty strip rather than a crash.
         let cap = max(0, limit)
         return ticks.count > cap ? Array(ticks.suffix(cap)) : ticks
     }
@@ -82,11 +68,6 @@ struct RunHistoryStrip: View {
     }
 }
 
-/// How long a run took, relative to the longest one beside it.
-///
-/// A forty-minute run and a forty-second one were the same row. The bar is
-/// deliberately relative rather than absolute: the question a list of runs
-/// answers is "which of these was the long one", not "how many seconds".
 struct DurationBar: View {
     var seconds: Double
     var longest: Double

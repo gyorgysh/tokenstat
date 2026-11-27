@@ -18,10 +18,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-/// Which silhouette a tier wears. Transcribed from the website's badge paths
-/// via Apple's `BadgeShape`: a crest shield for Patron, a star for Supporter,
-/// a crown for Legend. Free has no mark at all, and a tier this build does
-/// not know still gets a seal rather than looking downgraded.
 enum class TierKind {
     Crown, Star, Shield, Seal, None,
 }
@@ -34,15 +30,10 @@ fun tierKind(tier: String): TierKind = when (tier.lowercase()) {
     else -> TierKind.Seal
 }
 
-/// The tier as the silhouette the website puts beside a name, filled with the
-/// logo's own two strongest bars top to bottom. Points are absolute in the
-/// website's 24 unit square, matching `BadgeShape.path`.
 @Composable
 fun TierMark(tier: String, markSize: Int = 15) {
     val kind = tierKind(tier)
     if (kind == TierKind.None) return
-    // The theme's accent into its secondary, so the badge belongs to the
-    // interface around it.
     val colors = LocalTsColors.current
     val fill = remember(colors) { Brush.verticalGradient(listOf(colors.accent, colors.secondary)) }
     Canvas(
@@ -97,8 +88,6 @@ fun TierMark(tier: String, markSize: Int = 15) {
                 drawPath(star, fill)
             }
             TierKind.Shield -> {
-                // Crest shield with a chevron cut out of it. The cut is wound
-                // against the shield under an even-odd fill, so it stays open.
                 val shield = Path().apply {
                     fillType = PathFillType.EvenOdd
                     fun to(x: Float, y: Float) {

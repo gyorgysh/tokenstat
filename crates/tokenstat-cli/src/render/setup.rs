@@ -19,13 +19,6 @@ pub struct SetupOptions<'a> {
     pub json: bool,
 }
 
-/// Ask a yes/no question, defaulting to yes.
-///
-/// Running `setup` is itself the request, so the default is yes and a non-tty
-/// proceeds rather than skipping: piping this into a shell is how install scripts
-/// call it, and a no-op would make the command useless there. The prompt exists to
-/// give someone at a keyboard a chance to decline a step, not to re-ask whether
-/// they meant to run the command they just ran.
 fn confirm(question: &str, assume_yes: bool) -> bool {
     use std::io::{IsTerminal, Write};
     if assume_yes || !std::io::stdin().is_terminal() {
@@ -82,8 +75,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         println!();
     }
 
-    // 1. Scan. First because it is the thing with a deadline: Claude Code deletes
-    // transcripts after 30 days, so every day spent deciding costs history.
     let mut store = Store::open(db_path)?;
     let report = tokenstat_core::scan(&mut store, tz)?;
     if !opts.json {
@@ -107,16 +98,11 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         }
     }
 
-    // Prices, still inside step 1: without them every dollar column is a dash,
-    // and a first run that reports no cost at all reads as a broken install.
-    // Soft-failing is deliberate. An offline machine should still finish setup
-    // with a working archive, and both snapshots can be fetched later.
     fetch_reference_data(opts.json);
     if !opts.json {
         println!();
     }
 
-    // 2. Schedule. The whole point of the archive is that it outlives the logs.
     let scheduled = if opts.no_schedule {
         if !opts.json {
             println!("  {g}2{g:#} Keep it current");
@@ -131,10 +117,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
                 "  {DIM}A scheduled scan is what stops the next cleanup losing a month.{DIM:#}"
             );
         }
-        // No second question: the one at the top covered it.
-        // Scan only here so a failed login still leaves the archive catching up.
-        // After the account step we run `repair`, which refreshes every unit and
-        // drops a stale sync/update left by an older install.
         let installed = {
             let home = directories::BaseDirs::new()
                 .map(|d| d.home_dir().to_path_buf())
@@ -162,9 +144,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         installed
     };
 
-    // 3. Account. Connecting one is a large part of why this command exists, so it
-    // offers to do it rather than printing two commands and stopping. A pairing
-    // code does it without a browser; otherwise the device flow runs here.
     let mut connected = false;
     if !opts.local_only {
         let info = tokenstat_sync::scheduling_info(opts.host).ok();
@@ -200,9 +179,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
                 }
             }
         } else {
-            // The device flow needs a browser and a person, so it is offered only
-            // where both can exist. Starting it into a pipe would leave the process
-            // waiting fifteen minutes for an approval nobody is there to give.
             let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
             if !opts.json {
                 println!("  {DIM}Counters only, and nothing is published until you ask.{DIM:#}");
@@ -236,10 +212,6 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         }
     }
 
-    // 4. Repair the full schedule layout, then first sync when there is an account.
-    // Re-running setup / the website installer refreshes paths and intervals.
-    // Sync is only installed when linked; if not linked yet, an existing sync
-    // unit is left alone so logout does not undo install-and-forget.
     let mut sync_scheduled = false;
     if !opts.no_schedule {
         let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
@@ -397,9 +369,6 @@ pub fn schedule(
         .context("--every is too large")?;
     let platform = Platform::detect();
 
-    // The sync unit is only worth installing for an account, and its cadence is
-    // the plan's, not a number the user should have to know. An explicit
-    // --sync-every still wins, for testing against a sandbox.
     let info = tokenstat_sync::scheduling_info(None).ok();
     let want_sync = !no_sync && info.as_ref().is_some_and(|i| i.logged_in);
     let sync_interval = match sync_every_mins {
@@ -412,12 +381,9 @@ pub fn schedule(
             .and_then(|i| i.min_interval)
             .unwrap_or_else(|| Unit::Sync.default_interval()),
     };
-    // Default on. Opt out with `tokenstat update --auto off` (removes the unit).
     let want_update = tokenstat_sync::auto_apply_enabled();
     let update_interval = Unit::Update.default_interval();
 
-    // `--json` stays machine-readable: the same units and intervals as the
-    // text below, without the prose around them.
     if json && !install {
         let mut units = vec![unit_json(Unit::Scan, interval)];
         if want_sync {
@@ -441,16 +407,13 @@ pub fn schedule(
         let g = good();
         println!();
 
-        if want_update {
-            // Scheduler does not inherit TOKENSTAT_AUTO_UPDATE. Persist on so the
-            // daily unit matches what we are about to install.
-            if tokenstat_sync::config::load()
+        if want_update
+            && tokenstat_sync::config::load()
                 .ok()
                 .and_then(|c| c.update.auto)
                 != Some(true)
-            {
-                let _ = tokenstat_sync::config::set_update_auto(true);
-            }
+        {
+            let _ = tokenstat_sync::config::set_update_auto(true);
         }
 
         let sync_action = if want_sync {
@@ -458,8 +421,6 @@ pub fn schedule(
         } else if no_sync {
             sched::SyncAction::Remove
         } else {
-            // Not linked: leave an existing sync unit alone so logout does not
-            // undo install-and-forget. It will no-op until the next login.
             sched::SyncAction::Keep
         };
         let report = sched::repair(&home, &exe, interval, sync_action, want_update)?;
@@ -572,8 +533,6 @@ pub fn schedule(
     Ok(())
 }
 
-/// Print the scheduler entry for one unit, for a user who would rather install
-/// it themselves than have a tool write to their machine.
 fn print_unit(
     platform: crate::schedule::Platform,
     unit: crate::schedule::Unit,

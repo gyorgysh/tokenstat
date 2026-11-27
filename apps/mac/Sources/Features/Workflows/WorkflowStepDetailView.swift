@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// Fields and explicit connections for one step. Then, Else and loop Body
-/// stay separate picks, not a single next-step control.
 struct WorkflowStepDetailView: View {
     @Bindable var session: WorkflowEditorSession
     let nodeID: String

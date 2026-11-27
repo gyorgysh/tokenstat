@@ -147,9 +147,6 @@ impl HeatCalendar {
             return;
         }
         self.recount();
-        // Spend and busiest have to drop any day that just lost its value.
-        // `recount` leaves them alone because marking a day unmeasured is
-        // not a pricing change.
         let mut total = 0u64;
         let mut busiest: Option<HeatCell> = None;
         for cell in self.days() {
@@ -165,16 +162,6 @@ impl HeatCalendar {
         self.busiest = busiest;
     }
 
-    /// Redo the counts that treat a day as worked or not.
-    ///
-    /// Marking a cell is not a drawing change. "Active days" and both streaks
-    /// answer *was this day worked*, and for a day whose transcripts were
-    /// deleted the answer is yes on the vendor's own record. Leaving them out
-    /// reported 50 active days out of 57 and broke a 57 day streak into 47,
-    /// which reads as a week off that never happened.
-    ///
-    /// Spend is deliberately untouched: those days are worked and unpriced, and
-    /// a total is a floor rather than wrong.
     fn recount(&mut self) {
         let mut days: Vec<(jiff::civil::Date, bool)> = self
             .rows
@@ -192,8 +179,6 @@ impl HeatCalendar {
                 run += 1;
                 best = best.max(run);
             } else if *date < self.last {
-                // Same rule as the build: today being quiet is not a break,
-                // because the day is not over.
                 run = 0;
             }
             self.streak_current = run;
@@ -269,7 +254,6 @@ pub fn calendar(
     let last = anchor;
     let weeks = weeks.clamp(1, 53);
 
-    // Grid edges: end on the Sunday of the anchor's week, start on a Monday.
     let end = shift_days(
         anchor,
         6 - i64::from(anchor.weekday().to_monday_zero_offset()),
@@ -292,8 +276,6 @@ pub fn calendar(
     let mut streak_best = 0usize;
     let mut streak_current = 0usize;
 
-    // One ascending walk over the calendar. `parsed` is ascending too, so the
-    // lookup advances alongside it instead of searching per day.
     let mut lookup = parsed.iter().peekable();
     let mut cells: Vec<Option<HeatCell>> = Vec::with_capacity(span);
     let mut date = start;
@@ -330,8 +312,6 @@ pub fn calendar(
                 busiest = Some(cell);
             }
         } else if date < last {
-            // A quiet anchor day does not break the streak. The day is not
-            // over yet, and reporting "0 day streak" every morning is wrong.
             run = 0;
         }
         streak_current = run;
@@ -368,8 +348,6 @@ pub fn calendar(
     })
 }
 
-/// Month name for a column, or `None` when the label would repeat or crowd the
-/// previous one. Three-character names need two columns of clearance.
 fn month_label(
     monday: jiff::civil::Date,
     col: usize,
@@ -394,20 +372,8 @@ fn days_between(a: jiff::civil::Date, b: jiff::civil::Date) -> i64 {
     b.since(a).map(|s| s.get_days() as i64).unwrap_or(0)
 }
 
-/// Where the four shades change, taken from the days themselves.
-///
-/// Scaling against the maximum does not work here. One expensive day sets the
-/// ceiling and, with a fourth root to lift the low end, everything from a tenth
-/// of that day upwards landed on the top two shades: a $44 day and a $144 day
-/// drew the same square while the grid as a whole read as uniformly hot.
-///
-/// So the shades are quartiles of the active days instead. A quarter of the
-/// days you worked sit in each shade whatever the amounts are, which is what
-/// makes a busy month look different from a quiet one rather than every month
-/// looking like its own busiest day.
 #[derive(Debug, Clone, Copy)]
 struct Scale {
-    /// Upper bound of levels 1, 2 and 3. A day above the last one is level 4.
     breaks: [u64; 3],
 }
 
@@ -418,9 +384,6 @@ impl Scale {
         if active.is_empty() {
             return Self { breaks: [0; 3] };
         }
-        // Nearest-rank quartiles. With very few active days the ranks collide,
-        // which is correct: three days of work cannot fill four shades, and
-        // spreading them out would invent a difference that is not there.
         let at = |q: f64| -> u64 {
             let last = active.len() - 1;
             let rank = ((active.len() as f64) * q).ceil() as usize;
@@ -446,7 +409,6 @@ impl Scale {
 mod tests {
     use super::*;
 
-    /// Wednesday 2026-07-29, the anchor most of these cases hang off.
     fn anchor() -> jiff::civil::Date {
         jiff::civil::date(2026, 7, 29)
     }
@@ -507,10 +469,6 @@ mod tests {
 
     #[test]
     fn marking_a_day_worked_makes_it_count_as_worked() {
-        // The whole point: "active days" and the streaks answer *was this day
-        // worked*, and for a day whose transcripts were deleted the answer is
-        // yes. Marking used to change only the drawing, which reported 50
-        // active days out of 57 and split one streak into two.
         let days: Vec<_> = (1..=14)
             .filter(|d| !(6..=8).contains(d))
             .map(|d| (format!("2026-07-{d:02}"), 100u64))
@@ -557,7 +515,6 @@ mod tests {
     fn calendar_puts_each_day_in_its_real_weekday_row() {
         let days = vec![("2026-07-29".to_string(), 10)];
         let cal = calendar(&days, 4, anchor()).expect("calendar");
-        // 2026-07-29 is a Wednesday: row 2, Monday first.
         let found = cal.rows[2]
             .iter()
             .flatten()
@@ -652,8 +609,6 @@ mod tests {
 
     #[test]
     fn the_shades_split_the_active_days_evenly() {
-        // Twelve active days, so three per shade. Scaling against the maximum
-        // put nine of these twelve on the top two shades.
         let values: Vec<u64> = (1..=12).map(|n| n * 10).collect();
         let scale = Scale::from_days(values.iter().copied());
         let levels: Vec<u8> = values.iter().map(|v| scale.level(*v)).collect();
@@ -663,10 +618,6 @@ mod tests {
 
     #[test]
     fn one_expensive_day_does_not_flatten_the_rest() {
-        // The case that started this: a run of ordinary days and one that cost
-        // ten times as much. The ordinary days must still differ from each
-        // other rather than all collapsing into the bottom shade, and $44 and
-        // $144 must not draw the same square.
         let values = [10u64, 20, 44, 144, 300];
         let scale = Scale::from_days(values.iter().copied());
         let levels: Vec<u8> = values.iter().map(|v| scale.level(*v)).collect();
@@ -680,9 +631,6 @@ mod tests {
 
     #[test]
     fn locking_older_days_keeps_the_year_and_drops_their_value() {
-        // Free keeps a year of squares. Exact counts live in the last month.
-        // A 4-week strip was the other answer, and it read as the grid
-        // zoomed in rather than as a year with a locked past.
         let days: Vec<_> = (1..=29)
             .map(|d| (format!("2026-07-{d:02}"), 100u64))
             .collect();
@@ -711,8 +659,6 @@ mod tests {
             .expect("day");
         assert!(!live.locked);
         assert_eq!(live.value, 100);
-        // Same amount every live day. The walk is oldest first and keeps the
-        // first maximum, so the 20th wins rather than the 29th.
         assert_eq!(
             cal.busiest.map(|b| b.date.to_string()).as_deref(),
             Some("2026-07-20")

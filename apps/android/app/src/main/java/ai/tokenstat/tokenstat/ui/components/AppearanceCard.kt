@@ -37,13 +37,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 
-/// Mode and color theme. Port of the Apple `ClientAppearanceCard`.
 @Composable
 fun AppearanceCard() {
     val context = LocalContext.current
     val colors = LocalTsColors.current
     val view = LocalView.current
-    // A sheet has its own window, whose bars were set when it opened.
     (view.parent as? DialogWindowProvider)?.window?.let { window ->
         SideEffect {
             WindowCompat.getInsetsController(window, view).apply {

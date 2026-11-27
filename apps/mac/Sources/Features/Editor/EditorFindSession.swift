@@ -21,28 +21,18 @@ import Observation
 /// exercise it without an actor hop.
 @Observable
 final class EditorFindSession {
-    /// Bounded so a pathological query cannot mint unbounded ranges.
     static let matchLimit = 2000
 
-    /// Showing and hiding repaints the match backgrounds: hiding must clear
-    /// them rather than leave stale tint behind.
     var showing = false { didSet { revision &+= 1 } }
-    /// Setting the query searches immediately. The bar binds its field to
-    /// this and owns no buffer, so waiting for the caller to re-run the
-    /// search by hand meant every keystroke in the field showed "No
-    /// results" until the document itself changed.
     var query = "" { didSet { refresh(text: lastText) } }
     var replaceText = ""
     var replacing = false
-    /// The text view is inside a live composition. Replacements wait.
     var composing = false
     private var lastText = ""
 
     private(set) var matches: [NSRange] = []
     private(set) var currentIndex = 0
     private(set) var truncated = false
-    /// Bumped on every match or index change. The text view repaints its
-    /// match backgrounds only when this moves.
     private(set) var revision = 0
 
     enum Action {
@@ -51,8 +41,6 @@ final class EditorFindSession {
         case replaceCurrent
         case replaceAll
     }
-    /// Set by the text view. The bar calls the `go`/`replace` methods below,
-    /// which update this model first and then ask the view to act.
     var handler: ((Action) -> Void)?
 
     var hasQuery: Bool { !query.isEmpty }
@@ -73,9 +61,6 @@ final class EditorFindSession {
     var canNavigate: Bool { hasQuery && matches.count > 1 }
     var canReplace: Bool { hasQuery && !matches.isEmpty && !composing }
 
-    /// Recompute matches against the buffer. Keeps the current position
-    /// when the same match is still there, otherwise clamps. Remembers the
-    /// buffer, so the next query keystroke has something to search.
     func refresh(text: String) {
         lastText = text
         let found = Self.search(query: query, in: text)
@@ -121,8 +106,6 @@ final class EditorFindSession {
         handler?(.replaceAll)
     }
 
-    /// The highlight cap must not limit an edit advertised as Replace All.
-    /// Foundation replaces the complete buffer without storing every range.
     func replacingAll(in text: String) -> String {
         guard !query.isEmpty else { return text }
         return (text as NSString).replacingOccurrences(

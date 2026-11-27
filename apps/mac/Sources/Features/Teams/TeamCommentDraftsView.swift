@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Local writing is available even after its original audience is withdrawn.
-/// This surface has no network or send action.
 struct TeamCommentDraftsView: View {
     let origin: String
     let person: String

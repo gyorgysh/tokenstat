@@ -13,8 +13,6 @@ internal sealed partial class ChatPage
     private void CancelDropImport()
     {
         if (_dropImport is not { } import) return;
-        // Retire the busy claim synchronously, before a different chat paints.
-        // A cancelled copy may take another continuation to clean its bytes.
         _dropImport = null;
         import.Cancel(); _queueing = false;
         if (IsLoaded) { RebuildAttachStrip(); RebuildComposerActions(); }

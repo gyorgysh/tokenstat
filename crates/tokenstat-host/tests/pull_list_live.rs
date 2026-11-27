@@ -14,8 +14,6 @@ fn success(method: &str, params: Value) -> Value {
     response["result"].clone()
 }
 
-/// Opt in with GitHub credentials. Uses a temporary local registry and a public
-/// repository, and only reads from GitHub. It does not start the user's host.
 #[test]
 #[ignore = "requires network access and GitHub credentials"]
 fn list_pages_cross_the_host_dispatch() {

@@ -39,8 +39,7 @@ fn active(store: &Store, folder: &Folder) -> Checkout {
 fn independent_publication_readers_validate_authority_without_allowing_mutation() {
     let (_root, store, folder) = setup();
     let active = active(&store, &folder);
-    // A second guardian can be checking this same publication. Its read lock
-    // must not make a still-authorized run permanently retire its SDK.
+
     let reader = OpenOptions::new()
         .read(true)
         .write(true)

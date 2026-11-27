@@ -4,14 +4,6 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
-//! HTTP reverse proxy on the browser side of a tunnel port bridge.
-//!
-//! Raw TCP is the wrong tool for a web app. Vite and the harnesses emit
-//! absolute `localhost:<target>` URLs. The page then loads on the phone's
-//! random loopback port and those URLs miss. This hop rewrites `Host`,
-//! `Location` / `Refresh`, and obvious loopback URLs inside HTML.
-
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
@@ -30,8 +22,7 @@ pub(crate) fn bridge(
     listen_port: u16,
 ) {
     let _ = local.set_nodelay(true);
-    // Only the header wait is timed. A 101 upgrade or a long-lived TCP
-    // stream must sit idle without the socket treating that as EOF.
+
     let _ = local.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = local.set_write_timeout(Some(Duration::from_secs(30)));
     let mut local = local;
@@ -84,8 +75,6 @@ fn pump_one_http(
             writer.write(&leftover).map_err(|_| ())?;
         }
     } else {
-        // Upload and response are independent: a server may send 100 Continue
-        // before accepting a body, or reject an upload before it finishes.
         let socket = local.try_clone().map_err(|_| ())?;
         let upload_writer = writer.clone();
         cleanup.upload = Some(std::thread::spawn(move || {
@@ -106,11 +95,7 @@ fn pump_one_http(
     };
     let mut resp_head = remote.read_headers().ok_or(())?;
     let mut resp_text = String::from_utf8_lossy(&resp_head).into_owned();
-    // An interim response (100 Continue, 103 Early Hints) is not the answer.
-    // It carries no body, and the real response follows on the same
-    // connection, so forward it and read on; treating it as final would close
-    // the connection the client is still waiting on. A 101 switches protocols
-    // instead: hand it to the upgrade pump without reading another HTTP head.
+
     let mut interim_hops = 0;
     while interim_hops < 8
         && response_status(&resp_text)
@@ -141,9 +126,7 @@ fn pump_one_http(
 
     if meta.no_body {
         local.write_all(rewritten_resp.as_bytes()).map_err(|_| ())?;
-        // No body follows by definition (HEAD, 204, 304), so buffered bytes
-        // are never the rest of this response. Forwarding them would graft
-        // the next response's head onto a body that does not exist.
+
         remote.buf.clear();
         finish(reader, writer);
         return Ok(());
@@ -366,8 +349,6 @@ fn read_until_headers(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// True while the bytes we have could still become an HTTP request.
-/// A raw "ping" to an echo port must not wait for `\r\n\r\n`.
 fn maybe_http(buf: &[u8]) -> bool {
     const METHODS: [&[u8]; 8] = [
         b"GET ",
@@ -429,9 +410,6 @@ impl ResponseMeta {
 }
 
 fn response_has_no_body(request_head: bool, status: Option<u16>) -> bool {
-    // 1xx is not here: an interim response is followed by the real one, and
-    // the caller forwards it and keeps reading. Only these are final and
-    // bodiless.
     request_head || status.is_some_and(|status| status == 204 || status == 304)
 }
 
@@ -555,7 +533,7 @@ fn rewrite_response_headers(
     }
     if let Some(te) = header_ci(&headers, "Transfer-Encoding") {
         meta.chunked = te.to_ascii_lowercase().contains("chunked");
-        // Transfer-Encoding takes precedence over Content-Length.
+
         meta.content_length = None;
         headers.retain(|(name, _)| !name.eq_ignore_ascii_case("Content-Length"));
     }
@@ -593,7 +571,6 @@ enum RequestBody {
 fn request_body(block: &str) -> Option<RequestBody> {
     let (_, headers) = header_map(block)?;
     if let Some(encoding) = header_ci(&headers, "Transfer-Encoding") {
-        // No ambiguous framing or unsupported transfer codings.
         if header_ci(&headers, "Content-Length").is_some()
             || !encoding.eq_ignore_ascii_case("chunked")
         {
@@ -703,7 +680,7 @@ fn rewrite_loopback_urls(text: &str, target_port: u16, listen_port: u16) -> Stri
                     } else {
                         "http://"
                     };
-                    // The listener is IPv4-only, including when the target used ::1.
+
                     (from, format!("{local_scheme}127.0.0.1:{listen_port}"))
                 })
         })
@@ -931,8 +908,7 @@ const ws = "ws://localhost:5173/";"#;
     #[test]
     fn bodiless_responses_are_not_body_rewrite_candidates() {
         assert!(response_has_no_body(true, Some(200)));
-        // 1xx is interim, not final: the caller forwards it and reads the real
-        // response that follows, so it is not a bodiless final answer.
+
         assert!(!response_has_no_body(false, Some(100)));
         assert!(response_has_no_body(false, Some(204)));
         assert!(response_has_no_body(false, Some(304)));

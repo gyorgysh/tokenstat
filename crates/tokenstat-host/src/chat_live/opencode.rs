@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Observe the native v2 stream while the existing CLI owns the actual turn.
-//! The leased server inherits this turn's hooks and credentials. No user
-//! service is reused, and losing this observation never resends a prompt.
-
 use super::{emitter::Emitter, mailbox::Stop, output};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read};
@@ -19,8 +15,6 @@ const RECORD_CAP: usize = 16 * 1024 * 1024;
 const PART_CAP: usize = 256;
 
 fn envelope(source: &str, value: Value) -> Value {
-    // The queue owns the parsed record. Move large completions through it
-    // instead of cloning them just to label their source.
     Value::Object(serde_json::Map::from_iter([(source.into(), value)]))
 }
 
@@ -88,8 +82,6 @@ impl Owned {
     }
 
     fn finish(&mut self) -> Result<(), String> {
-        // Keep the PID reserved until descendant cleanup, as in the other
-        // native runners. Reaping first could signal a reused process group.
         super::kill_agent(&mut self.child);
         let status = self.child.wait().map_err(|error| error.to_string())?;
         self.reaped = true;
@@ -118,8 +110,6 @@ struct Lease {
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        // Match the CLI's standalone lease: EOF lets the engine persist its
-        // final session state before the process group is forcibly retired.
         self._server.child.stdin.take();
         let deadline = Instant::now() + super::EXIT_TIMEOUT;
         while Instant::now() < deadline
@@ -252,8 +242,7 @@ impl Lease {
                     if kind == "server.connected" {
                         let _ = connected.try_send(());
                     }
-                    // Catalog changes, tool-input fragments and other
-                    // unused updates need not wake the turn's output loop.
+
                     if !Projection::observes(kind) && kind != "session.inbox.delivered" {
                         return true;
                     }
@@ -421,8 +410,7 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     cli_eof = true;
                     native_eof = true;
-                    // A CLI may close stdout before its final cleanup ends.
-                    // A disconnected receiver otherwise spins without wait.
+
                     std::thread::sleep(Duration::from_millis(40));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -457,9 +445,6 @@ pub(super) fn run(argv: &[String], directory: &Path) -> Result<(), String> {
         && !cli.reaped
         && let Some(session) = &projection.session
     {
-        // Emitter backpressure can return Stop from inside emit(), before
-        // the outer loop sees it. Persist the native interruption in that
-        // path too, then drain bounded queues while the CLI winds down.
         if !interrupted {
             lease.interrupt(session);
         }

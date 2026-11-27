@@ -2,7 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Open SSH servers belong to the device, independently of remote projects.
 struct ClientServerRows: View {
     var rowHeight: CGFloat = 44
     @Environment(ClientSSHWorkbench.self) private var workbench

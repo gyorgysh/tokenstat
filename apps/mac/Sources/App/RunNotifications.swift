@@ -12,30 +12,7 @@ import UserNotifications
 import AppKit
 #endif
 
-/// Being told when an agent finished, on the two paths that need different
-/// machinery.
-///
-/// **The Mac tells itself.** It is the machine the run happened on, the app is
-/// watching the run list already, and a local notification needs no account,
-/// no network and nobody else's server. That is `RunNotifications` below.
-///
-/// **A phone cannot.** With the app closed there is nothing running to notice,
-/// so Apple has to wake it, which means a push and therefore a server. That is
-/// `PushRegistrar`, and what it sends is covered in `tokenstat-sync::push`: a
-/// reason from a fixed list and a machine id, never a folder name, a prompt or
-/// a path.
-///
-/// Both are off until somebody turns them on. A notification permission prompt
-/// on first launch, for a feature nobody has asked for yet, is the reason
-/// people say no to notifications forever.
 
-/// A tap on a notification, waiting to be opened.
-///
-/// Local Mac banners already know the conversation or the session: they
-/// wrote the id. A phone push cannot: the payload is a reason and a
-/// machine, and the destination is looked up over the tunnel after the
-/// tap. A terminal that needs the person wins over chat. Either way the
-/// destination lives here until the window that can open it has appeared.
 @MainActor
 @Observable
 final class NotificationOpen {
@@ -58,18 +35,6 @@ final class NotificationOpen {
     private(set) var request: Request?
     private var deadline: Date = .distantPast
 
-    /// How long a tap is retried before the app gives up and lands on a
-    /// usable screen instead.
-    ///
-    /// Resolving one is not instant: the phone refreshes the directory, waits
-    /// for a connect already in flight, dials the machine the push named and
-    /// reads its recent chats. A Mac waking as its lid opens deserves that
-    /// runway, which is why a failed attempt keeps the tap rather than
-    /// consuming it. What it does not deserve is forever. A conversation
-    /// deleted on the host never resolves, and a tap for one used to sit here
-    /// for the life of the process: every later mount of Workspaces or the
-    /// sidebar paid another refresh, another wait and another dial for a tap
-    /// made days ago, and showed nothing for it either time.
     static let patience: TimeInterval = 60
 
     func offer(_ request: Request) {
@@ -93,9 +58,6 @@ final class NotificationOpen {
         return value
     }
 
-    /// An attempt that could not resolve. True once the tap is stale, having
-    /// dropped it, which is the caller's signal to land on a usable screen
-    /// rather than keep chasing a destination that is not coming.
     func dropIfStale() -> Bool {
         guard request != nil, Date() >= deadline else { return false }
         request = nil
@@ -103,13 +65,6 @@ final class NotificationOpen {
         return true
     }
 
-    /// Read a tap. Local banners carry `ts.kind` and a conversation id. A
-    /// push carries `ts.reason` and a machine. The identifier is the fallback
-    /// for a banner posted before those keys existed.
-    ///
-    /// Unknown reasons, empty ids and a payload that is not a dictionary all
-    /// return nil. A tap must not crash the app because Apple delivered
-    /// something we did not write.
     nonisolated static func parse(
         userInfo: [AnyHashable: Any],
         identifier: String
@@ -232,18 +187,10 @@ final class NotificationOpen {
     }
 }
 
-/// Presents banners while the app is in front.
-///
-/// Without a delegate the system swallows a notification whose app is already
-/// frontmost. That is exactly the case here: the run finished in a window the
-/// person is looking at but not watching, and a silent notification is the
-/// same as no notification.
 @MainActor
 final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationPresenter()
 
-    /// Install once, early. Setting this after a notification has already been
-    /// delivered loses that delivery's callbacks, so it goes in at launch.
     static func install() {
         UNUserNotificationCenter.current().delegate = shared
         #if os(macOS)
@@ -307,13 +254,6 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
 }
 
 #if os(macOS)
-/// Local notifications for runs that ended on this Mac.
-///
-/// Fed from the same run lists the sidebar already polls, so there is no second
-/// source of truth about what a run is doing and nothing new to keep in step.
-///
-/// Only transitions are notified, and only after the first read: a launch that
-/// found four finished runs from last night must not post four banners.
 @MainActor
 @Observable
 final class RunNotifications {
@@ -321,7 +261,6 @@ final class RunNotifications {
 
     private static let onKey = "notifications.runsFinished"
 
-    /// Off until asked for. See the type comment.
     var isOn: Bool {
         didSet {
             guard isOn != oldValue else { return }
@@ -332,24 +271,14 @@ final class RunNotifications {
         }
     }
 
-    /// What the system last said about permission, for the settings row. Nil
-    /// until asked, because "not decided" and "denied" need different words.
     private(set) var authorization: UNAuthorizationStatus?
 
-    /// Which list a refresh came from.
-    ///
-    /// Kept apart because the two arrive on their own timers into one object.
-    /// Holding a single map meant each feed's refresh replaced the other's
-    /// baseline, so by the time a run finished its previous status had been
-    /// wiped by the other list and nothing was ever posted.
     private enum Feed: Hashable {
         case automations
         case workflows
     }
 
     private var lastStatus: [Feed: [String: String]] = [:]
-    /// Feeds that have been read once. Before that, everything is history, and
-    /// it is per feed for the same reason the statuses are.
     private var primed: Set<Feed> = []
 
     private struct ChatState {
@@ -363,28 +292,19 @@ final class RunNotifications {
         let hasRoutingLimit: Bool
     }
 
-    /// Chat state has its own shape: waiting is an approval, while completion
-    /// is the running edge plus the host's terminal Done status.
     private var lastChats: [String: ChatState] = [:]
     private var chatsPrimed = false
 
     private init() {
-        // `bool(forKey:)` is false for a key that was never written, which is
-        // the default this wants.
         isOn = UserDefaults.standard.bool(forKey: Self.onKey)
     }
 
-    /// Ask, once, and remember the answer for the settings row.
-    ///
-    /// Called when the switch goes on rather than at launch, so the system
-    /// prompt arrives in the same second as the request that explains it.
     func requestAuthorization() async {
         let center = UNUserNotificationCenter.current()
         _ = try? await center.requestAuthorization(options: [.alert, .sound])
         authorization = await center.notificationSettings().authorizationStatus
     }
 
-    /// Read the current permission without asking for it.
     func refreshAuthorization() async {
         authorization = await UNUserNotificationCenter.current().notificationSettings()
             .authorizationStatus
@@ -402,13 +322,6 @@ final class RunNotifications {
         }
     }
 
-    /// Agent runs, as of this refresh.
-    ///
-    /// A workflow node starts an ordinary automation run, so a five-step
-    /// workflow used to say "Run finished" five times on its way to saying it
-    /// once more for itself. A step is machinery under something the person
-    /// started, and machinery does not report to them: the workflow speaks for
-    /// its own steps.
     func settle(automations runs: [RunRecord]) {
         settle(
             runs
@@ -418,8 +331,6 @@ final class RunNotifications {
         )
     }
 
-    /// Workflow runs, as of this refresh. A workflow that is `waiting` has hit
-    /// a gate, which is a person's turn and worth saying so.
     func settle(workflows runs: [WorkflowRunRecord]) {
         settle(
             runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: nil) },
@@ -427,11 +338,6 @@ final class RunNotifications {
         )
     }
 
-    /// Conversations as of the Chat model's existing refresh.
-    ///
-    /// No timer lives here. The model already reads events, approvals and the
-    /// conversation list in one poll; feeding those facts into this object is
-    /// what keeps the notification and the row on screen from disagreeing.
     func settle(
         chats: [ChatConversation],
         approvals: [ChatApproval],
@@ -464,9 +370,6 @@ final class RunNotifications {
         guard isOn, chatsPrimed else { return }
         for (id, chat) in current {
             guard let before = lastChats[id] else { continue }
-            // The conversation on screen is its own notification. Whoever is
-            // reading it watched the card appear and the reply land, so a
-            // banner about either only repeats what they are looking at.
             let watching = UserPresence.shared.isWatching(conversation: id)
             if let entry = chat.routingActivity, entry != before.routingActivity,
                chat.routingNotifies, !watching, entry.kind != "settings" {
@@ -504,8 +407,6 @@ final class RunNotifications {
                     extras: chatExtras(id: id, workspaceID: chat.workspaceID, waiting: false)
                 )
             default:
-                // Explicit Stop and an old host with no trustworthy terminal
-                // status are both quieter than guessing that a turn failed.
                 continue
             }
         }
@@ -521,9 +422,6 @@ final class RunNotifications {
     private func settle(_ runs: [Ended], from feed: Feed) {
         let before = lastStatus[feed] ?? [:]
         defer {
-            // This feed's slice only. Replacing the whole map is what made one
-            // list forget the other, and merging without replacing would keep
-            // every run this app has ever seen.
             lastStatus[feed] = Dictionary(
                 runs.map { ($0.id, $0.status) },
                 uniquingKeysWith: { _, last in last }
@@ -533,8 +431,6 @@ final class RunNotifications {
         guard isOn, primed.contains(feed) else { return }
         for run in runs {
             guard let before = before[run.id], before != run.status else { continue }
-            // Only a live run can produce news. A record rewritten by a
-            // reconcile is not something that just happened.
             guard before == "running" || before == "queued" else { continue }
             switch run.status {
             case "ok":
@@ -545,22 +441,11 @@ final class RunNotifications {
             case "waiting":
                 post(run.id, title: L10n.text("apple.runnotifications.waiting_for_you.9f760ab2"), identifierTitle: "Waiting for you", body: L10n.text("apple.runnotifications.0_needs_an_answer_to_carry_on.6eb7efc2", "\(run.name)"))
             default:
-                // "stopped" is somebody at this keyboard. They know.
                 continue
             }
         }
     }
 
-    /// An agent in a terminal stopped to ask its person something.
-    ///
-    /// The one notification that is worth interrupting somebody for: a run
-    /// that finished can be read whenever, a question is holding the work up.
-    /// It was also the one the app never sent, because the local notifier only
-    /// ever watched automations and workflows, and a permission prompt in a
-    /// terminal is neither.
-    ///
-    /// Nothing about the session travels: the name is the folder and the
-    /// harness, which is what the sidebar already shows.
     func attention(sessionID: String, name: String, workspaceID: String = "") {
         guard isOn else { return }
         var extras: [String: String] = [
@@ -579,19 +464,12 @@ final class RunNotifications {
         )
     }
 
-    /// Take that notification back when the person arrives at the terminal.
-    ///
-    /// They answered the call by walking over to it. A banner still sitting in
-    /// Notification Centre about a question they are looking at is the same
-    /// nagging as a pill that will not go away.
     func attentionHandled(sessionID: String) {
         let identifier = "run.session.\(sessionID).Waiting for you"
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 
-    /// Take back a waiting-chat banner when its conversation is opened or its
-    /// approval is answered. The approval card is now the source of truth.
     func chatAttentionHandled(id: String) {
         UNUserNotificationCenter.current().removeDeliveredNotifications(
             withIdentifiers: ["run.chat.\(id).Waiting for you"]
@@ -618,8 +496,6 @@ final class RunNotifications {
         content.title = title
         content.body = body
         content.sound = .default
-        // Grouped per run, so a run that ends and is retried replaces its own
-        // banner rather than stacking a history in Notification Centre.
         content.threadIdentifier = runID
         if !extras.isEmpty {
             content.userInfo = ["ts": extras]
@@ -632,8 +508,6 @@ final class RunNotifications {
         UNUserNotificationCenter.current().add(request)
     }
 
-    /// The settings button. Posts through the same path a real run would, so
-    /// a test that arrives proves the real one will.
     func sendTest() {
         post("test", title: L10n.text("apple.runnotifications.notifications_are_on.ceaaed4b"), identifierTitle: "Notifications are on", body: L10n.text("apple.runnotifications.this_is_the_only_test_notification.45933459"))
     }
@@ -655,31 +529,15 @@ final class PushRegistrar {
     static let shared = PushRegistrar()
 
     private static let onKey = "notifications.push"
-    /// The last token this device registered, kept across launches.
-    ///
-    /// Switching off has to name the device to the account, and the token
-    /// otherwise only exists in memory after Apple hands it over. A person who
-    /// relaunches and turns the switch off in the same second would have taken
-    /// the switch off a device the account was still sending to.
     private static let tokenKey = "notifications.pushToken"
-    /// A token whose removal did not reach the account yet.
-    ///
-    /// Turning notifications off while offline used to be silently lost, and
-    /// the failure is invisible: the switch reads off and the notifications
-    /// keep arriving. Retried on the next launch.
     private static let pendingRemovalKey = "notifications.pushPendingRemoval"
 
-    /// Whether this device wants notifications. Off until asked for.
     private(set) var isOn: Bool
-    /// The last thing that went wrong, for the settings row. Registration is
-    /// silent when it works and a person needs to know when it does not.
     private(set) var errorMessage: String?
     private(set) var isRegistered = false
     private(set) var isWorking = false
     private let operations = PushRegistrationQueue()
 
-    /// The token Apple last handed us, kept so switching off can name the
-    /// device to remove rather than waiting for Apple to notice it is dead.
     private var deviceToken: String? {
         didSet {
             guard deviceToken != oldValue else { return }
@@ -692,10 +550,6 @@ final class PushRegistrar {
         deviceToken = UserDefaults.standard.string(forKey: Self.tokenKey)
     }
 
-    /// Turn notifications on for this device: ask the person, then ask Apple.
-    ///
-    /// A refusal at the system prompt leaves the switch off, because a switch
-    /// that says on while the system says no is a lie the app tells daily.
     func enable() async {
         guard !isWorking else { return }
         isWorking = true
@@ -711,19 +565,10 @@ final class PushRegistrar {
         }
         isOn = true
         UserDefaults.standard.set(true, forKey: Self.onKey)
-        // A removal that never landed is moot now: this device is asking to be
-        // sent to again, and retrying it later would take it back off.
         UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    /// Stop notifications for this device, at the account rather than only on
-    /// the phone, so nothing is sent that a Do Not Disturb happens to hide.
-    ///
-    /// The token comes from the stored one when Apple has not handed one over
-    /// yet this launch, and a removal that does not reach the account is
-    /// remembered rather than dropped: a switch that reads off while
-    /// notifications keep arriving is the worst of the states this can be in.
     func disable() async {
         guard !isWorking else { return }
         isWorking = true
@@ -743,16 +588,9 @@ final class PushRegistrar {
         }.value
     }
 
-    /// Re-register at launch, and after signing in. Cheap, and it is the only
-    /// thing that keeps a reissued token reachable.
-    ///
-    /// Also finishes a removal that never reached the account. That has to
-    /// happen before the registration below, or a device that was switched off
-    /// offline and switched back on would race its own removal.
     func refresh() {
         if let pending = UserDefaults.standard.string(forKey: Self.pendingRemovalKey) {
             operations.enqueue { [self] in
-                // Enabling again makes an unstarted removal obsolete.
                 if UserDefaults.standard.string(forKey: Self.pendingRemovalKey) == pending,
                    (try? await Bridge.pushUnregister(token: pending)) != nil,
                    UserDefaults.standard.string(forKey: Self.pendingRemovalKey) == pending {
@@ -768,7 +606,6 @@ final class PushRegistrar {
         UIApplication.shared.registerForRemoteNotifications()
     }
 
-    /// Apple answered. Hand the token to the account.
     func received(token: Data) {
         let hex = token.map { String(format: "%02x", $0) }.joined()
         deviceToken = hex
@@ -783,9 +620,6 @@ final class PushRegistrar {
             } catch {
                 guard isOn, deviceToken == hex else { return }
                 isRegistered = false
-                // Signed out is the ordinary case, not a fault worth shouting
-                // about: notifications need an account and the account screen
-                // is already saying so.
                 errorMessage = Bridge.isSignedOutError(error) ? nil : error.localizedDescription
             }
         }
@@ -798,8 +632,6 @@ final class PushRegistrar {
         errorMessage = error.localizedDescription
     }
 
-    /// Ask the account to send one, so somebody can tell "on" from "on but
-    /// nothing has happened yet".
     func sendTest() async {
         isWorking = true
         defer { isWorking = false }
@@ -808,9 +640,6 @@ final class PushRegistrar {
             if !result.signedIn {
                 errorMessage = L10n.text("apple.runnotifications.sign_in_first_a_notification_has_to_reach.c1314d42")
             } else if !result.enabled {
-                // The server, not this device. Saying "check your settings"
-                // here would send somebody looking for a switch that is
-                // already on.
                 errorMessage = L10n.text("apple.runnotifications.notifications_are_not_switched_on_for_the.b82ba3c6")
             } else if result.sent == 0 {
                 errorMessage = L10n.text("apple.runnotifications.the_account_has_no_device_to_notify_yet.bf208fe3")
@@ -822,15 +651,10 @@ final class PushRegistrar {
         }
     }
 
-    /// iPad and iPhone are one app and one bundle id, so this is a label for
-    /// the account's own device list rather than anything Apple routes on.
     private static var platform: String {
         UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
     }
 
-    /// Which Apple host this build's tokens belong to. A development build's
-    /// token is a sandbox token and the production host answers it with
-    /// BadDeviceToken, which is why the account stores this per device.
     static var environment: String {
         #if DEBUG
         "sandbox"

@@ -9,11 +9,6 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Tokenstat.Host;
 
-/// <summary>
-/// Shared lock hostd watches when Always-on is off. Same file as
-/// tokenstat-paths data_dir / host-owner.lock:
-/// %APPDATA%\tokenstat\tokenstat\data\host-owner.lock
-/// </summary>
 internal static class HostOwnerLock
 {
     private static FileStream? _stream;
@@ -36,21 +31,15 @@ internal static class HostOwnerLock
                 FileAccess.ReadWrite,
                 FileShare.ReadWrite | FileShare.Delete);
             var overlapped = new NativeOverlapped();
-            // Shared lock: flags 0. hostd's exclusive probe then fails while
-            // this process (or another tokenstat window) is open.
             if (!LockFileEx(stream.SafeFileHandle, 0, 0, 1, 0, ref overlapped))
             {
                 return;
             }
-            // Windows shared byte-range locks prohibit writes, even through
-            // the handle holding the lock. Writing a PID here throws before
-            // retaining the stream, and GC then silently drops app ownership.
             _stream = stream;
             stream = null;
         }
         catch
         {
-            // A missing lock is the same as no owner: hostd may exit on a laptop.
         }
         finally
         {
@@ -81,7 +70,6 @@ internal static class HostOwnerLock
     {
         get
         {
-            // Match tokenstat-paths, including its portable-install override.
             var data = Environment.GetEnvironmentVariable("TOKENSTAT_DATA_DIR");
             if (string.IsNullOrEmpty(data) || !Path.IsPathFullyQualified(data))
                 data = Path.Combine(

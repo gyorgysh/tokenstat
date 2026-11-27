@@ -5,8 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/// The trial line renders what Play configured, in words, and stays silent
-/// when the offer has a single phase.
 class BillingPhasesTest {
     @Test
     fun periodsHumanize() {
@@ -33,8 +31,6 @@ class BillingPhasesTest {
 
     @Test
     fun periodDecidesTabNotId() {
-        // The yearly plan is `annual` on patron and supporter but `yearly`
-        // on legend: the id cannot be trusted, the period can.
         assertEquals("year", intervalOfBasePlan("annual", "P1Y"))
         assertEquals("year", intervalOfBasePlan("yearly", "P1Y"))
         assertEquals("month", intervalOfBasePlan("monthly", "P1M"))

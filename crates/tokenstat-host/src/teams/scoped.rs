@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use crate::error::DispatchError;
 use crate::remote::{TeamReadMethod, TeamReadParams};
 use serde_json::{Value, json};
@@ -104,8 +103,6 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         if operation == TeamReadMethod::Lanes {
             #[cfg(feature = "local-host")]
             {
-                // Same gates as checkout info: a read capability, this exact
-                // publication, and its folder unchanged on this computer.
                 if !scope
                     .capabilities
                     .contains(&tokenstat_sync::teams::TeamCapability::Read)

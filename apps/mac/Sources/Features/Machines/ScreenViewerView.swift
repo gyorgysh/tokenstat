@@ -11,8 +11,6 @@ import AppKit
 import UIKit
 #endif
 
-/// Legend screen viewer. H.264 is decoded entirely at this endpoint by the
-/// system display layer; the relay and account service see encrypted bytes.
 struct ScreenViewerView: View {
     @Environment(\.dismiss) private var dismiss
     #if !os(macOS)
@@ -27,14 +25,8 @@ struct ScreenViewerView: View {
     @State private var muted = false
     @State private var importingFile = false
     @State private var zoom: CGFloat = 1
-    /// Local displacement of a magnified picture while merely viewing it.
-    /// Control mode follows the remote pointer instead and keeps this at zero.
     @State private var viewOffset: CGSize = .zero
-    /// Slow the pointer right down, for a target a few pixels across.
     @State private var fine = false
-    /// The left button is held, so the next drag drags. A toggle rather than
-    /// only a long press, because a long press cannot be held while the other
-    /// hand does anything and is not visible anywhere on screen.
     @State private var dragLatched = false
     @State private var heldModifiers: UInt64 = 0
     @State private var keyboardWanted = false
@@ -44,34 +36,14 @@ struct ScreenViewerView: View {
     @State private var viewerWindow: NSWindow?
     #else
     @State private var mode: ScreenPointerMode = .trackpad
-    /// The chrome is hidden and the picture has the whole display.
-    ///
-    /// A phone showing somebody's desktop wants every pixel: the navigation
-    /// bar, the status bar and the transport line together are a strip off the
-    /// top of a picture that is already smaller than the thing it is showing.
-    /// A tap on the picture brings them back.
     @State private var immersive = false
-    /// Whether the last rotation into landscape has already been acted on, so
-    /// leaving immersive mode by hand is not undone on the next redraw.
     @State private var appliedLandscape = false
-    /// The key row has been pulled up over a picture that otherwise has the
-    /// whole display.
-    ///
-    /// Full screen and landscape both hide the row, and in control mode that
-    /// left the only click, right click and modifier keys on the phone behind
-    /// a trip out of full screen and back. The row is what somebody
-    /// controlling a desktop reaches for most, so it gets a way up that does
-    /// not cost the picture: a grab handle on the bottom edge, dragged or
-    /// tapped.
     @State private var keysRevealed = false
     #endif
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            // The input surface scales with the picture, so a pinch changes
-            // what a finger can reach without changing what a tap means: the
-            // surface reports its own coordinates, which stay normalized.
             ScreenVideoSurface(layer: model.decoder.layer)
                 .aspectRatio(model.aspectRatio, contentMode: .fit)
                 .overlay { inputSurface }
@@ -86,10 +58,6 @@ struct ScreenViewerView: View {
         .clipped()
         .navigationTitle(name)
         .safeAreaInset(edge: .top) {
-            // Turned sideways, a phone has very little height and every line
-            // of it is picture somebody rotated the device to see. The
-            // transport is worth a line in portrait and is not worth one here,
-            // and it is not worth one with the chrome hidden either.
             if !isCompactHeight, !isImmersive {
                 HStack(spacing: 6) {
                     Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
@@ -99,10 +67,6 @@ struct ScreenViewerView: View {
             }
         }
         .toolbar {
-            // The Mac's viewer is a window and needs its own way out. A phone
-            // pushed this screen and already has a back control an inch to the
-            // left of this one, so a second close button was two controls for
-            // one job in a row that had no space to spare.
             #if os(macOS)
             ToolbarItem(placement: .cancellationAction) {
                 InspectorCloseButton(action: { dismiss() }, help: L10n.text("common.close"), label: L10n.text("apple.screenviewerview.close_screen_viewer.fec23bc8"))
@@ -182,8 +146,6 @@ struct ScreenViewerView: View {
                     viewerIsFullScreen ? L10n.text("apple.screenviewerview.exit_full_screen.897e0cf7") : L10n.text("apple.screenviewerview.full_screen.674fe2ac"),
                     viewerIsFullScreen ? .exitFullScreen : .enterFullScreen
                 ) {
-                    // The viewer's window, not the key window. A sheet's
-                    // parent is key, which is why this used to no-op.
                     (viewerWindow ?? NSApp.keyWindow)?.toggleFullScreen(nil)
                 }
                 .labelStyle(.iconOnly)
@@ -211,17 +173,11 @@ struct ScreenViewerView: View {
             }
             #endif
         }
-        // Control is a property of the session, so changing it reopens the
-        // stream rather than being refused.
         .onChange(of: controlling) { _, wanted in
             viewOffset = .zero
             #if !os(macOS)
-            // Handing control back leaves nothing on the key row worth
-            // showing, so a row pulled up over the picture goes with it.
             if !wanted { keysRevealed = false }
             #endif
-            // Handing control back with the button still latched down would
-            // leave the far end holding a click nothing here can release.
             if !wanted, dragLatched {
                 model.press(false)
                 dragLatched = false
@@ -273,30 +229,13 @@ struct ScreenViewerView: View {
         #endif
         #if !os(macOS)
         .toolbar(immersive ? .hidden : .visible, for: .navigationBar)
-        // And the app's own tab bar. Hiding the navigation bar and leaving
-        // Home / Workspaces / Insights / Devices across the bottom is most of
-        // a strip of somebody's desktop still spent on chrome, on the screen
-        // that asked for the whole display.
         .toolbar(immersive ? .hidden : .visible, for: .tabBar)
         .statusBarHidden(immersive)
         .persistentSystemOverlays(immersive ? .hidden : .automatic)
-        // A tap on the picture brings the chrome back, but only while merely
-        // watching. In control mode a tap is a click on the far end, and the
-        // gesture here is a separate recogniser watching the same touches
-        // rather than something the input surface can consume: every click
-        // would have dropped out of full screen as well as clicking. So
-        // control mode gets the corner button below instead, and this is for
-        // the mode where a tap means nothing else.
         .onTapGesture {
             guard immersive, !controlling else { return }
             withAnimation { immersive = false }
         }
-        // The way out that works in either mode.
-        //
-        // Hiding the chrome hides the button that hid it, so without this the
-        // only way back in control mode would be a gesture that also clicks
-        // somebody's desktop. Quiet enough not to be part of the picture, and
-        // always in the same corner.
         .overlay(alignment: .topTrailing) {
             if immersive {
                 Button(L10n.text("apple.screenviewerview.exit_full_screen.897e0cf7"), .exitFullScreen) {
@@ -308,31 +247,13 @@ struct ScreenViewerView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            // Full screen and landscape are the shapes somebody chose for the
-            // picture, so the key row does not take a strip of either by
-            // default. It is still what control mode reaches for most, so it
-            // is one pull away rather than a rotation and a trip out of full
-            // screen away.
             if controlling {
                 VStack(spacing: 0) {
-                    // The way back to the key row, for the two shapes that
-                    // hide it.
-                    //
-                    // A tap on the picture cannot do this job: in control
-                    // mode a tap is a click on somebody's desktop. So the
-                    // handle is its own small surface on the bottom edge, out
-                    // of the picture's way, and it answers to a tap or a drag
-                    // the way a sheet's grabber does. In portrait with the
-                    // chrome up the row is furniture and needs no handle.
                     if !keyBarIsFurniture { keyBarHandle }
                     if showsKeyBar { keyBar }
                 }
             }
         }
-        // Rotating a phone onto its side is asking for the picture, so going
-        // sideways hides the chrome once. Turning it back shows it again.
-        // Tracked, so leaving immersive mode by hand while still in landscape
-        // is not undone by the next redraw.
         .onChange(of: isCompactHeight) { _, compact in
             keysRevealed = false
             if compact {
@@ -345,24 +266,17 @@ struct ScreenViewerView: View {
                 withAnimation { immersive = false }
             }
         }
-        // The orientation the screen opened in never arrives as a change, so
-        // opening the viewer with the phone already sideways left the chrome
-        // up over a landscape picture: the one case the whole thing is for.
-        // Applied once on arrival, then `onChange` keeps up with it.
         .onAppear {
             if isCompactHeight {
                 appliedLandscape = true
                 immersive = true
             }
         }
-        // A screen somebody is watching must not dim under them.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         #endif
     }
 
-    /// Whether the chrome is hidden and the picture has the whole display.
-    /// Always false on the Mac, which fills a display by going full screen.
     private var isImmersive: Bool {
         #if os(macOS)
         false
@@ -371,11 +285,6 @@ struct ScreenViewerView: View {
         #endif
     }
 
-    /// Whether the key row is on screen.
-    ///
-    /// It has a place of its own in portrait with the chrome up. Full screen
-    /// and landscape take that place away, and there it appears only because
-    /// somebody pulled the handle on the bottom edge.
     private var showsKeyBar: Bool {
         #if os(macOS)
         false
@@ -384,8 +293,6 @@ struct ScreenViewerView: View {
         #endif
     }
 
-    /// Whether the key row has a place of its own rather than being pulled up
-    /// over the picture. Portrait with the chrome showing, and nothing else.
     private var keyBarIsFurniture: Bool {
         #if os(macOS)
         false
@@ -394,8 +301,6 @@ struct ScreenViewerView: View {
         #endif
     }
 
-    /// A phone on its side. iPad and Mac never report this, so nothing there
-    /// changes shape.
     private var isCompactHeight: Bool {
         #if os(macOS)
         false
@@ -406,8 +311,6 @@ struct ScreenViewerView: View {
 
     private func start() async { await model.start(peer: peer, tier: tier, control: controlling) }
 
-    /// Cover over the black backing until a picture is on it, or until the
-    /// session has said why there will not be one.
     @ViewBuilder
     private var overlayStatus: some View {
         VStack(spacing: Theme.Space.m) {
@@ -461,9 +364,6 @@ struct ScreenViewerView: View {
         .contentShape(Rectangle())
     }
 
-    /// The viewer opened on a plan that does not include the screen. A
-    /// checklist of other causes would send somebody hunting permissions they
-    /// do not need to grant.
     private var legendRequired: some View {
         VStack(spacing: Theme.Space.m) {
             #if os(macOS)
@@ -555,34 +455,17 @@ struct ScreenViewerView: View {
         #endif
     }
 
-    /// How far the pointer travels for a finger's worth of drag.
-    ///
-    /// Divided by the zoom, so magnifying the picture magnifies the precision
-    /// with it: at 4x a finger crosses a quarter as much of the remote screen,
-    /// which is the whole reason to zoom in on a control too small to hit.
-    /// Fine takes another third off that, for the last few pixels.
     private var pointerSensitivity: CGFloat {
         let base: CGFloat = 1.6
         return base / max(1, zoom) * (fine ? 0.35 : 1)
     }
 
-    /// The most the picture can be magnified.
-    ///
-    /// Four was not enough on a phone looking at a large display: a menu bar
-    /// item is a couple of points across at fit, and no amount of steadiness
-    /// makes that reachable.
     static let maxZoom: CGFloat = 8
 
-    /// Where the picture grows from when it is zoomed. Following the pointer
-    /// means control mode never needs a separate pan gesture: moving the
-    /// pointer to an edge brings that edge into view. View mode grows from the
-    /// centre and uses the local pan gesture instead.
     private var pointerAnchor: UnitPoint {
         controlling ? UnitPoint(x: model.cursor.x, y: model.cursor.y) : .center
     }
 
-    /// Keep local panning inside the part of a scaled picture that can exist
-    /// beyond its fitted bounds. At fit there is nowhere to pan.
     private func clamped(_ offset: CGSize, in size: CGSize, at zoom: CGFloat) -> CGSize {
         let horizontal = max(0, size.width * (zoom - 1) / 2)
         let vertical = max(0, size.height * (zoom - 1) / 2)
@@ -620,12 +503,6 @@ struct ScreenViewerView: View {
         )
     }
 
-    /// The grab handle that pulls the key row up over a full-screen picture.
-    ///
-    /// Deliberately quiet and deliberately small. It sits on the bottom edge
-    /// where a phone already expects a handle, it is a couple of points of
-    /// picture at most, and it is the only part of the screen in control mode
-    /// that a touch does not send to the far end.
     private var keyBarHandle: some View {
         VStack(spacing: 2) {
             Capsule()
@@ -635,8 +512,6 @@ struct ScreenViewerView: View {
                 .font(Theme.font(9, weight: .bold))
                 .foregroundStyle(Color.white.opacity(0.55))
         }
-        // The handle is 4 points tall and a thumb is not. The padding is the
-        // target, so the strip that answers is a proper 44.
         .padding(.horizontal, Theme.Space.l)
         .padding(.vertical, Theme.Space.s)
         .contentShape(.rect)
@@ -655,8 +530,6 @@ struct ScreenViewerView: View {
     }
     #endif
 
-    /// Trackpad mode hides the finger from the pointer, so the pointer has to
-    /// be visible. Direct mode does not need it: the finger is the pointer.
     @ViewBuilder
     private var pointerMark: some View {
         if controlling, mode == .trackpad {
@@ -685,8 +558,6 @@ private final class ScreenViewerModel {
     var selectedDisplay: UInt32?
     var transferProgress: Double?
     var transport = "relay"
-    /// Where the pointer is, normalized. The client owns this because trackpad
-    /// mode has no other way to know, and because a phone has to draw it.
     var cursor = CGPoint(x: 0.5, y: 0.5)
     let decoder = ScreenH264Decoder()
     let audio = ScreenAudioPlayer()
@@ -695,62 +566,30 @@ private final class ScreenViewerModel {
     private var pointerIsDown = false
     private var peer = ""
     private var transferTask: Task<Void, Never>?
-    /// The in-flight close of the session `stop` just ended. See `awaitClose`.
     private var closeTask: Task<Void, Never>?
-    /// The last input send, so the next one can queue behind it. See `send`.
     private var inputTail: Task<Void, Never>?
-    /// The "still watching" beat. See `startHeartbeat`.
     private var heartbeatTask: Task<Void, Never>?
     private var clipboardChangeCount = -1
     private var requestedTier: String?
     private var requestedControl = false
     private var reconnectAttempts = 0
-    /// When the transport connected, used only to bound the wait for the
-    /// first decodable picture.
     private var connectedSince: Date?
-    /// When the current session started streaming.
-    ///
-    /// The attempt counter used to reset on the first decoded frame, so a
-    /// session that died a second after its first frame reset the budget every
-    /// time and reconnected forever. That is the loop behind the endless
-    /// pair-then-close churn in the relay log. A session has to actually last
-    /// before it counts as recovered.
     private var streamingSince: Date?
-    /// How long a session has to hold up before the budget is given back.
     private static let stableAfter: TimeInterval = 12
     private var stopped = false
     private var generation: UInt64 = 0
-    /// When the viewer last asked for access on its own after a failed
-    /// connect. Bounds the auto-ask so repeated failures do not spam the host.
     private var lastAutoRequest = Date.distantPast
-    /// What came back from asking, kept apart from `message` on purpose.
-    ///
-    /// `message` is why the session is not running, and the checklist reads it
-    /// word by word. Writing an outcome into it would tell the checklist the
-    /// permission had arrived and take the button away in the same breath.
     private(set) var requestNotice: String?
     private(set) var isRequesting = false
-    /// What the picture is asked to be worth. Automatic lets the host read the
-    /// route, which is the right answer for almost everybody: a direct link
-    /// pays for a much better picture out of the person's own bandwidth, and
-    /// the relay stays where it was.
     var quality: ScreenQualityChoice = .auto
     var needsPermission: Bool {
         let value = message.lowercased()
         return value.contains("permission") || value.contains("screen access") || value.contains("allowed")
     }
-    /// The session never started because the plan does not include it.
     var needsLegend: Bool {
         message.localizedCaseInsensitiveContains("legend plan")
     }
 
-    /// Ask the computer itself, then nudge the owner's phone.
-    ///
-    /// The ask is the part that matters and the part that can fail usefully:
-    /// it travels the tunnel, so the host learns which device is asking and
-    /// can queue it for a person. The push afterwards is best effort and
-    /// carries no device id at all, which is why it was never enough on its
-    /// own. A host that is asleep cannot be asked, and says so.
     func requestAccess() async {
         guard !isRequesting, !stopped else { return }
         let owner = generation
@@ -759,11 +598,6 @@ private final class ScreenViewerModel {
         do {
             var answer = try await Bridge.askScreenAccess(peer: peer, control: requestedControl)
             guard owner == generation, !stopped, !Task.isCancelled else { return }
-            // Already allowed to watch, and still not running: what is missing
-            // is the mouse. Asking for exactly what the Control toggle happened
-            // to say left somebody who had been granted View only pressing a
-            // button that answered "this device already has access" forever,
-            // with no way from here to ask for the rest.
             if answer.granted == true, !requestedControl {
                 answer = try await Bridge.askScreenAccess(peer: peer, control: true)
             }
@@ -778,8 +612,6 @@ private final class ScreenViewerModel {
             requestNotice = error.localizedDescription
             return
         }
-        // Best effort, and never the reason the request failed. Somebody with
-        // no phone registered has still asked the computer itself.
         if let sent = try? await Bridge.requestScreenAccess(), sent.signedIn, sent.enabled, sent.sent > 0 {
             guard owner == generation, !stopped, !Task.isCancelled else { return }
             requestNotice = L10n.text("apple.screenviewerview.asked_a_notification_went_to_your_other_de.3be993ac")
@@ -803,8 +635,6 @@ private final class ScreenViewerModel {
     private func connect() async {
         let owner = generation
         func isCurrent() -> Bool { owner == generation && !stopped && !Task.isCancelled }
-        // Whatever the last session left behind has to be gone before this one
-        // dials: the relay allows one screen channel per account.
         await awaitClose()
         guard isCurrent() else { return }
         let tier = requestedTier
@@ -838,9 +668,6 @@ private final class ScreenViewerModel {
             transport = session.transport
             connectedSince = Date()
             streamingSince = nil
-            // Connected is not the same as a picture. Marking streaming here
-            // hid the overlay and left a black rectangle that still accepted
-            // mouse and keyboard, because input is a side channel.
             state = .connecting
             message = L10n.text("apple.screenviewerview.waiting_for_the_first_picture.be8d50cf")
             task = Task { [weak self] in await self?.readLoop(session.id) }
@@ -850,11 +677,6 @@ private final class ScreenViewerModel {
             if actionable(reason) {
                 state = .failed
                 message = reason
-                // The phone asks as soon as Connect fails. The Mac viewer
-                // waited for a second press, so the host Mac never saw a
-                // request unless somebody found the overlay button. Rate
-                // limited: without it every failed retry re-asks and spams
-                // the host.
                 if needsPermission, Date().timeIntervalSince(lastAutoRequest) > 60 {
                     lastAutoRequest = Date()
                     await requestAccess()
@@ -873,11 +695,6 @@ private final class ScreenViewerModel {
         task?.cancel()
         task = nil
         if let id = session?.id {
-            // Kept, not discarded. `connect` waits on it before dialling: the
-            // relay allows one screen channel per account, so a fresh dial
-            // that overtakes the close of the old one is refused with
-            // `screen_already_open`, and the retry ladder that follows is the
-            // reconnect storm this used to produce.
             closeTask = Task { await Bridge.screenViewerClose(id: id) }
         }
         session = nil
@@ -889,12 +706,6 @@ private final class ScreenViewerModel {
         transferTask = nil
     }
 
-    /// Wait for the previous session's close to land before dialling again.
-    ///
-    /// `screen.viewer.close` is local work: it drops the registry entry and
-    /// closes the writer, which puts a CH_CLOSE on the tunnel's writer thread.
-    /// The bridge caps it at ten seconds either way, so this cannot become the
-    /// thing that hangs a reconnect.
     private func awaitClose() async {
         guard let closing = closeTask else { return }
         closeTask = nil
@@ -927,9 +738,6 @@ private final class ScreenViewerModel {
                                 reconnectAttempts = 0
                             }
                         } else {
-                            // Stability starts with a picture, not with the
-                            // transport. A slow first keyframe must not spend
-                            // almost all of the stability window by itself.
                             streamingSince = Date()
                         }
                         if state != .streaming { state = .streaming }
@@ -939,9 +747,6 @@ private final class ScreenViewerModel {
                    let since = connectedSince,
                    Date().timeIntervalSince(since) > 8
                 {
-                    // The transport is alive but unusable. Do not leave its
-                    // viewer and the host's capture running behind a failed
-                    // overlay while waiting for somebody to press Try Again.
                     await Bridge.screenViewerClose(id: id)
                     guard !Task.isCancelled, !stopped, session?.id == id else { return }
                     session = nil
@@ -1005,20 +810,6 @@ private final class ScreenViewerModel {
         send(["type":"move", "x":cursor.x, "y":cursor.y] as [String: Any])
     }
 
-    /// Move the pointer by a distance measured on the viewer's own surface.
-    ///
-    /// Trackpad mode: the finger is not the pointer, so the client keeps the
-    /// pointer position itself and sends an absolute point. The host stays a
-    /// single "put it here", which is the only thing that survives two
-    /// displays of different sizes.
-    /// Move the pointer by a finger's worth of travel.
-    ///
-    /// `sensitivity` is the caller's, not a constant here, because how far a
-    /// finger should move the pointer depends on how magnified the picture is
-    /// and on whether somebody has asked for fine control. A fixed rate is
-    /// what made zooming in useless: the picture got bigger and the pointer
-    /// kept crossing it just as fast, so a four-pixel target stayed
-    /// unreachable at every zoom level.
     func nudge(by delta: CGSize, in size: CGSize, sensitivity: CGFloat) {
         move(to: CGPoint(
             x: cursor.x + delta.width * sensitivity / max(1, size.width),
@@ -1032,7 +823,6 @@ private final class ScreenViewerModel {
         send(["type":"click", "x":cursor.x, "y":cursor.y, "button":button, "clickCount":count] as [String: Any])
     }
 
-    /// Hold or release the left button, for a drag that outlives one gesture.
     func press(_ down: Bool) {
         pointerIsDown = down
         send(["type":"mouse", "x":cursor.x, "y":cursor.y, "button":0, "down":down] as [String: Any])
@@ -1048,12 +838,6 @@ private final class ScreenViewerModel {
 
     func sendText(_ text: String, flags: UInt64) { send(["type":"text", "text":text, "flags":flags] as [String: Any]) }
 
-    /// Turn control on or off on a session that is already running.
-    ///
-    /// Control is decided when the capability is issued, so switching means
-    /// reopening the stream. The toggle used to be disabled while streaming
-    /// instead, which meant control could never be turned on at all: the view
-    /// starts streaming as it appears.
     func setControl(_ wanted: Bool) async {
         guard wanted != requestedControl, !peer.isEmpty else { return }
         let owner = generation
@@ -1074,19 +858,6 @@ private final class ScreenViewerModel {
         }
     }
 
-    /// Turn control on or off on the session that is already up.
-    ///
-    /// The picture never stops, which is the point: reopening the stream meant
-    /// a new screen channel, and the relay counts one per account, so the
-    /// toggle raced the old channel's close and lost. Answers false when there
-    /// is nothing live to flip or the host is too old to know the method, and
-    /// the caller then falls back to reopening.
-    /// Move a live session to a different budget.
-    ///
-    /// Never by reopening. The relay allows one screen channel per account, so
-    /// a reopen races its own teardown, which is the whole reason control is
-    /// flipped in place as well. A host too old to know the method keeps the
-    /// picture it has, which is a worse picture and not a broken one.
     func setQuality(_ wanted: ScreenQualityChoice) async {
         guard wanted != quality else { return }
         quality = wanted
@@ -1105,13 +876,9 @@ private final class ScreenViewerModel {
                 peer: peer,
                 sessionID: hostSession,
                 capability: capability.token,
-                // Automatic on a live session has to be said out loud: there is
-                // no way to unsay a choice the host is already holding.
                 quality: wanted.wire ?? ScreenQualityChoice.auto.rawValue
             )
         } catch {
-            // Not worth a failed state. The session is still running and still
-            // showing a picture, just not the one that was asked for.
         }
     }
 
@@ -1121,9 +888,6 @@ private final class ScreenViewerModel {
         else { return false }
         do {
             let identity = try await Bridge.machineIdentity()
-            // A fresh capability every time. The one this session opened with
-            // says what it was opened for, and control is exactly the field
-            // the host checks.
             let capability = try await Bridge.onPeer(
                 peer,
                 "screen.capability.issue",
@@ -1141,14 +905,10 @@ private final class ScreenViewerModel {
             session?.control = wanted
             return true
         } catch {
-            // An old host has no such method. Anything else is a real refusal
-            // (the grant was narrowed, the plan lapsed), and reopening will
-            // meet the same answer and report it where somebody can read it.
             return false
         }
     }
 
-    /// Whether the live session is actually carrying input.
     var isControlling: Bool { requestedControl }
     func selectDisplay(_ id: UInt32) {
         guard displays.contains(where: { $0.id == id }) else { return }
@@ -1178,28 +938,12 @@ private final class ScreenViewerModel {
         clipboardChangeCount = UIPasteboard.general.changeCount
         #endif
     }
-    /// Say "still here" on a beat, so the relay can tell a session somebody is
-    /// watching from one nobody is.
-    ///
-    /// The relay cannot see inside an encrypted stream and must not try. What
-    /// it can see is which direction bytes are moving, and on a screen channel
-    /// everything flows one way: the host sends video, and the viewer sends
-    /// almost nothing. That makes "the viewer has said nothing for two
-    /// minutes" a usable definition of nobody is there, and this is what keeps
-    /// it honest for somebody who is watching without touching anything.
-    ///
-    /// Deliberately not tied to control mode. A passive watcher is the exact
-    /// case that would otherwise be cut off mid-session.
     private func startHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self, !Task.isCancelled else { return }
-                // Any state with a session behind it, not just streaming. The
-                // relay's idle cut does not care why the viewer went quiet,
-                // so staying silent through a reconnect would have it close
-                // the very session the reconnect is trying to resume.
                 guard let id = self.session?.id else { continue }
                 let payload = try? JSONSerialization.data(withJSONObject: ["type": "heartbeat"])
                 guard let payload else { continue }
@@ -1208,13 +952,6 @@ private final class ScreenViewerModel {
         }
     }
 
-    /// Every input event, in the order it was made.
-    ///
-    /// One task per event let a move overtake the release that should have
-    /// ended it: independent tasks have no order between them, and a drag that
-    /// arrives after its own mouse-up leaves the far end holding a button
-    /// nothing here will release. This chains each send onto the last, so the
-    /// wire order is the gesture order.
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         let isDisplay = (value["type"] as? String) == "display"
@@ -1365,7 +1102,6 @@ private final class ScreenH264Decoder {
     init() { layer.videoGravity = .resizeAspect }
     func reset() { layer.flushAndRemoveImage(); format = nil }
 
-    /// True when a picture was actually given to the display layer.
     @discardableResult
     func decode(_ frame: ScreenEncodedFrame) -> Bool {
         let units = frame.payload.annexBUnits()
@@ -1392,8 +1128,6 @@ private final class ScreenH264Decoder {
             }
         }
         guard let format else { return false }
-        // VCL only. SEI and AUD in the sample confuse the display layer, and
-        // SPS/PPS already live in the format description.
         let pictures = units.filter { unit in
             guard let first = unit.first else { return false }
             let nal = Int(first & 0x1f)

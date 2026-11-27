@@ -3,8 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// One immutable account/resource binding. It outlives a redraw so a late
-/// receipt settles only the original local attempt, never a newer draft.
 internal sealed class TeamCommentModel(TeamCommentDraftStore storage, TeamCommentTarget target, string label, Func<string, JsonObject, Task<JsonNode>> call)
 {
     internal string Text { get; private set; } = "";

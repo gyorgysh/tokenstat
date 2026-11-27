@@ -9,7 +9,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 
-/** Restart read-only screen polling on resume; stop it when the screen is hidden. */
 @Composable
 fun ForegroundEffect(vararg keys: Any?, block: suspend CoroutineScope.() -> Unit) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle

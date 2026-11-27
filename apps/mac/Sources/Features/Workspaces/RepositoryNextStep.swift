@@ -2,14 +2,7 @@
 
 import Foundation
 
-/// What a repository needs next, as one answer.
-///
-/// A card that lists everything it knows leaves the reader to rank it. This
-/// ranks it instead, always in the same order: a person blocking work, then
-/// work that failed, then work that is done and only needs a press, then what
-/// is running by itself, then what was left unfinished.
 enum RepositoryNextStep: Equatable {
-    /// The folder is gone, so nothing else known about it can be acted on.
     case missing
     case waiting(chatID: String)
     case checksFailed(pull: UInt32)
@@ -23,8 +16,6 @@ enum RepositoryNextStep: Equatable {
     case behind(commits: Int)
     case clear
 
-    /// Whether the strip at the top of the page names it. Only what a person
-    /// has to answer: running work and unfinished work stay on their cards.
     var needsPerson: Bool {
         switch self {
         case .waiting, .checksFailed, .changesRequested, .reviewRequested, .readyToMerge: true
@@ -32,7 +23,6 @@ enum RepositoryNextStep: Equatable {
         }
     }
 
-    /// Position in the order the page sorts by, most pressing first.
     var rank: Int {
         switch self {
         case .waiting: 0
@@ -50,24 +40,18 @@ enum RepositoryNextStep: Equatable {
     }
 }
 
-/// Everything the ranking reads, in plain values so it can be tested without
-/// a host, an account or a screen.
 struct RepositoryFacts: Equatable {
     struct Pull: Equatable {
         var number: UInt32
-        /// Opened by the signed-in person. Somebody else's failing checks are
-        /// theirs to fix.
         var mine: Bool
         var draft = false
         var failing = false
         var passing = false
-        /// `approved`, `changes_requested`, `review_required`, or nothing.
         var review: String?
         var reviewRequested = false
     }
 
     var exists = true
-    /// False only when the owning computer is known to be away.
     var reachable = true
     var waitingChatIDs: [String] = []
     var runningChats = 0
@@ -77,12 +61,10 @@ struct RepositoryFacts: Equatable {
     var unpushedCommits = 0
     var behindCommits = 0
     var lastActivity: Date?
-    /// Something in the last fourteen days of usage.
     var hasRecentUsage = false
 }
 
 extension RepositoryNextStep {
-    /// Every step a person owes this repository, most pressing first.
     static func owed(_ facts: RepositoryFacts) -> [RepositoryNextStep] {
         guard facts.exists else { return [] }
         var steps = facts.waitingChatIDs.map { RepositoryNextStep.waiting(chatID: $0) }
@@ -92,7 +74,6 @@ extension RepositoryNextStep {
             .map { .changesRequested(pull: $0.number) }
         steps += facts.pulls.filter { $0.reviewRequested && !$0.mine && !$0.draft }
             .map { .reviewRequested(pull: $0.number) }
-        // Approved alone is not enough: checks still running may yet fail.
         steps += mine.filter { $0.passing && $0.review == "approved" }
             .map { .readyToMerge(pull: $0.number) }
         return steps
@@ -109,10 +90,8 @@ extension RepositoryNextStep {
         return .clear
     }
 
-    /// Nothing recent and nothing left over, so one line is enough for it.
     static func isQuiet(_ facts: RepositoryFacts, now: Date = Date()) -> Bool {
         switch next(facts) {
-        // Being behind is the ordinary state of a repository nobody is in.
         case .clear, .asleep, .behind: break
         default: return false
         }
@@ -122,7 +101,6 @@ extension RepositoryNextStep {
     }
 }
 
-/// Days the ribbon draws, oldest first, as the archive spells them.
 enum RepositoryDays {
     static let count = 14
 
@@ -152,11 +130,6 @@ extension Calendar {
     }
 }
 
-/// The order cards keep while the page is open.
-///
-/// Work changes rank every few seconds, and a card that moves out from under
-/// the pointer is worse than one in a slightly stale place. The order is taken
-/// once and only new or removed repositories change it.
 enum RepositoryOrder {
     static func merge(held: [String], current: [String]) -> [String] {
         let present = Set(current)
@@ -165,7 +138,6 @@ enum RepositoryOrder {
         return kept + current.filter { !known.contains($0) }
     }
 
-    /// Where an arrow key lands in a grid, or nil at an edge.
     static func move(from index: Int, by delta: Int, count: Int) -> Int? {
         let next = index + delta
         return (0..<count).contains(next) ? next : nil

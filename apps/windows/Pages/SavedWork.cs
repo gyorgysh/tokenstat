@@ -61,7 +61,6 @@ internal sealed record SavedWork(long AccountGeneration, string Scope)
         {
             CheckAccount();
             if (CredentialVault.LoadWorkKey(Scope) is { } existing) return existing;
-            // If Windows lost a key, do not replace it while encrypted records still exist.
             if ((await ListAsync()).Count > 0) throw new InvalidOperationException(L10n.Text("windows.savedwork.key_unavailable"));
             CheckAccount();
             var bytes = RandomNumberGenerator.GetBytes(32);

@@ -9,17 +9,6 @@ import SwiftUI
 #if !os(macOS)
 import UIKit
 
-/// The same install, run by the person instead of by the app.
-///
-/// Not a lesser path. Handing an app an SSH key is a reasonable thing to
-/// decline for a server that matters, and the line already exists, so the
-/// whole cost of offering it is one screen. It is also the fallback whenever
-/// the SSH path fails for a reason tokenstat cannot fix: a bastion, an
-/// agent-forwarded key, or a provider console that is the only way in.
-///
-/// The pairing code is on screen here, and that is acceptable only because it
-/// is single use and short lived. Do not extend its life to make this screen
-/// nicer.
 struct ClientSetupByHand: View {
     @Bindable var model: ClientSetupModel
     @Binding var path: [SetupStep]
@@ -128,7 +117,6 @@ struct ClientSetupByHand: View {
         .cardSurface()
     }
 
-    /// The annotated form, because this one is read as well as run.
     private func commandCard(_ line: InstallLine) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("apple.clientsetupbyhand.on_the_server.3f5514e0"))

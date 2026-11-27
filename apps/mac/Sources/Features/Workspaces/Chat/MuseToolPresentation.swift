@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Older Muse archives keep tool inputs in the result detail instead of the
-/// start event. Recover only those documented metadata fields for compact rows.
 enum MuseToolPresentation {
     struct Value: Equatable {
         var verb: String
@@ -20,7 +18,6 @@ enum MuseToolPresentation {
         case "write todos", "write_todos": canonical = "TodoWrite"
         default: canonical = verb
         }
-        // A start event's real input is authoritative, including whitespace.
         guard target.isEmpty, let detail else { return Value(verb: canonical, target: target) }
 
         let bytes = Array(detail.utf8.prefix(maximumDetailBytes + 1))
@@ -42,8 +39,6 @@ enum MuseToolPresentation {
             } else if first.hasPrefix("$ ") {
                 recovered = String(first.dropFirst(2))
             } else if lines.count > 1, lines[1].hasPrefix("$ ") {
-                // The normalized shell result has one description line before
-                // its command. Never scan output for something resembling one.
                 recovered = String(lines[1].dropFirst(2))
             } else {
                 recovered = nil

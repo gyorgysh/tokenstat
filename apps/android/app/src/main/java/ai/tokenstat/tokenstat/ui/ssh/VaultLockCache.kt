@@ -38,14 +38,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import androidx.compose.ui.text.style.TextOverflow
 
-/// The last-known vault lock state, shown immediately instead of jumping.
-///
-/// The vault status is answered over the network, and the row used to read
-/// "not set up" for as long as the call took and then rewrite itself into
-/// "locked" or "ready": a sentence that was wrong first and jumped when it
-/// stopped being wrong. The cache keeps the last answer this device saw, so
-/// the first frame already says what the vault was, and the fresh answer only
-/// replaces it when it actually differs.
 data class VaultLockSnapshot(
     val created: Boolean,
     val locked: Boolean,
@@ -55,8 +47,6 @@ data class VaultLockSnapshot(
     companion object {
         fun of(status: JsonObject?): VaultLockSnapshot? {
             if (status == null) return null
-            // An unreachable account is not a vault state: the caller keeps
-            // showing the cache rather than storing the absence.
             if (status["unreachable"]?.let { (it as? JsonPrimitive)?.contentOrNull }
                 ?.isNotBlank() == true
             ) {
@@ -71,9 +61,6 @@ data class VaultLockSnapshot(
         }
     }
 
-    /// What the row says at the trailing edge. Ported from `SSHVaultRow`'s
-    /// detail: the count, "not syncing" where the plan cannot write, and no
-    /// "locked" here, because the badge beside it already says that.
     fun detail(canWrite: Boolean): String? = when {
         !created -> if (canWrite) L10n.text("android.vaultlockcache.not_set_up.ef93782b") else L10n.text("android.vaultlockcache.not_syncing.c0737345")
         locked -> null
@@ -90,7 +77,6 @@ object VaultLockCache {
     fun read(context: Context, owner: String): VaultLockSnapshot? {
         if (owner.isBlank()) return null
         val prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
-        // The old global cache has no owner and cannot be attributed safely.
         if (prefs.getString("owner", null) != owner) return null
         if (!prefs.contains("created")) return null
         return VaultLockSnapshot(
@@ -101,8 +87,6 @@ object VaultLockCache {
         )
     }
 
-    /// Store a fresh answer. Null (no answer, or the account unreachable)
-    /// keeps the cache: a failed read must not wipe what is known.
     fun write(context: Context, owner: String, snapshot: VaultLockSnapshot?) {
         if (snapshot == null || owner.isBlank()) return
         context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
@@ -115,11 +99,6 @@ object VaultLockCache {
     }
 }
 
-/// The vault as one quiet line: a shield, a count and a chevron.
-///
-/// Shows the last-known state immediately while the fresh status loads, then
-/// settles on the live answer. Pass the live `status` (null until answered);
-/// the row resolves cached versus live itself, so callers do not branch.
 @Composable
 fun VaultLockRow(
     owner: String,
@@ -136,8 +115,6 @@ fun VaultLockRow(
     if (live != null) {
         LaunchedEffect(owner, live) { VaultLockCache.write(context, owner, live) }
     }
-    // The live answer wins the moment it exists. Until then the cache says
-    // what the vault was, which beats a sentence that will be rewritten.
     val shown = live ?: cached
     val checking = live == null
     TsCard(modifier = modifier.heightIn(min = 48.dp).clickable(onClick = onOpen)) {

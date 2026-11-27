@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// One search presentation owns one index and one set of access facts. Query
-/// changes only consult memory. Refreshing saved pages is a separate action.
 @MainActor @Observable
 final class WorkSearchModel {
     enum Filter: String, CaseIterable, Identifiable {
@@ -165,9 +163,6 @@ final class WorkSearchModel {
     private let scope: WorkReference.Scope
     private var folders: [WorkSearchIndex.Folder: String]
     private let metadata: [WorkSearchIndex.Document]
-    /// Whether saved conversation text is part of the index, which decides
-    /// whether an empty result means "nothing matches" or "only folder names
-    /// were searched".
     private(set) var includesSavedText: Bool
     private let ownsSession: () -> Bool
     private let cache: WorkSearchCache
@@ -230,8 +225,6 @@ final class WorkSearchModel {
             for await _ in updates {
                 guard let self, !Task.isCancelled, !self.closed else { return }
                 self.savedWorkChanged = true
-                // Removal takes effect immediately. New content is loaded only
-                // when the person asks to refresh the saved-work snapshot.
                 await self.search()
             }
         }
@@ -241,17 +234,6 @@ final class WorkSearchModel {
         if includesSavedText { await refresh() } else { await search() }
     }
 
-    /// Folders a connected machine listed after the sheet opened.
-    ///
-    /// Finding a folder by name must not require having opened it on this
-    /// device first: the pins and recent places a phone knows are a fraction
-    /// of what is on the machine. The names come from the machine that owns
-    /// them, once when search opens rather than once per keystroke, and they
-    /// are labels only, no conversation text.
-    ///
-    /// Access is not granted here. A host is asked only when it is already
-    /// verified, so this widens what the index will answer for within
-    /// permission that was established before.
     func adopt(folders newFolders: [WorkSearchCatalog.KnownFolder], live: Set<String>) async {
         guard isCurrent(), let subscription else { return }
         var labels = folders
@@ -285,9 +267,6 @@ final class WorkSearchModel {
                                           folders: folders, machines: machines)
         }
         let hosts = live.intersection(Set(liveMachines.keys)).subtracting(liveHosts)
-        // A machine that answered is a machine that is reachable and still
-        // letting this device in, which is exactly the one worth searching as
-        // it is now. `selectLiveHosts` runs the query again on its own.
         if !hosts.isEmpty { selectLiveHosts(liveHosts.union(hosts)) }
         else if !documents.isEmpty { await search() }
     }
@@ -369,8 +348,6 @@ final class WorkSearchModel {
             }
         } catch WorkSearchQuery.Invalid.tooLong {
             liveScheduler?.update(query: query, kinds: filter.kinds)
-            // The scheduler cancelled this query. Returning to the previous
-            // valid text must schedule it again, even if its identity matches.
             liveIdentity = nil
             liveHits = [:]
             livePages = [:]
@@ -419,8 +396,6 @@ final class WorkSearchModel {
               displayedQuery == expectedIdentity,
               expectedIdentity == QueryIdentity(query: currentQuery, filter: filter, host: host),
               pendingPage?.generation == page.generation else { return }
-        // A newer live reply may have updated the pending page while the
-        // local generation was being checked. Adopt that current page.
         guard let page = pendingPage else { return }
         results = page.hits
         cursor = page.nextCursor

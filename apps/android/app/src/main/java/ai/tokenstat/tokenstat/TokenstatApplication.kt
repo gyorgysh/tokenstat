@@ -20,7 +20,6 @@ import kotlinx.serialization.json.put
 class TokenstatApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        // Before any screen or worker asks whose work this is.
         val identities = getSharedPreferences("accountIdentities", MODE_PRIVATE)
         AccountIdentityPins.activate(object : AccountIdentityPins.Store {
             override fun read() = identities.all.mapNotNull { (id, value) -> (value as? String)?.let { id to it } }.toMap()
@@ -43,10 +42,6 @@ class TokenstatApplication : Application() {
                 CoreClient.call("pricing.seed", buildJsonObject { put("path", seed.absolutePath) })
                 CoreClient.call("pricing.refresh")
             }.onFailure {
-                // Every money figure prices against this book. A silent
-                // failure here is a day of wrong numbers with nothing in
-                // the log saying why, which is what hid a 26-day-stale
-                // book behind a same-day fetch.
                 Log.w("ts-pricing", "price refresh failed, money is priced against the old book", it)
             }
         }

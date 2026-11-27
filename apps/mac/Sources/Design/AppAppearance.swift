@@ -68,8 +68,6 @@ struct AppearanceColors: Codable, Equatable {
         let rgb = values.compactMap(Self.rgb)
         guard rgb.count == values.count else { throw AppearanceImportError.color }
         let surface = [rgb[0], rgb[1], rgb[2], rgb[6]].map(Self.luminance)
-        // Text uses the platform's primary and secondary styles. Reserve room
-        // for their lower-contrast variants as well as the theme's accents.
         guard surface.allSatisfy({ onDark ? $0 <= 0.065 : $0 >= 0.64 }) else {
             throw AppearanceImportError.contrast
         }
@@ -181,8 +179,6 @@ final class AppAppearance {
     }
 
     var markdownCacheKey: String {
-        // Markdown caches hold colored Text and syntax. Theme edits retain
-        // their IDs, so the key needs the actual colors as well.
         guard paletteID != "default" else { return "" }
         let theme = theme
         return [theme.light.accent, theme.dark.accent, theme.light.secondary, theme.dark.secondary].joined()
@@ -249,9 +245,6 @@ final class AppAppearance {
 struct AppAppearanceScheme: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
-        // `preferredColorScheme(nil)` does not hand an iPhone back to the
-        // system once it has forced one, and sheets and alerts live in their
-        // own controllers. The window's own style reaches all of them.
         content
             .onChange(of: AppAppearance.shared.mode, initial: true) { _, mode in
                 let style: UIUserInterfaceStyle = switch mode.colorScheme {

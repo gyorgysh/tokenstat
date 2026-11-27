@@ -8,12 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// How somebody gets a machine, asked once and answerable forever after.
-///
-/// Not a modal that traps anybody: every step can be left, and leaving lands
-/// on the numbers, which is a real product rather than a failure state. Skip
-/// sits below the three doors as a quiet button rather than a fourth card,
-/// so it never reads as a fourth way to set up.
 struct ClientSetupWizard: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AccountModel.self) private var account
@@ -29,9 +23,6 @@ struct ClientSetupWizard: View {
         get { session.path }
         nonmutating set { session.path = newValue }
     }
-    /// Set when a picked door fails to start. The doors show no failure until
-    /// then. prepare() runs on open and stays silent; the check reruns on
-    /// entry instead.
     private var entryAttempted: Bool {
         get { session.entryAttempted }
         nonmutating set { session.entryAttempted = newValue }
@@ -45,9 +36,6 @@ struct ClientSetupWizard: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button(L10n.text("common.close")) { dismiss() }
-                            // Escape leaves, for somebody on a keyboard. The
-                            // sheet is dismissible by gesture already, and a
-                            // keyboard had no equivalent.
                             .keyboardShortcut(.cancelAction)
                             .accessibilityIdentifier("setup.close")
                     }
@@ -66,8 +54,6 @@ struct ClientSetupWizard: View {
         .environment(account)
     }
 
-    /// Both account callbacks use the library's immutable lifetime, so their
-    /// delivery order cannot pair a new setup model with a retired library.
     private func accountDidChange(_ now: Account?) {
         let departed = library.ownership.captured.map {
             $0.scope != WorkSessionContext.shared.scope || $0.generation != WorkSessionContext.shared.generation
@@ -83,20 +69,12 @@ struct ClientSetupWizard: View {
         Task { await model.prepare(library: currentLibrary) }
     }
 
-    // MARK: - D0, the question
 
     private var doors: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 header
-                // Failures show here only once setup is underway. Prepared and
-                // failing answers a tap. Unprepared with an entry attempt
-                // answers the picked door. A prepare that fails on open stays
-                // silent and reruns on entry.
                 if let failure = model.failure, model.prepared || entryAttempted {
-                    // Genuinely signed out gets sign-in words; anything else,
-                    // including a signed-in app whose account answered setup
-                    // differently, gets a retry and never sign-in advice.
                     if !model.prepared,
                        failure.action == .signInToAccount || failure.action == .retry {
                         if failure.action == .signInToAccount, !account.signedIn {
@@ -126,8 +104,6 @@ struct ClientSetupWizard: View {
                     }
                 }
                 if let draft = model.savedDraft { resumeCard(draft) }
-                // The computer first: no token, no rental, nothing to buy.
-                // The doors below it both assume a server.
                 door(
                     title: L10n.text("apple.clientsetupwizard.on_my_mac.8282732a"),
                     body: L10n.text("apple.clientsetupwizard.install_the_desktop_app_on_the_computer_yo.adea6dec"),
@@ -152,9 +128,6 @@ struct ClientSetupWizard: View {
                 ) {
                     enter([.cloud])
                 }
-                // Leaving, without pretending it is a setup choice. A fourth card
-                // wore the same surface as the three doors and read as a fourth
-                // way to set up. A quiet bordered button says what it is.
                 VStack(spacing: Theme.Space.s) {
                     Button(L10n.text("apple.clientsetupwizard.skip_for_now.b58eb52c"), .next) { dismiss() }
                         .buttonStyle(.bordered)
@@ -182,10 +155,6 @@ struct ClientSetupWizard: View {
         .background(Theme.background)
     }
 
-    /// A picked door setup could not walk through. prepare() runs on open so
-    /// the resume card and the install line are warm. Its failure stays
-    /// silent until a door is picked, and a success clears the attempt on
-    /// the way in.
     private func enter(_ steps: [SetupStep]) {
         if model.prepared {
             path = steps
@@ -212,11 +181,6 @@ struct ClientSetupWizard: View {
         model.failure = nil
     }
 
-    /// A picked door opened with no signed-in account. Not the failure's own
-    /// wording about "the account that started this setup", which confused
-    /// somebody who had started nothing. No art: the header above already
-    /// carries the connection scene, and repeating it here made one picture
-    /// do two jobs.
     private func SetupSignInCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
         ClientEmptyState(
             kind: .needsAccount,
@@ -231,10 +195,6 @@ struct ClientSetupWizard: View {
         )
     }
 
-    /// Setup could not start, although the app itself may look signed in.
-    /// Sign-in advice would send somebody in circles here, so this retries
-    /// instead. Unreachable grey, not the sign-in tile and not the header
-    /// scene, so the three states read apart.
     private func SetupRetryCard(onRetry: @escaping () -> Void, onDismiss: @escaping () -> Void) -> some View {
         ClientEmptyState(
             kind: .unreachable,
@@ -249,12 +209,6 @@ struct ClientSetupWizard: View {
         )
     }
 
-    /// Setup left half-finished is the normal case on a phone, not an error.
-    ///
-    /// Continuing never repeats a remote step: it reopens where the draft
-    /// stopped and asks the server what is actually true. Starting over is
-    /// offered beside it, and says plainly that it changes nothing on the
-    /// server, because that is the fear that makes people leave this screen.
     private func resumeCard(_ draft: ClientSetupDraft) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
@@ -319,8 +273,6 @@ struct ClientSetupWizard: View {
         .padding(.bottom, Theme.Space.xs)
     }
 
-    /// The server and cloud doors need a signed-in account and the tunnel.
-    /// Said on the door rather than after twenty minutes of SSH.
     private var paywalled: Bool {
         if let remote = account.account?.canRemote { return !remote }
         return !["free", "supporter", "patron", "legend"].contains(account.account?.tier?.lowercased())

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A project's chats stay visible across publishing computers. Choosing a
-/// computer is only necessary when starting work or narrowing this list.
 struct TeamProjectChatGroup: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -52,8 +50,6 @@ struct TeamProjectChatGroup: View {
             .task {
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(15)) } catch { return }
-                    // Preserve a person's expanded pages, including sparse
-                    // catalogs whose visible row count is less than a page.
                     guard scenePhase == .active, !loading, !hasLoadedMore else { continue }
                     await load(more: false, background: true)
                 }

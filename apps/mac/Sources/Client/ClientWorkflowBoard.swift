@@ -7,10 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A workflow as named columns. Read-only. The Mac canvas stays on the Mac.
-///
-/// Layers come from `WorkflowLayering`, the same rule `MiniGraph` uses, so a
-/// library row and this board cannot disagree about the order of the run.
 struct ClientWorkflowBoard: View {
     let graph: WorkflowGraph
     var run: WorkflowRunRecord?
@@ -98,8 +94,6 @@ private struct ClientWorkflowBoardCard: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(border, lineWidth: isCurrent || isSelected ? 1.5 : 1)
         }
-        // Scoped to the opacity: a forever animation on the whole view also
-        // swings its position when the layout around it moves.
         .animation(
             dimmed
                 ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)

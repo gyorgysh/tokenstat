@@ -97,8 +97,6 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
             Ok(())
         }
         Ok(tokenstat_sync::ScheduledUpdate::NotOurs { latest, path }) => {
-            // Not an error: a package manager owns this install, and saying so
-            // once a day in a log is more useful than failing.
             if json {
                 println!(
                     r#"{{"skipped":"not_ours","latest":{},"path":{}}}"#,
@@ -126,9 +124,6 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
             Ok(())
         }
         Err(err) => {
-            // Printed, not returned: a failed check must not make the scheduler
-            // treat the unit as broken, and the previous binary is still in place
-            // either way.
             if json {
                 println!(r#"{{"error":{}}}"#, json_string(&err.to_string()));
             } else {

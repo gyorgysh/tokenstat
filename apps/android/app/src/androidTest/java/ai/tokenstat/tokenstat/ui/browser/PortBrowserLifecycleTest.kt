@@ -18,7 +18,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Production browser content with real local listeners, no account or paired computer. */
 class PortBrowserLifecycleTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 

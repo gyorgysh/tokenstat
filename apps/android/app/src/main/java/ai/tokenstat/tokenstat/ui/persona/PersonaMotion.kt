@@ -11,15 +11,11 @@ import kotlin.math.round
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Work state supplies forces; the spring body carries motion between states. */
 enum class PersonaMood {
     Idle, Thinking, Running, Waiting, Complete, Failed, Sleeping, Bouncing, Dancing, Pacing,
     Speaking, Juggling, Reading, Gaming, Typing, Sipping, Sketching, Stargazing, Gardening, Bubbling, Snacking,
 }
 
-/** Fixed-step pressure body, with the same stage and fixed plush silhouettes as Apple/Windows.
- * All simulation buffers are reused. Compose observes only a draw invalidation tick.
- */
 class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val firmness: Double) {
     val count = lumps.size.coerceAtLeast(6)
     val x = DoubleArray(count)
@@ -61,11 +57,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     var yaw = 0.0; private set
     var mood = PersonaMood.Idle; private set
 
-    // The face, eased toward what the mood asks for, so a change of mood
-    // reads as an expression moving rather than a mask being swapped.
-    // Openness: zero shut, one normal, above one wide. Cheer: the lower lid
-    // pushed up into a smile, one a crescent. Droop: the outer ends of the
-    // upper lid down. Focus: the inner ends down. Gaze in eye radii.
     var openness = 1.0; private set
     var cheer = 0.0; private set
     var droop = 0.0; private set
@@ -76,8 +67,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     var gazeY = 0.0; private set
     private var blinks = true
 
-    // Where the eyes look on top of the mood's gaze. It jumps between
-    // fixations rather than drifting: fast, then still.
     var lookX = 0.0; private set
     var lookY = 0.0; private set
     private var lookVX = 0.0
@@ -85,7 +74,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     private var lookTargetX = 0.0
     private var lookTargetY = 0.0
     private var fixation = 0.8
-    /** The head leaning into where it looks. Underdamped: curiosity. */
     var headTilt = 0.0; private set
     private var headTiltV = 0.0
 
@@ -93,7 +81,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     private var blinkLength = 0.30
     private var blinkAgain = false
     private var blinkCountdown = 2.0
-    /** Minus one is the left eye, plus one the right, zero no wink. */
     var winkSide = 0; private set
     private var winkAge = -1.0
     private var winkCountdown = 7.0
@@ -124,7 +111,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
     fun advance(time: Double, requested: PersonaMood, moving: Boolean = true) {
         if (mood != requested) {
             previousMood = mood; mood = requested; moodAge = 0.0
-            // A blink over a change: the eye forgives what happens behind one.
             startBlink(0.30)
         }
         if (!moving) { previousMood = mood; moodAge = 1.0; settle(); return }
@@ -233,11 +219,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         grounded += (min(1.0, contacts / 3.0) - grounded) * STEP * 22
     }
 
-    /**
-     * What each mood does with the eyes, as lid positions: openness, cheer,
-     * droop, squint, focus, blush, gaze x and gaze y. Numbers rather than eye
-     * shapes, so every mood can ease into every other one.
-     */
     private fun target(state: PersonaMood): DoubleArray {
         val sway = sin(lifetime * 2 * PI / 7.3) * 0.22
         return when (state) {
@@ -275,7 +256,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         blinks = mood != PersonaMood.Sleeping
     }
 
-    /** How far this mood's eyes wander between fixations, in eye radii. */
     private val wander: Double get() = when (mood) {
         PersonaMood.Sleeping, PersonaMood.Failed -> 0.0
         PersonaMood.Idle, PersonaMood.Waiting, PersonaMood.Stargazing, PersonaMood.Gardening -> 0.55
@@ -288,7 +268,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         val reach = if (openness > 0.3) wander else 0.0
         fixation -= STEP
         if (fixation <= 0) {
-            // Mostly small hops, now and then a proper look somewhere else.
             val far = nextUnit() < 0.3
             val angle = nextUnit() * 2 * PI
             val distance = reach * (if (far) 0.7 + nextUnit() * 0.3 else nextUnit() * 0.45)
@@ -300,7 +279,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
             if (jump > 0.45 && blinkAge < 0 && blinks && nextUnit() < 0.35) startBlink(0.26)
         }
         if (reach == 0.0) { lookTargetX = 0.0; lookTargetY = 0.0 }
-        // Critically damped: there and still in a tenth of a second.
         val omega = 34.0
         lookVX += ((lookTargetX - lookX) * omega * omega - 2 * omega * lookVX) * STEP
         lookVY += ((lookTargetY - lookY) * omega * omega - 2 * omega * lookVY) * STEP
@@ -342,11 +320,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         }
     }
 
-    /**
-     * How shut the eyes are from blinking, zero to one. Fast down, a beat
-     * shut, then open a touch past where it started and back. Negative is
-     * wider than at rest.
-     */
     val blink: Double get() {
         if (blinkAge < 0) return 0.0
         val close = 0.06
@@ -363,7 +336,6 @@ class PersonaMotion(seed: ULong, private val lumps: List<Float>, private val fir
         return -0.08 * (1 - y * y * (3 - 2 * y))
     }
 
-    /** How shut one eye is from a wink. */
     val wink: Double get() {
         if (winkAge < 0) return 0.0
         val t = winkAge

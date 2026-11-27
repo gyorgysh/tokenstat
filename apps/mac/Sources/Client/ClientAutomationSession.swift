@@ -8,7 +8,6 @@
 import Foundation
 import Observation
 
-/// Jobs and runs for one folder on a peer. Create, edit, delete, run, pause, stop, tail.
 @MainActor
 @Observable
 final class ClientAutomationSession {
@@ -21,10 +20,7 @@ final class ClientAutomationSession {
     private(set) var jobs: [Automation] = []
     private(set) var runs: [RunRecord] = []
     private(set) var loaded = false
-    /// IANA name of the connected computer's scheduler. Empty until queue
-    /// answers, and never this device's zone.
     private(set) var schedulerTimezone: String = ""
-    /// Host-wide queue, not this folder. Nil until `automation.queue` answers.
     private(set) var queue: AutomationQueue?
     var errorMessage: String?
     var working = false
@@ -43,8 +39,6 @@ final class ClientAutomationSession {
     private var loadGeneration = 0
     private var isVisible = false
     private var visibility = 0
-    /// Set when this session is a detail page for one job. A missing id
-    /// then stays missing instead of becoming some other job.
     private let pinnedJobID: String?
     private let pinnedRunID: String?
     private let launchStorage: WorkbenchDraftFile<SavedAutomationLaunches>?
@@ -84,8 +78,6 @@ final class ClientAutomationSession {
         }
     }
 
-    /// When the caller asked for a specific job, do not fall back to another
-    /// one. The detail screen has to show empty, not a neighbour.
     var selectedJob: Automation? {
         if let selectedJobID {
             return jobs.first { $0.id == selectedJobID }
@@ -474,7 +466,6 @@ final class ClientAutomationSession {
                 startCatchUp(id: run.id)
             }
         } catch {
-            // The next tick tries again.
         }
     }
 
@@ -517,7 +508,6 @@ final class ClientAutomationSession {
             }
             transcriptOffset = chunk.nextOffset
         } catch {
-            // A just-finished run may still have its file in flight.
         }
     }
 }

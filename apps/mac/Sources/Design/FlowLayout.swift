@@ -48,8 +48,6 @@ struct FlowLayout: Layout {
         for index in subviews.indices {
             let size = subviews[index].sizeThatFits(.unspecified)
             let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
-            // A single item wider than the line still gets its own row rather
-            // than being dropped.
             if next > width, !row.indices.isEmpty {
                 rows.append(row)
                 row = Row()

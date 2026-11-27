@@ -3,17 +3,6 @@
 import Foundation
 import Observation
 
-/// The work worth keeping: pinned folders and conversations.
-///
-/// Account-scoped identifiers and a short label only. Transcript text never
-/// lands here; sealed conversation copies and their Keep offline setting live
-/// in the work cache independently. At most eight per scope: Home
-/// is a shelf, not a second folder list, and the limit is refused with words
-/// rather than by silently dropping somebody's oldest pin.
-///
-/// A duplicate conversation id on two machines never shares a pin: the key
-/// carries the verified machine identity and the raw workspace id, so the
-/// same id in two folders is two pins.
 @MainActor @Observable
 final class PinnedWorkStore {
     static let shared = PinnedWorkStore()
@@ -21,14 +10,10 @@ final class PinnedWorkStore {
 
     struct Pin: Codable, Equatable {
         var reference: WorkReference
-        /// A folder name or conversation title, for the row. Never a prompt,
-        /// path or command: labels come from the same safe surfaces as
-        /// recent places.
         var label: String
         var folderName: String
         var pinnedAt: Date
 
-        /// Stable within a scope. Nil when the reference cannot name work.
         var key: String? { PinnedWorkStore.pinKey(for: reference) }
     }
 
@@ -37,9 +22,6 @@ final class PinnedWorkStore {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
-    /// Newest first. Reads tolerate corruption and invalid rows by dropping
-    /// them, the same way recent places do: a pin the store cannot name is
-    /// not work worth keeping.
     func pins(in scope: WorkReference.Scope?) -> [Pin] {
         _ = revision
         guard let scope, let data = defaults.data(forKey: Self.storageKey(for: scope)),
@@ -61,9 +43,6 @@ final class PinnedWorkStore {
         return pins(in: reference.scope).contains { $0.key == key }
     }
 
-    /// False when the shelf is full and this is new: the caller says so
-    /// rather than the store choosing what goes. Re-pinning updates the
-    /// labels and moves the pin to the top.
     @discardableResult
     func pin(_ reference: WorkReference, label: String, folderName: String, at date: Date = Date()) -> Bool {
         guard let scope = Self.validScope(reference.scope), let key = Self.pinKey(for: reference) else { return false }
@@ -87,8 +66,6 @@ final class PinnedWorkStore {
         save(pins(in: scope).filter { $0.key != key }, in: scope)
     }
 
-    /// Stable identity for one piece of work. Workspace pins name the
-    /// folder; everything else names the item inside it.
     nonisolated static func pinKey(for reference: WorkReference) -> String? {
         guard validScope(reference.scope) != nil,
               !reference.hostIdentity.isEmpty, !reference.workspaceID.isEmpty,
@@ -145,9 +122,6 @@ final class PinnedWorkStore {
         revision += 1
     }
 
-    /// The account scope pins file under, from the same identity the
-    /// session scope uses, which does not move when a handle is claimed or
-    /// changed (see `AccountIdentityPins`).
     nonisolated static func scope(host: String, handle: String?, id: String?) -> WorkReference.Scope? {
         guard !host.isEmpty,
               let identity = WorkReference.Scope.accountIdentity(handle: handle, id: id) else { return nil }

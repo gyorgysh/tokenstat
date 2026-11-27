@@ -8,7 +8,6 @@ namespace Tokenstat.Pages;
 internal sealed record QueuedChatMessage(string Id, string Text, string[] Attachments, long Revision,
     string State = "waiting", long? AttemptedAt = null);
 
-/// <summary>Durable, bounded drafts. All readers and writers share the file lock.</summary>
 internal sealed class ChatOutbox(string directory)
 {
     public static readonly ChatOutbox Shared = new(Path.Combine(
@@ -87,7 +86,6 @@ internal sealed class ChatOutbox(string directory)
 
     public void Refuse(string key, string id, string code) => Update(key, items =>
     {
-        // Transport failures and uncertain host delivery keep the receipt hold.
         if (code is "delivery_unknown" or "timeout" or "io" or "eof" or "decode" or "connect") return;
         var index = items.FindIndex(item => item.Id == id);
         if (index >= 0 && items[index].State == "sending")

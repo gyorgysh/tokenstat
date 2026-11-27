@@ -62,8 +62,6 @@ fn fixture(refuse: bool, exited: bool) -> (Manager, SessionInfo, ProcessWitness,
         assert!(Instant::now() < deadline, "owned fixture did not exit");
         std::thread::sleep(Duration::from_millis(10));
     }
-    // Replace only an already completed owned child. No synthetic PID is
-    // ever handed to an operating-system signal or tree-kill function.
     let child = ChildFixture {
         exited: Arc::new(AtomicBool::new(exited)),
         calls: Arc::new(AtomicU64::new(0)),

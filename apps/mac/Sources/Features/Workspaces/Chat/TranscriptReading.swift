@@ -6,12 +6,6 @@
 
 import SwiftUI
 
-/// Keeping a reader's place in a conversation, and putting them back on it.
-///
-/// One implementation for both transcripts. A chat on the Mac and the same
-/// chat on a phone are the same conversation, and a place kept by one of them
-/// is a place the other has to understand. What the geometry means is
-/// `ChatReadingPosition`; this is the part that needs a scroll view.
 @MainActor
 enum TranscriptReading {
     enum Restoration { case restored, unavailable, unmeasured, interrupted }
@@ -28,7 +22,6 @@ enum TranscriptReading {
             viewportHeight: Double(window.viewportHeight))
     }
 
-    /// Keep, or drop, this conversation's place.
     static func record(follow: TranscriptFollowState, window: TranscriptWindow,
                        for reference: WorkReference?,
                        includingContainingRow: Bool = false,
@@ -37,8 +30,6 @@ enum TranscriptReading {
                for: reference, into: suppliedStore)
     }
 
-    /// A mobile viewport samples once for both durable history and its live
-    /// layout handoff. Both stores receive the same measured mark and date.
     static func record(_ position: ChatReadingPosition, for reference: WorkReference?,
                        into suppliedStore: ChatReadingStore? = nil) {
         guard let reference else { return }
@@ -50,30 +41,11 @@ enum TranscriptReading {
         }
     }
 
-    /// How long to wait for a conversation's rows before opening it at the
-    /// latest turn instead. The same budget the settle onto the end spends.
     private static let frames = 40
     private static let frame: Duration = .milliseconds(50)
-    /// Placements after the first. Rows are built at estimated heights and
-    /// measured over the frames that follow, so one scroll lands on a stack
-    /// that is still settling.
     private static let corrections = 3
-    /// How many older pages restoration pulls while the kept row is still
-    /// not among the loaded ones. A conversation reopened months later
-    /// opens on its newest page, and the row it was left on is screens
-    /// above that. Each pull is one bridge round trip; past this bound the
-    /// row is treated as gone rather than keeping the opening waiting.
     private static let earlierPages = 8
 
-    /// Put the viewport back where this conversation was left.
-    ///
-    /// An unavailable row opens at the latest turn. An interrupted restore
-    /// leaves navigation and the reader's own scrolling in control.
-    ///
-    /// `place` slides the built window so the row is its first, then scrolls
-    /// to it. Sliding first is what keeps the walk short: the row ends up at
-    /// the top of what is built, so reaching it costs nothing like a walk to
-    /// the end of a long conversation would.
     static func restore(_ mark: ChatReadingMark, reference: WorkReference, model: ChatModel,
                         follow: TranscriptFollowState,
                         isCurrent: () -> Bool = { true },
@@ -81,11 +53,6 @@ enum TranscriptReading {
                         place: (String, UnitPoint) -> Void) async -> Restoration {
         let generation = model.selectionGeneration
         guard !Task.isCancelled, isCurrent(), model.currentReference == reference else { return .interrupted }
-        // Inside a long row the reader was partway down it, so the row's
-        // own fraction puts them back there. Otherwise the row's top goes
-        // where it was in the viewport.
-        // Rows sit inside horizontal padding. Centering preserves that
-        // gutter instead of scrolling the padded leading edge sideways.
         let point: UnitPoint
         if mark.within > 0 {
             point = UnitPoint(x: 0.5, y: correct == nil ? min(max(mark.within, 0), 0.9) : 0)
@@ -94,8 +61,6 @@ enum TranscriptReading {
         }
         let wasPinned = follow.pinned
         follow.settle(true)
-        // Settling normally chases the end. Reading restoration owns a row,
-        // so growth and structural updates must not pin that row away.
         follow.pinned = false
         var placements = 0
         var measurements = 0
@@ -113,22 +78,13 @@ enum TranscriptReading {
                 follow.stopFollowing()
                 return .interrupted
             }
-            // Still arriving: the row may be in a page that has not landed.
             if model.openingConversation, placements == 0, fetched == 0 { continue }
             guard let rowID = ChatReadingAnchor.resolve(mark.eventID, items: model.displayItems, events: model.events) else {
-                // Not loaded yet, not necessarily gone: the conversation
-                // opens on its newest page, and the kept row may be screens
-                // above it. Pull older pages until it appears, the start is
-                // reached, or the bound is spent. Past that the row is
-                // treated as gone and the conversation opens at its end.
                 guard fetched < earlierPages, model.hasEarlier, !model.reachedStart else { break }
                 await model.loadEarlier()
                 fetched += 1
                 continue
             }
-            // A kept row may be folded into a step group. Open it, so the
-            // reader lands on the row itself, unless the mark was the closed
-            // group's own header.
             let visibleRow = mark.revealTarget ? model.revealRow(rowID) : model.readingRow(rowID)
             let correction = placements > 0 ? correct?(visibleRow, mark) : nil
             switch correction {
@@ -152,9 +108,6 @@ enum TranscriptReading {
             follow.pinned = wasPinned
             return .unavailable
         }
-        // The reader is above the latest turn on purpose, so the transcript
-        // stops following it and offers the way back instead of chasing the
-        // end under them.
         follow.stopFollowing()
         if correct != nil, measurements == 0 { return .unmeasured }
         return .restored

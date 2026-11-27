@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// One dated reading for Home, Account and every composer. Visible readers
-/// share a request; changing accounts retires both the result and its flight.
 @MainActor @Observable
 final class PlanLimitsStore {
     static let shared = PlanLimitsStore(
@@ -61,13 +59,10 @@ final class PlanLimitsStore {
             do {
                 let cached = try await readCache()
                 guard held == owner(), flight?.id == id else { throw CancellationError() }
-                // Retain live readings and failure notes until their replacement
-                // arrives. The last-good disk cache cannot clear a rate-limit warning.
                 mergeCachedProviders(cached.providers)
                 state.enabled = cached.enabled; state.skip = cached.skip
                 let providers = try await readLive(force)
                 guard held == owner(), flight?.id == id else { throw CancellationError() }
-                // Account retains disabled sources so their switches can be turned back on.
                 state.providers = providers + cached.providers.filter { previous in
                     cached.skip.contains(previous.source) && !providers.contains { $0.id == previous.id }
                 }
@@ -84,7 +79,6 @@ final class PlanLimitsStore {
         guard held == owner(), !Task.isCancelled else { throw CancellationError() }
     }
 
-    /// A sharing edit retires earlier reads so a late cache reply cannot undo it.
     func settingsChanged(_ settings: LimitsSyncState) {
         settingsRevision &+= 1
         if generation != owner() { state = LimitsSyncState() }
@@ -103,9 +97,6 @@ final class PlanLimitsStore {
         mergeCachedProviders(settings.providers)
     }
 
-    /// Settings replies carry last-good numbers, not the outcome of the last
-    /// attempt. Equal-dated cache entries must not clear a live failure, while
-    /// a newer background reading should reach every surface without HTTP.
     private func mergeCachedProviders(_ providers: [ProviderLimits]) {
         for provider in providers {
             if let index = state.providers.firstIndex(where: { $0.id == provider.id }) {

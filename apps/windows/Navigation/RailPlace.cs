@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Navigation;
 
-/// <summary>Machine-wide places, in the same order as the macOS rail.</summary>
 internal enum RailPlace { Home, Projects, Tasks, Notes, Automations, Insights, Devices, Ssh }
 
 internal static class RailPlaces

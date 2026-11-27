@@ -49,8 +49,6 @@ internal static class WorkspacePullCreate
         {
             if (ownerIdentity is not null && !ownerIdentity.IsCurrent) return;
             try { context = await call("pulls.prepareCreate", new JsonObject { ["workspaceId"] = workspaceId }); }
-            // A failed check must not leave the last branch and commit in
-            // place, or Create would offer a state nobody just confirmed.
             catch (Exception ex) { error = ex.Message; context = null; }
             if (draft.Base.Length == 0) draft.Base = Format.Text(context, "defaultBase");
             var branch = Format.Text(context, "branch");

@@ -10,9 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The agent, model and effort rows share one panel, one mark per section,
-/// and one line of summary. The rules below are what keeps the three from
-/// being one long list of names.
 class ChatAgentPanelTest {
     private fun obj(json: String): JsonObject = Json.parseToJsonElement(json).jsonObject
 

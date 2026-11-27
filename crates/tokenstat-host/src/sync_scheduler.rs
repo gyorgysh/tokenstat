@@ -2,9 +2,6 @@
 //
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
-
-//! Background sync coordinated with the CLI through the shared cursor and lock.
-
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,8 +17,7 @@ const SYNC_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 /// serialize uploads across the app, host daemon, and CLI.
 pub fn start(session: Arc<Mutex<Session>>) {
     let scan_session = Arc::clone(&session);
-    // Discover newly created sessions even when no account is linked. This
-    // thread never waits for vendor HTTP or holds the interactive Session.
+
     std::thread::spawn(move || {
         loop {
             if tokenstat_sync::scheduled_network_allowed() {
@@ -31,7 +27,7 @@ pub fn start(session: Arc<Mutex<Session>>) {
         }
     });
     let maintenance_session = Arc::clone(&session);
-    // Slow pricing/vendor requests must not postpone an upload deadline.
+
     std::thread::spawn(move || {
         let mut last_maintenance: Option<std::time::Instant> = None;
         loop {
@@ -56,9 +52,6 @@ pub fn start(session: Arc<Mutex<Session>>) {
     });
 }
 
-/// Local quota freshness does not depend on Tokenstat sign-in, the sharing
-/// switch, or the account's aggregate-upload cadence. The refresh itself
-/// still posts only when sharing is enabled.
 fn post_limits() {
     if !tokenstat_sync::scheduled_network_allowed() {
         return;
@@ -87,20 +80,12 @@ fn limits_pass_is_due(interval: Duration) -> bool {
     }
 }
 
-/// Fetch the hosted list-rate snapshot and write it where the core reads it.
-///
-/// Quiet on success. A failure is the machine being offline or the feed being
-/// down: the previous book (or the built-in estimate rates) keeps values
-/// readable, and the next pass retries.
 fn refresh_pricing(session: &Mutex<Session>) {
     if !tokenstat_sync::scheduled_network_allowed() {
         return;
     }
     match tokenstat_sync::pricing::refresh(false) {
         Ok(refreshed) => {
-            // The fetch wrote a new file; the session still prices from the
-            // book it opened with. Reload it, or every report keeps pricing
-            // against the empty book a fresh install opened with.
             if let Ok(mut guard) = session.lock() {
                 crate::pricing::reload(&mut guard);
             }
@@ -128,8 +113,7 @@ fn sync_interval() -> Duration {
     if !info.logged_in {
         return UNLINKED_CHECK_INTERVAL;
     }
-    // The upload path enforces the server's deadline. Polling that deadline
-    // avoids sleeping another full interval after a held or failed attempt.
+
     SYNC_CHECK_INTERVAL
 }
 
@@ -143,12 +127,11 @@ fn run_once(session: &Mutex<Session>) {
     if !info.logged_in || !sync_due(info.next_allowed_at.as_deref(), jiff::Timestamp::now()) {
         return;
     }
-    // A five-minute upload must not repeatedly upload an hour-old archive.
+
     if !scan_archive(session) {
         return;
     }
-    // Snapshot path and timezone under the lock, then open a separate Store for
-    // the HTTP phase. Holding Session across the upload freezes Home/Insights.
+
     let snapshot = {
         let Ok(guard) = session.lock() else {
             return;
@@ -182,9 +165,6 @@ fn run_once(session: &Mutex<Session>) {
     );
     match result {
         Ok(tokenstat_sync::ScheduledOutcome::Synced(_)) => {
-            // The account just changed, so the cached grid is stale by
-            // definition. Dropping it here is what makes a machine that has
-            // only just uploaded appear on Home without a wait.
             crate::account_activity::invalidate();
         }
         Ok(tokenstat_sync::ScheduledOutcome::NotLoggedIn)
@@ -197,10 +177,6 @@ fn run_once(session: &Mutex<Session>) {
     }
 }
 
-/// Cursor and Antigravity usage, on the same 30 minute cache and power gate
-/// as the scheduled CLI scan. The host is the process that already holds the
-/// person's Keychain grant for Cursor's saved sign-in, so Home shows today's
-/// Cursor usage even when the CLI timer cannot read that item.
 fn fetch_remote_usage(session: &Mutex<Session>) {
     if !tokenstat_sync::scheduled_network_allowed() {
         return;

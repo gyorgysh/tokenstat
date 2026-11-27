@@ -1,21 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! One visible plan format for every agent.
-//!
-//! Codex and Claude Code in the modes tokenstat runs have no plan tool:
-//! Codex's plan tool is off in exec and app-server turns, and Claude Code's
-//! print mode offers neither TodoWrite nor its task tools, not even through a
-//! tool search. So their plans never reached the chat. They write one the same
-//! way every backend asks a question: a fenced block in the reply, language
-//! `tokenstat-plan`, holding the whole list each time.
-//!
-//! The host records completed blocks as timeline updates and keeps the latest
-//! plan in the conversation's activity. Clients hide the raw blocks.
-//!
-//! Every other agent writes the block too. Several have a todo tool the host
-//! can read, but pointing each at its own tool failed in practice: OpenCode's
-//! headless run offers none, Cursor never called its own, and a plan split
-//! across a tool and prose looked different from agent to agent.
 
 use serde_json::{Value, json};
 
@@ -73,8 +58,6 @@ impl Scanner {
     }
 }
 
-/// One block body. Accepts `step` (the name Codex's own plan tool used) or
-/// `text` for each entry. Anything malformed is dropped.
 fn parse(body: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(body.trim()).ok()?;
     let steps = value.get("steps")?.as_array()?;
@@ -122,12 +105,9 @@ pub fn rule(backend: &str) -> Option<String> {
     })
 }
 
-/// When a plan is due. Concrete on purpose: "skip this for quick answers"
-/// let a model call a six-step file test quick and show no plan at all.
 const WHEN: &str = "For any task that takes three or more tool calls, including a small \
     test or a series of edits to one file,";
 
-/// The only exception, stated as a count so it cannot be argued.
 const SKIP: &str = "Skip the plan only when you answer with two tool calls or fewer.";
 
 #[cfg(test)]
@@ -202,8 +182,6 @@ mod tests {
 
     #[test]
     fn a_block_glued_to_the_last_closing_fence_still_updates_the_plan() {
-        // Captured from Grok: the second plan opens on the first one's
-        // closing line.
         let text = format!(
             "Starting.\n\n```{FENCE}\n{{\"steps\":[{{\"step\":\"Write\",\"status\":\"in_progress\"}},{{\"step\":\"Read\",\"status\":\"pending\"}}]}}\n``````{FENCE}\n{{\"steps\":[{{\"step\":\"Write\",\"status\":\"completed\"}},{{\"step\":\"Read\",\"status\":\"in_progress\"}}]}}\n```\nDone.\n"
         );
@@ -221,8 +199,6 @@ mod tests {
 
     #[test]
     fn a_plan_reopened_after_prose_on_its_closing_line_still_counts() {
-        // Captured from Cursor: the first plan closes and the next opens on
-        // the same line with prose between the fences.
         let text = format!(
             "A.\n```{FENCE}\n{{\"steps\":[{{\"step\":\"A\",\"status\":\"completed\"}}]}}\n```Next works.```{FENCE}\n{{\"steps\":[{{\"step\":\"B\",\"status\":\"in_progress\"}}]}}\n```\nDone.\n"
         );
@@ -235,8 +211,6 @@ mod tests {
 
     #[test]
     fn a_closing_fence_glued_to_prose_still_updates_the_plan() {
-        // The final update often arrives as ` ```Yes,...` with no newline after
-        // the ticks. That must still close the block or the plan sticks mid-run.
         let mut scanner = Scanner::default();
         let mut text = block(
             r#"{"steps":[{"step":"Inspect","status":"completed"},{"step":"Build","status":"completed"},{"step":"Validate","status":"in_progress"}]}"#,
@@ -245,7 +219,7 @@ mod tests {
         text.push_str(&format!(
             "```{FENCE}\n{{\"steps\":[{{\"step\":\"Inspect\",\"status\":\"completed\"}},{{\"step\":\"Build\",\"status\":\"completed\"}},{{\"step\":\"Validate\",\"status\":\"completed\"}}]}}\n```Yes, done."
         ));
-        // No newline after the glued prose yet: finish() must still apply it.
+
         assert!(scanner.scan(&text).is_none());
         let plan = scanner
             .finish(&text)

@@ -15,16 +15,12 @@ use crate::{host_install, host_rpc, host_service::Service};
 pub struct HostArgs {
     #[command(subcommand)]
     command: Option<HostCommand>,
-    /// Local daemon socket, for a separately installed host
     #[arg(long, global = true, value_name = "PATH")]
     socket: Option<PathBuf>,
-    /// Use this account's login service
     #[arg(long, global = true, conflicts_with = "system")]
     user: bool,
-    /// Use the system service (Linux, from a root console)
     #[arg(long, global = true, conflicts_with = "user")]
     system: bool,
-    /// Compatibility with the original installer
     #[arg(long, hide = true)]
     install: bool,
     #[arg(long, hide = true, value_name = "PATH")]
@@ -35,28 +31,20 @@ pub struct HostArgs {
 
 #[derive(Args)]
 struct InstallArgs {
-    /// Path to tokenstat-hostd, defaults to a sibling of this CLI
     #[arg(long, value_name = "PATH")]
     binary: Option<PathBuf>,
-    /// Friendly machine name for this machine on your account
     #[arg(long, value_name = "NAME")]
     name: Option<String>,
-    /// Pairing code from your signed-in device
     #[arg(long, conflicts_with = "code_file")]
     code: Option<String>,
-    /// Private file holding a pairing code, or - to read standard input
     #[arg(long, value_name = "PATH", conflicts_with = "code")]
     code_file: Option<PathBuf>,
-    /// Account the host and its agents run as (Linux, from a root console)
     #[arg(long, value_name = "USER")]
     run_as: Option<String>,
-    /// Agents to install on this machine, by id, separated by commas
     #[arg(long, value_name = "IDS", value_delimiter = ',')]
     agents: Vec<String>,
-    /// Let this device key work here straight away, without a second step
     #[arg(long, value_name = "DEVICE", value_parser = peer_key)]
     allow: Option<String>,
-    /// Print a one-time code for a second device when the install finishes
     #[arg(long)]
     print_invite: bool,
 }
@@ -86,10 +74,8 @@ enum HostCommand {
     Install(InstallArgs),
     /// Stop the host and remove the service, leaving every folder alone
     Uninstall {
-        /// Also delete tokenstat's own data on this machine
         #[arg(long)]
         purge: bool,
-        /// Do not ask for confirmation
         #[arg(long, short = 'y')]
         yes: bool,
     },
@@ -134,12 +120,9 @@ enum AccessCommand {
     /// to approve every pending request at once. CI: --yes skips the prompt,
     /// --json prints what was approved.
     Approve {
-        /// List number, key prefix, full key, or device label. Omit to choose interactively.
         target: Option<String>,
-        /// Approve every pending request
         #[arg(long, conflicts_with = "target")]
         all: bool,
-        /// Do not ask for confirmation
         #[arg(long, short = 'y')]
         yes: bool,
     },
@@ -270,11 +253,6 @@ pub fn run(args: &HostArgs, json_output: bool) -> Result<()> {
     }
 }
 
-/// Remove the service, and only ever tokenstat's own files with it.
-///
-/// A registered folder is somebody's work. It is never touched here, not even
-/// with `--purge`, which drops this machine's identity, settings and archive
-/// and nothing outside them.
 fn uninstall(service: &Service, purge: bool, assume_yes: bool, json_output: bool) -> Result<()> {
     let folders = registered_folders();
     let removable = if purge {
@@ -291,8 +269,6 @@ fn uninstall(service: &Service, purge: bool, assume_yes: bool, json_output: bool
             service.path.display()
         );
         if cfg!(target_os = "macos") {
-            // The app owns the same launchd label, so removing it here is not
-            // the last word on this Mac and saying otherwise would be a lie.
             println!("The desktop app installs it again the next time it opens.");
         }
         if purge {
@@ -345,10 +321,6 @@ fn uninstall(service: &Service, purge: bool, assume_yes: bool, json_output: bool
     Ok(())
 }
 
-/// How many folders this machine has registered, when the host can be asked.
-///
-/// Best effort on purpose: a stopped host still has to be removable, and the
-/// count is reassurance rather than a precondition.
 fn registered_folders() -> Option<usize> {
     let socket = tokenstat_paths::data_dir()?.join("host.sock");
     host_rpc::call(&socket, "workspace.list", json!({}))
@@ -357,7 +329,6 @@ fn registered_folders() -> Option<usize> {
         .map(Vec::len)
 }
 
-/// The directories this product owns on this machine, and no others.
 fn data_directories() -> Result<Vec<PathBuf>> {
     let mut paths: Vec<PathBuf> = [
         tokenstat_paths::data_dir(),
@@ -372,8 +343,6 @@ fn data_directories() -> Result<Vec<PathBuf>> {
     paths.sort();
     paths.dedup();
     for path in &paths {
-        // A recursive delete gets one guard that does not depend on the
-        // directory lookup being right.
         let ours = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -489,17 +458,6 @@ fn access(
     Ok(())
 }
 
-/// Approve pending requests by list number, key prefix, or label.
-///
-/// Numbered so a key never has to be retyped over SSH. `--all` takes every
-/// pending request at once; a single target plus `--yes` (or `--json`) runs
-/// without a prompt for scripts.
-///
-/// Numbers refer to the freshly fetched pending list inside this call, not
-/// to an earlier `host access` listing: a new request arriving between the
-/// list and this call shifts numbers. Scripts should prefer a full key or a
-/// long key prefix; numbers are for an interactive session that lists and
-/// approves in one step.
 fn approve(
     socket: &std::path::Path,
     target: Option<&str>,
@@ -589,9 +547,6 @@ fn approve(
     Ok(())
 }
 
-/// One pending request, by number (1-based), full key, unique key prefix, or
-/// case-insensitive label. Numbers are what SSH sessions want: short, exact,
-/// and visible in the list above.
 fn resolve_target(target: &str, pending: &[Value]) -> Result<String> {
     let needle = target.trim();
     if needle.is_empty() {
@@ -693,8 +648,6 @@ fn prompt_choices(pending: &[Value], keys: &[String]) -> Result<Vec<String>> {
     if answer == "a" || answer == "all" {
         return Ok(keys.to_vec());
     }
-    // A label may itself contain a comma. Try the whole answer first; only
-    // split when it does not resolve as one target.
     if let Ok(single) = resolve_target(&answer, pending) {
         return Ok(vec![single]);
     }
@@ -742,8 +695,6 @@ pub fn invite(socket: &std::path::Path, json_output: bool) -> Result<()> {
         text(&result["code"])
     );
     println!("Paste it in tokenstat under Devices, Add this device.");
-    // A code only lets in a device on the same account, so a machine that is
-    // signed out has nothing the code could ever match.
     if host_rpc::call(socket, "account.status", json!({}))
         .ok()
         .is_some_and(|account| account["signedIn"].as_bool() == Some(false))
@@ -786,9 +737,6 @@ fn log(socket: &std::path::Path, lines: u32, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-/// A daemon that predates a method answers "unknown method", which is a
-/// sentence about our protocol rather than about this machine. Say what a
-/// person can do instead.
 fn older_host(feature: &str, error: anyhow::Error) -> anyhow::Error {
     if error.to_string().contains("unknown") {
         return anyhow::anyhow!(
@@ -798,8 +746,6 @@ fn older_host(feature: &str, error: anyhow::Error) -> anyhow::Error {
     error
 }
 
-/// Seconds are enough. The record keeps the full stamp; a console does not
-/// need six decimal places to say when somebody let a phone in.
 fn when(at: &str) -> String {
     match at.split_once('.') {
         Some((head, _)) => format!("{head}Z").replace('T', " "),
@@ -807,14 +753,11 @@ fn when(at: &str) -> String {
     }
 }
 
-/// Enough of a device key to recognise, not enough to retype by mistake.
 fn short(device: &str) -> String {
     let device = sanitize_label(device);
     if device.chars().count() <= 16 {
         return device.to_owned();
     }
-    // Byte slicing panics on multi-byte chars; the audit file is locally
-    // editable, so truncate on char boundaries.
     let head: String = device.chars().take(8).collect();
     let tail: String = device
         .chars()
@@ -847,9 +790,6 @@ fn status(
             report["protocol"] = protocol;
         }
         Err(error) => {
-            // Unreachable is not the same as stopped, and saying "stopped"
-            // about a host that is running behind a bad socket path sends
-            // somebody to fix the wrong thing.
             report["running"] = Value::Null;
             report["reachable"] = json!(false);
             report["error"] = json!(error.to_string());
@@ -884,8 +824,6 @@ fn status(
         return Ok(());
     }
 
-    // The order is the order somebody debugs in: is it up, what is it, who is
-    // it, and only then what it holds.
     println!("Host running");
     print_service(installed_service);
     println!("  socket: {}", socket.display());
@@ -973,8 +911,6 @@ fn status(
     Ok(())
 }
 
-/// Who the host runs as comes first, because a root install gives every agent
-/// on this machine root and that is not something to discover later.
 fn print_service(service: Option<&Service>) {
     let Some(service) = service else {
         return;
@@ -1065,7 +1001,6 @@ mod tests {
             crate::Cli::try_parse_from(["tokenstat", "host", "access", "allow", "short"]).is_err()
         );
         assert!(crate::Cli::try_parse_from(["tokenstat", "host", "--binary", "/x"]).is_ok());
-        // A grant is an exact key. Half of one, or a label, is not a device.
         assert!(
             crate::Cli::try_parse_from(["tokenstat", "host", "install", "--allow", "my-phone"])
                 .is_err()
@@ -1123,9 +1058,6 @@ mod tests {
                 }
             }
             Err(error) => {
-                // Fail-closed: when the data directory is redirected somewhere
-                // the product does not own (for example the throwaway sandbox
-                // the test docs use), purge refuses instead of deleting.
                 let message = error.to_string();
                 assert!(message.contains("Refusing to delete"), "{message}");
                 let override_dir = std::env::var_os("TOKENSTAT_DATA_DIR")

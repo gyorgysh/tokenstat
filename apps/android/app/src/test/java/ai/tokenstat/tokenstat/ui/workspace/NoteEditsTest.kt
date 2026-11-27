@@ -12,8 +12,6 @@ class NoteEditsTest {
         val opened = NoteList.NoteCard("note", "Title", "Original", "backlog", 0, revision = 1)
         var saved = opened.copy(body = "Written on another device", revision = 2)
         suspend fun host(method: String, params: JsonObject): JsonObject {
-            // The legacy update endpoint accepts stale content. The checked
-            // endpoint refuses it before changing the stored title or body.
             if (method == "todo.edit") require(params["expectedRevision"]?.jsonPrimitive?.longOrNull == saved.revision)
             saved = saved.copy(title = params["title"]!!.jsonPrimitive.content,
                 body = params["notes"]!!.jsonPrimitive.content, revision = saved.revision!! + 1)
@@ -22,8 +20,6 @@ class NoteEditsTest {
         assertTrue(runCatching { editNote(opened, "My title", "My unsaved body", ::host) }.isFailure)
         assertEquals("Written on another device", saved.body)
         assertEquals("Title", saved.title)
-        // Keeping a draft after reviewing the fresh version advances the
-        // baseline; the same checked endpoint now accepts it.
         editNote(saved, "My title", "My unsaved body", ::host)
         assertEquals("My unsaved body", saved.body)
         assertEquals(3L, saved.revision)

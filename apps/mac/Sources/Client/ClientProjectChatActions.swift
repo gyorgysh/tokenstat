@@ -2,7 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Held above both mobile layouts. A menu always acts on its original row.
 struct ClientProjectChatAction: Identifiable {
     enum Kind { case rename, delete }
     let id = UUID()

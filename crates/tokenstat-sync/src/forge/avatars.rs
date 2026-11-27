@@ -95,7 +95,6 @@ fn page(repo: &Repo, from: Option<&str>) -> Result<CommitAvatars, HttpFailure> {
         None => send(None)?,
         Some(Ok(text)) => text,
         Some(Err(HttpFailure::Unauthorized)) => match stored.as_ref().map(|c| c.source()) {
-            // A stale app token: refresh once, as every other forge read does.
             Some(CredentialSource::Tokenstat) => {
                 let bearer = stored
                     .as_ref()
@@ -104,8 +103,6 @@ fn page(repo: &Repo, from: Option<&str>) -> Result<CommitAvatars, HttpFailure> {
                 let refreshed = auth::refresh_stored(&repo.host, &bearer)?;
                 send(Some(refreshed.bearer()))?
             }
-            // Someone else's token that no longer works must not hide a
-            // public repository's pictures.
             _ => send(None)?,
         },
         Some(Err(other)) => return Err(other),
@@ -163,7 +160,6 @@ mod tests {
             Some("https://avatars.example/u/1")
         );
         assert_eq!(avatars.by_commit.len(), 2);
-        // The newest picture for an email wins.
         assert_eq!(
             avatars.by_email.get("ada@example.com").map(String::as_str),
             Some("https://avatars.example/u/1")

@@ -21,7 +21,6 @@ internal static class EditorText
         return normalized.Replace("\n", ending);
     }
 
-    // The final RichEdit paragraph marker belongs to the control, not the file.
     public static string Read(RichEditTextDocument document)
     {
         var range = document.GetRange(0, int.MaxValue);

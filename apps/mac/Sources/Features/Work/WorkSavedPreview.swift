@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Small attachment previews share the sealed work cache and its account,
-/// folder, expiry and deletion boundaries. Missing bytes never trigger a peer
-/// request while a saved conversation is being read.
 enum WorkSavedPreview {
     static let maximumBytes = 256 * 1024
     struct Payload: Codable, Sendable {

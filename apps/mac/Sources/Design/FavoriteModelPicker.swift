@@ -6,9 +6,6 @@
 
 import SwiftUI
 
-/// Per-backend model favorites, local to this Mac.
-///
-/// Stars pin models to the top of the picker. Nothing here leaves the machine.
 @MainActor
 @Observable
 final class ModelFavoritesStore {
@@ -62,15 +59,10 @@ final class ModelFavoritesStore {
     }
 }
 
-/// Model picker with a brand star. Favorites pin to the top of the list.
-///
-/// Same capsule language as `AppMenuPicker`. The star is a toggle chip, not
-/// a system control.
 struct FavoriteModelPicker: View {
     var backendID: String
     var models: [String]
     var extra: String = ""
-    /// Checked task editing must not rewrite an old or custom alias on mount.
     var preservesSavedSelection = false
     @Binding var selection: String
     @State private var favorites = ModelFavoritesStore.shared
@@ -93,8 +85,6 @@ struct FavoriteModelPicker: View {
     private var options: [(value: String, label: String)] {
         var ids = models
         let extraID = preservesSavedSelection ? extra : TodoCard.cleanModelID(extra)
-        // Keep a stored alias this backend no longer lists. Do not carry a
-        // leftover from the previous agent into the new list.
         if !extraID.isEmpty, !ids.contains(extraID), extraID == selection {
             ids.insert(extraID, at: 0)
         }
@@ -146,8 +136,6 @@ struct FavoriteModelPicker: View {
     }
 }
 
-/// Run type, then a single Run button. Same control in the inspector and
-/// the run sheet, so the two surfaces cannot drift apart.
 enum TaskLaunchMode: String, CaseIterable {
     case background, foreground, chat
 

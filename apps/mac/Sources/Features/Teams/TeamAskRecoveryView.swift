@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Account-local recovery remains available after directory access is lost.
-/// Reading this list never sends, cancels or discards an agent request.
 struct TeamAskRecoveryView: View {
     let store: TeamStore
     let owner: TeamAccountOwner

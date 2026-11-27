@@ -7,17 +7,6 @@
 import Foundation
 import SwiftUI
 
-/// A failure, said in a way somebody can act on.
-///
-/// Errors arrive here as sentences written for a log: "connection refused (os
-/// error 61)", "the relay rejected this machine's tunnel credential". Those are
-/// the right words in `hostd.err.log` and the wrong words on a screen, and the
-/// screen is where people meet them.
-///
-/// One table, shared by the Mac and the client, so the same failure cannot be
-/// explained two ways in one product. The raw text is kept: a person who wants
-/// the original can still see it, and a support conversation is impossible
-/// without it. What changes is what leads.
 struct FriendlyError {
     var title: String
     var message: String
@@ -30,26 +19,14 @@ struct FriendlyError {
     var opensPlans: Bool = false
     var requiresSignIn: Bool = false
 
-    /// The glyph on that button, from the shared action vocabulary: a crown
-    /// when it leads to plans, the retry arrow when it retries.
     var actionIcon: ActionIcon { opensPlans ? .plans : requiresSignIn ? .signIn : .refresh }
 
     var isActionable: Bool { actionTitle != nil }
 
-    // Matching is on substrings of the message rather than typed errors on
-    // purpose: these strings cross a JSON boundary from Rust, where they are
-    // deliberately human sentences and not a code enum. A new phrasing that
-    // falls through lands in the default, which is honest, rather than being
-    // mapped to the wrong advice.
     static func from(_ text: String) -> FriendlyError {
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
-        // What the relay says when a screen session is refused or ended. These
-        // arrive as the relay's own short codes, which are the right words in
-        // its log and no words at all on a screen.
-        // No numbers here. The limits get tuned, and a message naming one is
-        // wrong the week it changes.
         if lower.contains("session_time_limit") {
             return FriendlyError(
                 title: L10n.text("apple.friendlyerror.session_ended.4a50e4c0"),
@@ -97,8 +74,6 @@ struct FriendlyError {
                 raw: raw
             )
         }
-        // -25300 is errSecItemNotFound: a key record survived the secret it
-        // points at, which happens after a restore from a backup.
         if lower.contains("-25300") {
             return FriendlyError(
                 title: L10n.text("apple.friendlyerror.the_private_key_is_not_on_this_device.3db8a142"),
@@ -108,12 +83,6 @@ struct FriendlyError {
             )
         }
 
-        // The vault lives on the account, so its failures arrive as server
-        // sentences written for a log. Two different causes share the
-        // `machine_required` code: a login that was never tied to this
-        // computer, and a computer the account has not heard of. They need
-        // different advice. Registering the machine cannot fix an unbound
-        // token; signing in again from this app can.
         if lower.contains("register this device before using the vault") {
             return FriendlyError(
                 title: L10n.text("apple.friendlyerror.this_login_is_not_tied_to_this_computer.b304b378"),
@@ -163,9 +132,6 @@ struct FriendlyError {
             )
         }
 
-        // A method the host has never heard of is not a bad call, it is an old
-        // helper: the daemon outlives the app that installed it. The method
-        // name belongs in a log, not on a screen.
         if lower.contains("unknown method") || lower.contains("unknown_method") {
             return FriendlyError(
                 title: L10n.text("apple.friendlyerror.helper_is_out_of_date.ff2cd175"),
@@ -194,10 +160,6 @@ struct FriendlyError {
                 raw: raw
             )
         }
-        // Before the sign-in case, and deliberately: a refused tunnel
-        // credential repairs itself, and its sentence used to contain the
-        // words "sign in again", which sent people to fix something that was
-        // already being fixed.
         let wantsSignIn = lower.contains("sign in") || lower.contains("signed out")
             || lower.contains("not logged in")
             || (lower.contains("token") && lower.contains("revoked"))
@@ -309,8 +271,6 @@ struct FriendlyError {
                 raw: raw
             )
         }
-        // Gateway failures establish unreachability, not its cause or duration.
-        // Keep the raw response available without guessing which server failed.
         if lower.contains("error code: 1033")
             || lower.contains("1033") && lower.contains("tunnel")
         {
@@ -322,9 +282,6 @@ struct FriendlyError {
                 raw: raw
             )
         }
-        // Bare codes only count inside a failure sentence ("status request
-        // failed (503)"), never on their own: a number alone could be a port
-        // or a count in some other sentence.
         let readsAsFailure = lower.contains("status") || lower.contains("gateway")
             || lower.contains("error") || lower.contains("failed")
         if lower.contains("bad gateway") || lower.contains("service unavailable")
@@ -352,15 +309,6 @@ struct FriendlyError {
             )
         }
 
-        // The relay has no record of that computer. Every word of this arrives
-        // from the transport ("no direct address", "tunnel: no_such_peer") and
-        // every word of it is the wrong thing to read on a phone: it names the
-        // mechanism and not one thing a person can do.
-        //
-        // Most often the same cause, and it is a switch nobody has found:
-        // the computer has never been turned on for remote reach, so it has
-        // never registered with the relay. A relay-evicted or temporarily
-        // offline Mac produces the same strings, so do not assert it.
         if lower.contains("no_such_peer") || lower.contains("no direct address")
             || lower.contains("peer_not_found") || lower.contains("no such peer")
             || lower.contains("could not reach") && (lower.contains("tunnel")
@@ -375,8 +323,6 @@ struct FriendlyError {
             )
         }
 
-        // Nothing matched. Say that something failed and show the words the
-        // machine used, rather than inventing a cause.
         return FriendlyError(
             title: L10n.text("apple.friendlyerror.that_did_not_work.93a20328"),
             message: raw.isEmpty ? L10n.text("apple.friendlyerror.something_went_wrong_and_nothing_said_what.8776f982") : raw,
@@ -387,16 +333,8 @@ struct FriendlyError {
     }
 }
 
-/// A failure at the top of a screen, in the app's own voice.
-///
-/// `Banner` says one line in one colour, which is right for "your plan
-/// changed" and wrong for everything that went wrong: the sentence it was
-/// given was usually a transport error. This keeps the banner's shape and
-/// gives the cause a name, a symbol of its own, the fix, and the raw text
-/// behind a disclosure for whoever needs it.
 struct ErrorBanner: View {
     var message: String
-    /// Offered as the banner's button when the caller has something to retry.
     var retry: (() -> Void)?
     @State private var showingDetail = false
 

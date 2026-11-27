@@ -8,12 +8,6 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The two surfaces every terminal in this app draws on, taken from the
-/// Apple TerminalPalette so both clients paint the same content. A terminal
-/// is content rather than chrome, so the background sits a shade off the
-/// app background instead of reading as a hole.
-/// </summary>
 internal static class TerminalPalette
 {
     public static uint BackgroundHex(bool dark) => dark ? 0x0A0A0Bu : 0xF7F7F8u;
@@ -30,13 +24,5 @@ internal static class TerminalPalette
 
     public static Color Foreground(bool dark) => FromHex(ForegroundHex(dark));
 
-    /// <summary>
-    /// The same background for the pane a terminal sits in rather than the
-    /// cells themselves. A terminal view does not fill its container: the
-    /// strip of a pane wider than the columns fit, and the moment before
-    /// the first frame, are all drawn by whatever is behind it. Taking that
-    /// shade from the same number the cells use means the seam cannot be
-    /// seen at all.
-    /// </summary>
     public static Color Surface(bool dark) => Background(dark);
 }

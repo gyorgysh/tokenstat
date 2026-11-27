@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// The original Ask stays immutable even after its running reply arrives.
-/// Replaying it is the host's idempotent recovery path, never a fresh review.
 struct TeamAskRecord: Codable, Equatable, Sendable {
     let version: Int
     let input: [String: JSONValue]
@@ -31,7 +29,6 @@ struct TeamAskRecord: Codable, Equatable, Sendable {
               try JSONEncoder().encode(input).count <= 14 * 1024,
               fence.map(Self.validFence) ?? true else { throw TeamAskRecoveryFailure.unconfirmed }
     }
-    /// Only a bound, terminal receipt can retire an Ask without a run fence.
     func terminal(_ response: JSONValue, share: String) -> Bool {
         guard case let .object(body) = response, case let .object(receipt)? = body["receipt"],
               receipt["shareId"] == .string(share), receipt["clientMessageId"] == input["clientMessageId"],
@@ -46,7 +43,6 @@ struct TeamAskNotAccepted: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/// The sharing computer is holding the request until its owner answers.
 struct TeamAskAwaitingApproval: Error {}
 
 enum TeamAskRecoveryFailure: LocalizedError {
@@ -54,8 +50,6 @@ enum TeamAskRecoveryFailure: LocalizedError {
     var errorDescription: String? { L10n.text(self == .unavailable ? "common.teams.ask_save_failed" : "common.teams.ask_unconfirmed") }
 }
 
-/// Reuse the local draft store's locked, atomic CAS files, in a separate
-/// directory. These envelopes are never Comment attempts or send payloads.
 actor TeamAskRecoveryStore {
     static let shared = TeamAskRecoveryStore()
     struct Snapshot: Sendable { let saved: TeamCommentDraft; let record: TeamAskRecord }
@@ -95,8 +89,6 @@ actor TeamAskRecoveryStore {
             guard let saved, let record else { return nil }
             return Snapshot(saved: saved, record: record)
         } catch TeamCommentDraftFailure.changed {
-            // Another window may have persisted this same reply, or a prior
-            // delete may have succeeded before its fsync reported failure.
             let current = try await load(target)
             if current?.record == record { return current }
             throw TeamCommentDraftFailure.changed

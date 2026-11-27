@@ -4,8 +4,6 @@
 import AppKit
 import SwiftUI
 
-/// One repository, as plain values. Equatable so a card whose repository did
-/// not change is not drawn again when another one's agent speaks.
 struct RepositoryCardData: Equatable, Identifiable {
     struct Chat: Equatable, Identifiable {
         var id: String
@@ -37,7 +35,6 @@ struct RepositoryCardData: Equatable, Identifiable {
     var added: UInt64
     var removed: UInt64
     var changedFiles: Int
-    /// Nil when GitHub did not answer, which is not the same as none.
     var openPulls: Int?
     var chatCount: Int
     var taskCount: Int
@@ -54,8 +51,6 @@ struct RepositoryCardData: Equatable, Identifiable {
     }
 }
 
-/// Where each part of a card leads. One set for the page, so no card holds
-/// its own copy of the shell's navigation.
 struct RepositoryActions {
     var open: (String) -> Void
     var section: (WorkspaceSection, String) -> Void
@@ -66,7 +61,6 @@ struct RepositoryActions {
     var peek: (String) -> Void
 }
 
-// MARK: - Next step
 
 struct RepositoryStepPresentation {
     var text: String
@@ -153,7 +147,6 @@ struct RepositoryStepPresentation {
 }
 
 extension RepositoryActions {
-    /// The press a next step offers.
     func perform(_ step: RepositoryNextStep, in data: RepositoryCardData) {
         switch step {
         case let .waiting(id): chat(id, data.id)
@@ -168,7 +161,6 @@ extension RepositoryActions {
     }
 }
 
-// MARK: - Card
 
 struct RepositoryCard: View, Equatable {
     let data: RepositoryCardData
@@ -306,8 +298,6 @@ struct RepositoryCard: View, Equatable {
                         ChatPullMark(pulls: chat.pulls)
                         Spacer(minLength: 4)
                         if chat.waiting {
-                            // The mark carries the colour. Amber words are too
-                            // faint to read on a light card.
                             Circle().fill(Theme.warning).frame(width: 6, height: 6).accessibilityHidden(true)
                             Text(L10n.text("apple.repositories.chat_waiting")).font(Theme.subheadline.weight(.medium))
                         } else if chat.running {
@@ -331,8 +321,6 @@ struct RepositoryCard: View, Equatable {
         data.changedFiles > 0 || (data.openPulls ?? 0) > 0 || data.chatCount > 0 || data.taskCount > 0 || data.terminalCount > 0
     }
 
-    /// Counts that exist. A zero is left out, so what is here is worth a press.
-    /// A card too narrow for the words keeps the marks and the figures.
     @ViewBuilder private var facts: some View {
         if hasFacts {
             VStack(alignment: .leading, spacing: 8) {
@@ -401,11 +389,7 @@ struct RepositoryCard: View, Equatable {
     }
 }
 
-// MARK: - Ribbon
 
-/// Fourteen days of tokens, today last, with a mark on each day a pull request
-/// was opened. Scaled to this repository's own busiest day, which is why the
-/// total is always printed beside it.
 struct RepositoryRibbon: View {
     let keys: [String]
     let days: [UInt64]
@@ -508,7 +492,6 @@ struct RepositoryRibbon: View {
         return pulls.first { $0.state == "open" } ?? pulls.first { $0.state == "merged" } ?? pulls.first
     }
 
-    /// Open is an outline, settled is filled, so the two differ without colour.
     @ViewBuilder private func mark(_ pull: PullSummary) -> some View {
         let square = RoundedRectangle(cornerRadius: 1.5)
         if pull.state == "open" {

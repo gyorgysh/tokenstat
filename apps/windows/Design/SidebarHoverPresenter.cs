@@ -15,7 +15,6 @@ using WinRT.Interop;
 
 namespace Tokenstat.Design;
 
-/// <summary>A nonmodal card that never takes the first click or leaves a timer running after closing.</summary>
 internal sealed class SidebarHoverPresenter
 {
     private static SidebarHoverPresenter? _active;
@@ -64,14 +63,8 @@ internal sealed class SidebarHoverPresenter
             Padding = new Thickness(0), BorderThickness = new Thickness(0), Background = Theme.ClearBrush,
             Content = new FontIcon { Glyph = "\uE946", FontSize = 14, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") } };
         var label = L10n.Text("windows.sidebarhovercard.details");
-        // No tooltip: its popup takes the pointer from the row, the row drops
-        // its hover, the tooltip closes and the pointer re-enters, so the row
-        // blinks for as long as the mouse rests here. The card it opens is the
-        // explanation, and the accessible name still says what it does.
         AutomationProperties.SetName(button, label); AutomationProperties.SetAutomationId(button, "sidebar.details");
         button.Click += (_, _) => {
-            // NavigationRows can move fresh content into a retained container.
-            // Resolve its current row instead of capturing the discarded one.
             for (DependencyObject? parent = button; parent is not null; parent = VisualTreeHelper.GetParent(parent))
                 if (parent is NavigationViewItem row && Presenters.TryGetValue(row, out var presenter))
                 { if (presenter._popup is not null || presenter._pending is not null) presenter.Close(); else presenter.Begin(); break; }
@@ -162,7 +155,7 @@ internal sealed class SidebarHoverPresenter
             }
         }
         catch (OperationCanceledException) { }
-        catch { Close(); } // A preview must never break a row's normal navigation.
+        catch { Close(); }
         finally { if (_popup is null && _pending?.Token == token) CancelPending(); }
     }
     private HoverRect? Bounds()

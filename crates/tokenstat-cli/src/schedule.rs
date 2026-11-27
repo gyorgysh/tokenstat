@@ -36,9 +36,6 @@ pub fn preferred_executable() -> String {
                 return local.display().to_string();
             }
         }
-        // Prefer the conventional install path over a cargo target tree so a
-        // re-run of schedule --install from `cargo run` does not retarget the
-        // timer at a build that disappears on the next `cargo clean`.
         if current.as_ref().is_some_and(|c| is_cargo_build_path(c)) {
             return local.display().to_string();
         }
@@ -68,12 +65,9 @@ fn is_cargo_build_path(path: &Path) -> bool {
         || s.contains("/target/release/")
         || s.contains("\\target\\debug\\")
         || s.contains("\\target\\release\\")
-        || s.contains("/target/dir/") // sandbox CARGO_TARGET_DIR shapes
+        || s.contains("/target/dir/")
 }
 
-/// Escape text for an XML text node. The executable and log paths are
-/// interpolated into the plist, and a path with `&` or `<` would otherwise make
-/// a document launchd refuses to parse.
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -89,12 +83,6 @@ fn xml_escape(s: &str) -> String {
     out
 }
 
-/// Quote one executable path for a systemd `ExecStart=`.
-///
-/// Control characters are rejected rather than escaped: the unit file is read
-/// line by line, so a newline would inject a setting. Backslashes, quotes,
-/// percent specifiers and dollars are escaped because systemd expands them even
-/// inside quotes. Same discipline as `host_install::linux_unit`.
 fn systemd_exec_quote(path: &str) -> Result<String> {
     if path.chars().any(char::is_control) {
         bail!("executable path contains a control character");
@@ -108,11 +96,6 @@ fn systemd_exec_quote(path: &str) -> Result<String> {
     ))
 }
 
-/// Quote one executable path for the VBScript `Run` string.
-///
-/// A quote is doubled, which is how a VBScript string literal carries one.
-/// Control characters are rejected: a newline cannot be escaped inside a
-/// literal and would end the statement, turning a path into code.
 fn vbs_quote(path: &str) -> Result<String> {
     if path.chars().any(char::is_control) {
         bail!("executable path contains a control character");
@@ -158,8 +141,6 @@ pub enum Unit {
 }
 
 impl Unit {
-    /// Every unit this binary knows how to schedule. Used when repairing so a
-    /// stale sync or update entry from an older install cannot linger.
     #[cfg(test)]
     fn all() -> [Unit; 3] {
         [Unit::Scan, Unit::Sync, Unit::Update]
@@ -176,14 +157,8 @@ impl Unit {
     /// Arguments passed to the tokenstat binary.
     pub fn args(self) -> &'static [&'static str] {
         match self {
-            // --scheduled skips the local and network follow-on work during
-            // macOS sleep or DarkWake.
             Unit::Scan => &["scan", "--scheduled"],
-            // --scheduled adds the jitter and the self-pacing, and keeps quiet
-            // (exit 0) when there is no account or the interval has not elapsed.
             Unit::Sync => &["sync", "--scheduled"],
-            // Quiet when the user opted out; otherwise verifies the downloaded
-            // binary before letting it replace this one.
             Unit::Update => &["update", "--scheduled"],
         }
     }
@@ -510,8 +485,6 @@ pub fn install_windows_task(unit: Unit, exe: &str, interval_secs: u64) -> Result
     std::fs::write(&helper, windows_hidden_vbs(exe, unit)?)
         .with_context(|| format!("writing {}", helper.display()))?;
 
-    // Quiet: first install has nothing to delete; /F on /Create alone is not
-    // enough when the action shape changes (direct exe → hidden wscript).
     let _ = Command::new("schtasks")
         .args(["/Delete", "/TN", label, "/F"])
         .stdout(std::process::Stdio::null())
@@ -751,17 +724,13 @@ pub fn install_linked_units(
         .min_interval
         .unwrap_or_else(|| Unit::Sync.default_interval());
     let want_update = tokenstat_sync::auto_apply_enabled();
-    if want_update {
-        // Scheduler does not inherit TOKENSTAT_AUTO_UPDATE; persist so the daily
-        // unit does not treat a missing config key as off after a future default
-        // change, and so an env-forced on survives into launchd/Task Scheduler.
-        if tokenstat_sync::config::load()
+    if want_update
+        && tokenstat_sync::config::load()
             .ok()
             .and_then(|c| c.update.auto)
             != Some(true)
-        {
-            let _ = tokenstat_sync::config::set_update_auto(true);
-        }
+    {
+        let _ = tokenstat_sync::config::set_update_auto(true);
     }
     let repaired = repair(
         home,
@@ -806,15 +775,11 @@ mod tests {
 
     #[test]
     fn the_scan_plist_catches_up_at_load() {
-        // Without this, a machine that was asleep waits a full interval before
-        // recording anything, which is exactly when a catch-up matters most.
         assert!(launchd_plist(Unit::Scan, "t", 60, "/tmp/t.log").contains("<key>RunAtLoad</key>"));
     }
 
     #[test]
     fn the_sync_plist_does_not_fire_at_load() {
-        // A fleet that boots together must not sync together, and nothing is lost
-        // by waiting one interval.
         let p = launchd_plist(Unit::Sync, "t", 600, "/tmp/t.log");
         assert!(!p.contains("RunAtLoad"));
         assert!(p.contains("<string>sync</string>"));
@@ -852,7 +817,6 @@ mod tests {
         let (service, timer) = systemd_units(Unit::Scan, "/usr/bin/tokenstat", 900).unwrap();
         assert!(service.contains("ExecStart=\"/usr/bin/tokenstat\" scan"));
         assert!(timer.contains("OnUnitActiveSec=900s"));
-        // Persistent replays a missed run rather than skipping it.
         assert!(timer.contains("Persistent=true"));
     }
 
@@ -862,7 +826,6 @@ mod tests {
         assert!(service.contains("ExecStart=\"/usr/bin/tokenstat\" sync --scheduled"));
         assert!(timer.contains("OnUnitActiveSec=600s"));
         assert!(timer.contains("RandomizedDelaySec=180"));
-        // A replayed sync at boot is exactly the burst we are avoiding.
         assert!(!timer.contains("Persistent=true"));
     }
 
@@ -921,15 +884,12 @@ mod tests {
     #[test]
     fn the_windows_helper_hides_the_console() {
         let vbs = windows_hidden_vbs(r"C:\Program Files\tokenstat.exe", Unit::Sync).unwrap();
-        // """path"" args" is the VBScript form of the Run string `"path" args`.
         assert!(vbs.contains(".Run \"\"\"C:\\Program Files\\tokenstat.exe\"\" sync --scheduled\""));
-        // Window style 0 is what stops the cmd flash.
         assert!(vbs.contains(", 0, True"));
     }
 
     #[test]
     fn a_sub_minute_interval_still_produces_a_valid_windows_task() {
-        // schtasks rejects /MO 0, so short intervals clamp to one minute.
         assert!(
             windows_command(Unit::Scan, "t.exe", 30)
                 .unwrap()

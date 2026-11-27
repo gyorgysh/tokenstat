@@ -51,13 +51,8 @@ use tokenstat_core::GroupBy;
 const MUTED: Color = Color::Gray;
 const SELECTED: Color = Color::White;
 
-/// Deep violet used for panel borders: present, but never competing with data.
 const BORDER_RGB: (u8, u8, u8) = ui::BORDER_RGB;
 
-/// A brand colour as a ratatui colour, degraded to what the terminal supports.
-///
-/// ratatui will happily emit a truecolor escape to a terminal that cannot show
-/// one, so the same resolution the one-shot renderer does has to happen here.
 fn brand(rgb: (u8, u8, u8)) -> Color {
     let (r, g, b) = rgb;
     match ui::rgb(r, g, b) {
@@ -109,7 +104,6 @@ fn border() -> Color {
     brand(BORDER_RGB)
 }
 
-/// Rounded where the terminal can draw it, square where it cannot.
 fn border_type() -> BorderType {
     if ui::caps().unicode {
         BorderType::Rounded
@@ -179,7 +173,6 @@ impl Tab {
     }
 }
 
-/// Modal flow for `/login` (and `/setup`) inside the interactive client.
 enum Wizard {
     /// Pick API host before device login.
     LoginHost { selected: usize },
@@ -193,12 +186,8 @@ enum Wizard {
     Setup { step: SetupStep, selected: usize },
 }
 
-/// A read-only report window (heatmap, wrapped, budget) drawn over the current
-/// tab. The tab bar has no room for these, so they open as a popup and close
-/// with Esc. Contents are computed once at open; arrows scroll.
 struct Detail {
     lines: Vec<Line<'static>>,
-    /// Preferred popup width, clamped to the frame at draw time.
     width: u16,
     scroll: u16,
 }
@@ -252,14 +241,9 @@ struct App {
     should_quit: bool,
     empty: bool,
     totals: Totals,
-    /// Days a vendor recorded work for that the archive cannot measure. Counted
-    /// into "Active days" and drawn on every grid: the day happened, only its
-    /// tokens are unknown.
     days_unmeasured: Vec<String>,
     models: Vec<Bucket>,
     days: Vec<Bucket>,
-    /// `(YYYY-MM-DD, total tokens)` for the heatmap. The grid ramps on volume,
-    /// including cache reads and writes, independent of model pricing.
     day_tokens: Vec<(String, u64)>,
     values: Vec<(GroupBy, crate::render::ValueMap)>,
     loaded_tabs: Vec<Tab>,
@@ -269,42 +253,26 @@ struct App {
     sessions: Vec<Bucket>,
     blocks: Vec<UsageBlock>,
     filter: Query,
-    /// Date tabs default to newest first so recent days are on screen without
-    /// scrolling. One-shot `tokenstat daily` stays oldest→newest so the
-    /// response ends on today.
     chrono_newest_first: bool,
     peak_hour: Option<u8>,
     confidence: Vec<(String, u64)>,
     last_scan: Option<String>,
     reconciliation: Option<Reconciliation>,
-    /// Previous slash commands for ↑/↓ recall when the palette is closed.
     history: Vec<String>,
     history_idx: Option<usize>,
     wizard: Option<Wizard>,
     detail: Option<Detail>,
-    /// Host flag to pass to device login after leaving the alternate screen.
     pending_login_host: Option<Option<String>>,
     pending_sync_host: Option<String>,
     summary_models_expanded: bool,
     sync_hint: Option<String>,
-    /// Result channel for a `/sync` running on a worker thread. The UI never
-    /// blocks on the network, so a dead link cannot freeze the client.
     pending_sync: Option<std::sync::mpsc::Receiver<Result<tokenstat_sync::SyncResult, String>>>,
-    /// Loaded once, shared by every frame. Reading the price book and the
-    /// catalog from disk on every draw is the single biggest per-frame cost.
     prices: PriceTable,
-    /// Set when anything visible changed. The client repaints only when this is
-    /// set or the clock ticked over a minute, never on a fixed interval.
     dirty: bool,
 }
 
 const SUMMARY_MODEL_PREVIEW: usize = 10;
 
-/// Rescan when opening the interactive client if the archive is this old.
-///
-/// People open `tokenstat` to see current usage, not to remember a separate
-/// `scan` step. The shared five-minute freshness window also governs the
-/// helper and scheduled uploads.
 const AUTO_SCAN_MAX_AGE: Duration = tokenstat_core::AUTO_SCAN_INTERVAL;
 
 /// Enter alternate screen, run until quit, then restore the terminal.
@@ -314,8 +282,6 @@ const AUTO_SCAN_MAX_AGE: Duration = tokenstat_core::AUTO_SCAN_INTERVAL;
 /// looks frozen until the shell SIGKILLs the process (`zsh: killed`).
 pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
     enable_raw_mode().context("enabling raw mode")?;
-    // The guard exists before anything else touches the terminal, so a failed
-    // alternate-screen entry cannot leave raw mode behind.
     let _guard = TerminalGuard;
     install_signal_handlers();
     let mut stdout = io::stdout();
@@ -323,7 +289,6 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("creating terminal")?;
 
-    // Always leave the user's terminal usable, even on panic or early error.
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore_terminal();
@@ -332,9 +297,6 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
 
     let result = (|| {
         let mut app = App::load(db_path, tz)?;
-        // Fresh numbers on open: if nobody has scanned for a while (or ever),
-        // do it before the first interactive frame settles. Draw once first so
-        // a long scan shows "Updating archive…" instead of a blank screen.
         if archive_needs_scan(app.last_scan.as_deref(), AUTO_SCAN_MAX_AGE) {
             app.status = "Updating archive…".into();
             terminal.draw(|f| draw(f, &mut app))?;
@@ -353,10 +315,6 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
         let mut scan_check = std::time::Instant::now();
         let mut scan_job: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>> = None;
         loop {
-            // Idle is the common case, and repainting the whole frame on a
-            // timer burns CPU for no visible change. Draw only when a key
-            // press changed something, or the wall clock ticked over a minute
-            // (Blocks and Doctor render minute-granular ages).
             let now_minute = epoch_minutes();
             if app.dirty || now_minute != last_minute {
                 app.ensure_tab_loaded()?;
@@ -452,8 +410,6 @@ fn archive_needs_scan(last_scan_ms: Option<&str>, max_age: Duration) -> bool {
     age_ms >= max_age.as_millis() as u64
 }
 
-/// Restores cooked mode and the primary screen. Idempotent enough for Drop and
-/// the panic hook to both call it.
 fn restore_terminal() {
     let _ = disable_raw_mode();
     let mut stdout = io::stdout();
@@ -471,8 +427,6 @@ impl Drop for TerminalGuard {
 
 static STOP_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-/// Ask the main loop to restore the terminal and exit. Rust stdout and the
-/// terminal implementation use locks and must never run inside a signal handler.
 #[cfg(unix)]
 #[allow(unsafe_code)]
 fn install_signal_handlers() {
@@ -581,7 +535,6 @@ fn format_age_secs(secs: i64) -> String {
     }
 }
 
-/// Epoch minutes, the tick rate of the minute-granular clock text on screen.
 fn epoch_minutes() -> i64 {
     jiff::Timestamp::now().as_second() / 60
 }

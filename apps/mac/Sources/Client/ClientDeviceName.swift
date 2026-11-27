@@ -23,8 +23,6 @@ import UIKit
 /// device list that says "iPhone" is worse than one that says "iPhone 17 Pro
 /// Max" and much better than one that says "iPhone19,4".
 enum ClientDeviceName {
-    /// The kernel's model identifier, `iPhone18,2` on a phone. Simulators
-    /// report the host architecture, so the environment carries the real one.
     static var identifier: String {
         if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
             return simulated
@@ -37,7 +35,6 @@ enum ClientDeviceName {
         }
     }
 
-    /// The name a person would use for this device.
     static var marketing: String {
         let id = identifier
         if let known = models[id] { return known }
@@ -46,28 +43,16 @@ enum ClientDeviceName {
         return UIDevice.current.model
     }
 
-    /// Names this device on the host, unless somebody already named it.
-    ///
-    /// Runs at launch rather than at connect: the account directory shows this
-    /// name to every other device, and a phone that only names itself when it
-    /// dials a Mac sits in everyone else's list as "iPhone" until it does.
     @MainActor
     static func publish() async {
         guard let identity = try? await Bridge.machineIdentity() else { return }
         let current = identity.label.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A name somebody typed wins, whatever it says. Somebody who renames
-        // their phone to "iPhone" meant it, and this used to overwrite them on
-        // every launch because the name matched the placeholder. Our own
-        // rename counts as chosen too, which is what stops this running twice.
         if identity.labelIsChosen == true, !current.isEmpty { return }
         let wanted = marketing
         guard current != wanted else { return }
         _ = try? await Bridge.renameMachine(wanted)
     }
 
-    /// Only the generations this build can meet. Anything newer falls back to
-    /// the family, which is why this table does not need to be exhaustive and
-    /// must never grow a guess.
     private static let models: [String: String] = [
         "iPhone18,1": "iPhone 17 Pro",
         "iPhone18,2": "iPhone 17 Pro Max",
@@ -91,14 +76,6 @@ enum ClientDeviceName {
 
 #endif
 
-/// Which machine a row is, at a glance.
-///
-/// A list of five identical grey rectangles is a list nobody reads. The kind
-/// comes from the account when it knows one, and from the name when it does
-/// not: a machine called "MacBook Pro" is a laptop whatever the directory has
-/// recorded, and a machine that says nothing is drawn as a desktop rather than
-/// guessed at. iPad is checked before the generic client default, or every
-/// tablet would draw as a phone.
 enum ClientDeviceIcon {
     static func symbol(name: String?, isHost: Bool, platform: String? = nil) -> String {
         let lower = [name, platform]
@@ -113,7 +90,6 @@ enum ClientDeviceIcon {
         if lower.contains("iphone") || lower.contains("ipod") {
             return "iphone"
         }
-        // Bare "ios" without phone/tablet: still a phone-shaped client.
         if !isHost {
             if lower.contains("android") && (lower.contains("tablet") || lower.contains("tab ")) {
                 return "ipad"

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Real encrypted connections and production dispatch, with isolated host data.
 use super::*;
 use std::collections::HashSet;
 use std::io::Write;
@@ -76,9 +75,9 @@ fn encrypted_history_child() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     tokenstat_paths::configure_mobile(&data, root.path().join("cache")).unwrap();
-    // The parent starts this child alone, before threads or identity readers exist.
+
     unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", root.path().join("identity")) };
-    // Deterministic keys belong only to this disposable fixture and its relay.
+
     let identity_directory = tokenstat_identity::identity_dir().unwrap();
     std::fs::write(identity_directory.join("machine.key"), [60u8; 32]).unwrap();
     let host = MachineIdentity::load_or_create().unwrap();

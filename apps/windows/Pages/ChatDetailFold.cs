@@ -5,43 +5,23 @@
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// How much of an agent's work a transcript shows between a question and its
-/// answer. Port of ChatTranscriptFold.swift <c>ChatDetail</c>. Every level
-/// keeps the question, every reply, an approval, a failure and an attachment.
-/// </summary>
 internal enum ChatDetail
 {
-    /// <summary>One line per stretch of work.</summary>
     Minimal,
-    /// <summary>
-    /// One quiet line per step, the way most editors show it. An opened line
-    /// shows what the step produced, without a card.
-    /// </summary>
     Compact,
-    /// <summary>Thinking and runs of reads and searches fold to one line each.</summary>
     Standard,
-    /// <summary>Every step on its own row, with its output open.</summary>
     Detailed,
 }
 
 internal enum ChatStepGroupStyle { Work, Explored, Thought, Step }
 
-/// <summary>
-/// How a step under an open Compact line is drawn. Port of
-/// <c>ChatDisplayItem.PlainStep</c>.
-/// </summary>
 internal enum PlainStep
 {
-    /// <summary>Any other row: drawn as itself.</summary>
     None,
-    /// <summary>A lone step: only what it produced, no card and no second header.</summary>
     Detail,
-    /// <summary>One of a run: a plain line of its own, so each names its file.</summary>
     Line,
 }
 
-/// <summary>One file a turn changed. Counts are summed over the turn's edits to it.</summary>
 internal sealed record ChangedFile(string Path, long Added, long Removed)
 {
     public IReadOnlyList<string> Patches { get; init; } = Array.Empty<string>();
@@ -56,16 +36,12 @@ internal sealed record ChangedFile(string Path, long Added, long Removed)
     }
 }
 
-/// <summary>One folded line standing in for several rows. Port of <c>ChatStepGroup</c>.</summary>
 internal sealed record ChatStepGroup
 {
     public ChatStepGroupStyle Style { get; init; }
     public bool Open { get; init; }
-    /// <summary>The rows this line stands for, oldest first.</summary>
     public IReadOnlyList<string> MemberIds { get; init; } = [];
-    /// <summary>The rows themselves, shown below the header when it is open.</summary>
     public IReadOnlyList<ChatPage.DisplayItem> Members { get; init; } = [];
-    /// <summary>Tool calls and edits. Thinking and in-between text are not steps.</summary>
     public int Steps { get; init; }
     public int Files { get; init; }
     public long Added { get; init; }
@@ -73,33 +49,19 @@ internal sealed record ChatStepGroup
     public int Reads { get; init; }
     public int Searches { get; init; }
     public int Pages { get; init; }
-    /// <summary>
-    /// Steps that failed. A failure folds like any other step, since agents
-    /// retry all the time, and the line says how many so none goes unseen.
-    /// </summary>
     public int Failures { get; init; }
     public bool Running { get; init; }
     public string? LiveVerb { get; init; }
     public string? LiveTarget { get; init; }
     public long? StartedAt { get; init; }
     public long? EndedAt { get; init; }
-    /// <summary>The turn's reported spend, in Minimal, where its usage row is not drawn.</summary>
     public double? Cost { get; init; }
-    /// <summary>The first line of a folded thought.</summary>
     public string? Preview { get; init; }
-    /// <summary>Drawn as Compact draws it: a plain line, no icon or chevron.</summary>
     public bool Plain { get; init; }
-    /// <summary>The one step a single-member group stands for.</summary>
     public string? Verb { get; init; }
     public string? Subject { get; init; }
 }
 
-/// <summary>
-/// Folds coalesced rows into what a detail level shows. Port of
-/// <c>ChatTranscriptFold</c>. Detailed is the identity. An open group is its
-/// header followed by its steps, each marked with <c>GroupId</c>, never one
-/// tall card.
-/// </summary>
 internal static class ChatDetailFold
 {
     private static readonly HashSet<string> ReadVerbs = ["Read"];
@@ -122,11 +84,6 @@ internal static class ChatDetailFold
         return WithTurnChanges(folded, items, running);
     }
 
-    /// <summary>
-    /// A turn's edits, one row per file, after the turn has finished. Read
-    /// from the raw rows, since a closed group hides its edits. User rows are
-    /// never folded, so the n-th one starts the same turn in both lists.
-    /// </summary>
     public static List<ChatPage.DisplayItem> WithTurnChanges(
         List<ChatPage.DisplayItem> folded, List<ChatPage.DisplayItem> raw, bool running)
     {
@@ -238,7 +195,6 @@ internal static class ChatDetailFold
         return output;
     }
 
-    /// <summary>A path becomes its file name. A command keeps its first line.</summary>
     public static string ShortSubject(string? verb, string subject)
     {
         var newline = subject.IndexOf('\n');
@@ -254,10 +210,6 @@ internal static class ChatDetailFold
         }
     }
 
-    /// <summary>
-    /// The group header standing for <paramref name="id"/>, when it is one of
-    /// a closed group's steps.
-    /// </summary>
     public static string? Owner(string id, List<ChatPage.DisplayItem> folded)
     {
         foreach (var item in folded)
@@ -270,7 +222,6 @@ internal static class ChatDetailFold
         return null;
     }
 
-    /// <summary>Named after the first step, so it holds while a live turn grows.</summary>
     public static string GroupId(string firstMember) => "g:" + firstMember;
 
     private static bool IsExploration(string verb) =>
@@ -299,8 +250,6 @@ internal static class ChatDetailFold
             else if (item.Kind == ChatPage.ItemKind.Thinking)
             {
                 FlushRun(false);
-                // Reasoning still arriving stays open. It folds once anything
-                // comes after it.
                 if (running && index == items.Count - 1)
                 {
                     output.Add(item);
@@ -325,8 +274,6 @@ internal static class ChatDetailFold
         List<ChatPage.DisplayItem> items, bool running, Func<string, bool> isOpen)
     {
         var output = new List<ChatPage.DisplayItem>();
-        // A turn runs from one question to the next. Rows before the first
-        // question (a window that opens mid-turn) are a turn of their own.
         var starts = new List<int>();
         for (var i = 0; i < items.Count; i++)
         {
@@ -376,8 +323,6 @@ internal static class ChatDetailFold
                 case ChatPage.ItemKind.Thinking:
                 case ChatPage.ItemKind.Tool:
                 case ChatPage.ItemKind.Edit:
-                    // A failed step folds with the rest. The work line counts
-                    // it, so it is marked without taking a card of its own.
                     members.Add(item);
                     break;
                 default:
@@ -388,8 +333,6 @@ internal static class ChatDetailFold
         }
         Flush(true);
 
-        // The spend rides on the turn's last work line. A turn with no work to
-        // fold, or without a complete positive cost, keeps one token total.
         var knownCost = double.IsFinite(cost) && usage.All(item => !item.CostUnknown && double.IsFinite(item.Cost) && item.Cost >= 0);
         if (lastHeader >= 0 && knownCost && cost > 0 && output[lastHeader].Group is { } group)
         {
@@ -422,8 +365,6 @@ internal static class ChatDetailFold
             Group = group with { Open = open, Members = [.. members] },
         });
         if (!open) return;
-        // A Compact line already names its step, so a lone step drops its
-        // card and shows what it produced. A run keeps a plain line per step.
         var plain = !group.Plain ? PlainStep.None : members.Count == 1 ? PlainStep.Detail : PlainStep.Line;
         foreach (var member in members)
         {
@@ -500,7 +441,6 @@ internal static class ChatDetailFold
         };
     }
 
-    /// <summary>The first line that says something, without its markdown marks.</summary>
     public static string? Preview(string text)
     {
         foreach (var line in text.Split('\n'))

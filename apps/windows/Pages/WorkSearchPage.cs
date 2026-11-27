@@ -14,12 +14,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Search over the same host queries as the Mac work search. A query field
-/// with kind filters, live results from work.search with cursor paging, and
-/// recent queries for an empty field. Opening a hit returns to the folder
-/// it lives in: a conversation opens in Chat, anything else in Sessions.
-/// </summary>
 internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly StackPanel _inspector = new()
@@ -142,7 +136,6 @@ internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbar
 
     public event Action? ToolbarChanged { add { } remove { } }
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
     public IList<UIElement> ToolbarActions()
@@ -168,11 +161,6 @@ internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbar
         };
     }
 
-    /// <summary>
-    /// The inspector column content: recent searches and what the last query
-    /// found. Searches repaint it, so the column stays live without the shell
-    /// asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -418,8 +406,6 @@ internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbar
             TextWrapping = TextWrapping.Wrap,
         });
         body.Children.Add(heading);
-        // A folder's row is its own name twice over otherwise: the title and
-        // the trail. Show the excerpt only when it says something new.
         if (!string.IsNullOrEmpty(excerpt) && excerpt != title)
         {
             body.Children.Add(Excerpt(hit, excerpt));
@@ -477,11 +463,6 @@ internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbar
         return open;
     }
 
-    /// <summary>
-    /// The mark for a search hit kind, from the one vocabulary. Glyphs match
-    /// the previous call-site symbols one for one: comment is the message,
-    /// reveal the folder, merge the switch, plan the document, search the lens.
-    /// </summary>
     private static ActionIcon KindIcon(string kind) => kind switch
     {
         "conversation" => ActionIcon.Comment,
@@ -538,11 +519,6 @@ internal sealed partial class WorkSearchPage : Page, IInspectorContent, IToolbar
         return rich;
     }
 
-    /// <summary>
-    /// Where it came from, and when it last changed when that is known. A
-    /// folder carries no time of its own: the host answers zero for it, which
-    /// would print as decades ago. Saying Live and stopping is honest.
-    /// </summary>
     private static string Timing(JsonNode hit)
     {
         var source = Format.Text(hit, "source", L10n.Text("windows.worksearchpage.live.b64ac05f"));

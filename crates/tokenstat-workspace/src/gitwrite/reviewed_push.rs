@@ -187,15 +187,12 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
         message: "Pushing the reviewed commit.".into(),
         retry_allowed: false,
     };
-    // Keep an interrupted attempt's original endpoint through preflight.
     let previous_endpoint = previous
         .as_ref()
         .and_then(|stored| stored.endpoint.as_deref());
     save_receipt(&path, &result, previous_endpoint)?;
     let prepared = (|| {
         let mut fresh = review(dir)?;
-        // LFS readiness is advisory review metadata, not part of the bound
-        // branch/destination identity. Older clients do not round-trip it.
         fresh.lfs = reviewed.lfs.clone();
         if fresh != *reviewed {
             return Err(
@@ -229,8 +226,6 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
     };
     save_receipt(&path, &result, Some(&url))?;
     let spec = format!("{}:{}", reviewed.head, reviewed.remote_ref);
-    // A URL pins the endpoint without re-reading remote.* configuration in
-    // git push. Credentials and pre-push hooks still run in the host Git env.
     match command(
         dir,
         &[
@@ -261,8 +256,6 @@ pub fn push(dir: &Path, id: &str, reviewed: &Review, retry: bool) -> Result<Rece
             }
         }
         Ok(out) => {
-            // A network failure may follow a successful receive on the remote.
-            // Keep the identity; explicit recovery reads the destination.
             let rejected = String::from_utf8_lossy(&out.stdout)
                 .lines()
                 .any(|line| line.starts_with("!\t"));

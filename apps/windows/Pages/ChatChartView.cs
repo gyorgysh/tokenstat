@@ -12,7 +12,6 @@ using Windows.Foundation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>An offline chart has an isolated browser profile and a narrow export bridge.</summary>
 internal sealed class ChatChartView : Grid
 {
     private const string PageUri = "https://charts.tokenstat.invalid/index.html";
@@ -85,8 +84,6 @@ internal sealed class ChatChartView : Grid
     private void ObserveVisibility()
     {
         StopObservingVisibility();
-        // Collapsed ancestors do not receive viewport notifications. Observe
-        // those transitions too, so a folded transcript releases its browser.
         for (DependencyObject? node = this; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
             if (node is UIElement element)
                 _visibilityOwners.Add((element, element.RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => RefreshViewport())));
@@ -115,13 +112,9 @@ internal sealed class ChatChartView : Grid
         if (!visible && _web is not null) RetireBrowser();
         if (_visibilityScheduled) return;
         _visibilityScheduled = true;
-        // Viewport notifications run during layout. Change native browser
-        // children on a later turn, using the latest visibility and lifetime.
         if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
         {
             _visibilityScheduled = false;
-            // A quick return must not keep a browser whose navigation finished
-            // while it was outside the viewport and could not render.
             ReleaseRetiredBrowser();
             if (_inViewport && IsLoaded) await StartAsync();
             else if (_web is not null) Close();
@@ -264,7 +257,7 @@ internal sealed class ChatChartView : Grid
     {
         ++_epoch; _loaded = false;
         var web = _web; _web = null;
-        if (web is not null) { try { web.Close(); } catch { /* A failed browser may already have closed. */ } }
+        if (web is not null) { try { web.Close(); } catch { } }
         Children.Clear();
     }
 }

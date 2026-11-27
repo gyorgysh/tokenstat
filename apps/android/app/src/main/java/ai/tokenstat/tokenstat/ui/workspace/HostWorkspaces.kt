@@ -128,18 +128,12 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/// One block of the connected-host Workspaces surface. Hosts stay outside
-/// this list: they are how you get here, not cards to rearrange. Port of
-/// `WorkspacesSection` in `WorkspacesLayout.swift`.
 enum class WorkSection(val key: String, val label: String, val detail: String) {
     FOLDERS("folders", L10n.text("common.projects"), L10n.text("android.hostworkspaces.projects_on_the_connected_computer.458f1f5f")),
     RECENT_CHATS("recent_chats", L10n.text("android.hostworkspaces.recent_chats.2ccfecbc"), L10n.text("android.hostworkspaces.chats_opened_recently.0953f969")),
     SESSIONS("sessions", L10n.text("android.hostworkspaces.all_sessions.78648d4d"), L10n.text("android.hostworkspaces.terminals_and_agents_running_now.ac545246")),
 }
 
-/// How this device arranges the three work blocks once a host is connected.
-/// Device furniture, same idea as Home: the layout is not per host. Backed
-/// by SharedPreferences the way the Apple client uses UserDefaults.
 class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     private val prefs = context.getSharedPreferences("tokenstat.workspaces.v1", Context.MODE_PRIVATE)
 
@@ -169,9 +163,6 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     fun lastConnectedHost(): String? =
         if (accountScope.isBlank()) null else prefs.getString(lastHostKey(), null)
 
-    /// Every host this account has connected to or explicitly enabled. The
-    /// last active one comes first for navigation; callers still apply the
-    /// per-host auto-connect switch and live account directory before dialing.
     fun rememberedHosts(knownPeers: Set<String>): List<String> {
         if (accountScope.isBlank()) return emptyList()
         return (listOfNotNull(lastConnectedHost()) +
@@ -188,9 +179,6 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
         editor.apply()
     }
 
-    /// Carry the old single-account choice forward only when that host is
-    /// actually on the signed-in account. Remove the legacy keys after the
-    /// transfer so a later account cannot inherit the first account's host.
     fun migrateLegacyHost(knownPeers: Set<String>) {
         if (accountScope.isBlank()) return
         val legacy = prefs.getString("lastConnectedHost", null) ?: return
@@ -205,9 +193,6 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
         editor.remove("lastConnectedHost").remove(oldAutoKey).apply()
     }
 
-    /// Missing means on. Nothing dials on its own until somebody has
-    /// connected by hand once, because the auto path needs the last host and
-    /// only a successful connection writes it.
     fun isAutoConnectEnabled(peer: String): Boolean =
         accountScope.isNotBlank() && prefs.getBoolean(autoConnectKey(peer), true)
 
@@ -221,9 +206,6 @@ class WorkspaceLayoutStore(context: Context, private val accountScope: String) {
     }
 }
 
-/// Which harness a session command belongs to, port of
-/// `harnessID(forCommand:)`. The last path component decides: the full
-/// command is a path, and the brand is the binary.
 fun harnessIdForCommand(command: String): String? = when (command.replace('\\', '/').substringAfterLast("/").removeSuffix(".exe").removeSuffix(".cmd").removeSuffix(".bat")) {
     "claude" -> "claude_code"
     "codex" -> "codex"
@@ -243,8 +225,6 @@ fun harnessIdForCommand(command: String): String? = when (command.replace('\\', 
     else -> null
 }
 
-/// One-line git summary: branch, ahead/behind, diff stat. Nil when there is
-/// nothing worth saying. Port of `WorkspaceFolder.subtitle`.
 fun folderSubtitle(folder: JsonObject): String? {
     if ((folder["exists"] as? JsonPrimitive)?.booleanOrNull == false) return L10n.text("android.hostworkspaces.folder_missing.f06c68a6")
     if (folder.bol("gitStatusPending") == true) return null
@@ -263,10 +243,6 @@ fun folderSubtitle(folder: JsonObject): String? {
     return parts.joinToString(" ").takeIf { it.isNotEmpty() }
 }
 
-/// The same ahead, behind and diff figures as `folderSubtitle`, without the
-/// branch name. For a row that already says which branch it is on: the folder
-/// header repeated "main" beside "Branch main" and then said nothing about
-/// what was actually waiting in it.
 fun folderGitStats(folder: JsonObject): String? {
     val git = folder["git"] as? JsonObject ?: return null
     if (git.bol("isRepo") != true) return null
@@ -285,8 +261,6 @@ fun folderGitStats(folder: JsonObject): String? {
 private fun gitChangeSummary(git: JsonObject, files: Int): String {
     val added = (git["added"] as? JsonPrimitive)?.intOrNull ?: 0
     val removed = (git["removed"] as? JsonPrimitive)?.intOrNull ?: 0
-    // Untracked and binary changes have unknown line counts. A zero floor is
-    // not a useful summary; say how many paths changed instead.
     if (added == 0 && removed == 0) {
         return if (files == 1) L10n.text("android.hostworkspaces.change_count.one", files.toString())
             else L10n.text("android.hostworkspaces.change_count.other", files.toString())
@@ -294,8 +268,6 @@ private fun gitChangeSummary(git: JsonObject, files: Int): String {
     return "+$added" + (if (removed > 0) " −$removed" else "")
 }
 
-/// The power glyph for a stats reading: a bolt on the wall, a battery
-/// draining with the percent, a charging battery while it fills.
 fun powerIconVector(charging: Boolean, percent: Int?, power: String?): ImageVector {
     if (charging) return Icons.Default.BatteryChargingFull
     if (power == "ac") return Icons.Default.Bolt
@@ -308,8 +280,6 @@ fun powerIconVector(charging: Boolean, percent: Int?, power: String?): ImageVect
     return Icons.Default.Bolt
 }
 
-/// The same wording and colours the screen viewer uses, on a machine row.
-/// Nothing renders for a path nobody has observed yet.
 @Composable
 fun ConnectionRouteMark(route: String?) {
     val label = HostStatsFormat.routeLabel(route) ?: return
@@ -328,10 +298,6 @@ fun ConnectionRouteMark(route: String?) {
     }
 }
 
-/// Compact power, CPU and memory for a machine, refilled every 2.5 seconds
-/// over the tunnel. Ported from `HostStatsStrip`: the power cell always
-/// draws (an ellipsis while loading, n/a when the hop failed), CPU and
-/// memory join only when the host measured them.
 @Composable
 fun HostStatsStrip(model: AppViewModel, peer: String, online: Boolean = true) {
     val colors = LocalTsColors.current
@@ -345,8 +311,6 @@ fun HostStatsStrip(model: AppViewModel, peer: String, online: Boolean = true) {
                 .onSuccess { stats = it; failed = false }
                 .onFailure {
                     android.util.Log.w("ts-stats", "host.stats failed for peer len=${peer.length}: $it")
-                    // Matches iOS: failed tracks this hop, and the last good
-                    // readings stay on screen either way.
                     failed = true
                 }
             route = runCatching { model.peerRoute(peer) }.getOrNull()
@@ -401,10 +365,6 @@ fun HostStatsStrip(model: AppViewModel, peer: String, online: Boolean = true) {
     }
 }
 
-/// One host on the account: presence, name, and the way in. Port of
-/// `hostCard` in `ClientWorkspacesView.swift`. No card-wide tap: the card
-/// holds Connect/Disconnect, Open device and an Auto-connect toggle, and a
-/// parent tap would fire for taps on those controls too.
 @Composable
 fun HostCard(
     model: AppViewModel,
@@ -472,9 +432,6 @@ fun HostCard(
                     color = colors.textSecondary,
                 )
             }
-            // Opening the device used to hide behind a bare chevron, so the
-            // card never said it could be entered. It says so now, as its
-            // own row.
             if (onOpenDevice != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -490,11 +447,7 @@ fun HostCard(
                 }
             }
             if (connected) {
-                // What the machine is doing, rather than a sentence saying
-                // it is connected. The row already says that: the dot is lit
-                // and the button says Disconnect.
                 HostStatsStrip(model, peer, online != false)
-                // Per-host, on by default, same line-height as Disconnect.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -538,7 +491,6 @@ fun HostCard(
     }
 }
 
-/** Several hosts share one short list; details stay in each row's menu. */
 @Composable
 fun CompactHostList(
     model: AppViewModel,
@@ -557,7 +509,6 @@ fun CompactHostList(
 ) {
     val colors = LocalTsColors.current
     var expanded by remember { mutableStateOf(false) }
-    // Preserve account order while the asynchronous host dials finish.
     val ordered = hosts
     val shown = if (expanded) ordered else ordered.take(3)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(cardRadiusDp)).tsPanel()
@@ -665,7 +616,6 @@ fun CompactHostList(
     }
 }
 
-/** A route is a live tunnel reading; the online dot only means presence. */
 @Composable
 private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
     val colors = LocalTsColors.current
@@ -735,10 +685,6 @@ private fun CompactHostConnectionSummary(model: AppViewModel, peer: String) {
 
 private const val ROW_MARK = 26
 
-/// A path shortened in the middle, the way the Apple rows truncate one:
-/// the start says which machine area, the end says which folder, and the
-/// middle is what nobody needs. Compose only ellipsizes the end, so long
-/// paths are cut by hand.
 fun middleTruncate(text: String, maxChars: Int = 48): String {
     if (maxChars <= 0) return ""
     if (maxChars == 1) return if (text.length <= 1) text else "…"
@@ -748,12 +694,6 @@ fun middleTruncate(text: String, maxChars: Int = 48): String {
     return text.take(head) + "…" + text.takeLast(tail)
 }
 
-/// What protects a connection between this phone and a computer, in the
-/// words and the numbers it actually runs on. Ported from
-/// `ClientSecurityCard.swift`: a glass divider on the work list, not a
-/// fourth device card, expanding to the keys a person can compare against
-/// the other machine. The wording follows the privacy rule: the guarantee
-/// is the boundary, not the read.
 @Composable
 fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
     val colors = LocalTsColors.current
@@ -764,9 +704,6 @@ fun SecurityCard(model: AppViewModel, peerKey: String?, peerName: String?) {
     var copied by remember { mutableStateOf<String?>(null) }
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(peerKey) {
-        // The effect restarts per peer, but a run already past its first
-        // call is not stopped by the next one starting. Capture what this
-        // run is for and refuse to publish into a different peer's card.
         val wanted = peerKey
         val got = runCatching { model.machineIdentity() }.getOrNull()
         currentCoroutineContext().ensureActive()
@@ -928,8 +865,6 @@ private fun SecurityKeyRow(
     }
 }
 
-/// One registered folder: its name, path, and git state. Port of
-/// `ClientFolderRow`.
 @Composable
 fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> Unit)? = null, peer: String? = null, grouped: Boolean = false) {
     val colors = LocalTsColors.current
@@ -1027,8 +962,6 @@ fun WorkspaceFolderRow(folder: JsonObject, onOpen: () -> Unit, onRename: (() -> 
     }
 }
 
-/// One running session: the harness mark where the command names one, a
-/// terminal tile otherwise. Port of `ClientSessionRow`.
 @Composable
 fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen: () -> Unit, grouped: Boolean = false) {
     val colors = LocalTsColors.current
@@ -1076,9 +1009,6 @@ fun WorkspaceSessionRow(session: JsonObject, displayName: String? = null, onOpen
     }
 }
 
-/// One recent chat: harness mark with an attention dot, title, and where it
-/// lives. Port of `ClientRecentChatRow`. This device keeps no read receipts,
-/// so the dot is attention only: unread tracking lives on the Apple client.
 @Composable
 fun WorkspaceChatRow(chat: JsonObject, folderName: String, peer: String, onOpen: () -> Unit, grouped: Boolean = false) {
     val colors = LocalTsColors.current
@@ -1138,9 +1068,6 @@ fun WorkspaceChatRow(chat: JsonObject, folderName: String, peer: String, onOpen:
     }
 }
 
-/// The screen a device sees until that computer lets it in. Opening the host
-/// is somebody saying they want in, so the asking happens without a second
-/// press; the button stays, for asking again once a request has gone stale.
 const val REQUEST_ACCESS_PENDING_NOTICE = "request_access_pending"
 
 @Composable
@@ -1261,8 +1188,6 @@ fun RequestAccessCard(
     }
 }
 
-/// A machine with no folders is a machine waiting to be given one, and both
-/// ways to do that are here rather than described.
 @Composable
 fun EmptyWorkspacesCard(
     hostName: String,
@@ -1289,8 +1214,6 @@ fun EmptyWorkspacesCard(
     )
 }
 
-/// Chats live inside folders, so starting one means picking the folder
-/// first. Port of `ClientFolderChooserSheet`.
 @Composable
 fun FolderChooserDialog(
     title: String,
@@ -1332,9 +1255,6 @@ fun FolderChooserDialog(
     )
 }
 
-/// Order of Folders, Recent chats and All sessions on the connected machine.
-/// Hosts stay above. Mirrors `HomeEditor`: presets, then visible rows with
-/// up/down moves, then hidden rows.
 @Composable
 fun WorkspacesEditor(
     order: List<WorkSection>,
@@ -1431,8 +1351,6 @@ fun WorkspacesEditor(
     }
 }
 
-/// The connected host at a glance: one bar per visible block, in order.
-/// Port of `WorkspacesLayoutPreview`.
 @Composable
 fun WorkspacesLayoutPreview(sections: List<WorkSection>) {
     val colors = LocalTsColors.current

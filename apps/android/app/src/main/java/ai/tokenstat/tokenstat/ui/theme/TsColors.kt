@@ -13,9 +13,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 
-/// Shared visual constants, transcribed from the Apple client's
-/// `Sources/Design/Theme.swift`. The brand colours follow tokenstat.ai's
-/// design tokens, so both clients read as one product in either theme.
 @Immutable
 data class TsColors(
     val isDark: Boolean,
@@ -39,23 +36,11 @@ data class TsColors(
     val stateIdle: Color,
     val diffAdded: Color,
     val diffRemoved: Color,
-    /// Five steps of activity, idle first. Step 0 is neutral so a quiet day
-    /// reads as "nothing here"; upper levels run violet into fuchsia.
     val heat: List<Color>,
-    /// Text colours standing in for SwiftUI's `.primary/.secondary/.tertiary`.
-    /// The Apple client never gives these a hex: body text is `.primary`
-    /// (opaque black or white) and supporting text the hierarchical
-    /// `.secondary` and `.tertiary` styles, which are that same black or
-    /// white at 60% and 30% alpha. These transcribe that behaviour, not a
-    /// brand value, so they stay readable if the background ever moves.
     val textPrimary: Color,
     val textSecondary: Color,
     val textTertiary: Color,
-    /// The logo draws in the brand's own colours on the Default theme only.
-    /// Beside an orange or teal interface the violet mark reads as a sticker.
     val showsBrandColors: Boolean = true,
-    /// This theme brings its own activity ramp, whose quiet step reads on any
-    /// ground.
     val ownsHeat: Boolean = false,
 ) {
     fun heat(level: Int): Color = heat[level.coerceIn(0, heat.lastIndex)]
@@ -133,27 +118,15 @@ val DarkColors: TsColors = TsColors(
 
 val LocalTsColors = staticCompositionLocalOf { DarkColors }
 
-/// The accent tinted at card strength; success is deliberately the accent.
 val TsColors.rowSelected: Color get() = accent.copy(alpha = 0.18f)
 
-/// Text and glyphs on an accent fill. White on the brand violet, near black on
-/// the pale accents the other themes use in the dark.
 val TsColors.onAccent: Color get() = if (accent.luminance() > 0.35f) Color(0xFF111114) else Color.White
 
-/// Highlight kind, mirroring the core table the Apple client reads. A kind
-/// this build does not know decodes as Unknown and renders as plain text.
 enum class SyntaxKind {
     Keyword, String, Number, Comment, Type, Function, Constant, Attribute,
     Property, Variable, Operator, Punctuation, Markup, Unknown,
 }
 
-/// Colour for a syntax kind.
-///
-/// The whole palette in one place, transcribed hex-for-hex from the Apple
-/// client's `Sources/Design/Theme.swift`, which is the only place the app
-/// decides what a keyword looks like. Variables, operators and punctuation
-/// stay the text colour: colouring every token is how a file ends up
-/// unreadable, so most of it must not be coloured.
 fun TsColors.syntax(kind: SyntaxKind): Color = when (kind) {
     SyntaxKind.Keyword -> accent
     SyntaxKind.String ->
@@ -175,8 +148,6 @@ fun TsColors.syntax(kind: SyntaxKind): Color = when (kind) {
         textPrimary
 }
 
-/// A drop shadow weighted for the appearance it lands on: dark mode takes the
-/// full weight, light mode a little under half.
 fun TsColors.shadow(opacity: Float): Color = Color.Black.copy(alpha = if (isDark) opacity else opacity * 0.35f)
 
 @Composable
@@ -187,16 +158,8 @@ fun rememberTsColors(): TsColors {
     return remember(systemDark, mode, palette) { AppAppearance.colors(mode, palette, systemDark) }
 }
 
-/// Material widgets that have not been restyled still read this scheme, so
-/// light paper cannot sit under a forced `darkColorScheme`.
 fun TsColors.toColorScheme(): ColorScheme {
     val onAccent = onAccent
-    // Every floating surface reads the container roles: dialogs use High,
-    // menus use Container. Leaving them at Material's defaults painted all
-    // thirty-odd dialogs and every menu neutral grey in dark mode, while
-    // light mode hid it. Highest stays default on purpose: it feeds the
-    // switch and progress tracks, which read fine grey on a card and would
-    // blend into one in panel.
     val scheme = if (isDark) {
         darkColorScheme(
             primary = accent,
@@ -242,8 +205,6 @@ fun TsColors.toColorScheme(): ColorScheme {
             onTertiary = onAccent,
         )
     }
-    // Material's own tracks and chips are violet, the brand's and no other
-    // theme's.
     return if (showsBrandColors) scheme else scheme.copy(secondaryContainer = border, onSecondaryContainer = textPrimary)
 }
 

@@ -45,7 +45,6 @@ class SshSessionsTest {
 
     @Test
     fun reconcileSkipsClosingSessions() {
-        // A close in flight must not adopt the session back.
         val out = reconcileSessions(
             current = emptyList(),
             held = listOf(entry("a")),
@@ -56,8 +55,6 @@ class SshSessionsTest {
 
     @Test
     fun reconcileMarksForgottenSessionsEnded() {
-        // The host reaps an ended shell before answering. The entry stays
-        // until explicitly closed, so the final output can still be read.
         val out = reconcileSessions(
             current = listOf(entry("a")),
             held = emptyList(),

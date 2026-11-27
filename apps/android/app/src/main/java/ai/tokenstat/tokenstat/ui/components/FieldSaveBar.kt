@@ -23,9 +23,6 @@ import androidx.compose.ui.unit.sp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// Whether an editable field has something waiting to be written. Ported
-/// from `FieldSaveState` in `Sources/Design/Theme.swift`, same five states
-/// in the same order.
 enum class FieldSaveState {
     Idle,
     Dirty,
@@ -34,9 +31,6 @@ enum class FieldSaveState {
     Failed,
 }
 
-/// The status word the bar shows for a state, or null when the bar shows
-/// nothing. Same copy as the Apple status view: Unsaved, Saving, Saved,
-/// and Not saved for a failure.
 fun saveStateLabel(state: FieldSaveState): String? = when (state) {
     FieldSaveState.Idle -> null
     FieldSaveState.Dirty -> L10n.text("android.fieldsavebar.unsaved.6250d572")
@@ -45,16 +39,9 @@ fun saveStateLabel(state: FieldSaveState): String? = when (state) {
     FieldSaveState.Failed -> L10n.text("android.fieldsavebar.not_saved.22b3467c")
 }
 
-/// Whether the Save and Cancel buttons are on screen. Ported from
-/// `FieldSaveBar`: implicit blur-save hid failures, so the buttons stay
-/// visible exactly while there is something unwritten or a write that
-/// failed.
 fun saveBarShowsActions(state: FieldSaveState): Boolean =
     state == FieldSaveState.Dirty || state == FieldSaveState.Failed
 
-/// Unsaved / Saving / Saved next to Save and Cancel. A card that looks
-/// finished after a keystroke, then reverts later, is worse than a button
-/// that says it wrote.
 @Composable
 fun FieldSaveBar(
     state: FieldSaveState,

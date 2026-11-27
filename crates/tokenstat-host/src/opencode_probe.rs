@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! A leased local server for read-only discovery. It never depends on or
-//! restarts the user's background service, including during CLI upgrades.
-
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -75,8 +72,7 @@ impl Server {
                     .filter(|_| ready.len() <= 64 * 1024)
                     .map(|_| ready),
             );
-            // A service may log after readiness; keep its stdout open and
-            // draining without retaining that output in memory.
+
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
         let ready = rx
@@ -117,7 +113,6 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        // EOF ends the service's lease, also when the owning host crashes.
         self.child.stdin.take();
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline {
@@ -128,7 +123,6 @@ impl Drop for Server {
         }
         #[cfg(unix)]
         if let Ok(pid) = i32::try_from(self.child.id()) {
-            // SAFETY: this child owns a dedicated process group.
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }

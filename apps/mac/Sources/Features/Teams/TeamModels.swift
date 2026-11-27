@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Directory scope is independent of login ownership and the origin of a
-/// mounted chat. Choosing an organization never changes WorkSessionContext.
 struct TeamAccountOwner: Hashable, Sendable {
     let scope: WorkReference.Scope
     let generation: UInt64
     let session: String
-    /// Verified account profile identity; usable for local writing recovery,
-    /// never as a substitute for current Team capabilities or membership.
     let personId: String?
     init(scope: WorkReference.Scope, generation: UInt64, session: String, personId: String? = nil) {
         self.scope = scope; self.generation = generation; self.session = session
@@ -60,8 +56,6 @@ struct TeamAPI: Sendable {
         return try JSONDecoder().decode(T.self, from: JSONEncoder().encode(value))
     }
 }
-/// The step that stopped a signed-in device from turning Teams on: a code
-/// that stays the same across releases and a sentence for the person.
 struct TeamSetupIssue: Decodable, Sendable, Equatable { let code: String; let message: String }
 struct TeamCapabilities: Decodable, Sendable {
     var supportsAppPresence = false
@@ -71,10 +65,7 @@ struct TeamCapabilities: Decodable, Sendable {
     var canPublishChats = false
     var canResumeProjectSharing = false
     var canReviewChatSelection = false
-    /// The person removed this device from Teams. Signing in again does not
-    /// turn it back on; their account settings do.
     var deviceRemoved = false
-    /// Why this device did not turn Teams on by itself, as the host saw it.
     var setupIssue: TeamSetupIssue?
     var actorId: String?
     var enabled: Bool
@@ -170,11 +161,7 @@ struct TeamRepository: Codable, Identifiable, Hashable, Sendable {
     let role: TeamRepositoryRole?
     let revision: UInt64
     let createdAt: String
-    /// How many computers share it now. An older account server leaves this
-    /// out, and then every project counts as shared, as it always did.
     var activeCheckouts: Int? = nil
-    /// A project whose last computer stopped sharing still exists in the
-    /// team. It belongs in the project list, not among shared projects.
     var isShared: Bool { activeCheckouts.map { $0 > 0 } ?? true }
 }
 struct TeamRepositoryMember: Codable, Identifiable, Hashable, Sendable {
@@ -261,9 +248,6 @@ struct TeamSharedChat: Codable, Identifiable, Hashable, Sendable {
 struct TeamSharedChats: Decodable, Sendable { let shares: [TeamSharedChat]; let nextOffset: Int? }
 struct TeamNewChat: Decodable, Sendable {
     let share: String
-    /// Opening the exact creation result must not depend on its position in
-    /// a paged catalog. The reader fetches authoritative details before use;
-    /// this reference carries no publication revision or creation-date claim.
     func openingReference(checkout: String, title: String) -> TeamSharedChat? {
         guard !share.isEmpty, !checkout.isEmpty else { return nil }
         return TeamSharedChat(id: share, checkoutId: checkout, revision: 0, createdAt: "", title: title)
@@ -316,8 +300,6 @@ struct TeamChatCatalog: Decodable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         shares = try values.decode([TeamSharedChat].self, forKey: .shares)
         nextCursor = try values.decodeIfPresent(String.self, forKey: .nextCursor)
-        // Agent discovery is optional on older publishers. Malformed metadata
-        // must not hide valid shared chats or silently replace a draft choice.
         backends = (try? values.decode(BackendMetadata.self, forKey: .backends))?.choices
     }
 }
@@ -381,8 +363,6 @@ enum TeamMessageAttribution {
         }
         return people
     }
-    /// Comments and Asks by people who have left the organization. The host
-    /// sends no name or id for them, only that they were here.
     static func former(_ events: [JSONValue]) -> Set<String> {
         Set(events.compactMap { event in
             guard case let .object(row) = event, row["kind"] == .string("user"),
@@ -437,8 +417,6 @@ struct TeamMutationContext: Equatable, Sendable { let owner: TeamAccountOwner; l
     static func parse(_ value: String) -> Date? { fractional.date(from: value) ?? standard.date(from: value) }
 }
 
-/// Only the hosted first-party avatar route may be fetched. A profile never
-/// chooses a network origin, path traversal, query or external image service.
 func teamAvatarURL(_ path: String?, owner: TeamAccountOwner?) -> URL? {
     guard let path, let owner, path.hasPrefix("/avatar/"),
           let name = path.split(separator: "/", omittingEmptySubsequences: false).last,

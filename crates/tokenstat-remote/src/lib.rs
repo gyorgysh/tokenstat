@@ -328,9 +328,6 @@ impl Connection {
     /// a separate stall timeout bounds gaps within the message.
     pub fn receive_within(&mut self, max: usize, idle: Duration) -> Result<Vec<u8>, RemoteError> {
         let result = read_one(&mut self.noise, &mut *self.stream, max, Some(idle));
-        // `read_one` leaves the idle timeout on the transport for the next
-        // frame. This connection goes back into a pool where the next caller
-        // decides its own budget, so hand it back the way it was found.
         let _ = self.stream.set_read_timeout(None);
         if let Ok(ref payload) = result {
             note_payload(self.relay, payload.len() as u64);
@@ -448,8 +445,6 @@ impl Core {
 pub struct StreamReader {
     core: Arc<Mutex<Core>>,
     read_ready: Option<ReadReady>,
-    // Keep concurrent callers from consuming pieces of each other's message
-    // while allowing the independent writer to use Core between reads.
     reading: Mutex<()>,
 }
 
@@ -538,9 +533,6 @@ impl StreamReader {
             let wait_time = remaining
                 .unwrap_or(Duration::from_millis(400))
                 .min(Duration::from_millis(400));
-            // Always inspect queued input before treating an elapsed budget
-            // as a stall: an outgoing write may have held Core in the meantime.
-            // Readiness waits and short fallback reads preserve every byte.
             if let Some(wait) = &self.read_ready {
                 {
                     let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
@@ -583,8 +575,6 @@ impl StreamReader {
                     if progress.is_some_and(|last| last.elapsed() >= stall) {
                         return Err(RemoteError::BrokenMessage);
                     }
-                    // Custom transports may report an immediate timeout. Let
-                    // writers run without busy-spinning on those transports.
                     std::thread::sleep(Duration::from_millis(5));
                 }
                 Err(error) => return Err(error.into()),
@@ -624,8 +614,6 @@ impl StreamWriter {
     }
 
     fn write_with_stall_timeout(&self, payload: &[u8], stall: Duration) -> Result<(), RemoteError> {
-        // Writers cannot interleave frames from different messages, even
-        // though the reader may use Core between partial socket writes.
         let _writing = self.writing.lock().map_err(|_| RemoteError::Closed)?;
         if !self.short_writes {
             return self.write_blocking(payload);
@@ -811,8 +799,6 @@ fn read_one(
     }
     let result = read_remaining_frames(noise, stream, total);
     if restore {
-        // Best effort: the value is going back the way it was found, and a
-        // transport that cannot take it is already failing the read above.
         let _ = stream.set_read_timeout(idle_timeout);
     }
     result
@@ -878,10 +864,6 @@ fn read_framed(
     let mut header = [0u8; 4];
     match idle_timeout {
         Some(timeout) => {
-            // With an idle budget, bound only the wait before the first
-            // byte. Once a byte has arrived the frame must complete, or the
-            // retry would re-read from the middle of it and corrupt the
-            // stream. The timeout is restored afterwards.
             stream.set_read_timeout(Some(timeout))?;
             let mut filled = 0;
             let header_result = loop {
@@ -915,9 +897,6 @@ fn read_framed(
             header_result?;
         }
         None => {
-            // The handshake and request/response paths: a deadline, if any,
-            // is owned by the caller and the whole frame must finish under
-            // it.
             stream.read_exact(&mut header)?;
         }
     }
@@ -929,8 +908,6 @@ fn read_framed(
     let mut bytes = vec![0u8; len];
     match idle_timeout {
         Some(timeout) => {
-            // A stalled partial frame is terminal: retrying would interpret
-            // the remaining ciphertext as a new length header.
             stream
                 .set_read_timeout(Some(MESSAGE_STALL_TIMEOUT))
                 .map_err(RemoteError::Io)?;
@@ -1082,8 +1059,6 @@ fn handshake_initiator_with_timeout(
     let response = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
     handshake.read_message(&response, &mut buffer)?;
 
-    // Last message carries this machine's display name so the far side can
-    // show "iPhone" rather than "unnamed machine" when recording a pending peer.
     let intro = intro_payload();
     let n = handshake.write_message(&intro, &mut buffer)?;
     write_framed(&mut stream, &buffer[..n])?;
@@ -1101,8 +1076,6 @@ fn handshake_initiator_with_timeout(
         });
     }
 
-    // The handshake timeout was for the handshake. A session read blocks until
-    // there is an answer, which for a scan is a long time.
     stream.set_deadline(None)?;
     let relay = stream.is_relay();
 
@@ -1184,8 +1157,6 @@ impl Server {
     }
 
     fn handshake(&self, stream: TcpStream, address: &str) -> Result<Connection, Refused> {
-        // Blocking from here on, whatever the listener was.
-        //
         // The direct listener is non-blocking so its accept loop can notice a
         // stop flag rather than parking forever on `accept`. On BSD, and so on
         // macOS, an accepted socket inherits that flag, and the Noise
@@ -1237,8 +1208,6 @@ pub fn authorize_with(
         relay,
     } = connection;
     let label = intro_label.trim().to_string();
-    // Directory lookups may wait for the network. Do that before taking the
-    // peer-store lock, then check current trust again inside the transaction.
     let account_label = if let Some(hook) = auto_approve {
         let store = PeerStore::load().map_err(|e| Refused::Handshake(RemoteError::Identity(e)))?;
         if store.get(&peer).is_none_or(|p| p.trust == Trust::Pending) {
@@ -1253,16 +1222,12 @@ pub fn authorize_with(
         let prior_peer = store.get(&peer);
         let known = prior_peer.is_some();
         let prior = prior_peer.map(|p| p.trust);
-        // Whether the peer arrived carrying a name this store does not have.
-        // A first contact and a rename are both worth a write; a machine
-        // saying the same thing again is not.
         let named_differently = store
             .get(&peer)
             .map(|existing| !label.is_empty() && existing.label != label)
             .unwrap_or(false);
         let mut trust = store.seen(&peer, &label, Some(address), &crate::now());
         let mut approved_now = false;
-        // Auto-approve only when still pending (never when revoked).
         if trust == Trust::Pending
             && prior != Some(Trust::Revoked)
             && let Some(account_label) = account_label
@@ -1276,10 +1241,6 @@ pub fn authorize_with(
             trust = Trust::Approved;
             approved_now = true;
         }
-        // Written back only when something changed. A phone opens a channel
-        // per workspace, per terminal and per port, and rewriting peers.json
-        // on each of them is the disk churn the original code avoided by
-        // saving new peers only.
         (
             (
                 known,
@@ -1403,7 +1364,6 @@ fn now() -> String {
 fn format_epoch(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
-    // Howard Hinnant's civil_from_days, which is exact and short.
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
@@ -1664,8 +1624,6 @@ mod tests {
         let write = std::thread::spawn(move || {
             let _ = sent.send(send.write(b"outbound"));
         });
-        // The readiness wait is still parked. Sending must finish without it
-        // timing out or receiving any input from the peer.
         let result = received.recv_timeout(Duration::from_millis(200));
         allowed.store(false, std::sync::atomic::Ordering::SeqCst);
         *release.0.lock().unwrap() = true;
@@ -1781,8 +1739,6 @@ mod tests {
         let accepted = std::thread::spawn(move || {
             loop {
                 match server.accept() {
-                    // Approval is not what this is about: a refusal that names
-                    // the peer store means the handshake itself got through.
                     Ok(answer) => return answer.map(|_| ()).map_err(|e| format!("{e:?}")),
                     Err(RemoteError::Io(error))
                         if error.kind() == std::io::ErrorKind::WouldBlock =>
@@ -1829,9 +1785,6 @@ mod tests {
             if output.is_empty() || self.position >= self.data.len() {
                 return Ok(0);
             }
-            // A gap longer than the split stream's short deadline and far
-            // shorter than the one a message is allowed. Only a deadline in
-            // that band fires, which is the band a loaded relay sits in.
             if self.timeout.is_some_and(|t| t < Duration::from_secs(1)) {
                 self.stall = !self.stall;
                 if self.stall {
@@ -1936,8 +1889,6 @@ mod tests {
 
     #[test]
     fn a_large_message_survives_a_pause_inside_it() {
-        // Three Noise frames' worth, so the continuation path is exercised
-        // rather than the header path alone.
         let payload: Vec<u8> = (0..(MAX_PAYLOAD * 2 + 1024))
             .map(|i| (i % 251) as u8)
             .collect();
@@ -1957,7 +1908,6 @@ mod tests {
             timeout: None,
             stall: false,
         };
-        // Exactly what `split` does to the transport it is handed.
         reader
             .set_read_timeout(Some(STREAM_READ_TIMEOUT))
             .expect("arm the deadline");
@@ -1980,8 +1930,6 @@ mod tests {
         };
         assert_eq!(got.len(), payload.len());
         assert_eq!(got, payload);
-        // And the deadline is handed back, so the next read still yields to
-        // the writer rather than parking on the lock forever.
         assert_eq!(reader.timeout, Some(STREAM_READ_TIMEOUT));
     }
 
@@ -2016,8 +1964,6 @@ mod tests {
                 self.0.set_read_timeout(timeout)
             }
         }
-        // Both a partial length prefix and a partial encrypted header must
-        // release the shared connection lock instead of waiting forever.
         for cut in 1..24 {
             let (mut sender, mut receiver) = transport_pair();
             let mut wire = StutteringTransport {

@@ -117,7 +117,7 @@ pub fn apply(
         {
             return Err("handoff request ID was already used for different content".into());
         }
-        // A lost reply does not create a new revision or change its time.
+
         return Ok(PutResult::Saved {
             handoff: current.clone(),
         });

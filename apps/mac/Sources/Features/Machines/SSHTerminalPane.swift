@@ -23,18 +23,12 @@ import SwiftUI
 struct SSHTerminalPane: View {
     @Bindable var sessions: SSHSessionsModel
     let library: SSHLibraryModel
-    /// The saved record this pane belongs to. Layout is remembered per host.
     let host: SSHHost
-    /// Whether this pane may take the keyboard. False while it is mounted
-    /// under another destination.
     var claimsFocus: Bool = true
 
     @Environment(\.detailChromeToggles) private var toggles
 
     @State private var closing: SSHLiveTerminal?
-    /// A command whose placeholders are being filled before it is typed into
-    /// the shell in front. This keeps snippets reachable when the inspector is
-    /// closed, which is the common layout on a narrower window.
     @State private var asking: SSHSnippet?
 
     private var mine: [SSHLiveTerminal] { sessions.sessions(for: host.id) }
@@ -54,8 +48,6 @@ struct SSHTerminalPane: View {
         sessions.activeSession(for: host.id)
     }
 
-    /// Snippets type into a live shell only. Ended tabs keep their scrollback
-    /// and may stay selected, but writing to one is a silent no-op at the host.
     private var snippetTarget: SSHLiveTerminal? {
         guard let active, active.alive else { return nil }
         return active
@@ -104,18 +96,9 @@ struct SSHTerminalPane: View {
         }
     }
 
-    // MARK: - Tabs
 
     private var strip: some View {
         HStack(spacing: Theme.Space.s) {
-            // The window's own two marks, in the places every other screen
-            // puts them. This strip is written here rather than built from
-            // `DetailChromeBar`, because that view owns the order of its
-            // slots and a row of session tabs wants to sit after the sidebar
-            // mark rather than before it. What it must not do is skip them:
-            // the SSH terminal was the one destination in the app with no way
-            // to reopen the inspector except the keyboard, so a snippets pane
-            // somebody closed was a pane they had to know a chord to get back.
             toggles?.leftSidebar
             ForEach(mine) { session in
                 SSHSessionChip(
@@ -125,9 +108,6 @@ struct SSHTerminalPane: View {
                         && session.id == trailing?.id
                         && session.id != active?.id
                 ) {
-                    // Option-click puts a tab in the other half, the same
-                    // chord the workspace strip uses. One gesture, two panes,
-                    // and nothing new to learn on this screen.
                     if NSEvent.modifierFlags.contains(.option) {
                         sessions.sendToOtherHalf(session, in: host.id)
                     } else {
@@ -185,14 +165,11 @@ struct SSHTerminalPane: View {
                 .disabled(mine.count < 2)
             }
 
-            // Last, nearest the edge it opens, exactly as the shared chrome
-            // bar places it.
             if let right = toggles?.rightInspector {
                 right
             }
         }
         .padding(.horizontal, Theme.Space.m)
-        // The same optical baseline as every other destination's chrome row.
         .chromeBarMetrics()
         .modifier(DesktopTitlebarPlate(fallback: Theme.tabStrip))
     }
@@ -209,9 +186,6 @@ struct SSHTerminalPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Run a saved command. Placeholder commands go through the same prompt as
-    /// the phone and the inspector before they reach this path, so the filled
-    /// line is on screen before anything is sent.
     private func use(_ snippet: SSHSnippet) {
         if SSHSnippet.placeholders(in: snippet.command).isEmpty {
             type(snippet.command)
@@ -227,9 +201,6 @@ struct SSHTerminalPane: View {
     }
 }
 
-/// The fill-in sheet for a saved command the palette chose, on whichever
-/// session is in front. Written as a modifier because the session in front
-/// can be nil and a `sheet(item:)` needs something to bind to.
 struct PaletteSnippetSheet: ViewModifier {
     let session: SSHLiveTerminal?
 
@@ -238,7 +209,6 @@ struct PaletteSnippetSheet: ViewModifier {
     }
 }
 
-/// One session's tab.
 private struct SSHSessionChip: View {
     let session: SSHLiveTerminal
     let isSelected: Bool
@@ -261,8 +231,6 @@ private struct SSHSessionChip: View {
                         .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    // A session that ended keeps its tab and says so. Its last
-                    // screenful is often the reason somebody is looking.
                     if !session.alive {
                         Text(L10n.text("apple.sshterminalpane.ended.e87ba7a0"))
                             .font(Theme.caption2)
@@ -277,8 +245,6 @@ private struct SSHSessionChip: View {
             if isSelected || isHovering {
                 TabCloseButton(help: L10n.text("apple.sshterminalpane.close_this_session.fa2af1b6"), action: onClose)
             } else {
-                // Holds the width the button would take, so a tab does not
-                // resize under the pointer and shove every tab after it along.
                 Color.clear.frame(width: 20, height: 20)
             }
         }

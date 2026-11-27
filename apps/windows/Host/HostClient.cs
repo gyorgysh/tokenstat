@@ -72,8 +72,6 @@ internal sealed class HostClient
         };
         var line = payload.ToJsonString();
 
-        // hostd shares its session across connections. Give each request its
-        // own pipe so a scan or remote dial cannot queue every page behind it.
         using var pipe = new NamedPipeClientStream(
             ".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
@@ -84,12 +82,8 @@ internal sealed class HostClient
             }
             catch (TimeoutException) when (_recover is not null)
             {
-                // Recover only before sending. Replaying an interrupted write
-                // could create a second terminal, workspace or other mutation.
                 lock (_recoveryGate)
                 {
-                    // All pages may notice the same outage. One restart
-                    // attempt serves them all, including when startup fails.
                     if (DateTime.UtcNow - _lastRecovery > TimeSpan.FromSeconds(15))
                     {
                         try { _recover(); }
@@ -100,8 +94,6 @@ internal sealed class HostClient
             }
             using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, leaveOpen: true);
             using var deadline = new CancellationTokenSource(timeout);
-            // Bound writes as well as reads; a live but stuck helper must not
-            // leave a page waiting indefinitely.
             pipe.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), deadline.Token).AsTask().GetAwaiter().GetResult();
             var response = reader.ReadLineAsync(deadline.Token).AsTask().GetAwaiter().GetResult();
             if (response is null)

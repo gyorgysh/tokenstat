@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! What to offer somebody part-way through typing a command in an SSH session.
-//!
-//! Two honest sources and no third one. A saved snippet is something the
-//! person wrote down themselves, and a directory name is something the server
-//! was asked for over the session that is already open. Nothing here guesses
-//! at shell history, walks `PATH`, or installs anything on the far end, and
-//! nothing is ever sent to the shell because a row happens to be highlighted.
-//!
-//! The ranking lives in the host rather than in a client so that the Mac,
-//! Windows and Android all offer the same rows in the same order, and so that
-//! the parts worth testing (which token is being completed, what a name has to
-//! be escaped to, which row wins) are tested once.
 
 use serde::Serialize;
 
@@ -102,13 +90,8 @@ pub(crate) struct PathQuery {
     pub head: String,
 }
 
-/// Punctuation that starts a whole new command. The word after one of these
-/// is a program name again, so nothing is completed against it.
 const COMMAND_BREAKS: &[char] = &['|', ';', '&', '(', ')', '`', '{', '}', '\n'];
 
-/// Punctuation that ends a word without ending the command. What follows a
-/// redirect or an `=` is a path, which is exactly what is worth completing:
-/// `--config=/etc/n` should offer the file, not the flag.
 const WORD_BREAKS: &[char] = &[' ', '\t', '<', '>', '='];
 
 /// Split off the word the cursor is sitting at the end of.
@@ -150,9 +133,6 @@ pub(crate) fn last_token(fragment: &str) -> Token {
                 start = index + ch.len_utf8();
             }
             ch if WORD_BREAKS.contains(&ch) => {
-                // A redirect is always followed by a path, whatever came
-                // before it. A space only makes an argument once a command
-                // word has actually been typed.
                 if seen_word || ch == '<' || ch == '>' {
                     first = false;
                 }
@@ -170,7 +150,6 @@ pub(crate) fn last_token(fragment: &str) -> Token {
     }
 }
 
-/// Turn `a\ b` back into `a b`.
 fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut escaped = false;
@@ -202,9 +181,7 @@ pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery>
     if token.first || token.open_quote {
         return None;
     }
-    // A word not started yet, after a command that has one. `cd ` means "what
-    // is in here", which is only answerable where the session's own directory
-    // is known.
+
     if token.text.is_empty() {
         let base = base?;
         return Some(PathQuery {
@@ -216,8 +193,7 @@ pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery>
     if token.text.starts_with('-') {
         return None;
     }
-    // A half-open quote. Completing into it would change what the rest of the
-    // line means.
+
     if token.text.contains('\'') || token.text.contains('"') {
         return None;
     }
@@ -243,7 +219,6 @@ pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery>
             trimmed.to_string()
         }
     } else {
-        // A relative head: `src/`, `../`, `./log/`.
         let base = base?;
         let joined = format!("{}/{}", base.trim_end_matches('/'), head);
         joined.trim_end_matches('/').to_string()
@@ -251,7 +226,6 @@ pub(crate) fn path_query(token: &Token, base: Option<&str>) -> Option<PathQuery>
     Some(PathQuery { dir, prefix, head })
 }
 
-/// Characters a shell leaves alone inside a bare word.
 fn plain(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || "_./:@%+,^-".contains(ch)
 }
@@ -311,7 +285,6 @@ pub(crate) struct SessionHistory {
     /// directory the session was opened in, moved by the `cd` lines watched
     /// since, and replaced outright whenever the server says so itself.
     pub cwd: Option<String>,
-    /// The one before this, for `cd -`.
     previous: Option<String>,
     /// Directories this session has been in, most recent first.
     pub directories: Vec<String>,
@@ -321,16 +294,8 @@ pub(crate) struct SessionHistory {
 
 const KEPT_DIRECTORIES: usize = 60;
 const KEPT_COMMANDS: usize = 200;
-/// The longest command line worth remembering. A pasted file is not a command
-/// somebody will want offered back to them.
 const LONGEST_COMMAND: usize = 512;
 
-/// Commands after which this side no longer knows where the session is.
-///
-/// Each of these can leave the person somewhere else entirely: on another
-/// machine, as another user, inside a container, or in a shell whose
-/// directory this one never saw. Guessing after one of them is how a
-/// completion ends up naming a directory that is not there.
 const LOSES_THE_PLACE: [&str; 14] = [
     "ssh", "su", "sudo", "doas", "docker", "podman", "kubectl", "chroot", "bash", "sh", "zsh",
     "fish", "screen", "tmux",
@@ -366,12 +331,11 @@ impl SessionHistory {
         self.follow(command);
     }
 
-    /// Move the working directory the way this line would have.
     fn follow(&mut self, command: &str) {
         let token = last_token(command);
         let mut words = command.split_whitespace();
         let Some(head) = words.next() else { return };
-        // The name as typed, so `/usr/bin/ssh` counts as `ssh`.
+
         let name = head.rsplit('/').next().unwrap_or(head);
         if name != "cd" {
             if LOSES_THE_PLACE.contains(&name) {
@@ -379,8 +343,7 @@ impl SessionHistory {
             }
             return;
         }
-        // `cd` with more than one word after it is not a plain change of
-        // directory, and neither is one this side cannot read.
+
         let argument = words.next().unwrap_or("~");
         if words.next().is_some() || token.open_quote {
             self.previous = self.cwd.take();
@@ -401,12 +364,11 @@ impl SessionHistory {
         self.arrive(target);
     }
 
-    /// Where an argument to `cd` would put the session.
     fn resolve(&self, argument: &str) -> Option<String> {
         if argument.starts_with('/') || argument == "~" || argument.starts_with("~/") {
             return Some(normalize(argument));
         }
-        // Relative, so it only means something from somewhere known.
+
         let cwd = self.cwd.as_deref()?;
         Some(normalize(&format!(
             "{}/{argument}",
@@ -423,19 +385,12 @@ impl SessionHistory {
     }
 }
 
-/// Most recent first, no repeats, bounded.
 fn remember(list: &mut Vec<String>, value: String, keep: usize) {
     list.retain(|held| held != &value);
     list.insert(0, value);
     list.truncate(keep);
 }
 
-/// Fold `.` and `..` away without touching the disk.
-///
-/// Textual on purpose: this runs against a path on another machine, so there
-/// is nothing here to ask. A `..` through a symlink therefore lands where the
-/// text says rather than where the link does, and the listing that follows is
-/// what settles whether it exists at all.
 fn normalize(path: &str) -> String {
     let rooted = path.starts_with('/');
     let home = path == "~" || path.starts_with("~/");
@@ -491,7 +446,6 @@ pub(crate) fn rank(
     let replace_all = fragment.chars().count();
     let replace_token = token.text.chars().count();
 
-    // 1. A saved command being typed out by hand.
     if !typed.is_empty() {
         for snippet in snippets {
             if starts_with_fold(&snippet.command, typed) && snippet.command.len() > typed.len() {
@@ -519,8 +473,6 @@ pub(crate) fn rank(
         for entry in names {
             let path = joined(query, entry);
             let Some(insert) = escape_path(&path) else {
-                // A name with a newline in it. Not something to type into a
-                // prompt on somebody's behalf.
                 continue;
             };
             rows.push(Row {
@@ -534,13 +486,6 @@ pub(crate) fn rank(
         }
     }
 
-    // 3. A line already run in this session, being typed again. Somebody
-    // repeating themselves is the commonest thing at a prompt, and this is
-    // the one source that knows what they repeat. After the directory,
-    // because when a path is being written the path is the answer.
-    //
-    // Three characters of it, so `cd ` does not offer back every `cd` this
-    // session has run in front of what is actually in the folder.
     if typed.trim().chars().count() >= 3 {
         for command in &history.commands {
             if starts_with_fold(command, typed) && command.len() > typed.len() {
@@ -556,9 +501,6 @@ pub(crate) fn rank(
         }
     }
 
-    // 4. Somewhere this session has already been. Offered whenever a path is
-    // being written, including the moment after `cd `, because the folder
-    // somebody wants next is usually one they have been in before.
     if query.is_some() {
         let wanted = token.literal();
         for directory in &history.directories {
@@ -590,11 +532,6 @@ pub(crate) fn rank(
         }
     }
 
-    // 5. Saved commands found by name.
-    //
-    // Three characters, not one: `cd` and `ls` appear inside half the
-    // commands anybody saves, and a palette that opened on the command word
-    // of every line would be in the way rather than in reach.
     let wanted = typed.trim();
     if wanted.chars().count() >= 3 {
         let mut found: Vec<Row> = Vec::new();
@@ -609,9 +546,6 @@ pub(crate) fn rank(
         sort_scoped(&mut found, snippets);
         rows.append(&mut found);
 
-        // 6. And a line run in this session with the typed text anywhere in
-        // it, which is how somebody finds the long command they half
-        // remember.
         for command in &history.commands {
             if contains_fold(command, wanted) {
                 rows.push(Row {
@@ -666,7 +600,6 @@ fn sort_scoped(rows: &mut [Row], snippets: &[Snippet]) {
 
 fn matches_prefix(name: &str, prefix: &str) -> bool {
     if prefix.is_empty() {
-        // A bare `.` file is noise until somebody types the dot.
         return !name.starts_with('.');
     }
     starts_with_fold(name, prefix)
@@ -705,7 +638,6 @@ pub(crate) fn list_command(dir: &str) -> Option<String> {
     Some(format!("LC_ALL=C ls -1ApL -- {target}"))
 }
 
-/// Wrap in single quotes, the one form a POSIX shell reads literally.
 fn single_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\"'\"'"))
 }
@@ -725,9 +657,7 @@ pub(crate) fn parse_listing(output: &str, cap: usize) -> Vec<Entry> {
         if line.is_empty() {
             continue;
         }
-        // `ls` on a path that does not exist writes to stderr, which the
-        // reader keeps separate. A line that still looks like a message is
-        // not a filename anybody can use.
+
         let directory = line.ends_with('/');
         let name = line.trim_end_matches('/');
         if name.is_empty() || name.contains('/') || name.chars().any(char::is_control) {
@@ -1172,8 +1102,6 @@ mod tests {
 
     #[test]
     fn a_password_is_never_remembered_because_it_never_arrives() {
-        // The client only reports a line the far end echoed, so this is the
-        // whole of the guarantee here: what is not handed over is not kept.
         let past = SessionHistory::default();
         assert!(past.commands.is_empty());
     }
@@ -1275,10 +1203,7 @@ mod tests {
         );
         let wire = serde_json::to_value(&rows[0]).expect("serialize");
         let object = wire.as_object().expect("object");
-        // A row with no placeholders still says so. A strict decoder on the
-        // other end reads a missing key as a broken answer rather than as an
-        // empty list, and a palette that never appears is what that looks
-        // like from the outside.
+
         for key in ["kind", "title", "detail", "insert", "replace", "variables"] {
             assert!(object.contains_key(key), "{key} is missing from {wire}");
         }

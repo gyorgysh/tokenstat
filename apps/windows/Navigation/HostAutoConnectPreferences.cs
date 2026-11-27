@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Account-owned host reconnect choices, including one-time legacy migration.</summary>
 internal sealed class HostAutoConnectPreferences(string path, string legacyPath)
 {
     public bool IsEnabled(string? scope, string peer)
@@ -29,7 +28,6 @@ internal sealed class HostAutoConnectPreferences(string path, string legacyPath)
         Write(root);
     }
 
-    /// <summary>Claim each old choice once, and only for a peer listed on this account.</summary>
     public void Migrate(string? scope, IEnumerable<string> accountPeers)
     {
         if (string.IsNullOrEmpty(scope)) return;

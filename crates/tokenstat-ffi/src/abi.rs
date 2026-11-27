@@ -125,7 +125,6 @@ mod tests {
         assert_eq!(raw, tokenstat_ffi_protocol_version());
     }
 
-    /// Drive the real C entry point the way Swift will.
     fn c_call(method: &str, params: &str) -> String {
         let m = CString::new(method).unwrap();
         let p = CString::new(params).unwrap();

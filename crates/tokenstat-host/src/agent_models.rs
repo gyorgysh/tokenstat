@@ -4,14 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Live model lists from the agent CLIs this machine actually has.
-//!
-//! The picker used to ship a curated snapshot. That goes stale the moment a
-//! CLI adds a default (grok-4.6 was on `grok models` while the picker still
-//! offered only grok-4.5). Each backend that can list does so here. A miss
-//! falls back to the small snapshot so a missing CLI still has something to
-//! show, and a timeout cannot hang the picker.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
@@ -29,7 +22,6 @@ enum Cached {
     Miss,
 }
 
-/// Backends whose CLI can enumerate its own models.
 const LISTABLE: &[&str] = &[
     "grok",
     "cursor",
@@ -47,17 +39,8 @@ const LISTABLE: &[&str] = &[
 /// so its aliases are the whole picker rather than a stopgap.
 pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
     match id {
-        // Claude Code resolves these aliases itself ("fable", "opus", or
-        // "sonnet" per its `--help`); haiku is the long-standing third
-        // tier. Full ids change with every release and need an account to
-        // enumerate, so the aliases are the stable contract.
         "claude" => &["fable", "opus", "sonnet", "haiku"],
-        // The live list comes from `codex app-server`'s `model/list`, and
-        // replaces these the moment a probe answers. They are here because
-        // the first request after a daemon starts is served before any
-        // probe has finished, and an empty list means no model picker at
-        // all: a Codex chat could only ever run the model in
-        // `~/.codex/config.toml`, with nothing on screen saying why.
+
         "codex" => &[
             "gpt-5.6-sol",
             "gpt-5.6-terra",
@@ -66,9 +49,7 @@ pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
             "gpt-5.4",
             "gpt-5.4-mini",
         ],
-        // Muse's MSP model/list replaces this snapshot after discovery.
-        // Keep the confirmed Contributor aliases: MSP lists base models,
-        // while the terminal picker also offers these discounted variants.
+
         "muse" => &[
             "muse-wonder-1.0",
             "muse-spark-1.3",
@@ -88,8 +69,7 @@ pub(crate) fn fallback_for(id: &str) -> &'static [&'static str] {
             "gpt-5-mini",
             "glm-5.2-high",
         ],
-        // agy reports the account-specific catalog. Offer the common Flash
-        // tier while its probe is pending and let the live list replace it.
+
         "agy" => &[
             "gemini-3.8-flash-medium",
             "gemini-3.8-flash-low",
@@ -155,7 +135,6 @@ pub fn refresh_now() {
     probe_all(true);
 }
 
-/// Whether any entry is missing or past its TTL. Pure cache read, no probes.
 fn needs_refresh() -> bool {
     let cache = cache_lock();
     for &id in LISTABLE {
@@ -176,8 +155,6 @@ fn needs_refresh() -> bool {
     false
 }
 
-/// One background refresh at a time. A second caller while probes are in
-/// flight serves the cache instead of doubling the subprocesses.
 static REFRESH_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn claim_refresh() -> bool {
@@ -195,10 +172,6 @@ fn release_refresh() {
     REFRESH_IN_FLIGHT.store(false, std::sync::atomic::Ordering::Release);
 }
 
-/// The probes themselves, on a background thread: same parallel fan-out as
-/// before, one timeout rather than one per backend, but no request waits
-/// for it. The claim releases even on panic, so one bad probe run cannot
-/// wedge every later refresh.
 fn refresh_blocking() {
     struct ReleaseOnDrop;
     impl Drop for ReleaseOnDrop {
@@ -252,9 +225,6 @@ pub fn for_backend(id: &str, fallback: &[&str]) -> Vec<String> {
 /// Enumeration is distinct from installation and from account access.
 pub(crate) fn list_status(id: &str) -> &'static str {
     if !LISTABLE.contains(&id) {
-        // No probe, but possibly a curated list. "defaultOnly" is reserved
-        // for backends with neither, so the picker never offers models its
-        // status disowns. Clients ignore unknown values.
         return if fallback_for(id).is_empty() {
             "defaultOnly"
         } else {
@@ -279,10 +249,6 @@ fn fill(id: &str, force: bool, fetch: impl FnOnce() -> Option<Vec<String>>) {
         }
     }
     let Some(list) = fetch().filter(|list| !list.is_empty()) else {
-        // A failed probe must not evict a good list: the picker would
-        // silently downgrade to fallbacks until the next success. Record a
-        // miss only when there is nothing to keep; otherwise refresh its
-        // timestamp so we back off and do not storm probes on every request.
         let mut lock = cache_lock();
         if let Some(entry) = lock.get_mut(id) {
             entry.at = Instant::now();
@@ -431,16 +397,9 @@ pub(crate) fn run_cli_probe(
 
 fn reap_list_child(child: &mut std::process::Child) {
     #[cfg(windows)]
-    // A CLI launcher can own a Node child that still holds stdout. Retire
-    // its tree while the live launcher PID identifies this exact process.
     tokenstat_pty::kill_windows_process_tree(child.id());
     #[cfg(unix)]
     if let Ok(pid) = i32::try_from(child.id()) {
-        // Both listing launchers create their own process group. Signal it
-        // before killing/reaping its leader: signaling a zombie-only group
-        // returns EPERM on macOS, and spawning `kill` adds another unbounded
-        // process to a path that is supposed to have reached its deadline.
-        // SAFETY: the negative pid names this child's dedicated process group.
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
     let _ = child.kill();
@@ -458,9 +417,6 @@ fn muse_models() -> Option<Vec<String>> {
     )?)
 }
 
-/// Codex and Muse enumerate through a stdio JSON-RPC server rather than a
-/// `models` command. Discovery opens no agent session and sends no prompt.
-/// Retire the server's process tree as soon as its catalog has been read.
 fn model_list_rpc(command_name: &str, args: &[&str]) -> Option<String> {
     let bin = crate::launcher::resolve_command(command_name)?;
     let path_var = crate::launcher::search_path_var();
@@ -483,8 +439,6 @@ fn model_list_rpc(command_name: &str, args: &[&str]) -> Option<String> {
     }
     let mut child = command.spawn().ok()?;
 
-    // `initialize` first: the server answers nothing else until it has been
-    // told who is asking.
     let answer = (|| {
         {
             let stdin = child.stdin.as_mut()?;
@@ -500,16 +454,12 @@ fn model_list_rpc(command_name: &str, args: &[&str]) -> Option<String> {
             stdin.write_all(handshake.as_bytes()).ok()?;
             stdin.flush().ok()?;
         }
-        // Closing stdin would end the session before the answer arrives, so the
-        // pipe is held open for as long as the child is.
+
         let stdout = child.stdout.take()?;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout.take(LIST_CAP as u64));
             for line in reader.lines().map_while(Result::ok) {
-                // Notifications arrive on the same pipe. Only the answer to id 2
-                // is being waited for: parse the line so a payload mentioning
-                // `"id":2` elsewhere does not match.
                 let is_answer = serde_json::from_str::<serde_json::Value>(&line)
                     .ok()
                     .and_then(|value| value.get("id")?.as_u64())
@@ -542,9 +492,6 @@ pub(crate) fn parse_codex_models(line: &str) -> Option<Vec<String>> {
     (!ids.is_empty()).then_some(ids)
 }
 
-/// Muse's catalog contains selectable base models, newest first. Keep that
-/// order and add only confirmed Contributor aliases whose base is present.
-/// Unknown future models arrive without needing a tokenstat release.
 fn parse_muse_models(line: &str) -> Option<Vec<String>> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let models = value.get("result")?.get("models")?.as_array()?;
@@ -658,7 +605,7 @@ pub(crate) fn sanitize_agy_model(raw: &str) -> Option<String> {
     if is_model_id(first) {
         return Some(first.to_string());
     }
-    // Legacy: the whole line is the `--model` value, e.g. "Gemini 3.1 Pro (High)".
+
     if first.chars().any(|c| c.is_whitespace()) {
         return Some(first.to_string());
     }
@@ -741,9 +688,7 @@ pub fn cheapest_model(backend: &str, models: &[String]) -> Option<String> {
     if models.is_empty() {
         return None;
     }
-    // Grok's build-fast variants charge a premium for speed. The "fast"
-    // marker describes a cheaper model for some providers, but choosing a
-    // build-fast variant here would increase the cost of automatic work.
+
     let eligible =
         |model: &&String| backend != "grok" || !model.to_ascii_lowercase().ends_with("-build-fast");
     for marker in CHEAP_MARKERS {
@@ -802,9 +747,6 @@ mod tests {
 
     #[test]
     fn unlistable_backends_report_curated_or_default_only() {
-        // Claude has no list command, so the curated table is the
-        // whole picker for it. The status must say so: "defaultOnly" while
-        // models are advertised is the picker contradicting itself.
         assert_eq!(super::list_status("claude"), "curated");
         assert_eq!(super::list_status("sh"), "defaultOnly");
         assert_eq!(super::list_status("no-such-backend"), "defaultOnly");
@@ -1030,8 +972,6 @@ gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)
 
     #[test]
     fn a_hanging_list_command_is_reaped() {
-        // Login-shell discovery has its own budget and is cached. Measure the
-        // probe's process timeout after that unrelated startup work finishes.
         let _ = tokenstat_pty::login_env();
         let start = Instant::now();
         let (command, args): (&str, &[&str]) = if cfg!(windows) {
@@ -1085,7 +1025,7 @@ gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)
             .creation_flags(0x08000000)
             .spawn()
             .unwrap();
-        // Start a fresh line after libtest's own progress label.
+
         println!("\nCHILD:{}", agent.id());
         std::io::stdout().flush().unwrap();
         let _ = agent.wait();
@@ -1139,9 +1079,7 @@ gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)
                 }
             }
         });
-        // Native fixtures avoid PowerShell startup and output dependencies.
-        // Hold the exact descendant's handle so PID reuse cannot make the
-        // post-cleanup assertion inspect an unrelated process.
+
         let ready = rx.recv_timeout(Duration::from_secs(20));
         let process = ready.as_ref().ok().and_then(|pid| unsafe {
             crate::win32::handle_to_owned(crate::win32::OpenProcess(0x00100000, 0, *pid))
@@ -1200,8 +1138,7 @@ gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)
                 "opencode models parsed to {list:?}"
             );
         }
-        // Codex speaks a protocol instead of printing a list, so this one
-        // exercises the whole handshake on a machine that has the CLI.
+
         if crate::launcher::resolve_command("codex").is_some()
             && let Some(list) = codex_models()
         {
@@ -1262,7 +1199,6 @@ not-a-model
         let past = Instant::now() - (LIVE_TTL + Duration::from_secs(1));
         cache_lock().get_mut(test_id).unwrap().at = past;
 
-        // Failing probe should keep the live model list and refresh its timestamp
         fill(test_id, false, || None);
         assert_eq!(for_backend(test_id, &[]), vec!["test-model-1"]);
 
@@ -1270,16 +1206,12 @@ not-a-model
         assert!(entry_at.elapsed() < Duration::from_secs(5));
     }
 
-    /// Refresh in the picker has to reach the CLI even though the cached list
-    /// is minutes from expiring, which is the whole case it exists for: an API
-    /// key was added a moment ago and the provider it unlocked is missing.
     #[test]
     fn a_forced_fill_probes_a_fresh_entry() {
         let test_id = "test-probe-force";
         fill(test_id, false, || Some(vec!["before".into()]));
         assert_eq!(for_backend(test_id, &[]), vec!["before"]);
 
-        // Well inside LIVE_TTL: an ordinary fill must not probe.
         fill(test_id, false, || Some(vec!["after".into()]));
         assert_eq!(for_backend(test_id, &[]), vec!["before"]);
 
@@ -1287,9 +1219,6 @@ not-a-model
         assert_eq!(for_backend(test_id, &[]), vec!["after"]);
     }
 
-    /// Forcing skips the TTL, not the rule that a failed probe keeps the list
-    /// it could not replace. Refresh answering with an empty picker would be
-    /// worse than answering with yesterday's models.
     #[test]
     fn a_forced_fill_that_fails_keeps_the_list() {
         let test_id = "test-probe-force-fail";

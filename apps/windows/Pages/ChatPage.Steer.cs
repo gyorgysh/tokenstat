@@ -13,11 +13,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// A short note that rides the next step. The turn keeps going.
-/// Stop leaves the note parked so it can be sent once the turn is idle.
-/// A host that cannot carry one falls back to the queue.
-/// </summary>
 internal sealed partial class ChatPage
 {
     private readonly Dictionary<string, long> _steerProtocol = [];
@@ -53,10 +48,6 @@ internal sealed partial class ChatPage
 
     private bool OpenChatIs(string chat) => IsLoaded && _openId == chat;
 
-    /// <summary>
-    /// Drop in-flight probe and delivery work for the conversation being left.
-    /// A protocol number already read stays, because it belongs to the computer.
-    /// </summary>
     private void AbandonSteerDelivery()
     {
         _steerDeliverGeneration++;
@@ -67,11 +58,6 @@ internal sealed partial class ChatPage
         _steerError = null;
     }
 
-    /// <summary>
-    /// The button may say "Next step" only once this computer's protocol is
-    /// known to be new enough. An unknown answer queues, so a failed probe
-    /// never sticks as an old host.
-    /// </summary>
     private bool SteerKnownAvailable()
     {
         if (SteerUnsupported()) return false;
@@ -82,7 +68,6 @@ internal sealed partial class ChatPage
         var backend = Format.Text(_openChat, "backend");
         if (backend is not ("claude" or "codex" or "cursor" or "muse")) return false;
         if (backend == "cursor" && Format.Text(_openChat, "mode") == "plan") return false;
-        // This computer's own host has no muse hook home, so it refuses a muse note.
         if (backend == "muse") return SteerPeerKey().Length > 0;
         return Format.Text(_openChat, "autonomy", "standard") == "standard";
     }
@@ -109,10 +94,6 @@ internal sealed partial class ChatPage
         return number;
     }
 
-    /// <summary>
-    /// One probe when a chat opens, and one more while it is busy if that
-    /// probe learned nothing. A poll tick must not ask again every 400ms.
-    /// </summary>
     private void ProbeSteerIfNeeded(bool fromBusyLoop)
     {
         if (!IsLoaded || _openId is null || SteerUnsupported()) return;
@@ -141,11 +122,6 @@ internal sealed partial class ChatPage
         }
     }
 
-    /// <summary>
-    /// Park the draft on the running turn. True means this send is finished
-    /// (parked, kept as an error, or the conversation changed). False means
-    /// the existing queue should carry it.
-    /// </summary>
     private async Task<bool> TryParkSteerAsync(string chat, string text, bool sendNext, string[] attachmentIds)
     {
         var generation = _openGeneration;
@@ -280,8 +256,6 @@ internal sealed partial class ChatPage
 
             await ReloadOpenChatAsync(chat);
             if (!Current()) return;
-            // A failed reload says nothing about the note, which the host
-            // keeps when it did not deliver. Leave it for the next poll.
             _deliveringSteer = false;
             await DrainQueueAsync(deliverNote: false);
             if (Current()) PaintConversation();

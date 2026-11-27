@@ -5,10 +5,6 @@
 import SwiftUI
 
 #if os(macOS)
-/// The Blueprint: palette, canvas, and the graph currently being edited.
-///
-/// The host IR is the source of truth. This view edits a working copy and
-/// writes it back on Save. Design-from-prompt still lands as a draft here.
 struct WorkflowsEditor: View {
     @Bindable var model: WorkflowsModel
     var folders: [WorkspaceFolder]
@@ -19,19 +15,10 @@ struct WorkflowsEditor: View {
     @State private var designing = false
     @State private var name = ""
 
-    /// Width below which the palette would leave no canvas worth having.
-    ///
-    /// A 220 point column beside a 480 point window is most of the editor spent
-    /// on a list of things to add, with nowhere to put them. Below this the
-    /// canvas keeps the pane and nodes are added with the + under each card,
-    /// which is the way most of them get added anyway.
     private static let paletteFloor: CGFloat = 700
 
     var body: some View {
         WidthReader { width in
-            // An unmeasured width is not a narrow one: treating the first
-            // frame's zero as "no room" flashed the palette closed every time
-            // the editor opened.
             let roomForPalette = width == 0 || width >= Self.paletteFloor
             VStack(spacing: 0) {
                 chrome(width: width, roomForPalette: roomForPalette)
@@ -75,22 +62,10 @@ struct WorkflowsEditor: View {
         return model.lastRun(for: graph)?.isLive == true ? model.lastRun(for: graph) : nil
     }
 
-    /// Width below which the toolbar drops its button labels.
-    ///
-    /// Save and Run are the two things somebody came to this screen to press,
-    /// and both sit at the right end, so a row that overflows takes exactly
-    /// those away. Glyph-only buttons keep every action on screen at a width
-    /// where the labels cannot all fit.
     private static let labelFloor: CGFloat = 1000
 
     private func chrome(width: CGFloat, roomForPalette: Bool) -> some View {
         let compact = width > 0 && width < Self.labelFloor
-        // Shrink first, scroll only as the last resort. The scroll view is what
-        // keeps a 400 point window usable at all, but it is not the answer to
-        // an ordinary narrow window: it would hide the Run button rather than
-        // make room for it. `fixedSize` vertically because a ScrollView is
-        // greedy on both axes, and this one would otherwise take its share of
-        // the pane's height from the canvas.
         return ScrollView(.horizontal, showsIndicators: false) {
             chromeContent(compact: compact, roomForPalette: roomForPalette)
                 .padding(.horizontal, Theme.Space.m)
@@ -105,8 +80,6 @@ struct WorkflowsEditor: View {
         HStack(spacing: Theme.Space.s) {
             Button(L10n.text("apple.workflowseditor.library.dc20b3d5"), .back) { onBack() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
-            // No button for a palette this window has no room for: a toggle
-            // that changes nothing is worse than the missing column.
             if roomForPalette {
                 Button(paletteOpen ? L10n.text("apple.workflowseditor.hide_palette.7bf7d98e") : L10n.text("apple.workflowseditor.palette.85794eff"), .layout) {
                     paletteOpen.toggle()
@@ -188,9 +161,6 @@ struct WorkflowsEditor: View {
                 }
             }
         }
-        // Every control keeps the width its label needs. Without this the
-        // scroll view proposes its own width to the row and the labels wrap
-        // again, inside a view that was supposed to fix exactly that.
         .fixedSize()
     }
 
@@ -205,7 +175,6 @@ struct WorkflowsEditor: View {
     }
 }
 
-/// Left of the canvas. Tiles add a node to the working graph.
 struct WorkflowPalette: View {
     @Bindable var model: WorkflowsModel
 
@@ -302,7 +271,6 @@ struct WorkflowPalette: View {
     }
 }
 
-/// Design-from-prompt from the canvas. Same contract as the library card.
 struct WorkflowDesignSheet: View {
     @Bindable var model: WorkflowsModel
     var folders: [WorkspaceFolder]

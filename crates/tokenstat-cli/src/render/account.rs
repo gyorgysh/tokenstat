@@ -36,7 +36,6 @@ pub fn fetch_reports(reports: &[tokenstat_sync::FetchReport], json: bool) -> Res
             );
             continue;
         }
-        // Antigravity may report quota and/or IDE sync with zero new events.
         if r.events == 0
             && let Some(msg) = &r.message
         {
@@ -257,10 +256,6 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
     Ok(())
 }
 
-/// Best-effort sync (and auto-update) schedule after linking an account.
-///
-/// Goes through `repair` so a re-login also refreshes the scan entry and drops
-/// a stale update unit when auto-apply is off.
 fn maybe_install_linked_schedules(host: Option<&str>, quiet: bool) {
     let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) else {
         return;
@@ -391,9 +386,6 @@ pub fn device(host: Option<&str>, name: Option<&str>, clear: bool, json: bool) -
     if clear || name.is_some() {
         let wanted = if clear { "" } else { name.unwrap_or("").trim() };
         tokenstat_identity::set_machine_label(wanted).map_err(|e| anyhow::anyhow!("{e}"))?;
-        // And on the account, when there is one. Not being signed in is not a
-        // failure to name a machine: the local name is what travels to a
-        // paired peer either way, so that case says nothing at all.
         let machine =
             tokenstat_sync::config::ensure_machine_id().map_err(|e| anyhow::anyhow!("{e}"))?;
         if let Err(e) = tokenstat_sync::rename_machine(host, &machine, wanted)

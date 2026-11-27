@@ -2,16 +2,7 @@
 
 import SwiftUI
 
-/// At-a-glance quota for the agent this conversation runs on, in the composer.
-///
-/// "5h 26% · 7d 87%" on the row's right side, with the full windows one tap
-/// away. Vendors that report no quota leave no badge rather than a zero:
-/// "we could not look" and "nothing is used" are different answers.
-///
-/// Shares dated readings with Home and Account, refreshing while visible.
 struct ComposerLimitsBadge: View {
-    /// Canonical source matching runs against this, so "claude" meets the
-    /// "claude_code" readings.
     let backend: String
     var peer: String?
     var profileID: String? = nil
@@ -25,12 +16,6 @@ struct ComposerLimitsBadge: View {
         readings.visible.filter { $0.profileId == profileID }
     }
 
-    /// The readings for the agent this conversation runs on, and nobody
-    /// else's. A chat on an agent that reports no quota gets no badge: it
-    /// used to borrow the tightest quota anywhere under its owner's name,
-    /// which put a Codex window on a Muse chat. Muse is not Codex, and a
-    /// number that belongs to another tool cannot answer "can I keep working
-    /// in this chat".
     private var provider: ProviderLimits? {
         ComposerLimits.pick(
             backend: backend,
@@ -42,13 +27,6 @@ struct ComposerLimitsBadge: View {
     }
 
     var body: some View {
-        // A zero-size leaf that is always there, so the badge is a real view
-        // even with nothing to draw. `.task` does not run on a view that
-        // resolves to nothing, and the readings it fetches are exactly what
-        // decides whether anything is drawn: an empty badge stayed empty for
-        // the life of the composer, never having asked. An empty badge draws
-        // nothing and the composer's flexible gap takes up its row spacing,
-        // so it costs no visible room either.
         HStack(spacing: 0) {
             Color.clear
                 .frame(width: 0, height: 0)
@@ -56,9 +34,6 @@ struct ComposerLimitsBadge: View {
             if let provider {
                 let rows = ComposerLimits.badgeRows(
                     windows: provider.windows, label: \.label, scope: \.scope)
-                // Codex reports the account week beside the model's own, so
-                // the headline shows general only and the popover below
-                // keeps them all, secondaries included.
                 let headline = harnessCanonicalID(provider.source) == "codex"
                     ? ComposerLimits.codexHeadlineRows(
                         windows: provider.windows, label: \.label, scope: \.scope)
@@ -126,9 +101,6 @@ struct ComposerLimitsBadge: View {
         }
     }
 
-    /// One seated line: "5h 26% · 7d 87%". Each figure wears its own window's
-    /// severity, so the one about to stop the work carries the warning rather
-    /// than the whole badge.
     private func summary(
         for rows: [(display: String, window: UsageWindow)]
     ) -> some View {
@@ -143,9 +115,6 @@ struct ComposerLimitsBadge: View {
 
 }
 
-/// One seated line: "5h 26% · 7d 87%". Each figure wears its own window's
-/// severity, so the one about to stop the work carries the warning rather
-/// than the whole line.
 struct ComposerLimitsLine: View {
     let rows: [(display: String, window: UsageWindow)]
 
@@ -171,9 +140,6 @@ struct ComposerLimitsLine: View {
     }
 }
 
-/// The composer's quota line for one agent, read-only, beside its row in the
-/// agent picker. Same readings and the same choice of windows as the badge,
-/// so the picker never shows a number the composer would not.
 struct AgentLimitsSummary: View {
     let backend: String
     var peer: String?
@@ -201,8 +167,6 @@ struct AgentLimitsSummary: View {
     }
 }
 
-/// The full windows behind the badge: bars, reset times, and the reading's
-/// age, with a way to ask the vendors again.
 struct ComposerLimitsDetail: View {
     let source: String
     let providers: [ProviderLimits]
@@ -295,9 +259,6 @@ struct ComposerLimitsDetail: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// When the numbers were read. A reading with no date is not a reading,
-    /// least of all on the screen where somebody decides whether to keep
-    /// working.
     private var footer: some View {
         Group {
             if let provider, let observed = provider.observedAt {

@@ -17,8 +17,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 
-/** Local discovery needs neither directory access nor a reachable publisher.
- * No request is resent, forgotten or turned into a new review by listing it. */
 @Composable internal fun TeamAskRecoveryList(storage: TeamAskRecoveryStore, calls: TeamCalls, onBack: () -> Unit) {
     val scope = rememberCoroutineScope(); val colors = LocalTsColors.current
     var entries by remember(storage, calls) { mutableStateOf<List<TeamAskRecoveryStore.Entry>>(emptyList()) }

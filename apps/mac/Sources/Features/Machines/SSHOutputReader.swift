@@ -19,8 +19,6 @@ enum SSHOutputReaderError: LocalizedError {
     }
 }
 
-/// Keeps an output cursor across reversible pauses. The emulator and output
-/// filter belong to the terminal; this reader never replaces either one.
 @MainActor
 final class SSHOutputReader {
     private(set) var offset: UInt64 = 0
@@ -68,7 +66,6 @@ final class SSHOutputReader {
         guard !shellEnded else { return }
         shellEnded = true
         inputEpoch &+= 1
-        // Metadata can precede the last output chunk. Keep draining.
     }
 
     func retire() {
@@ -78,8 +75,6 @@ final class SSHOutputReader {
         cancelRead()
     }
 
-    /// Closing is available while paused and after EOF. Failure leaves the
-    /// same reader retryable; success permanently retires it.
     func beginClose() -> UUID? {
         guard !retired, closeTicket == nil else { return nil }
         let token = UUID()
@@ -139,9 +134,6 @@ final class SSHOutputReader {
         offset = chunk.nextOffset
         if chunk.closed {
             noteShellEnded()
-            // Read once at the consumed end offset. The host then knows the
-            // final bytes were delivered, rather than merely sent to a task
-            // that might have been cancelled before feeding its emulator.
             drained = chunk.data.isEmpty
         }
         return true

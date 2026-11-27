@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Native inbox delivery, isolated from the output and Stop loops.
 use super::*;
 use std::collections::HashSet;
 use std::sync::{
@@ -91,8 +90,7 @@ impl Steering {
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .insert(native_id.clone());
-                            // Do not start another execution if the current one ended
-                            // between its last event and this request reaching the server.
+
                             body["resume"] = json!(false);
                             let mut post = client
                                 .post(url.clone())
@@ -101,10 +99,7 @@ impl Steering {
                             if let Some(header) = &header {
                                 post = post.header("x-opencode-directory", header);
                             }
-                            // Delivery is acknowledged by the native event's
-                            // session and unpredictable inbox ID, not by echoing
-                            // the response body (which includes entire attachments).
-                            // Even a lost HTTP response cannot undo that proof.
+
                             let _ = post.send();
                             let deadline = Instant::now() + Duration::from_secs(6);
                             while Instant::now() < deadline {
@@ -128,8 +123,7 @@ impl Steering {
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .remove(&native_id);
-                            // HTTP errors, expiry after submission and a missing
-                            // delivery event cannot prove the words were rejected.
+
                             Ok(json!({"ok":false,"unknown":true}))
                         })()
                         .unwrap_or_else(|error: String| json!({"ok":false,"error":error}));

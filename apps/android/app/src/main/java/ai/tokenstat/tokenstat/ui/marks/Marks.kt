@@ -55,54 +55,36 @@ import ai.tokenstat.tokenstat.ui.theme.TsMotion
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
 
-/// One place cross-view UI signals live. Apple posts NotificationCenter
-/// `.clientRefreshing`; the Android equivalent is a listener list.
 object UiSignals {
     private val listeners = mutableListOf<() -> Unit>()
 
-    /// Registers a listener, returning an unsubscribe function the caller
-    /// must run when it leaves, so a recomposed logo does not stack listeners.
     fun onRefreshing(listener: () -> Unit): () -> Unit {
         synchronized(listeners) { listeners.add(listener) }
         return { synchronized(listeners) { listeners.remove(listener) } }
     }
 
-    /// A refresh somebody asked for dips the logo bars and lets them back up,
-    /// once.
     fun beganRefreshing() {
         val snapshot = synchronized(listeners) { listeners.toList() }
         snapshot.forEach { it() }
     }
 }
 
-/// The logo bar timings, transcribed from `LogoMark` in the Apple client's
-/// `Marks.swift` so the launch loop, the one-shot rise and the refresh dip
-/// move the same way on both platforms. Pinned by `LaunchMotionTest`.
 object LogoMotion {
-    /// Repeating launch loop: easeInOut 0.62s autoreverse, staggered 0.14s.
     const val loopMs = 620
     const val loopStaggerMs = 140
 
-    /// One rise that lands and holds: easeInOut 1.2s, staggered 0.15s.
     const val oneShotMs = 1200
     const val oneShotStaggerMs = 150L
 
-    /// Refresh dip: easeInOut 0.26s, staggered 0.07s, down to 0.35 and back.
     const val dipMs = 260
     const val dipStaggerMs = 70L
     const val dipScale = 0.35f
 
-    /// How long the dip is held before the bars come back up. Apple sleeps
-    /// 300ms between setting and clearing the pulse.
     const val dipHoldMs = 300L
 }
 
-/// The bars in one text colour, for a theme that is not the brand's own.
 private val MONOCHROME_OPACITY = floatArrayOf(0.4f, 0.68f, 1f)
 
-/// The 3-bar tokenstat logo, hand-drawn geometry transcribed from the website
-/// SVG via the Apple client's `Marks.swift`. Bars rise in turn out of the
-/// baseline they share.
 @Composable
 fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
     val reduceMotion = rememberReduceMotion()
@@ -172,10 +154,6 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 )
             }
             val scale = if (pulse || dip.value != 1f) dip.value else looped
-            // The dip drives the geometry, not a layer transform: the bars
-            // shorten toward the baseline they share, so a scale the renderer
-            // drops cannot leave them standing. Same picture as a bottom
-            // pivoted scaleY, corner radius included.
             val barHeight = height * scale
             Box(
                 Modifier
@@ -189,9 +167,6 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
     }
 }
 
-/// The lowercase wordmark. `token` in primary, `stat` in the accent, matching
-/// `Marks.swift`. The phone toolbar passes a larger size; the bars are optional
-/// so a lockup that already placed the mark does not draw it twice.
 @Composable
 fun Wordmark(
     modifier: Modifier = Modifier,
@@ -215,10 +190,6 @@ fun Wordmark(
     }
 }
 
-/// A product-owned vector mark for a feature surface, ported from
-/// `FeatureMark` in `Marks.swift`: the glyph at 62% on a tile of its own tint
-/// at 12%, cornered at 28%. Names are the Apple asset names (`mark_host`),
-/// resolved to the converted drawables.
 fun featureMarkRes(name: String): Int = when (name) {
     "mark_account" -> R.drawable.feature_mark_account
     "mark_activity" -> R.drawable.feature_mark_activity
@@ -254,9 +225,6 @@ fun featureMarkRes(name: String): Int = when (name) {
 @Composable
 fun FeatureMark(name: String, tint: Color = LocalTsColors.current.accent, size: Int = 18) {
     val res = featureMarkRes(name)
-    // A name with no drawing behind it used to paint the tile anyway, which
-    // is a blank accent square: worse than nothing, and it looks like the
-    // image failed to load rather than like a typo in a mark name.
     if (res == 0) return
     Box(
         Modifier
@@ -276,34 +244,19 @@ fun FeatureMark(name: String, tint: Color = LocalTsColors.current.accent, size: 
     }
 }
 
-/// Initials from a display name, the same function the Apple `Avatar` uses:
-/// the first letters of the first two words, uppercased. Nil when there is no
-/// name to take them from, so the caller falls through to the handle.
 fun avatarInitials(name: String?): String? {
     val parts = (name ?: "").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
     if (parts.isEmpty()) return null
     return parts.take(2).joinToString("") { it.substring(0, it.offsetByCodePoints(0, 1)) }.uppercase()
 }
 
-/// The account, reached from the leading edge of every screen. Ported from
-/// `AvatarButton.swift`: the monogram on an accent-to-secondary gradient, the
-/// fetched picture over it once it has arrived, and a person glyph inside an
-/// accent ring when signed out. The picture reads the shared cache
-/// synchronously, so an already fetched face paints on the first frame instead
-/// of flashing the letter while a new fetch spins up.
 @Composable
 fun Avatar(
     name: String,
     size: Int = 28,
     avatarUrl: String? = null,
     signedIn: Boolean = true,
-    /// The bubble's colour. The app's accent for our own picture; a colour
-    /// drawn from the identity where several people appear in one list, so a
-    /// row is recognisable before the name is read. Port of `Avatar.tint`.
     tint: Color? = null,
-    /// Beside its own name in text, a face is decoration and announcing it
-    /// again is noise. The account button, which is the face on its own,
-    /// leaves this false and keeps its label.
     decorative: Boolean = false,
 ) {
     val colors = LocalTsColors.current
@@ -314,8 +267,6 @@ fun Avatar(
     LaunchedEffect(raw) {
         if (raw == null || picture != null) return@LaunchedEffect
         val loaded = AvatarCache.image(context, raw)
-        // Only land while this URL is still the one on show, so a slow
-        // answer for the previous account cannot cover the new one.
         if (loaded != null) picture = loaded
     }
     val drawn: Dp = size.dp
@@ -361,8 +312,6 @@ fun Avatar(
             }
         }
         if (signedIn && picture != null) {
-            // Over the monogram, not instead of it, so a slow or failed load
-            // shows the letter rather than a hole.
             Image(
                 picture!!.asImageBitmap(),
                 contentDescription = null,
@@ -380,14 +329,6 @@ fun Avatar(
     }
 }
 
-/// A stable colour for a person, from the app's own ramp. Port of
-/// `Avatar.tint(for:)`.
-///
-/// Hashed over the bytes rather than with `hashCode`, which is not promised to
-/// be stable across runs: the same author would get a different colour on the
-/// next launch, and a mark that moves is not a mark. The ramp's first two
-/// steps are left out — they are the heatmap's quiet-day greys, and a letter
-/// in one of them is a letter nobody can read.
 fun avatarTint(identity: String, colors: TsColors): Color {
     val palette = colors.heat.drop(2) + listOf(colors.warning, colors.danger)
     if (palette.isEmpty()) return colors.accent

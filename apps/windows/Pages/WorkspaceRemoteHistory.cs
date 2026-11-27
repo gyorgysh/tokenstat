@@ -12,17 +12,8 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Commit history for a folder on another machine. The same list and the
-/// same commit sheet as WorkspaceHistory, with every read routed through
-/// the peer that owns the folder.
-/// </summary>
 internal static class WorkspaceRemoteHistory
 {
-    /// <summary>
-    /// The history card, or null when this folder has no git history to
-    /// show. File details come from the selected commit.
-    /// </summary>
     public static async Task<UIElement?> LoadCardAsync(
         UIElement owner, string remoteId)
     {
@@ -53,12 +44,12 @@ internal static class WorkspaceRemoteHistory
                 remoteId, "workspace.status", new JsonObject { ["id"] = remoteId });
             hasUpstream = !string.IsNullOrEmpty(Format.Text(status["git"], "upstream", Format.Text(status, "upstream")));
         }
-        catch { /* Do not claim that a commit was pushed without an upstream. */ }
+        catch { }
         JsonNode? ownAccount = null;
         string? ownAvatar = null;
         string ownHandle = "", ownName = "";
         try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAccount = account; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
-        catch { /* History remains usable while account status is unavailable. */ }
+        catch { }
         var publicAvatars = HistoryAvatars.PublicAsync(remoteId, array);
         var ownEmails = await HistoryAvatars.OwnEmailsAsync(ownAccount, array);
         var faces = await publicAvatars;
@@ -83,9 +74,6 @@ internal static class WorkspaceRemoteHistory
             }.Where(part => !string.IsNullOrEmpty(part)));
             if (commit?["tags"] is JsonArray tags && tags.Count > 0)
             {
-                // A non-string tag must not take down the whole list. The
-                // parse materializes inside the try, so a bad entry lands
-                // here instead of at the join below.
                 List<string> names;
                 try
                 {

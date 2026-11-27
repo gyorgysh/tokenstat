@@ -2,50 +2,35 @@
 
 import Foundation
 
-/// A question the agent asked in its reply, and the person's answer once
-/// there is one. The host finds the block and records it; see the host's
-/// `chat_question` for the format and for how an answer reaches the agent.
 struct ChatQuestion: Equatable, Sendable {
     let id: String
     let question: String
     let options: [String]
     let multiple: Bool
     let defaultAnswer: String?
-    /// The agent stopped for this rather than carrying on with its default.
     let blocking: Bool
     var answer: String?
-    /// `note` rode the running turn, `queued` waits for it to end, `sent`
-    /// started a turn.
     var delivery: String?
 
     var isAnswered: Bool { answer != nil }
 }
 
 extension ChatDisplayItem {
-    /// The question this row asks, so a row can tell whether its answer is
-    /// still on the way.
     var questionID: String? {
         if case let .question(question) = kind { return question.id }
         return nil
     }
 }
 
-/// Answer from `chat.answerQuestion`.
 struct ChatQuestionDelivery: Decodable, Sendable {
     let delivery: String
 }
 
-/// The question blocks inside reply text, which the card shows instead.
 enum ChatQuestionText {
     static let fence = "tokenstat-question"
-    /// A plan the agent wrote for the activity panel. The host reads it there,
-    /// so the reply drops it the same way.
     static let planFence = "tokenstat-plan"
-    // Match the host scanner. Rejected blocks must remain readable as text.
     private static let blockMaxBytes = 64 * 1024
 
-    /// The reply without its question blocks. A block still streaming is cut
-    /// from its opening line, so half a JSON object never flashes on screen.
     static func stripping(_ text: String, streaming: Bool = true) -> String {
         guard text.contains(fence) || text.contains(planFence) else { return text }
         var kept: [String] = []
@@ -53,7 +38,6 @@ enum ChatQuestionText {
         var isPlan = false
         var block: [String] = []
         var bodyBytes = 0
-        // Character splitting treats CRLF as one character, missing its LF.
         let lines = text.components(separatedBy: "\n")
         for (index, line) in lines.enumerated() {
             if !inside, let opening = Self.opening(in: line) {
@@ -75,9 +59,6 @@ enum ChatQuestionText {
                 continue
             }
             if inside {
-                // Host closing_fence: ticks may share the line with the next
-                // sentence (` ```Yes,...`), sit on the JSON line (`{...}```),
-                // or open the next named fence on the same run of ticks.
                 if let closed = Self.closeBodyLine(line, block: &block, isPlan: isPlan, kept: &kept) {
                     inside = closed.inside
                     isPlan = closed.isPlan
@@ -101,7 +82,6 @@ enum ChatQuestionText {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Opening fence on its own line or after prose, matching the host scanner.
     private static func opening(in line: String) -> (prefix: String, fenceLine: String, sameLineBody: String?, isPlan: Bool)? {
         var start = line.startIndex
         while start < line.endIndex, let range = line.range(of: "```", range: start..<line.endIndex) {
@@ -118,7 +98,6 @@ enum ChatQuestionText {
         return nil
     }
 
-    /// Named fence language tag, with optional JSON body on the same line.
     private static func fenceBody(in header: String) -> (language: String, body: String?, isPlan: Bool)? {
         let trimmed = header.trimmingCharacters(in: .whitespaces)
         for (name, isPlan) in [(planFence, true), (fence, false)] {
@@ -127,15 +106,12 @@ enum ChatQuestionText {
             let rest = trimmed.dropFirst(name.count)
             guard rest.first?.isWhitespace == true else { continue }
             let body = rest.drop(while: { $0.isWhitespace })
-            // Prose after the language tag is not a block. The body is a JSON
-            // object, so a same-line body must open one.
             guard body.first == "{" else { continue }
             return (name, String(body), isPlan)
         }
         return nil
     }
 
-    /// Close a body line. Returns the next inside/isPlan state when it closed.
     private static func closeBodyLine(
         _ line: String,
         block: inout [String],
@@ -153,11 +129,6 @@ enum ChatQuestionText {
             : question?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let next = closed.trailing.trimmingCharacters(in: .whitespaces)
         let nextInfo = Self.fenceBody(in: next.hasPrefix("```") ? String(next.dropFirst(3)) : "")
-        // The next block can reopen anywhere in the trailing text, not only
-        // at its start: a close glued to prose that itself ends in a new
-        // opening (` ```Next works.```tokenstat-plan`) hides both blocks.
-        // `opening` scans the whole fragment, mirroring the host scanner,
-        // which resumes mid-line after a close.
         let reopen = Self.opening(in: closed.trailing)
         let opensNext = nextInfo != nil || reopen != nil
         if !valid {
@@ -193,7 +164,6 @@ enum ChatQuestionText {
         return (false, isPlan)
     }
 
-    /// Body text before closing ticks, and prose / next fence after them.
     private static func closingFence(in line: String) -> (bodyPrefix: String, trailing: String)? {
         var index = line.startIndex
         while index < line.endIndex, line[index] == " " || line[index] == "\t" {
@@ -223,7 +193,6 @@ enum ChatQuestionText {
         return trailingClose(in: line)
     }
 
-    /// `{...}``` or `{...} ```Yes` or `{...}``````tokenstat-plan`.
     private static func trailingClose(in line: String) -> (bodyPrefix: String, trailing: String)? {
         var start = line.startIndex
         while start < line.endIndex, let range = line.range(of: "```", range: start..<line.endIndex) {

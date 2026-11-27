@@ -48,12 +48,6 @@ struct DiffDocumentView<Header: View>: View {
             }
         }
         .task(id: request) {
-            // Mount the scroll view with its complete row set so its first
-            // visible range is computed against the real document, rather
-            // than a loading indicator that will be replaced asynchronously.
-            // Once mounted, keep the rows and scroll position while a newer
-            // snapshot builds. A file watcher refresh must not replace the
-            // document with a spinner or collapse its expanded pages.
             let request = request
             guard displayedRequest != request else { return }
             let input = diffs

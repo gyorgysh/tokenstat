@@ -2,10 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Metadata sits outside a vertical-only, width-bounded code pane, with its
-/// own scroll area when a short viewport or large text cannot fit the header.
-/// Long source lines wrap and retain their source number; oversized lines are
-/// split into bounded lazy items so a minified file cannot monopolize layout.
 struct ClientDiffDocumentView<Header: View>: View {
     let diffs: [FileDiff]
     let revision: UUID
@@ -59,8 +55,6 @@ struct ClientDiffDocumentView<Header: View>: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
-            // Navigation and tab chrome already constrain this safe-area pane.
-            // Fill it; reserving a second tab-bar height leaves unused space.
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .task(id: Request(revision: revision, rowLimit: rowLimit, fileHeaders: fileHeaders)) {

@@ -102,9 +102,6 @@ data class WorkflowNode(
     val pattern: String? = null,
     val times: Long? = null,
     val until: String? = null,
-    /// Fields the host sent that this client does not name. Never shown,
-    /// never edited, written back untouched so a round trip cannot delete
-    /// them.
     val extra: Map<String, JsonElement> = emptyMap(),
 ) {
     companion object {
@@ -148,7 +145,6 @@ data class WorkflowNode(
         return kind.label
     }
 
-    /// One-line caption for the outline.
     val subtitle: String get() = when (kind) {
         WorkflowNodeKind.INPUT -> L10n.text("android.workflowmodels.starting_prompt.407bec2f")
         WorkflowNodeKind.AGENT -> listOfNotNull(backend, model).filter { !it.isNullOrEmpty() }.joinToString(" · ")
@@ -236,11 +232,7 @@ data class WorkflowGraph(
     val lastRunAtMs: Long? = null,
     val nextRunAtMs: Long? = null,
     val lastRunID: String? = null,
-    /// Missing on hosts before protocol 22, and on cached copies from then.
     val revision: Long = 0,
-    /// Fields the host sent that this client does not name. Never shown,
-    /// never edited, written back untouched so a round trip cannot delete
-    /// them.
     val extra: Map<String, JsonElement> = emptyMap(),
 ) {
     companion object {
@@ -267,7 +259,6 @@ data class WorkflowGraph(
             extra = obj.entries.filter { (k, _) -> k !in knownKeys }.associate { (k, v) -> k to v },
         )
 
-        /// Empty graph with a start node. The person still has to save it.
         fun blank(name: String = L10n.text("android.workflowmodels.untitled.f59ab8d1"), workspaceID: String? = null): WorkflowGraph =
             WorkflowGraph(
                 name = name,
@@ -277,9 +268,6 @@ data class WorkflowGraph(
             )
     }
 
-    /// Place nodes top to bottom when every position is still the origin.
-    /// Design-from-prompt often omits x/y. Layers go down, siblings share
-    /// a row. Port of `WorkflowGraph.layoutIfNeeded`.
     fun layoutIfNeeded(): WorkflowGraph {
         if (nodes.isEmpty()) return this
         if (nodes.any { it.x != 0.0 || it.y != 0.0 }) return this
@@ -334,25 +322,18 @@ data class WorkflowGraph(
     }
 }
 
-/// Host graph limits and the messages a person sees before Save. Keep the
-/// numbers and the legal shapes in step with `tokenstat-host::workflows`.
-/// Port of `WorkflowGraphRules`.
 object WorkflowGraphRules {
     const val MAX_NODES = 64
     const val MAX_EDGES = 128
     const val MAX_LOOP_TIMES = 20L
     const val MAX_PATH_ID = 128
 
-    /// Kinds a person can add. MCP is reserved on the host.
     val authorableKinds = listOf(
         WorkflowNodeKind.INPUT, WorkflowNodeKind.AGENT, WorkflowNodeKind.AUTOMATION,
         WorkflowNodeKind.HTTP, WorkflowNodeKind.COMMAND, WorkflowNodeKind.GATE,
         WorkflowNodeKind.CONDITION, WorkflowNodeKind.LOOP,
     )
 
-    /// How an outgoing connection is named on the step list and detail.
-    /// If uses Then/Else. Loop uses Body for the repeated work and After
-    /// last pass for the way out. Other steps use Then, On error, Always.
     fun outgoingRole(kind: WorkflowNodeKind, whenDo: WorkflowEdgeWhen): String = when {
         kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.OK -> L10n.text("android.workflowmodels.then.0597f441")
         kind == WorkflowNodeKind.CONDITION && whenDo == WorkflowEdgeWhen.ERROR -> L10n.text("android.workflowmodels.else.9c77d72e")
@@ -484,8 +465,6 @@ object WorkflowGraphRules {
         return node
     }
 
-    /// Cycles are allowed only when every cycle passes through a loop node.
-    /// Edges that touch a loop are dropped from the walk, matching the host.
     fun hasIllegalCycle(nodes: List<WorkflowNode>, edges: List<WorkflowEdge>): Boolean {
         val loops = nodes.filter { it.kind == WorkflowNodeKind.LOOP }.map { it.id }.toSet()
         val adj = mutableMapOf<String, MutableList<String>>()
@@ -509,8 +488,6 @@ object WorkflowGraphRules {
     }
 }
 
-/// Graph metadata a phone can author. Port of `WorkflowEditorDraft`.
-/// Recipes fill nodes and edges locally; a blank draft is a Start card.
 data class WorkflowEditorDraft(
     val name: String = "",
     val workspaceID: String = "",
@@ -520,9 +497,6 @@ data class WorkflowEditorDraft(
     val edges: List<WorkflowEdge> = emptyList(),
     val schedule: ScheduleFields = ScheduleFields(),
     val budget: BudgetFields = BudgetFields(),
-    /// Graph-level fields the host sent that this client does not name.
-    /// Saved with the draft so a round trip through this device cannot
-    /// delete them.
     val graphExtra: Map<String, JsonElement> = emptyMap(),
 ) {
     companion object {
@@ -617,8 +591,6 @@ data class WorkflowEditorDraft(
     }
 }
 
-/// Cheap/low defaults used by Design and by the example recipes.
-/// Port of `WorkflowModelPick`.
 object WorkflowModelPick {
     val cheapMarkers = listOf("haiku", "nano", "mini", "flash", "fast", "lite", "small")
 
@@ -665,7 +637,6 @@ object WorkflowModelPick {
     }
 }
 
-/// One example pipeline. Port of `WorkflowRecipe`.
 data class WorkflowRecipe(
     val id: String,
     val name: String,
@@ -675,8 +646,6 @@ data class WorkflowRecipe(
     val edges: List<WorkflowEdge>,
 )
 
-/// Example pipelines built from the advertised backends. Port of
-/// `WorkflowRecipes` (phone path: every advertised agent counts).
 object WorkflowRecipes {
     fun designAgents(backends: List<AgentBackend>): List<AgentBackend> =
         backends.filter { it.id != "sh" }
@@ -903,18 +872,14 @@ data class WorkflowDesignResult(val workflow: WorkflowGraph, val transcript: Str
     }
 }
 
-/// "3 workflows · 1 running", the workflows library summary.
 fun workflowListSummary(total: Int, running: Int): String = L10n.text("android.workflowmodels.0_workflows_1_running.3c6bc0ea", "${total}", "${running}")
 
-/// Library search covers the graph name, like the Apple client.
 fun graphMatchesQuery(graph: WorkflowGraph, query: String): Boolean {
     val q = query.trim()
     if (q.isEmpty()) return true
     return graph.name.contains(q, ignoreCase = true)
 }
 
-/// The run the detail leads with: the graph's recorded last run, else the
-/// first retained run. Port of `ClientWorkflowSession.lastRun(for:)`.
 fun lastWorkflowRun(runs: List<WorkflowRunRecord>, graph: WorkflowGraph): WorkflowRunRecord? {
     val id = graph.lastRunID
     if (id != null) runs.firstOrNull { it.id == id }?.let { return it }

@@ -57,15 +57,12 @@ internal fun rememberChatComposerInput(owner: String?, draft: String, readDraft:
     }
     if (readDraft != null) {
         DisposableEffect(input) {
-            // Navigation can retire the field before its final edit reaches
-            // the collector. This scope still has the departing draft owner.
             onDispose { input.publish(currentRead, currentWrite, verifyWrite = true) }
         }
     }
     input
 }
 
-/** Clipboard and keyboard images use the same owned file import as the picker. */
 @OptIn(ExperimentalFoundationApi::class)
 internal fun Modifier.chatImagePaste(onImages: (List<Uri>, () -> Unit) -> Unit): Modifier =
     contentReceiver { content ->

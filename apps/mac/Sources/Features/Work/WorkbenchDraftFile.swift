@@ -8,8 +8,6 @@ private enum WorkbenchDraftIO {
     static let mutex = NSLock()
 }
 
-/// Original writing stays in protected, backed-up files. Each target has its
-/// own file and revision, so another app instance cannot silently overwrite it.
 actor WorkbenchDraftFile<Value: Codable & Sendable & Equatable> {
     struct Record: Codable, Sendable {
         let revision: String

@@ -81,8 +81,6 @@ struct ChatInspection: Decodable, Sendable {
         return min(1, Double(contextUsed) / Double(contextWindow))
     }
 
-    /// Fractions of capacity, with a single used segment when categories
-    /// are absent or inconsistent. Never let malformed telemetry overfill.
     var contextSegments: [Double] {
         guard let used = contextUsed, let window = contextWindow, window > 0 else { return [] }
         let denominator = Double(max(used, window))

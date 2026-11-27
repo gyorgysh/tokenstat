@@ -118,14 +118,6 @@ fun AutomationsDialog(
     }
 }
 
-/// The automations workbench as full pages: list, detail, history, run,
-/// the editor, and the host scheduler. Ports `ClientAutomationWorkspace`
-/// (phone list), the detail, history and run views, the queue editor, and
-/// the `ClientAutomationSession` operation rules.
-///
-/// Create-once and run-once receipts where the host offers them (protocol
-/// 21+), revision-checked `automation.edit` saves with the conflict flow,
-/// and plain `create`/`run`/`update` below that.
 @Composable
 fun AutomationsScreen(
     model: AppViewModel,
@@ -136,9 +128,6 @@ fun AutomationsScreen(
     folderName: String,
     onBack: () -> Unit,
 ) {
-    // This screen brings its own header, its own back and its own add,
-    // so the section header above it steps aside rather than stacking a
-    // second copy of the same title and arrow.
     OwnSectionHeader()
     val scope = rememberCoroutineScope()
     val supportsReceipts = HostContracts.supportsAutomationReceipts(protocol)
@@ -713,8 +702,6 @@ private fun AutomationListPage(
     }
 }
 
-/// Library row for host-wide scheduler defaults. The list may be one
-/// folder. The copy must not be. Port of `ClientSchedulerCard`.
 @Composable
 private fun SchedulerCard(hostLabel: String, folderName: String, queue: AutomationQueue?, onOpen: () -> Unit) {
     val colors = LocalTsColors.current
@@ -1156,9 +1143,6 @@ private fun AutomationRunPage(
     }
 }
 
-/// Host-wide scheduler defaults as a full page. Opened from the library,
-/// never from a job editor, so it cannot look like a folder setting.
-/// Port of `AutomationQueueView`.
 @Composable
 private fun SchedulerPage(
     queue: AutomationQueue,
@@ -1309,7 +1293,6 @@ private fun SchedulerPage(
     }
 }
 
-/// Host-level queue editor state. Port of `AutomationQueueDraft`.
 data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxConcurrent: String, val originalBudgetSeconds: Long? = null) {
     companion object {
         fun fromQueue(queue: AutomationQueue): QueueDraft = QueueDraft(
@@ -1329,8 +1312,6 @@ data class QueueDraft(val budgetMinutes: String, val noLimit: Boolean, val maxCo
     }
 }
 
-/// Live tail of one run's readable transcript, capped like the Apple
-/// inspector. Polls while the run is running, reads once when it is done.
 @Composable
 fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolean, modifier: Modifier = Modifier) {
     var text by remember(peer, runID) { mutableStateOf("") }
@@ -1382,7 +1363,6 @@ fun RunTranscript(model: AppViewModel, peer: String, runID: String, live: Boolea
     }
 }
 
-/** Drain every reply page, including output written just before a run completes. */
 internal suspend fun readRunTranscript(
     live: Boolean,
     read: suspend (Long) -> JsonObject,

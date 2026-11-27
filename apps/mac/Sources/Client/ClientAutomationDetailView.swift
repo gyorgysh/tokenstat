@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One scheduled job on a phone: the prompt, Run / Stop, pause.
 struct ClientAutomationDetailView: View {
     let peer: String
     let workspaceID: String

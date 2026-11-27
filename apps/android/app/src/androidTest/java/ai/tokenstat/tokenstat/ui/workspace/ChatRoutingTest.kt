@@ -25,7 +25,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Production controls with controlled replies; no real provider or account is used. */
 @RunWith(AndroidJUnit4::class)
 class ChatRoutingTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()

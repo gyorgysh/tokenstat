@@ -14,8 +14,6 @@ use serde::Serialize;
 const SEQUENCE_LIMIT: usize = 4096;
 const RECORD_LIMIT: usize = 256;
 
-/// ConPTY discards OSC written as terminal input. Its Win32-input encoding
-/// delivers the fixed ASCII capability reply as literal character events.
 #[cfg(windows)]
 pub(crate) fn conpty_reply(bytes: &[u8]) -> Vec<u8> {
     let mut reply = String::new();
@@ -46,8 +44,6 @@ impl State {
         }
     }
 
-    // A worker still running keeps the session working after the root turn
-    // finishes. A blocked worker always wins, even over a working root.
     fn priority(self) -> u8 {
         match self {
             Self::Blocked => 5,
@@ -178,12 +174,12 @@ impl Tracker {
         self.parser = match byte {
             b']' => {
                 self.pending.clear();
-                self.length = 2; // ESC ]
+                self.length = 2;
                 ParserState::Osc
             }
             b'P' | b'X' | b'^' | b'_' => ParserState::String,
             b'c' => {
-                self.records.clear(); // RIS; alternate-screen switches do not clear.
+                self.records.clear();
                 ParserState::Ground
             }
             0x1b => ParserState::Escape,
@@ -216,8 +212,6 @@ impl Tracker {
                     .retain(|key, _| !id.is_empty() && key != &id && !key.starts_with(&prefix));
             }
             Report::Set(id, record) => {
-                // Repeated identical reports are not a new attention episode.
-                // Still update recency for the protocol's eviction rule.
                 self.revision = self.revision.saturating_add(1);
                 if !self.records.contains_key(&id)
                     && self.records.len() == RECORD_LIMIT
@@ -298,8 +292,6 @@ fn text(value: &str, encoded_limit: usize, decoded_limit: usize) -> Option<Strin
 fn parse(body: &[u8]) -> Option<Report> {
     let mut fields = BTreeMap::new();
     for pair in body.split(|&byte| byte == b':') {
-        // Malformed pairs, including non-UTF-8 bytes, do not discard valid
-        // pairs elsewhere in the report. Free text itself must be base64.
         let Ok(pair) = std::str::from_utf8(pair) else {
             continue;
         };
@@ -315,8 +307,6 @@ fn parse(body: &[u8]) -> Option<Report> {
         {
             continue;
         }
-        // Validate every pair, including duplicates and unknown keys, before
-        // applying anything. Later duplicates cannot hide an oversized field.
         if key.len() > 16 {
             return None;
         }

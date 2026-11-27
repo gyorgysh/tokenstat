@@ -58,9 +58,6 @@ import androidx.compose.material.icons.outlined.KeyboardHide
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.ui.graphics.vector.ImageVector
 
-/// One glyph per action. Case names match `ActionIcon.swift` and
-/// `shared/web/actionIcons.js`. Android maps them onto Material icons so a
-/// Save cannot be a check on one screen and a download on the next.
 enum class ActionIcon {
     Save, Claim, Create, Upload, Copy, Download,
     SignIn, SignOut, Account, Team, Settings, Security, Edit,
@@ -118,14 +115,10 @@ enum class ActionIcon {
             Reopen -> Icons.Default.History
             Checkout -> Icons.Default.Download
             Filter -> Icons.AutoMirrored.Filled.Sort
-            // The two-arrow pair the Apple clients draw, not an external link.
             EnterFullScreen -> Icons.Default.OpenInFull
             ExitFullScreen -> Icons.Default.CloseFullscreen
             Delete -> Icons.Default.Delete
             Next -> Icons.AutoMirrored.Filled.ArrowForward
-            // A row that opens something, not a Next button. The Apple
-            // clients draw every one of these as `chevron.right`, and an
-            // arrow among chevrons reads as a different kind of action.
             Disclosure -> Icons.AutoMirrored.Filled.KeyboardArrowRight
             Latest -> Icons.Default.KeyboardArrowDown
             Back -> Icons.AutoMirrored.Filled.ArrowBack

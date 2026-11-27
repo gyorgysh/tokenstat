@@ -80,8 +80,7 @@ fn legacy_projection(directory: &Path, chat: &Conversation) -> Result<SessionInv
             .map(|entry| (entry.backend.clone(), entry.id.clone()))
             .collect(),
     };
-    // Some remote filesystems do not report stable IDs. Re-read those files
-    // rather than treating matching timestamps as proof of identity.
+
     let cacheable = key.identity.is_some() && key.modified.is_some();
     let cache = LEGACY_CACHE.get_or_init(|| Mutex::new(VecDeque::new()));
     if cacheable
@@ -100,8 +99,7 @@ fn legacy_projection(directory: &Path, chat: &Conversation) -> Result<SessionInv
         ..Default::default()
     };
     inventory.entries.reverse();
-    // An older still-saved candidate must remain visible without double-counting
-    // its identity. Cache only the bounded projection, never the entire ledger.
+
     for candidate in candidates {
         if !inventory
             .entries
@@ -168,8 +166,7 @@ pub(crate) fn valid_native_id(backend: &str, id: &str) -> bool {
                 })
                 && id.bytes().any(|byte| byte != b'0' && byte != b'-')
         }
-        // OpenCode's Identifier generator uses a 12-hex timestamp followed by
-        // 14 base62 characters, with the session-specific `ses_` prefix.
+
         "opencode" | "opencode2" => id.strip_prefix("ses_").is_some_and(|tail| {
             tail.len() == 26
                 && tail.bytes().take(12).all(|byte| byte.is_ascii_hexdigit())
@@ -184,8 +181,6 @@ pub(crate) fn valid_native_id(backend: &str, id: &str) -> bool {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Record {
-    /// True exactly once for this backend/id/source identity, so the complete
-    /// total can be counted while keeping memory bounded to the visible tail.
     first: bool,
     #[serde(flatten)]
     entry: SessionReference,
@@ -232,9 +227,6 @@ fn read_records(path: &Path, mut visit: impl FnMut(Record)) -> Result<u64, Strin
                 .map_err(|error| error.to_string())?
                 .is_empty()
         {
-            // An append interrupted before its final newline is uncommitted.
-            // Readers retain the verified prefix; the next writer truncates
-            // only this trailing fragment before appending a complete record.
             break;
         }
         if size as u64 > RECORD_BYTES || !line.ends_with(b"\n") {
@@ -340,9 +332,6 @@ fn candidates(chat: &Conversation) -> Vec<SessionReference> {
 /// any old resume value. Legacy credentials are filtered, never copied raw.
 pub(crate) fn remember(directory: &Path, chat: &Conversation) -> Result<(), String> {
     if !directory.join(ARCHIVE).exists() {
-        // Publishing a partially migrated ledger would make the remaining
-        // legacy IDs invisible on every subsequent read. Commit the complete
-        // initial projection together, then use append-only updates below.
         let legacy = legacy_entries(directory, chat)?;
         fs::create_dir_all(directory).map_err(|error| error.to_string())?;
         let mut initial =
@@ -657,7 +646,7 @@ mod tests {
         assert_eq!(inventory.entries[0].status, "current");
         assert_eq!(inventory.entries[1].status, "historical");
         invalidated(temp.path(), &chat, "claude", SECOND, 6).unwrap();
-        // Durable resume credentials may remain until a replacement reports.
+
         assert!(
             super::inventory(temp.path(), &chat)
                 .entries
@@ -708,8 +697,7 @@ mod tests {
         let original = open_legacy_transcript(&path).unwrap().unwrap();
         let original_identity = legacy_file_identity(&original, &original.metadata().unwrap());
         assert_eq!(inventory(temp.path(), &chat).entries[0].id, FIRST);
-        // Atomic replacement can have the same length and timestamps. The
-        // opened file's identity still retires the old projection.
+
         let previous_time = fs::metadata(&path).unwrap().modified().unwrap();
         let replacement = temp.path().join("replacement");
         fs::write(&replacement, row(SECOND)).unwrap();
@@ -727,8 +715,7 @@ mod tests {
         if original_identity.is_some() {
             assert!(original_identity != replacement_identity);
         }
-        // Parse the same handle from which the identity and metadata came,
-        // even if the name was replaced between opening and reading.
+
         assert_eq!(
             legacy_entries_from_file(original, &chat).unwrap()[0].id,
             FIRST
@@ -759,8 +746,7 @@ mod tests {
                 + "\n"
         };
         fs::write(temp.path().join("events.ndjson"), row(FIRST) + &row(SECOND)).unwrap();
-        // A process that dies during migration can leave an unpublished
-        // temporary file, but it must never leave a partially committed ledger.
+
         fs::write(
             temp.path().join(".tmp-interrupted-migration"),
             b"{\"first\":true",

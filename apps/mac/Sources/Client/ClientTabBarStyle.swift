@@ -111,15 +111,9 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
         (controller as? Prober)?.restore()
     }
 
-    /// A zero-size controller whose only job is to reach the tab bar.
     final class Prober: UIViewController {
         var hidden = false
-        /// Restore only what this instance hid, so tearing down a visible
-        /// screen cannot unhide a later one that still wants it gone.
         private var hidByUs = false
-        /// Held because teardown walks the parent chain after this view has
-        /// left the window, and `controller(from:)` then returns nil. Back
-        /// from a conversation would leave the floating bar gone.
         private weak var tabs: UITabBarController?
 
         override func didMove(toParent parent: UIViewController?) {
@@ -154,8 +148,6 @@ struct ClientHiddenTabBar: UIViewControllerRepresentable {
             apply(animated: false)
         }
 
-        /// Every live prober that wants the bar gone. A screen leaving must not
-        /// bring the bar back while the screen replacing it still hides it.
         private static let hiders = NSHashTable<Prober>.weakObjects()
 
         func apply(animated: Bool) {
@@ -235,7 +227,6 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
         (controller as? Prober)?.apply()
     }
 
-    /// A zero-size controller whose only job is to reach its ancestors.
     final class Prober: UIViewController {
         /// Set the override only when it is not already what we want.
         ///
@@ -261,8 +252,6 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
             }
         }
 
-        /// The scene whose size classes are being followed, held weakly so a
-        /// scene that goes away does not outlive itself here.
         private weak var observedScene: UIWindowScene?
         private var sceneRegistration: (any UITraitChangeRegistration)?
 
@@ -273,21 +262,14 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
 
         override func viewIsAppearing(_ animated: Bool) {
             super.viewIsAppearing(animated)
-            // The first point with a window and nothing drawn yet, so the bar
-            // never shows in the top position first.
             apply()
         }
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            // Tabs are built lazily: a tab visited later gets its navigation
-            // controller after the first pass, so the walk runs again on every
-            // appearance rather than once at install.
             apply()
         }
 
-        /// Re-run when the window changes shape. Nothing appears or moves
-        /// when a Duo opens, so no other callback here would notice.
         private func observeScene() {
             guard let scene = view.window?.windowScene, scene !== observedScene else { return }
             stopObservingScene()
@@ -299,9 +281,6 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
             }
         }
 
-        /// A layout swap builds a new prober every time the iPhone Duo folds,
-        /// so each one takes its registration with it rather than leaving the
-        /// scene a handler that only ever finds nil.
         private func stopObservingScene() {
             if let sceneRegistration, let observedScene {
                 observedScene.unregisterForTraitChanges(sceneRegistration)
@@ -331,8 +310,6 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
                 return
             }
             Self.override(tabs, with: .compact)
-            // Put every tab's content back to regular. Without this the split
-            // views inside collapse and the iPad reads as a phone.
             for child in tabs.viewControllers ?? [] {
                 Self.override(child, with: .regular)
             }
@@ -341,10 +318,6 @@ struct CompactTabBarOnPad: UIViewControllerRepresentable {
 }
 
 extension View {
-    /// Draw the tab bar the way the phone draws it, in a window with room.
-    ///
-    /// A no-op in a compact window, where it is already true, and on anything that does
-    /// not host tabs in a `UITabBarController`.
     func clientCompactTabBarOnPad() -> some View {
         background(CompactTabBarOnPad().frame(width: 0, height: 0).allowsHitTesting(false))
     }

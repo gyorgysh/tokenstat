@@ -2,27 +2,10 @@
 
 import Foundation
 
-/// How much of an agent's work a transcript shows between a question and
-/// its answer.
-///
-/// One setting rather than a page of switches. Every level keeps the rows a
-/// person has to see: what they asked, every reply, an approval the agent is
-/// waiting on, a failure, a handoff and an attachment. The levels differ only
-/// in how the steps in between are drawn.
-///
-/// Stored under `ChatDetailPreference.key`. Minimal and Compact swapped
-/// names once, and a choice stored before that is moved across there.
 enum ChatDetail: String, CaseIterable, Sendable {
-    /// One line per stretch of work: "Worked 3m · 14 steps · 2 files".
     case minimal
-    /// One quiet line per step: "Edited vault.rs +6 −2", "Ran cargo test",
-    /// "Explored 4 files, 2 searches". No cards, and an opened line shows
-    /// what the step produced without a card around it either.
     case compact
-    /// Thinking and runs of reads and searches fold to one line each.
-    /// Commands and edits keep their own rows.
     case standard
-    /// Every step on its own row, with its output open.
     case detailed
 }
 
@@ -36,23 +19,15 @@ struct ChatStepGroup: Equatable, Sendable {
     }
 
     enum Style: Equatable, Sendable {
-        /// Minimal: a stretch of tool activity between visible replies.
         case work
-        /// Standard: consecutive reads, searches and page fetches.
         case explored
-        /// A block of reasoning, at any level that folds.
         case thought
-        /// Compact: one command or edit, as a single line.
         case step
     }
 
     var style: Style
     var open: Bool
-    /// The rows this line stands for, oldest first. A search hit or a kept
-    /// reading place can name one of these, and the group has to be found
-    /// and opened for it.
     var memberIDs: [String]
-    /// Tool calls and edits. Thinking is not counted as a step.
     var steps = 0
     var files = 0
     var added: UInt64 = 0
@@ -60,33 +35,19 @@ struct ChatStepGroup: Equatable, Sendable {
     var reads = 0
     var searches = 0
     var pages = 0
-    /// Steps that failed. A failure folds like any other step, since agents
-    /// retry all the time, and the line says how many so none goes unseen.
     var failures = 0
-    /// Still being added to: the conversation is running and nothing has
-    /// come after this group yet.
     var running = false
     var liveVerb: String?
     var liveTarget: String?
-    /// A few recent actions, with running calls kept ahead of finished ones
-    /// when choosing what fits. Output stays in the expandable member rows.
     var recentActivity: [Activity] = []
-    /// Keep Minimal informative while work runs, and return to one line
-    /// afterwards. Opening the group already shows these calls in full.
     var activityPreview: [Activity] {
         style == .work && running && !open ? recentActivity : []
     }
-    /// The first step's start and the last step's end, when the host
-    /// recorded them.
     var startedAtMs: Int64?
     var endedAtMs: Int64?
-    /// Reported spend for the turn this group belongs to, in Minimal, where
-    /// the usage row itself is not drawn.
     var cost: Double?
     var preview: String?
     var plain = false
-    /// The one step a single-member group stands for: its tool name, and
-    /// the file or command it acted on.
     var verb: String?
     var subject: String?
 }
@@ -100,14 +61,10 @@ struct ChatStepGroup: Equatable, Sendable {
 /// one at a time, and the spinner, live markdown and hover all keep working
 /// on the rows they always worked on.
 enum ChatTranscriptFold {
-    /// Verbs that only look. A run of these reads as one line in Standard.
     private static let readVerbs: Set<String> = ["Read"]
     private static let searchVerbs: Set<String> = ["Grep", "Search", "Glob", "Find", "WebSearch"]
     private static let pageVerbs: Set<String> = ["WebFetch"]
 
-    /// - Parameters:
-    ///   - running: whether the conversation's last turn is still going.
-    ///   - isOpen: whether a group, by id, is shown with its steps.
     static func fold(
         _ items: [ChatDisplayItem],
         detail: ChatDetail,
@@ -128,13 +85,7 @@ enum ChatTranscriptFold {
         return withTurnChanges(folded, raw: items, running: running)
     }
 
-    // MARK: Files changed
 
-    /// A turn's edits, one row per file, after the turn has finished.
-    ///
-    /// Read from the raw rows, since a closed group hides its edits from the
-    /// folded list. Turns are counted the same way in both lists: user rows
-    /// are never folded, so the n-th one starts the same turn in each.
     static func withTurnChanges(_ folded: [ChatDisplayItem], raw: [ChatDisplayItem], running: Bool) -> [ChatDisplayItem] {
         var changes: [Int: ChatTurnChanges] = [:]
         var turn = 0
@@ -176,15 +127,12 @@ enum ChatTranscriptFold {
             }
             out.append(item)
         }
-        // The turn still running gets its card when it ends.
         if !running, let finished = changes[turn] {
             out.append(ChatDisplayItem(id: finished.id, kind: .changes(finished)))
         }
         return out
     }
 
-    /// The group header standing for `id`, when `id` is one of a closed
-    /// group's steps. Nil when the row is drawn as itself or is not here.
     static func owner(of id: String, in folded: [ChatDisplayItem]) -> String? {
         for item in folded {
             if case let .group(group) = item.kind, !group.open,
@@ -195,8 +143,6 @@ enum ChatTranscriptFold {
         return nil
     }
 
-    /// A group's row id. Named after its first step, so it holds while a
-    /// live turn adds steps after it and when an older page lands above.
     static func groupID(firstMember id: String) -> String { "g:\(id)" }
 
 
@@ -211,8 +157,6 @@ enum ChatTranscriptFold {
 
         func flushRun(trailing: Bool) {
             defer { run = [] }
-            // One read is a row like any other. Folding it would hide the
-            // only thing it says behind a line that says less.
             guard run.count >= 2 else {
                 out.append(contentsOf: run)
                 return
@@ -226,8 +170,6 @@ enum ChatTranscriptFold {
                 run.append(item)
             case let .thinking(text):
                 flushRun(trailing: false)
-                // Reasoning still arriving stays open: watching it is the
-                // point. It folds once anything comes after it.
                 if running, index == items.count - 1 {
                     out.append(item)
                 } else {
@@ -245,9 +187,6 @@ enum ChatTranscriptFold {
     }
 
 
-    /// Every step is one line. Runs of reads and searches still read as
-    /// one, even a run of one, because "Explored ChatModel.swift" says what
-    /// a lone Read row says in less room.
     private static func compactFold(
         _ items: [ChatDisplayItem],
         running: Bool,
@@ -283,7 +222,6 @@ enum ChatTranscriptFold {
                     group.plain = true
                     emit(group, members: [item], into: &out, isOpen: isOpen)
                 }
-            // A failed step is a line too, marked on the line itself.
             case let .tool(state):
                 flushRun(trailing: false)
                 line(.step, [item], running: state.running)
@@ -306,8 +244,6 @@ enum ChatTranscriptFold {
         isOpen: (String) -> Bool
     ) -> [ChatDisplayItem] {
         var out: [ChatDisplayItem] = []
-        // A turn runs from one question to the next. Rows before the first
-        // question (a window that opens mid-turn) are a turn of their own.
         var starts = items.indices.filter { if case .user = items[$0].kind, !items[$0].isSteer { return true } else { return false } }
         if starts.first != 0 { starts.insert(0, at: 0) }
         for (n, start) in starts.enumerated() where start < items.count {
@@ -350,19 +286,14 @@ enum ChatTranscriptFold {
                 knownCost = knownCost && spent != nil && spent?.isFinite == true && (spent ?? -1) >= 0
                 usage.append(item)
             case .thinking, .tool, .edit:
-                // A failed step folds with the rest. The work line counts
-                // it, so it is marked without taking a card of its own.
                 members.append(item)
             default:
-                // Replies, questions, turn failures and handoffs stay in order.
                 flush(trailing: false)
                 out.append(item)
             }
         }
         flush(trailing: true)
 
-        // The spend rides on the turn's last work line. A turn with no work
-        // to fold, or without a complete positive cost, keeps one token total.
         if let lastHeader, knownCost, cost.isFinite, cost > 0, case var .group(group) = out[lastHeader].kind {
             group.cost = cost
             let previous = out[lastHeader]
@@ -384,7 +315,6 @@ enum ChatTranscriptFold {
         }
     }
 
-    // MARK: Building groups
 
     private static func emit(
         _ group: ChatStepGroup,
@@ -427,8 +357,6 @@ enum ChatTranscriptFold {
                 target: line.trimmingCharacters(in: .whitespaces), running: running, failed: failed
             ))
             if group.recentActivity.count > 3 {
-                // A long-running call may precede several quick completions.
-                // Keep it visible rather than implying everything has ended.
                 let oldestFinished = group.recentActivity.firstIndex { !$0.running }
                 group.recentActivity.remove(at: oldestFinished ?? 0)
             }
@@ -484,8 +412,6 @@ enum ChatTranscriptFold {
                 break
             }
         }
-        // A step still running is running whatever came after it. A group
-        // with nothing running is live only while it is the turn's last.
         group.running = anyRunning || running
         return group
     }
@@ -494,7 +420,6 @@ enum ChatTranscriptFold {
         readVerbs.contains(verb) || searchVerbs.contains(verb) || pageVerbs.contains(verb)
     }
 
-    /// The first line that says something, without its markdown marks.
     static func preview(of text: String) -> String? {
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let plain = line

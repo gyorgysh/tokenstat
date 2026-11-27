@@ -21,11 +21,6 @@ using ShapesPath = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// A refresh somebody asked for, as an event the logo bars listen for.
-/// Matches the Mac clientRefreshing notification: toolbar refresh, scan and
-/// sync all go through here so the bars move the same way on both platforms.
-/// </summary>
 internal static class LogoRefresh
 {
     internal static event Action? Refreshing;
@@ -33,13 +28,6 @@ internal static class LogoRefresh
     public static void Began() => Refreshing?.Invoke();
 }
 
-/// <summary>
-/// The tokenstat brand marks, drawn in code. No image assets: the logo is
-/// three rounded rectangles, so an asset would be a resource to keep in step
-/// with the website SVG for no benefit, and drawn geometry is sharp at any
-/// size. Geometry, colours, sizes and timings are read from the Mac
-/// Marks.swift, which is the source of truth. Nothing here is invented.
-/// </summary>
 internal static class Marks
 {
     public static FrameworkElement Device(string platform, bool client = false, double size = 30)
@@ -59,7 +47,6 @@ internal static class Marks
         };
     }
 
-    /// <summary>The bars in one text colour, for a theme that is not the brand's own.</summary>
     private static Color BarColor(Color brand, int index)
     {
         if (Theme.ShowsBrandColors) return brand;
@@ -67,16 +54,6 @@ internal static class Marks
         return Color.FromArgb(index switch { 0 => (byte)102, 1 => (byte)173, _ => (byte)255 }, text.R, text.G, text.B);
     }
 
-    /// <summary>
-    /// The tokenstat mark: three ascending bars on a shared baseline.
-    /// Bars 12 wide on a 15 pitch, sharing a baseline, from the website's
-    /// 64 unit artboard. The frame is the ink (x 11..53, y 10..52), not the
-    /// artboard, so the mark does not sit high next to text beside it.
-    /// </summary>
-    /// <param name="size">Frame side. The text in <see cref="Wordmark"/> scales with it.</param>
-    /// <param name="animated">Draw the bars rising in turn, for a screen waiting on something.</param>
-    /// <param name="loops">A repeating rise for a screen that stays while it waits,
-    /// or one rise that lands and holds.</param>
     public static FrameworkElement LogoMark(double size = 18, bool animated = false, bool loops = true)
     {
         double unit = size / 42;
@@ -84,8 +61,6 @@ internal static class Marks
         double[] heights = [18, 30, 42];
         Color[] fills = [Theme.Hex(0xC3B0FFu), Theme.Hex(0x8B5CF6u), Theme.Hex(0xE879F9u)];
 
-        // With the system reduce-motion setting on, loops land on the last
-        // frame: full bars, no storyboard.
         bool moves = animated && AnimationsEnabled();
         var canvas = new Canvas { Width = size, Height = size };
         var bars = new List<Rectangle>();
@@ -132,9 +107,6 @@ internal static class Marks
             var board = new Storyboard();
             foreach (var (bar, index) in bars.Select((bar, index) => (bar, index)))
             {
-                // Loops: 620ms rise, each bar a beat (140ms) after the one
-                // before it. One shot: a single 1200ms rise on a 150ms
-                // stagger that lands and holds.
                 var rise = loops
                     ? BarScale(index, 620, 140, loop: true)
                     : BarScale(index, 1200, 150, loop: false);
@@ -156,15 +128,6 @@ internal static class Marks
         return canvas;
     }
 
-    /// <summary>
-    /// The mark and the name, for the top of the sidebar. 17 by default,
-    /// where this sits above rows and must not shout over them.
-    /// </summary>
-    /// <param name="size">Mark height. The text scales with it, so one number sizes the lockup.</param>
-    /// <param name="fills">Take the full width and push later content right,
-    /// which is what a sidebar header wants and a centred toolbar item does not.</param>
-    /// <param name="showsMark">Draw the bars as well as the name. A lockup that
-    /// already placed the mark above the letters wants the word only.</param>
     public static FrameworkElement Wordmark(double size = 17, bool fills = true, bool showsMark = true)
     {
         var row = new Grid();
@@ -211,17 +174,6 @@ internal static class Marks
         return row;
     }
 
-    /// <summary>
-    /// The account's profile picture, or initials when there is none. Same
-    /// rule as the website and the Mac client: a real upload is the picture,
-    /// a missing one is letters from the display name, first letter of the
-    /// first two words, on a filled bubble.
-    /// </summary>
-    /// <param name="url">Profile picture URL. Empty and blank mean no picture.</param>
-    /// <param name="name">The name the person is shown as. Initials come from this first.</param>
-    /// <param name="handle">Falls back to this when there is no display name.</param>
-    /// <param name="tint">Bubble colour when this is not the signed-in account.
-    /// Left unset for our own picture, which uses the brand gradient.</param>
     public static FrameworkElement Avatar(
         string? url = null,
         string? name = null,
@@ -230,8 +182,6 @@ internal static class Marks
         Color? tint = null)
     {
         Color seat = tint ?? Theme.Accent;
-        // The signed-in account uses the same two-stop fill as the Mac bubble.
-        // A per-person tint stays that person's colour, darkened toward the foot.
         Color deep = seat == Theme.Accent
             ? Theme.Secondary
             : Color.FromArgb(184, seat.R, seat.G, seat.B);
@@ -314,10 +264,6 @@ internal static class Marks
         return grid;
     }
 
-    /// <summary>
-    /// One or two letters, uppercased, from a display name or a handle. First
-    /// letter of the first two words, the same function the website uses.
-    /// </summary>
     public static string? Initials(string? name)
     {
         var parts = (name ?? "").Trim()
@@ -334,13 +280,6 @@ internal static class Marks
         return letters.ToUpperInvariant();
     }
 
-    /// <summary>
-    /// A stable colour for a person, from the heat ramp. Hashed over the bytes
-    /// (djb2) rather than GetHashCode, which is seeded per process: the same
-    /// author would get a different colour on every launch, and a mark that
-    /// moves is not a mark. The ramp's first two steps are left out, they are
-    /// the quiet-day greys and a letter in one of them is unreadable.
-    /// </summary>
     public static Color TintForIdentity(string identity)
     {
         var ramp = Theme.IsDark ? Theme.HeatDark : Theme.Heat;
@@ -353,14 +292,6 @@ internal static class Marks
         return palette[hash % (ulong)palette.Length];
     }
 
-    /// <summary>
-    /// The tier, as the silhouette the website puts beside a name. The paths
-    /// are the site's own: a crest shield for Patron, a star for Supporter, a
-    /// crown for Legend. Free has no mark at all, a badge everyone holds is
-    /// decoration. A tier this build does not know still gets a mark (a seal),
-    /// so a new tier on the server never makes an account look downgraded.
-    /// </summary>
-    /// <returns>The mark, or null when there is nothing to show.</returns>
     public static FrameworkElement? TierMark(string tier, double size = 15)
     {
         string kind = (tier ?? "").ToLowerInvariant();
@@ -402,11 +333,6 @@ internal static class Marks
         return mark;
     }
 
-    /// <summary>
-    /// One run of the logo rise for a refresh somebody pulled: the bars dip
-    /// and come back up, once. Not the repeating launch animation. Wired only
-    /// for a static mark, and only while it is in the tree.
-    /// </summary>
     private static void WatchRefresh(Canvas canvas, List<Rectangle> bars)
     {
         bool pulsing = false;
@@ -446,11 +372,6 @@ internal static class Marks
         };
     }
 
-    /// <summary>
-    /// A scale-Y rise for one bar: ease in-out, starting a stagger after the
-    /// previous bar. A looping rise reverses back down and repeats; a single
-    /// rise lands and holds.
-    /// </summary>
     private static DoubleAnimation BarScale(int index, int durationMs, int staggerMs, bool loop)
     {
         var animation = new DoubleAnimation
@@ -493,14 +414,6 @@ internal static class Marks
     private static readonly Dictionary<string, BitmapImage> AvatarImages = new();
     private static readonly Queue<string> AvatarImageOrder = new();
 
-    /// <summary>
-    /// One decoded profile picture per URL, for the life of the process. The
-    /// same face is drawn in several places, fetching it each time is a
-    /// request nobody asked for. Capped at 128 entries; WinUI owns the decode
-    /// cache, so there is no byte cap to account here like the Mac NSCache has.
-    /// A shared instance also dedupes in-flight loads: views created while a
-    /// download is running get the same bitmap and paint when it opens.
-    /// </summary>
     private static BitmapImage? AvatarImage(string url)
     {
         if (AvatarImages.TryGetValue(url, out var cached))
@@ -586,11 +499,6 @@ internal static class Marks
         return new PathGeometry { Figures = { star } };
     }
 
-    /// <summary>
-    /// Patron crest shield with a chevron cut out of it. The cut is wound
-    /// against the shield under an even-odd fill, so it stays open; at small
-    /// sizes it closes up into a plain shield rather than mush.
-    /// </summary>
     private static PathGeometry PatronShield(double size)
     {
         double u = size / 24;

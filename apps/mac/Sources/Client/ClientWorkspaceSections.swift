@@ -8,29 +8,11 @@
 import SwiftUI
 import UIKit
 
-/// One folder on a connected host, as its sections.
-///
-/// The same ones the Mac's sidebar lists, in the same order and with the same
-/// counts, because they are the same folder. Notes are the exception: they
-/// live on the machine that owns the folder and a client cannot read them yet.
-///
-/// The phone has no sidebar and no tab strip, so a section pushes instead of
-/// opening a tab: list, workspace, section, and a document is the fourth and
-/// last level.
-///
-/// Sessions, workflows and automations can start and stop work on the
-/// machine that owns the folder. Construction stays on the Mac: a phone
-/// can run a graph, it cannot draw one.
 struct ClientWorkspaceDetailView: View {
     let peer: String
     let hostName: String
-    /// What the list this was pushed from knew when it was tapped. A seed, not
-    /// the truth: an agent writing files changes it a second later.
     let folder: WorkspaceFolder
 
-    /// The folder as the owning machine last described it. Only the parts that
-    /// go stale are taken, because the peer answers with its own local id and
-    /// this side addresses a remote folder as `remote:<peer>:<id>`.
     @State private var live: WorkspaceFolder?
     @State private var counts = WorkspaceSectionCounts()
     @State private var pullCounts = PullCountStore.shared
@@ -61,9 +43,6 @@ struct ClientWorkspaceDetailView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(ClientNavigationModel.self) private var navigation
 
-    /// Regular both ways only: an iPad, or an iPhone Duo opened out. A large
-    /// iPhone in landscape is regular across but compact down, and that is
-    /// still a phone surface.
     private var usesWorkspaceLayout: Bool {
         ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
     }
@@ -150,8 +129,6 @@ struct ClientWorkspaceDetailView: View {
         .cardSurface()
     }
 
-    /// In the Mac's order. Files, Changes and the rest push.
-    /// Browser is a cover: it is a web page, not a level of this folder.
     @ViewBuilder
     private var sections: some View {
         VStack(spacing: Theme.Space.s) {
@@ -163,9 +140,6 @@ struct ClientWorkspaceDetailView: View {
             }
             .buttonStyle(.plain)
 
-            // Under Sessions, the same place the Mac puts it. This list is
-            // written out rather than driven from `WorkspaceSection.allCases`,
-            // which is why adding the case alone left the phone without it.
             ClientOwnedNavigationLink {
                 RemoteHostFeatureGate(feature: .chat, peer: peer, hostName: hostName) {
                     ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName, folder: current)
@@ -323,13 +297,6 @@ struct ClientWorkspaceDetailView: View {
         .presentationDetents([.medium])
     }
 
-    /// Two calls, not six.
-    ///
-    /// `workspace.summary` answers every badge at once, and `workspace.status`
-    /// re-reads the git state the header and the Changes row need. This used
-    /// to read five whole lists over the tunnel and count them on the phone,
-    /// which is five round trips for a screen that is mostly numbers and a
-    /// second opinion about what a folder contains.
     private func reload() async {
         async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
         async let counted = ClientRemote.summaries(peer: peer)
@@ -339,17 +306,10 @@ struct ClientWorkspaceDetailView: View {
         do {
             summaries = try await counted
         } catch {
-            // Say so. Every badge comes from this one call now, so a failure
-            // leaves all of them stale rather than one of them blank, and a
-            // screen of ten-minute-old numbers presented as current is worse
-            // than a screen that admits it could not ask.
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
         guard let summary = summaries.first(where: { $0.id == workspaceID }) else {
-            // The host answered but does not have this folder, or is too old
-            // to know the method. Badges stay as they were: "we could not ask"
-            // is not the same as "nothing here".
             counts.changes = current.git?.files.count ?? counts.changes
             return
         }
@@ -394,7 +354,6 @@ struct ClientWorkspaceDetailView: View {
     }
 }
 
-/// What the badges say. One value each, filled by one pass.
 struct WorkspaceSectionCounts {
     var sessions = 0
     var chats = 0
@@ -406,11 +365,6 @@ struct WorkspaceSectionCounts {
     var workflows = 0
 }
 
-/// One section row on the phone.
-///
-/// The same glyph and the same word as the Mac's sidebar row, at the size a
-/// thumb needs. Zero draws nothing, for the reason it draws nothing there: a
-/// zero is not news, and a column of grey zeroes is a wall of them.
 struct ClientSectionRow: View {
     let section: WorkspaceSection
     let count: Int?
@@ -465,7 +419,6 @@ struct ClientProjectSectionRow: View {
     }
 }
 
-/// The same project row on iPhone and iPad, opening the existing host-gated sheet.
 struct ClientProjectWorktreesButton: View {
     let peer: String
     let hostName: String
@@ -502,21 +455,12 @@ struct ClientProjectWorktreesButton: View {
     }
 }
 
-// MARK: - Changes
 
-/// What is uncommitted in this folder, as the host last reported it.
-///
-/// Tapping a file opens its diff. Selection stays local until the person
-/// submits the reviewed content to the computer that owns the repository.
 struct ClientWorkspaceChangesView: View {
     let peer: String
     let workspaceID: String
-    /// What the section list had. Replaced by this screen's own read, so a
-    /// file written while it is open shows up here rather than on the next
-    /// visit.
     let folder: WorkspaceFolder
     let hostName: String
-    /// Inspector panes already name this surface. Compact pushes still need the title.
     var showsNavigationTitle: Bool = true
 
     @State private var live: WorkspaceFolder?
@@ -644,8 +588,6 @@ struct ClientWorkspaceChangesView: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }.padding(.horizontal, Theme.Space.m)
-                // Bring commits in, send them out, and the pull request they
-                // belong to, side by side like the Mac's Changes footer.
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Theme.Space.s) { syncControls(current) }
                     VStack(alignment: .leading, spacing: Theme.Space.s) { syncControls(current) }
@@ -736,8 +678,6 @@ struct ClientFolderBranchRow: View {
     let folder: WorkspaceFolder
     let onChanged: () async -> Void
 
-    /// Named, not just valued: a bare "v1.0" beside two plain header lines
-    /// never said it opens the picker.
     private var branchLabel: String {
         L10n.text("apple.clientworkspacesections.branch_0.e742d863", "\(folder.subtitle ?? L10n.text("apple.clientworkspacesections.detached.88e34e4c"))")
     }
@@ -775,10 +715,6 @@ struct ClientFolderBranchRow: View {
     }
 }
 
-/// One changed file, and the way into its diff.
-///
-/// Its own view rather than a label inline: the compiler gave up type-checking
-/// the stack once it was nested inside a `NavigationLink` inside a `ForEach`.
 private struct ClientChangedFileRow: View {
     let file: FileChange
 
@@ -825,9 +761,7 @@ private struct ClientChangedFileRow: View {
     }
 }
 
-// MARK: - Tasks
 
-/// This folder's cards, on the host that owns them.
 struct ClientWorkspaceTasksView: View {
     let peer: String
     let workspaceID: String
@@ -839,10 +773,7 @@ struct ClientWorkspaceTasksView: View {
     }
 }
 
-// MARK: - Jobs
 
-/// Both phone navigation and iPad sections mount the same session owner.
-/// Window width only changes its presentation.
 struct ClientWorkspaceWorkflowsView: View {
     let peer: String
     let workspaceID: String
@@ -873,9 +804,7 @@ struct ClientWorkspaceAutomationsView: View {
     }
 }
 
-// MARK: - Shared section chrome
 
-/// A job or a graph: a name, one quiet line, and whether it is going.
 struct ClientJobRow: View {
     let title: String
     let subtitle: String
@@ -960,12 +889,6 @@ struct ClientJobRow: View {
     }
 }
 
-/// Nothing here, said properly.
-///
-/// A wrapper over `ClientEmptyState` rather than its own card, so a section's
-/// empty screen cannot drift back into a grey sentence while Home and Devices
-/// draw something considered. The title is the state, the line under it is the
-/// next move.
 struct ClientSectionEmpty: View {
     let text: String
     var art: EmptyArtKind?
@@ -987,18 +910,6 @@ struct ClientSectionEmpty: View {
     }
 }
 
-/// The shell every pushed section shares: one scroll view, one error card, one
-/// empty state, and pull to refresh. Written once so a folder's five sections
-/// cannot each arrive at their own idea of what a loading screen looks like.
-/// The same screen as `ClientSectionList`, built on a `List`.
-///
-/// **`swipeActions` only exists inside a `List`.** Attached to a row in a
-/// `ScrollView` it compiles, renders and does nothing, which is how the first
-/// cut of the phone's task board shipped gestures that could not be performed.
-/// Any screen whose rows can be swiped has to be here rather than there.
-///
-/// The loading, empty and error states are the same ones, drawn as rows so a
-/// screen does not change shape when its data lands.
 struct ClientCardList<Content: View>: View {
     let title: String
     let errorMessage: String?
@@ -1017,8 +928,6 @@ struct ClientCardList<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var waitedTooLong = false
 
-    /// The empty screen this list was configured with. One place, so the two
-    /// list shells cannot describe the same folder differently.
     private var emptyState: some View {
         ClientSectionEmpty(
             text: emptyText,
@@ -1055,19 +964,12 @@ struct ClientCardList<Content: View>: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        // Rows carry the gap below them and nothing above, so without this the
-        // first card sits flush against whatever the screen puts over the list.
-        // On notes that is the composer's own border, and an empty state that
-        // touches the field it belongs to reads as part of it.
         .contentMargins(.top, Theme.Space.m, for: .scrollContent)
         .contentMargins(.bottom, Theme.Space.l, for: .scrollContent)
         .background(Theme.background)
         .animation(.easeInOut(duration: 0.22), value: isLoaded)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        // Keyed on `isLoaded` so the timer restarts when it changes. A plain
-        // `.task` closure captures the value it started with, which for a
-        // `let` means it never sees the load finish.
         .task(id: isLoaded) {
             guard !isLoaded else {
                 waitedTooLong = false
@@ -1087,7 +989,6 @@ struct ClientCardList<Content: View>: View {
     }
 }
 
-/// Compact folder sections need a title. Inspector panes already name the surface.
 struct ClientOptionalNavigationTitle: ViewModifier {
     var title: String?
 
@@ -1104,11 +1005,6 @@ struct ClientOptionalNavigationTitle: ViewModifier {
 }
 
 extension View {
-    /// A card as a list row: our spacing, no separator, no system fill.
-    ///
-    /// The gap lives below the row rather than around it, so the list's own
-    /// content margins own both ends and cards cannot end up twice as far
-    /// apart as they are from the top of the screen.
     func clientCardRow() -> some View {
         listRowInsets(EdgeInsets(
             top: 0,
@@ -1121,7 +1017,6 @@ extension View {
     }
 }
 
-/// Shared by every section screen that only scrolls.
 struct ClientSectionList<Content: View>: View {
     let title: String
     let errorMessage: String?
@@ -1139,8 +1034,6 @@ struct ClientSectionList<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var waitedTooLong = false
 
-    /// The empty screen this list was configured with. One place, so the two
-    /// list shells cannot describe the same folder differently.
     private var emptyState: some View {
         ClientSectionEmpty(
             text: emptyText,
@@ -1161,14 +1054,8 @@ struct ClientSectionList<Content: View>: View {
                     }
                 }
                 if !isLoaded {
-                    // Nothing yet is an answer, and it must not be given
-                    // before the question has been asked. A wireframe says
-                    // "rows are coming" and holds their shape, where a spinner
-                    // said nothing and then let the list appear all at once.
                     ClientWireframe.Page()
                         .transition(.smoothIn(reduceMotion: reduceMotion))
-                    // But a wireframe promises the answer is coming, so it
-                    // must not pulse forever when the machine never replies.
                     if waitedTooLong {
                         ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil), art: .waiting)
                     }
@@ -1185,9 +1072,6 @@ struct ClientSectionList<Content: View>: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        // Keyed on `isLoaded`: a plain `.task` closure keeps the value it
-        // started with, so the guard would fire on every screen whether or not
-        // the load had already finished.
         .task(id: isLoaded) {
             guard !isLoaded else {
                 waitedTooLong = false

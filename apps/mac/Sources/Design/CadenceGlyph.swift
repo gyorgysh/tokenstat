@@ -6,14 +6,10 @@
 
 import SwiftUI
 
-/// Monday is the top dot and the week runs clockwise, matching the bitmask the
-/// host uses (Monday = bit 0).
 struct CadenceGlyph: View {
     var schedule: AutomationSchedule
     var enabled: Bool = true
     var size: CGFloat = 22
-    /// The words this replaces. Callers pass `scheduleSummary`, which is the
-    /// one place that phrasing is decided.
     var summary: String = ""
 
     private var tint: Color { enabled ? Theme.accent : Theme.stateIdle }
@@ -62,7 +58,6 @@ struct CadenceGlyph: View {
         }
     }
 
-    /// 0 is Monday, matching `AutomationSchedule.weekdays` and `weekday`.
     private func fires(on day: Int) -> Bool {
         switch schedule.kind {
         case .daily:
@@ -70,10 +65,6 @@ struct CadenceGlyph: View {
         case .weekdays:
             return day < 5
         case .weekly:
-            // The host accepts a weekly schedule either way and sends both, so
-            // prefer the bitset when it carries days. `scheduleSummary` makes
-            // the same choice, and the ring must not contradict the words it
-            // sits beside.
             if schedule.weekdays & 0b0111_1111 != 0 {
                 return schedule.weekdays & (1 << day) != 0
             }
@@ -87,17 +78,12 @@ struct CadenceGlyph: View {
 }
 
 struct CountdownRing: View {
-    /// Usually the last run. Without it the ring cannot show progress, so it
-    /// draws empty and the words beside it carry the meaning.
     var start: Date?
     var end: Date
     var size: CGFloat = 18
     var lineWidth: CGFloat = 2.5
 
     var body: some View {
-        // Reading a phrase from the shared clock is what subscribes this view
-        // to the tick. See `RelativeClock`: a per-view live date costs a window
-        // layout pass every frame.
         let words = RelativeClock.phrase(for: end, style: .abbreviated)
         return ZStack {
             Circle()
@@ -141,15 +127,9 @@ struct NextRunBadge: View {
 struct SlotGauge: View {
     var filled: Int
     var total: Int
-    /// Zero concurrent means no cap on the host, which has no shape at all, so
-    /// say so in words instead of drawing an infinite row of tiles.
     var uncapped: Bool = false
     var tile: CGFloat = 10
 
-    /// The number comes from a text field somebody is still typing into, so it
-    /// has to be bounded: `100000` is a valid thing to type and a hundred
-    /// thousand rectangles in an HStack hangs the window before the value is
-    /// ever saved. Past this many the count is words, not shapes.
     private static let maxTiles = 12
 
     private var drawn: Int {

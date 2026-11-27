@@ -10,8 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the provisioning rules ported from `ClientSetupModel.swift`: one auth
-/// payload, the session params every step shares, and the machine-name offer.
 class SetupConnectTest {
     private fun key(id: String = "key_1", ref: String = "android:key_1") = buildJsonObject {
         put("id", id)

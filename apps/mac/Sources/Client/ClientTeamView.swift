@@ -11,13 +11,10 @@ struct ClientTeamView: View {
     }
 }
 
-/// Account settings link to the collaboration destination; organization
-/// navigation belongs inside Team and never pretends to switch accounts.
 struct ClientTeamAccountLink: View {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        // One row, like the profile above it: the whole card opens Team.
         Button {
             navigation.chooseNavigation(); navigation.restoredRoute = nil
             navigation.destination = .team; navigation.folderID = nil

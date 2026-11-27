@@ -250,8 +250,6 @@ pub fn plans(
         );
     }
 
-    // The comparison. A trailing 30 days is the closest thing to "a month of
-    // how I actually work" that the archive can answer without guessing.
     let query = Query {
         since: last_30_days(tz),
         ..Query::default()
@@ -377,11 +375,6 @@ pub fn models_detail(store: &Store, q: &Query, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Fetch the list-rate book and the model catalog, reporting but not failing.
-///
-/// Called from `setup`, where the run must finish on a machine with no network.
-/// A missing snapshot degrades reports to counts without dollars, which is a
-/// documented state, not an error.
 pub(super) fn fetch_reference_data(json: bool) {
     match tokenstat_sync::pricing::refresh(false) {
         Ok(r) if !json => println!(
@@ -409,7 +402,6 @@ fn price_or_dash(v: Option<f64>) -> String {
     v.map(ui::usd).unwrap_or_else(|| "-".into())
 }
 
-/// Start date of a trailing 30 day window, inclusive of today.
 fn last_30_days(tz: &jiff::tz::TimeZone) -> Option<String> {
     today(tz)
         .checked_sub(jiff::Span::new().days(29))

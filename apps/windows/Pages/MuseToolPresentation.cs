@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Recover subjects that Muse logged in a result rather than its tool start.</summary>
 internal static class MuseToolPresentation
 {
     private const int ScanCap = 128 * 1024;
@@ -38,7 +37,6 @@ internal static class MuseToolPresentation
         var first = lines[0].TrimEnd('\r');
         if (subject.Length == 0 && name is "Bash" or "Shell")
         {
-            // The renderer puts a description before the command. Never scan stdout for '$'.
             if (first.StartsWith("$ ", StringComparison.Ordinal)) subject = first[2..];
             else if (lines.Length > 1 && lines[1].StartsWith("$ ", StringComparison.Ordinal)) subject = lines[1][2..].TrimEnd('\r');
         }

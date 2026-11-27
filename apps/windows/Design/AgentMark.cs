@@ -7,7 +7,6 @@ using Windows.Storage.Streams;
 
 namespace Tokenstat.Design;
 
-/// <summary>The same template brand artwork as the Mac launcher, tinted by our theme.</summary>
 internal static class AgentMark
 {
     private static readonly string[] Known = ["claude_code", "codex", "grok", "opencode", "cline", "openclaw", "muse", "devin", "pi", "omp", "dsh", "zed", "copilot", "antigravity", "cursor", "gemini", "hermes", "kilo", "kimi", "qwen"];
@@ -56,7 +55,7 @@ internal static class AgentMark
                 image.Source = source;
                 icon.Visibility = Visibility.Collapsed;
             }
-            catch { /* A missing brand keeps the accessible generic agent mark. */ }
+            catch { }
         }
         box.Unloaded += (_, _) => paintRevision++;
         box.Loaded += async (_, _) => await PaintAsync();

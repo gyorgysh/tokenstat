@@ -31,21 +31,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
 
-/// One screen session, port of Apple `ScreenViewerModel`.
-///
-/// Owns everything the picture needs and nothing the picture looks like: the
-/// capability, the viewer registration, the read loop that tells "connected"
-/// from "streaming", the bounded reconnect, the ordered input channel, the
-/// heartbeat, and the side channels (displays, quality, clipboard, audio,
-/// file transfer). The composable reads its state and draws it.
 class ScreenViewerModel(
     private val app: AppViewModel,
     private val scope: CoroutineScope,
     private val clipboard: ScreenClipboard? = null,
-    /// Where a session's viewer close runs. The composition scope is being
-    /// cancelled when `release` runs from `onDispose`, which would drop the
-    /// close and leak the viewer relay-side until timeout, so this outlives
-    /// the screen. The call site passes the view model's own scope.
     private val closeScope: CoroutineScope = scope,
 ) {
     enum class State { Idle, Connecting, Streaming, Failed }
@@ -71,8 +60,6 @@ class ScreenViewerModel(
     var quality by mutableStateOf(ScreenQuality.Auto)
         private set
 
-    /// Where the pointer is, normalized. This device owns it because trackpad
-    /// mode has no other way to know, and because a phone has to draw it.
     var cursorX by mutableFloatStateOf(0.5f)
         private set
     var cursorY by mutableFloatStateOf(0.5f)
@@ -81,15 +68,9 @@ class ScreenViewerModel(
     val decoder = ScreenDecoder()
     val audio = ScreenAudio()
 
-    /// Whether the live session is actually carrying input.
     var isControlling by mutableStateOf(false)
         private set
 
-    /// One input event waiting for the pump. Moves coalesce: a finger emits
-    /// them at touch rate while the pump sends at network round trips, so
-    /// only the latest position matters. Scrolls merge the same way by
-    /// distance. Clicks, presses and keys always keep their place, because a
-    /// release dropped from a full queue would stick a button on the host.
     private sealed interface PendingInput {
         data class Control(val json: String) : PendingInput
         data class Move(val json: String) : PendingInput
@@ -107,9 +88,6 @@ class ScreenViewerModel(
     private val inputLock = Any()
     private val inputQueue = ArrayDeque<PendingInput>()
     private val inputSignal = Channel<Unit>(capacity = Channel.CONFLATED)
-    /// Decode runs off the main thread, while resets arrive on it from the
-    /// screen. One lock, so a display switch cannot tear the codec down
-    /// under a frame being fed to it.
     private val mediaLock = Any()
     private var stopped = false
     private var generation = 0
@@ -120,23 +98,17 @@ class ScreenViewerModel(
     private var clipboardStamp = -1L
     private var clipboardWritten: String? = null
 
-    /// The permission is missing, so the checklist offers to ask for it.
     val needsPermission: Boolean
         get() = message.lowercase().let {
             it.contains("permission") || it.contains("screen access") || it.contains("allowed")
         }
 
-    /// The session never started because the plan does not include it.
     val needsLegend: Boolean
         get() = message.contains("legend plan", ignoreCase = true)
 
     fun start(peer: String, hostLabel: String, tier: String?, control: Boolean) {
         stop()
         stopped = false
-        // The cancelled session is still unwinding past its own
-        // non-cancellable closes. It carries the old number and stands down
-        // wherever it checks it, instead of redialling into this session's
-        // state.
         generation += 1
         val current = generation
         this.peer = peer
@@ -154,7 +126,6 @@ class ScreenViewerModel(
 
     private var label = ""
 
-    /// Everything this session holds, put down. Safe to call twice.
     fun stop() {
         stopped = true
         heartbeatJob?.cancel()
@@ -169,9 +140,6 @@ class ScreenViewerModel(
         viewerId = null
         hostSessionId = null
         if (id != null) {
-            // Not discarded. The relay allows one screen channel per account,
-            // so a fresh dial that overtakes the old channel's close is
-            // refused, and the retry ladder that follows is a reconnect storm.
             closeScope.launch {
                 withContext(NonCancellable) {
                     runCatching { app.core("screen.viewer.close", buildJsonObject { put("id", id) }) }
@@ -213,9 +181,6 @@ class ScreenViewerModel(
             closeSession()
             state = State.Failed
             message = reason
-            // Ask as soon as the connect fails, rather than waiting for
-            // somebody to find the button under the overlay. Rate limited, or
-            // every failed retry re-asks and spams the host.
             if (autoRequest && needsPermission &&
                 System.currentTimeMillis() - lastAutoRequest > 60_000
             ) {
@@ -231,24 +196,16 @@ class ScreenViewerModel(
             return false
         }
         state = State.Connecting
-        // Say why. Keeping the reason back until the third failure made the
-        // whole visible story of a session that could not stay up
-        // "Reconnecting…", which names nothing anybody can act on.
         message = L10n.text("android.screenviewermodel.reconnecting_attempt_0_of_3_1.8f4f26ac", "${attempts}", "${reason}")
         delay(attempts * 1_000L)
         return current == generation && !stopped
     }
 
-    /// Null when the session opened. Otherwise the reason it did not.
     private suspend fun openSession(): String? {
         if (!tier.equals("legend", ignoreCase = true)) {
             return L10n.text("android.screenviewermodel.screen_access_requires_the_legend_plan.66173f1c")
         }
         return try {
-            // Pair and serve before dialling, the way a workspace connect
-            // does: a fresh process holds no tunnel session, and the
-            // capability issue below would fail with "tunnel session is not
-            // running" instead of opening.
             app.prepareHost(peer, label)
             val token = issueCapability(isControlling)
             val opened = app.core(
@@ -267,9 +224,6 @@ class ScreenViewerModel(
             connectedSince = System.currentTimeMillis()
             streamingSince = 0
             synchronized(mediaLock) { decoder.reset() }
-            // Connected is not the same as a picture. Marking this streaming
-            // would lift the overlay off a black rectangle that still accepts
-            // mouse and keyboard, because input is a side channel.
             state = State.Connecting
             message = L10n.text("android.screenviewermodel.waiting_for_the_first_picture.be8d50cf")
             null
@@ -280,9 +234,6 @@ class ScreenViewerModel(
 
     private suspend fun issueCapability(control: Boolean): String {
         val identity = app.core("machine.identity") as JsonObject
-        // `machine.identity` answers `key`, the 64-hex machine public key,
-        // never `publicIdentity`: that lookup missed on every device and the
-        // viewer failed before dialling. The Apple viewer reads the same key.
         val peerId = identity["key"]?.jsonPrimitive?.contentOrNull
             ?: throw IllegalStateException(L10n.text("android.screenviewermodel.this_device_has_no_identity_yet.40d835eb"))
         val cap = app.workspaceSection(
@@ -300,21 +251,15 @@ class ScreenViewerModel(
 
     private suspend fun closeSession() {
         val id = viewerId ?: return
-        // `screen.viewer.close` is local work that drops the registry entry,
-        // so a fresh dial never overtakes the old channel's close.
         withContext(NonCancellable) {
             runCatching { app.core("screen.viewer.close", buildJsonObject { put("id", id) }) }
         }
-        // Only this session's own id. A restart may have opened the next
-        // session while this close was in flight, and that id is not ours
-        // to clear.
         if (viewerId == id) {
             viewerId = null
             hostSessionId = null
         }
     }
 
-    /// Null when this device ended the session. Otherwise why it ended.
     private suspend fun readLoop(current: Int): String? {
         val id = viewerId ?: return L10n.text("android.screenviewermodel.the_viewer_never_opened.e0afb76d")
         while (current == generation && !stopped) {
@@ -340,9 +285,6 @@ class ScreenViewerModel(
                 System.currentTimeMillis() - connectedSince > 8_000
             ) {
                 if (current != generation || stopped) return null
-                // The transport is alive but unusable. Do not leave its viewer
-                // and the host's capture running behind a failed overlay while
-                // waiting for somebody to press Try again.
                 closeSession()
                 connectedSince = 0
                 state = State.Failed
@@ -371,10 +313,6 @@ class ScreenViewerModel(
                 metadata.text?.let {
                     clipboard?.write(it)
                     clipboardStamp = clipboard?.stamp() ?: -1L
-                    // The stamp can land after the write, so the text is
-                    // remembered too. Without it the host's own copy comes
-                    // straight back at it, and the two ends bounce one string
-                    // between them for as long as the session lasts.
                     clipboardWritten = it
                 }
             }
@@ -383,9 +321,6 @@ class ScreenViewerModel(
 
     private suspend fun applyFrame(encoded: String) {
         val bytes = decode(encoded) ?: return
-        // Parsing and MediaCodec both work on the calling thread, up to tens
-        // of milliseconds a frame. Off the main thread, so the picture never
-        // stalls the chrome drawn over it.
         val frame = withContext(Dispatchers.Default) { ScreenFrames.parse(bytes) } ?: return
         val ratio = frame.width.toFloat() / frame.height.coerceAtLeast(1).toFloat()
         if (ratio.isFinite() && ratio > 0f) aspectRatio = ratio
@@ -394,14 +329,8 @@ class ScreenViewerModel(
         }
         if (!rendered) return
         if (streamingSince == 0L) {
-            // Stability starts with a picture, not with the transport. A slow
-            // first keyframe must not spend almost all of the window by
-            // itself.
             streamingSince = System.currentTimeMillis()
         } else if (System.currentTimeMillis() - streamingSince > STABLE_AFTER_MS) {
-            // A session that died a second after its first frame used to reset
-            // the budget every time and reconnect forever. A session has to
-            // last before it counts as recovered.
             attempts = 0
         }
         if (state != State.Streaming) {
@@ -413,8 +342,6 @@ class ScreenViewerModel(
     private fun decode(encoded: String): ByteArray? =
         runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrNull()
 
-    /// A reason the checklist can act on, in which case the viewer stops and
-    /// says so rather than reconnecting forever. Mirrors Apple `actionable`.
     private fun actionable(reason: String): Boolean {
         val value = reason.lowercase()
         return value.contains("screen recording") || value.contains("accessibility") ||
@@ -424,8 +351,6 @@ class ScreenViewerModel(
     }
 
 
-    /// Every input event, in the order it was made. Independent sends would
-    /// let a move overtake the release that should have ended its drag.
     private fun startInputPump() {
         inputJob = scope.launch {
             for (ignored in inputSignal) {
@@ -434,9 +359,6 @@ class ScreenViewerModel(
                     val next: PendingInput = synchronized(inputLock) {
                         if (inputQueue.isEmpty()) null else inputQueue.removeFirst()
                     } ?: break
-                    // A reconnect drops what it was carrying: the new session
-                    // starts from this device's own pointer, not from a move
-                    // meant for the dead one.
                     val id = viewerId ?: continue
                     val json = when (next) {
                         is PendingInput.Control -> next.json
@@ -455,13 +377,6 @@ class ScreenViewerModel(
         }
     }
 
-    /// Say "still here" on a beat, so the relay can tell a session somebody is
-    /// watching from one nobody is.
-    ///
-    /// The relay cannot see inside an encrypted stream and must not try. What
-    /// it can see is which direction bytes are moving, and on a screen channel
-    /// everything flows one way. Deliberately not tied to control mode: a
-    /// passive watcher is the exact case that would otherwise be cut off.
     private fun startHeartbeat() {
         heartbeatJob = scope.launch {
             while (isActive && !stopped) {
@@ -471,16 +386,12 @@ class ScreenViewerModel(
         }
     }
 
-    /// A control event, which always keeps its place in the queue.
     private fun send(json: String) {
         if (stopped || viewerId == null) return
         synchronized(inputLock) { inputQueue.addLast(PendingInput.Control(json)) }
         inputSignal.trySend(Unit)
     }
 
-    /// A move, which supersedes a move still waiting behind nothing else.
-    /// Every message carries absolute coordinates, so an overtaken move
-    /// changes nothing about what the host ends up holding.
     private fun sendMove(json: String) {
         if (stopped || viewerId == null) return
         synchronized(inputLock) {
@@ -493,8 +404,6 @@ class ScreenViewerModel(
         inputSignal.trySend(Unit)
     }
 
-    /// A scroll, merged into a scroll still waiting: the latest point, the
-    /// whole travel. Wheel distance adds up, so merging drops no movement.
     private fun sendScroll(x: Double, y: Double, dx: Double, dy: Double) {
         if (stopped || viewerId == null) return
         synchronized(inputLock) {
@@ -509,7 +418,6 @@ class ScreenViewerModel(
         inputSignal.trySend(Unit)
     }
 
-    /// Put the pointer at a normalized point on the remote display.
     fun move(x: Float, y: Float) {
         cursorX = x.coerceIn(0f, 1f)
         cursorY = y.coerceIn(0f, 1f)
@@ -517,12 +425,6 @@ class ScreenViewerModel(
         sendMove(ScreenFrames.move(cursorX.toDouble(), cursorY.toDouble()))
     }
 
-    /// Move the pointer by a finger's worth of travel on this surface.
-    ///
-    /// Trackpad mode: the finger is not the pointer, so this device keeps the
-    /// pointer position itself and sends an absolute point. The host stays a
-    /// single "put it here", which is the only thing that survives two
-    /// displays of different sizes.
     fun nudge(dx: Float, dy: Float, width: Float, height: Float, sensitivity: Float) {
         move(
             cursorX + dx * sensitivity / width.coerceAtLeast(1f),
@@ -530,14 +432,11 @@ class ScreenViewerModel(
         )
     }
 
-    /// Press and release in one message, with the count macOS needs to read a
-    /// double click as a double click.
     fun click(button: Int, count: Int, flags: Long = 0) {
         if (!isControlling) return
         send(ScreenFrames.click(cursorX.toDouble(), cursorY.toDouble(), button, count, flags))
     }
 
-    /// Hold or release the left button, for a drag that outlives one gesture.
     fun press(down: Boolean) {
         if (!isControlling) return
         send(ScreenFrames.press(cursorX.toDouble(), cursorY.toDouble(), down))
@@ -558,9 +457,6 @@ class ScreenViewerModel(
         send(ScreenFrames.text(text, flags))
     }
 
-    /// Which screen this device is watching is the viewer's own choice, so a
-    /// view-only session may still make it. The host reads the display event
-    /// without asking whether the session carries input.
     fun selectDisplay(id: Long) {
         if (displays.none { it.id == id }) return
         selectedDisplay = id
@@ -581,21 +477,12 @@ class ScreenViewerModel(
     }
 
 
-    /// Turn control on or off, without stopping the picture where the host
-    /// knows how.
-    ///
-    /// Control is decided when the capability is issued, so an old host has to
-    /// reopen the stream. The relay allows one screen channel per account, so
-    /// reopening races its own teardown, which is why the flip is preferred.
     fun setControl(wanted: Boolean) {
         if (wanted == isControlling) return
         scope.launch {
             val hostSession = hostSessionId
             if (viewerId != null && !hostSession.isNullOrBlank()) {
                 val flipped = runCatching {
-                    // A fresh capability every time. The one this session
-                    // opened with says what it was opened for, and control is
-                    // exactly the field the host checks.
                     val token = issueCapability(wanted)
                     CoreClient.remote(
                         peer,
@@ -612,8 +499,6 @@ class ScreenViewerModel(
                     return@launch
                 }
             }
-            // An old host has no such method. Reopening will meet any real
-            // refusal again and report it where somebody can read it.
             val keepTier = tier
             val keepPeer = peer
             val keepLabel = label
@@ -623,18 +508,12 @@ class ScreenViewerModel(
         }
     }
 
-    /// Move a live session to a different budget. Never by reopening, for the
-    /// same reason control is flipped in place. A host too old to know the
-    /// method keeps the picture it has, which is a worse picture and not a
-    /// broken one.
     fun chooseQuality(wanted: ScreenQuality) {
         if (wanted == quality) return
         quality = wanted
         val hostSession = hostSessionId
         if (viewerId == null || hostSession.isNullOrBlank()) return
         scope.launch {
-            // Not worth a failed state. The session is still running and still
-            // showing a picture, just not the one that was asked for.
             runCatching {
                 val token = issueCapability(isControlling)
                 CoreClient.remote(
@@ -643,8 +522,6 @@ class ScreenViewerModel(
                     buildJsonObject {
                         put("sessionId", hostSession)
                         put("capability", token)
-                        // Automatic on a live session has to be said out loud:
-                        // there is no way to unsay a choice the host holds.
                         put("quality", wanted.wire ?: "auto")
                     },
                 )
@@ -653,13 +530,6 @@ class ScreenViewerModel(
     }
 
 
-    /// Ask the computer itself, then nudge the owner's other devices.
-    ///
-    /// The ask is the part that matters and the part that can fail usefully:
-    /// it travels the tunnel, so the host learns which device is asking and
-    /// can queue it for a person. The push afterwards is best effort and
-    /// carries no device id at all, which is why it was never enough on its
-    /// own. A host that is asleep cannot be asked, and says so.
     fun requestAccess() {
         if (isRequesting) return
         scope.launch { requestAccessNow() }
@@ -673,10 +543,6 @@ class ScreenViewerModel(
                 requestNotice = it.message ?: L10n.text("android.screenviewermodel.that_computer_could_not_be_asked.d4222412")
                 return
             }
-            // Already allowed to watch, and still not running: what is missing
-            // is the mouse. Asking for exactly what the Control toggle happened
-            // to say left somebody granted View only pressing a button that
-            // answered "this device already has access" forever.
             val allowed = if (answer && !isControlling) {
                 runCatching { ask(true) }.getOrDefault(true)
             } else {
@@ -687,8 +553,6 @@ class ScreenViewerModel(
                 return
             }
             requestNotice = L10n.text("android.screenviewermodel.asked_approve_this_device_on_that_computer.f8ffae43")
-            // Best effort, and never the reason the request failed. Somebody
-            // with no other device registered has still asked the computer.
             runCatching {
                 val sent = app.core("screen.access.request") as JsonObject
                 val devices = sent["sent"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
@@ -730,17 +594,11 @@ class ScreenViewerModel(
     }
 
     private suspend fun transfer(file: ScreenFileSource, destination: String = peer) = withContext(Dispatchers.IO) {
-        // Capture the destination before a reconnect can change the viewer.
-        // Content providers and hashing may block, so all file work stays off
-        // the UI thread and cooperates with cancellation between reads.
         var id = ""
         try {
             val hashed = hashScreenFile(file.open)
             val size = hashed.size
             val hash = hashed.sha256
-            // The same resume key the Apple client computes, so a transfer
-            // begun on one device carries on from where it stopped on the
-            // other.
             id = hex(
                 MessageDigest.getInstance("SHA-256").digest(
                     listOf(file.name, size.toString(), hash)
@@ -763,10 +621,6 @@ class ScreenViewerModel(
                 ).coerceIn(1, 256 * 1024)
             transferProgress = if (size == 0L) 1f else offset.toFloat() / size.toFloat()
             file.open().use { stream ->
-                // Read and discard, never `skip`: a stream may stop short,
-                // and uploading from the wrong offset under the claimed one
-                // corrupts the file on the host. A short stream means the
-                // file changed under us, which fails the transfer instead.
                 var skipped = 0L
                 val discard = ByteArray(8192)
                 while (skipped < offset) {
@@ -812,27 +666,15 @@ class ScreenViewerModel(
         bytes.joinToString("") { "%02x".format(it) }
 
     private companion object {
-        /// How long a session has to hold up before the reconnect budget is
-        /// given back.
         const val STABLE_AFTER_MS = 12_000L
 
-        /// The separator the Apple client joins a transfer's resume key with.
-        /// Both ends only have to agree with themselves, but agreeing with
-        /// each other means a transfer started on one device resumes on the
-        /// other.
         val NUL = "\u0000"
     }
 }
 
-/// A file chosen on this device, opened as many times as the transfer needs:
-/// once to hash it, once to send it.
 class ScreenFileSource(val name: String, val open: () -> InputStream)
 
-/// This device's clipboard, as much of it as the viewer needs.
 interface ScreenClipboard {
-    /// A number that changes when the clipboard does, or -1 when this device
-    /// will not say. Read before `read`, so a session that copies nothing
-    /// never asks for the contents and never trips the system paste notice.
     fun stamp(): Long
     fun read(): String?
     fun write(text: String)

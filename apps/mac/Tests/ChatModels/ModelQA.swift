@@ -21,7 +21,6 @@ enum L10n { static func text(_ key: String) -> String { "This model cannot be pr
                     if let scroll = view as? UIScrollView { scrollY = Int(scroll.contentOffset.y); break }
                     ancestor = view.superview
                 }
-                // Observe the real renderer after load; do not replace its controls or render loop.
                 let script = """
                 (() => {
                   if (!window.modelProbe) {

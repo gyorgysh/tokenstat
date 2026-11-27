@@ -6,23 +6,12 @@
 
 import SwiftUI
 
-/// Where a step sits in a rail somebody is walking.
-///
-/// Three states and no fourth: a step is behind you, in front of you, or the
-/// one to do now. "Skipped" is not a state, because a rail that can be skipped
-/// is a list with numbers painted on it.
 enum GettingStartedState {
     case done
     case now
     case next
 }
 
-/// One step, and what it offers.
-///
-/// The action is part of the step rather than something the caller draws under
-/// the rail, because a step whose instruction is the name of another screen is
-/// the thing this replaces. If there is something to do, the button doing it
-/// belongs on the line that asks for it.
 struct GettingStartedStep: Identifiable {
     let number: Int
     let title: String
@@ -35,17 +24,6 @@ struct GettingStartedStep: Identifiable {
     var id: Int { number }
 }
 
-/// The numbered rail a new account walks: one line, one live step, the rest
-/// ahead or struck behind.
-///
-/// The same shape the website's getting-started card uses, for the same reason:
-/// somebody who leaves and comes back should find the page they left with one
-/// more step behind them, not a different screen with different words. Drawn in
-/// the app's own accent rather than in a grey panel, because a screen that is
-/// empty is exactly the screen that should look like the product.
-///
-/// The connector is drawn on the step and not between two of them, so a step
-/// can be any height and the line still reaches the next disc.
 struct GettingStartedRail: View {
     let steps: [GettingStartedStep]
 
@@ -62,8 +40,6 @@ struct GettingStartedRail: View {
             VStack(spacing: 0) {
                 GettingStartedDisc(number: step.number, state: step.state)
                 if !isLast {
-                    // Below the disc rather than beside it, so the line starts
-                    // where the circle ends whatever the row above is doing.
                     Capsule()
                         .fill(connector(step.state))
                         .frame(width: 2)
@@ -93,9 +69,6 @@ struct GettingStartedRail: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The prominent button each platform already uses everywhere else. The
-    /// phone's is the glass capsule from `GlassChrome`, the Mac's is the
-    /// system's, and neither is worth a third variant invented here.
     @ViewBuilder
     private func stepButton(
         _ title: String,
@@ -135,14 +108,10 @@ private struct GettingStartedDisc: View {
 
     var body: some View {
         ZStack {
-            // The live step gets a halo. It is the one thing on the card that
-            // should catch the eye first, and a ring costs nothing next to
-            // making the disc itself louder than the title beside it.
             if state == .now {
                 Circle()
                     .fill(Theme.accent.opacity(0.16))
                     .frame(width: 30, height: 30)
-                    // Scoped to the halo: see the working dot in `RootView`.
                     .animation(pulsing ? .easeOut(duration: 1.8).repeatForever(autoreverses: false) : nil) {
                         $0.scaleEffect(pulsing ? 1.42 : 1).opacity(pulsing ? 0 : 1)
                     }
@@ -190,19 +159,8 @@ private struct GettingStartedDisc: View {
     }
 }
 
-/// The grid that is not there yet, drawn where it will be.
-///
-/// The strongest thing on the website's card, and the reason is that it is not
-/// decoration: it is the shape of the answer, so waiting for the first scan
-/// looks like waiting for something specific rather than like a screen that
-/// failed to load. Cells light in a wave across the weeks and fade, which is
-/// roughly what a real first sync looks like arriving.
 struct GettingStartedGhostGrid: View {
-    /// How many weeks wide. The Mac has room for a season, a phone does not.
     var weeks: Int = 18
-    /// The Mac's wider onboarding card uses its grid as part of the reading
-    /// rail. The client Home card uses a shorter grid as an illustration, so
-    /// it can opt into a centred treatment without changing the Mac layout.
     var alignment: Alignment = .leading
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -210,7 +168,6 @@ struct GettingStartedGhostGrid: View {
     private let rows = 7
     private let cell: CGFloat = 9
     private let gap: CGFloat = 3
-    /// One pass of the band, in seconds.
     private static let period: Double = 3.4
 
     var body: some View {
@@ -241,22 +198,15 @@ struct GettingStartedGhostGrid: View {
         .frame(maxWidth: .infinity, alignment: alignment)
     }
 
-    /// Where the band is, as a fraction of the width, from the wall clock. Time
-    /// rather than stored state, so the loop cannot drift and nothing has to be
-    /// restarted when the view is rebuilt.
     private static func phase(at date: Date) -> Double {
         let seconds = date.timeIntervalSinceReferenceDate
         return (seconds.truncatingRemainder(dividingBy: period)) / period
     }
 
-    /// A soft band over a floor of empty cells. The per-cell jitter keeps it
-    /// from reading as a scanning bar: a real week is not one brightness.
     private func level(row: Int, week: Int, phase: Double) -> Double {
         let floor = 0.08
         guard !reduceMotion else { return floor }
         let position = Double(week) / Double(max(weeks - 1, 1))
-        // Wrapped distance, so the band leaves the right edge and arrives at
-        // the left one rather than jumping back through the middle.
         var distance = abs(position - phase)
         distance = min(distance, 1 - distance)
         let band = max(0, 1 - distance * 5)

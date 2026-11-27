@@ -31,7 +31,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 
-/** Compact local connection details, independent of the host that loads them. */
 @Composable
 internal fun LocalTrafficPanel(
     status: JsonObject?,
@@ -144,7 +143,6 @@ internal fun formatTrafficBytes(n: Long): String {
     val value = n.coerceAtLeast(0).toDouble()
     val kibi = 1024.0
     fun fmt(x: Double, unit: String): String {
-        // Trim decimal zeros only; whole amounts such as 20 GiB keep their zero.
         val shown = if (x >= 10) {
             "%.0f".format(x)
         } else {

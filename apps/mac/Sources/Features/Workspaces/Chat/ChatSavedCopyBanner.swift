@@ -2,14 +2,6 @@
 
 import SwiftUI
 
-/// The line between a saved copy and the composer, saying what is true.
-///
-/// Three facts and one action: the machine could not be reached, these rows
-/// were kept on this device at this time, and earlier messages may not be in
-/// the copy. Checking asks the machine again; while it is being asked the
-/// banner says so instead of going quiet. The transcript below stays exactly
-/// as readable as a live one: reading, copying and drafting carry on, and
-/// only sending, approvals and downloads wait for the machine.
 struct ChatSavedCopyBanner: View {
     var info: SavedCopyInfo
     var checking: Bool
@@ -64,9 +56,6 @@ struct ChatSavedCopyBanner: View {
     }
 }
 
-/// The quiet control in a banner: a word and a glyph, no filled shape. The
-/// banner is already tinted, and a button on top of it would compete with the
-/// Send button a row below.
 struct NoticeActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

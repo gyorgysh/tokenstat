@@ -13,7 +13,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
-/** Dismiss input without clearing text, submitting or leaving the screen. */
 @Composable
 fun KeyboardDismissButton(modifier: Modifier = Modifier) {
     val keyboard = LocalSoftwareKeyboardController.current

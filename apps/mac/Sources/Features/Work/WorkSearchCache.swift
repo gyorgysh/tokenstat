@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Coordinates the local cache transport with disposable search indexes.
-/// Loading is paused across mutations because a put can evict another scope.
-/// Unaffected indexed records remain available rather than rebuilding on every
-/// saved page. Callers still supply current folder access to the index.
 actor WorkSearchCache {
     static let shared = WorkSearchCache()
 
@@ -99,8 +95,6 @@ actor WorkSearchCache {
         return token
     }
 
-    /// An uncertain mutation clears indexes conservatively: a failed reply
-    /// cannot prove that the host did not commit or evict before disconnecting.
     func finishMutation(_ token: UUID, scope: String, changedIDs: [String] = [],
                         evicted: [String] = [], cleared: Bool = false,
                         uncertain: Bool = false) async {

@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Read only this guardian's fresh backend stdout. The stable file handle is
-//! never replaced by a provider session file, and EOF is not process exit.
-
 use crate::transcript::{Event, Parser};
 use std::{
     fs::{File, OpenOptions},
@@ -69,8 +65,7 @@ impl Output {
             return Err(io::Error::other("Team output exceeded its limit."));
         }
         let mut bytes = [0; 32 * 1024];
-        // Live drains yield after 128 KiB so output cannot starve authority,
-        // Stop or process checks. Final drains happen after owned OS cleanup.
+
         let chunks = if finished {
             RAW_LIMIT as usize / bytes.len() + 1
         } else {
@@ -93,8 +88,7 @@ impl Output {
                 break;
             }
             let events = self.parser.push_events(&bytes[..n]);
-            // Attachments require their own scoped storage flow. Never copy
-            // files observed by the personal image collector into this chat.
+
             self.parser.take_images();
             if !events.is_empty() {
                 append(self.batch, events)?;

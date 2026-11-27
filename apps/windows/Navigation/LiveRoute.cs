@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Navigation;
 
-/// <summary>Preserve both namespaced resource ids in a sidebar selection.</summary>
 internal static class LiveRoute
 {
     public static string Join(string prefix, string folder, string leaf) =>

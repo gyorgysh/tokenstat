@@ -3,7 +3,6 @@ import SwiftUI
 import Observation
 
 #if !os(macOS)
-/// One SSH workbench per login lifetime, shared by both adaptive layouts.
 @MainActor @Observable
 final class ClientSSHWorkbench {
     struct Connection: Identifiable {
@@ -106,7 +105,6 @@ final class ClientSSHWorkbench {
     }
 }
 
-/// Presenters stay above the branch replaced when the phone folds.
 struct ClientSSHPresentations: ViewModifier {
     @Bindable var workbench: ClientSSHWorkbench
     let tier: String?

@@ -42,19 +42,9 @@ public sealed partial class MainWindow : Window
     /// NavigationView content grid never shows its default grey through.
     /// </summary>
     private readonly Border _contentHost = new();
-    /// <summary>
-    /// The content body: the global toolbar above, the inspector host below.
-    /// One toolbar for the window rather than one per page, mirroring the Mac
-    /// detail chrome, which carries the sidebar and inspector marks.
-    /// </summary>
     private readonly Grid _bodyGrid = new();
     private readonly Border _toolbarSlot = new();
     private readonly InspectorHost _inspectorHost = new();
-    /// <summary>
-    /// What the toolbar scope picker asks reports to count. Every device by
-    /// default, like the Mac and the Home page: a person with two machines
-    /// wants their year, not one PC's share of it.
-    /// </summary>
     private DeviceScope _scope = DeviceScopeNames.Restore();
     // One brush instance per flat surface, shared by every element showing
     // that tone. A theme change mutates the color in place, which reaches the
@@ -67,8 +57,6 @@ public sealed partial class MainWindow : Window
     {
         Content = L10n.Text("common.projects"),
         HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        // The default header style disables the item, which greys out and
-        // blocks the view switch, filter, menu and add buttons it now holds.
         IsEnabled = true,
     };
     private string _projectsFilter = "";
@@ -79,10 +67,6 @@ public sealed partial class MainWindow : Window
     private const string ChatDayPrefix = "wschatday:";
     private const string ChatPagePrefix = "wschatpage:";
     private UIElement? _hostSplash;
-    /// <summary>
-    /// Folders whose sidebar chat list is showing ten instead of five, like
-    /// the Mac expanded chat histories.
-    /// </summary>
     private readonly HashSet<string> _liveChatExpanded = SidebarPreferences.Shared.ExpandedIDs("history:");
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sidebarPoll;
     private int _sidebarTick;
@@ -97,10 +81,6 @@ public sealed partial class MainWindow : Window
     private JsonNode? _liveAccount;
     private JsonArray _liveSshSessions = new();
     private string _liveFooterKey = "";
-    /// <summary>
-    /// A check still running after a moment. A quiet check that answers
-    /// quickly never draws a card, like the Mac.
-    /// </summary>
     private bool _showUpdateChecking;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _updateCheckingDelay;
 
@@ -121,8 +101,6 @@ public sealed partial class MainWindow : Window
         var window = new WeakReference<MainWindow>(this);
         row.RegisterPropertyChangedCallback(NavigationViewItem.IsExpandedProperty, (owner, _) =>
         {
-            // Native compaction and hierarchy rebuilds are temporary UI state.
-            // Leaves can share tags with groups, so track only group owners.
             if (window.TryGetTarget(out var shell) && shell._sidebarRestoreDepth == 0 && shell._nav.IsPaneOpen
                 && owner is NavigationViewItem group && group.MenuItems.Count > 0 && group.Tag is string tag)
                 shell.DispatcherQueue.TryEnqueue(() =>
@@ -408,11 +386,6 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                // A day is a local-archive query, so the scope goes to This
-                // device first: the account cuts cannot show one day. Then
-                // through the sidebar row, so the pane and the content agree,
-                // and the day pins onto the mounted page like the Mac
-                // heatmap tap.
                 SetScope("local");
                 const string tag = "global:Insights";
                 if (FindNavItem(tag) is NavigationViewItem row)
@@ -488,11 +461,11 @@ public sealed partial class MainWindow : Window
         RailPlace.Home => ActionIcon.Home.Icon(),
         RailPlace.Projects => ActionIcon.Reveal.Icon(),
         RailPlace.Tasks => ActionIcon.Apply.Icon(),
-        RailPlace.Notes => new FontIcon { Glyph = "\uE8A5" }, // All notes
+        RailPlace.Notes => new FontIcon { Glyph = "\uE8A5" },
         RailPlace.Automations => GlobalIcon(GlobalSection.Automations),
         RailPlace.Insights => new SymbolIcon(Symbol.FourBars),
         RailPlace.Devices => GlobalIcon(GlobalSection.Machines),
-        _ => new FontIcon { Glyph = "\uE756" }, // Command prompt
+        _ => new FontIcon { Glyph = "\uE756" },
     };
 
     private void UpdateRail(string? tag)
@@ -511,10 +484,6 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>
-    /// Retained SSH navigation targets plus the live servers group. Library
-    /// sections live in the page's tabs; only running sessions show here.
-    /// </summary>
     private static NavigationViewItem SshGroup()
     {
         var parent = new NavigationViewItem
@@ -544,12 +513,6 @@ public sealed partial class MainWindow : Window
         return parent;
     }
 
-    /// <summary>
-    /// Launch in the Mac's beats: splash while the helper comes up, then the
-    /// real window, where pages draw wireframes while their own loads land.
-    /// Bounded like the Mac host deadline: after eight seconds the app shows
-    /// anyway, and the folder rows fill in behind it when the helper answers.
-    /// </summary>
     private async Task BootAsync()
     {
         var started = DateTime.UtcNow;
@@ -558,7 +521,6 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                // A real method answering, not only a pipe that exists.
                 await AppServices.Host.CallAsync("info", patience: TimeSpan.FromSeconds(2));
                 break;
             }
@@ -566,8 +528,6 @@ public sealed partial class MainWindow : Window
             {
                 var info = FriendlyError.From(ex.Message);
                 DispatcherQueue.TryEnqueue(() => ShowHostSplash(info));
-                // Try again shortens the wait. One loop only: the button
-                // wakes this wait rather than starting a second loop.
                 _hostWake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 await Task.WhenAny(Task.Delay(250), _hostWake.Task);
             }
@@ -594,11 +554,6 @@ public sealed partial class MainWindow : Window
     private bool _foldersLoaded;
     private JsonArray _localFolders = new();
 
-    /// <summary>
-    /// The folder rows under Workspaces. Runs once after boot mounts content,
-    /// then again on every slow sidebar poll until it lands, so a helper that
-    /// answers late still fills the sidebar in. A miss keeps the old rows.
-    /// </summary>
     private async Task TryLoadFoldersAsync(bool refresh = false)
     {
         await _folderLoadGate.WaitAsync();
@@ -641,12 +596,6 @@ public sealed partial class MainWindow : Window
         finally { _folderLoadGate.Release(); }
     }
 
-    /// <summary>
-    /// Local folders and every reachable peer's, each opening onto its running
-    /// terminals and chats (the sections are tabs on the project page). The
-    /// Add project row stays under the folders. The servers block follows
-    /// the saved section order even while no servers are connected.
-    /// </summary>
     private void RebuildFolderItems()
     {
         var suppressed = _suppressNav;
@@ -692,9 +641,6 @@ public sealed partial class MainWindow : Window
             }
             _nav.MenuItems.Add(NavigationRows.Reuse(_nav, FolderParent(id, name, remote: false, Format.Text(folder, "path"), folder?["git"], general: GeneralFolder.IsGeneral(folder))));
         }
-        // Another computer's folders sit beside this one's, as on the Mac:
-        // one level, named "Computer / folder", not nested under a computer
-        // row that pushes every folder and chat a step further in.
         var remoteFolders = OrderedRemoteFolders(sort).ToList();
         foreach (var folder in byChat ? Enumerable.Empty<RemoteFolder>() : remoteFolders)
         {
@@ -718,8 +664,6 @@ public sealed partial class MainWindow : Window
         _nav.MenuItems.Add(_sshGroup);
         UpdateProjectsHeader();
         ApplySidebarSectionLayout();
-        // Populate children before restoring expansion: native rows without
-        // children cannot retain an expanded state while they are mounted.
         RebuildSidebarLive();
         foreach (var item in NavItems(_nav.MenuItems))
         {
@@ -739,7 +683,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // "No repository" leads, and only once it holds a chat, as on the Mac.
     private List<JsonNode?> OrderedLocalFolders(SidebarProjectsSort sort) =>
         _localFolders.Where(folder => GeneralFolder.IsGeneral(folder) && FolderActivity(Format.Text(folder, "id")) > 0)
             .Concat(SidebarProjectsLayout.OrderFolders(_localFolders.Where(folder => !GeneralFolder.IsGeneral(folder)).ToList(), sort,
@@ -792,7 +735,6 @@ public sealed partial class MainWindow : Window
         if (shared) ContextMenus.AddAsync(menu, L10n.Text("common.teams.stop_sharing"), () => StopSharingTeamFolderAsync(id, name, CurrentParent()));
         async Task NewChat()
         {
-            // Finish the native row's selection before opening its action.
             await Task.Yield();
             OpenNewChat(id);
         }
@@ -942,7 +884,6 @@ public sealed partial class MainWindow : Window
         header.Children.Add(controls);
         if (hasFolders && (_showingProjectsFilter || _projectsFilter.Length > 0))
         {
-            // One box, kept across header rebuilds so typing never loses focus.
             var box = ProjectsFilterBox();
             box.PlaceholderText = byChat ? L10n.Text("common.sidebar.filter_chats") : L10n.Text("common.sidebar.filter_repositories");
             if (box.Parent is Panel previous) previous.Children.Remove(box);
@@ -1027,10 +968,6 @@ public sealed partial class MainWindow : Window
         RebuildFolderItems();
     }
 
-    /// <summary>
-    /// The section menu. Sorting is a folder view choice: the chat list is a
-    /// timeline by day.
-    /// </summary>
     private MenuFlyout ProjectsSectionMenu(bool byChat)
     {
         var menu = new MenuFlyout();
@@ -1058,11 +995,6 @@ public sealed partial class MainWindow : Window
         return menu;
     }
 
-    /// <summary>
-    /// The chat view's add control. A list of chats is where a new chat is
-    /// most often wanted, so it leads, with a repository to start it in.
-    /// Adding a repository stays one choice away.
-    /// </summary>
     private MenuFlyout ProjectsAddMenu()
     {
         var menu = new MenuFlyout();
@@ -1192,8 +1124,6 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            // "Computer / folder". The computer gives way first, so a long
-            // computer name never hides which folder this is.
             var names = new Grid();
             names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             names.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1208,9 +1138,6 @@ public sealed partial class MainWindow : Window
             names.Children.Add(folderName);
             label.Children.Add(names);
         }
-        // Always present, even empty: it holds the right-hand seat the row's
-        // hover actions take over, so the name keeps its width either way.
-        // The counts sit flush right inside it, like the Mac's trailing frame.
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         if (git is not null && Format.Flag(git, "isRepo"))
@@ -1232,8 +1159,6 @@ public sealed partial class MainWindow : Window
 
     private void ShowHostSplash(FriendlyErrorInfo? error)
     {
-        // Dismissed once the helper answered: a late retry must not drag the
-        // splash back over the first page.
         if (_hostSplash is not null && !ReferenceEquals(_frame.Content, _hostSplash))
         {
             return;
@@ -1242,7 +1167,6 @@ public sealed partial class MainWindow : Window
             ? HostSplashState.Starting
             : error.Title == "No connection" ? HostSplashState.Offline : HostSplashState.Error;
         var key = state + "|" + (error?.Title ?? "");
-        // Same state already on screen: rebuilding would restart the rise.
         if (_hostSplash is not null && _hostSplashKey == key)
         {
             return;
@@ -1257,11 +1181,6 @@ public sealed partial class MainWindow : Window
         Motion.PlayDoor(splash);
     }
 
-    /// <summary>
-    /// The first-run tour over the current page. First run marks it seen on
-    /// the way in, so any exit, Skip, Get started, or the sidebar, counts.
-    /// Re-opened from About it leaves the flag alone.
-    /// </summary>
     private void ShowOnboarding(bool firstRun)
     {
         if (firstRun)
@@ -1281,9 +1200,6 @@ public sealed partial class MainWindow : Window
             _lastNavTag = null;
             RestoreSelection(null);
         }
-        // Pages sit transparent over the content host, which carries the
-        // Background tone. Only when the page did not choose its own surface:
-        // the terminal and the screen own a black one, and a local value wins.
         if (page.ReadLocalValue(Control.BackgroundProperty) == DependencyProperty.UnsetValue)
         {
             page.Background = Theme.ClearBrush;
@@ -1376,9 +1292,6 @@ public sealed partial class MainWindow : Window
             RebuildToolbar();
         }
         popover.Closed += (_, _) => Restore();
-        // From the trailing edge, where the docked inspector sits and where
-        // its toggle is, not centred over the page like a dialog: the right
-        // edges line up and it drops from the top.
         try
         {
             popover.ShowAt(page, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
@@ -1403,13 +1316,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    /// <summary>
-    /// Rebuild the one top bar for what is on screen, like the Mac contextual
-    /// toolbar: the device scope picker on Home and Insights, then the page's
-    /// scope chip and actions, and the inspector toggle last, nearest the edge
-    /// it opens. Search lives in the project sidebar. Account never
-    /// shows an inspector, so it gets no toggle either.
-    /// </summary>
     private void RebuildToolbar()
     {
         var content = _frame.Content;
@@ -1472,11 +1378,6 @@ public sealed partial class MainWindow : Window
         _toolbarSlot.Child = DetailBar.View(leading, null, null, trailing);
     }
 
-    /// <summary>
-    /// The This device / All devices switch, with the same device and globe
-    /// marks as the Mac, fixed at the picker's width so the bar never
-    /// jitters between selections.
-    /// </summary>
     private UIElement ScopePicker()
     {
         var options = new List<(string Value, string Label, ActionIcon? Glyph)>
@@ -1509,12 +1410,6 @@ public sealed partial class MainWindow : Window
         RebuildToolbar();
     }
 
-    /// <summary>
-    /// Open search from the sidebar or Ctrl+K. The selection clears:
-    /// leaving the old row lit would claim the sidebar
-    /// and the content agree when they do not, and the lit row would not
-    /// navigate back.
-    /// </summary>
     private void OpenSearch()
     {
         NavigateTo("global:Search");
@@ -1536,17 +1431,11 @@ public sealed partial class MainWindow : Window
         RebuildToolbar();
     }
 
-    /// <summary>
-    /// Hide the inspector on narrow windows without spending the user's choice:
-    /// the toggle preference stands, so widening brings the column back.
-    /// </summary>
     private bool _inspectorFitQueued;
     private void SyncInspectorFit()
     {
         if (_inspectorFitQueued) return;
         _inspectorFitQueued = true;
-        // Toolbar and size callbacks can arrive during native initialization.
-        // Apply their latest measurements after the loaded layout has settled.
         if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             try
@@ -1582,8 +1471,6 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        // Live rows under the folder parents, like the Mac sidebar. Actions
-        // such as Show more leave the current rail destination selected.
         if (tag.StartsWith(SidebarLive.SessionPrefix, StringComparison.Ordinal)
             && SidebarLive.TrySplit(tag, SidebarLive.SessionPrefix, out var termFolder, out var sessionId))
         {
@@ -1610,8 +1497,6 @@ public sealed partial class MainWindow : Window
         }
         if (tag == "workspaces:add")
         {
-            // An action, not a place: the selection goes back where it was
-            // once the dialog closes, and the content stays put.
             Show(tag);
             RefreshUpdateBadge();
             return;
@@ -1622,20 +1507,8 @@ public sealed partial class MainWindow : Window
         RefreshUpdateBadge();
     }
 
-    /// <summary>
-    /// The tag a selection change just opened, and when, so an invoke from
-    /// the same click does not open it a second time. Timed, so a selection
-    /// made from the keyboard cannot swallow a later click.
-    /// </summary>
     private (string Tag, long At)? _selectionNavigated;
 
-    /// <summary>
-    /// A click on a project row opens its launcher, like the Mac, whatever is
-    /// selected. While a chat or another section is open the project row is
-    /// already the selected one (sections have no rows of their own), so the
-    /// native row saw no selection change and only folded its children away.
-    /// The chevron still folds and unfolds; the row itself only opens.
-    /// </summary>
     private void NavOnItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.InvokedItemContainer is not NavigationViewItem item || item.Tag is not string tag) return;
@@ -1654,8 +1527,6 @@ public sealed partial class MainWindow : Window
             return;
         }
         if (!tag.StartsWith("ws:", StringComparison.Ordinal) || !tag.EndsWith(":Launcher", StringComparison.Ordinal)) return;
-        // After the native row has finished with the click: its own expand
-        // toggle and any selection change both happen first.
         DispatcherQueue.TryEnqueue(() =>
         {
             item.IsExpanded = true;
@@ -1805,15 +1676,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// The page for one folder section. Local folders open the full
-    /// workbench. A folder on another machine opens the same dedicated pages,
-    /// whose helpers route through the peer, except Notes, which stays local
-    /// like the desktop Mac.
-    /// </summary>
     private readonly Dictionary<string, WorkspaceTabsPage> _workbenches = new();
-    // Failed autosaves keep the person's draft in the page. Retain it when
-    // global navigation leaves Notes, as project workbenches already do.
     private NotesPage? _globalNotesPage;
     private SshPage? _sshPage;
     private Dictionary<string, JsonNode> _starredHosts = new();
@@ -1893,10 +1756,6 @@ public sealed partial class MainWindow : Window
         UpdateRail(tag);
     }
 
-    /// <summary>
-    /// A project section has no sidebar row of its own, so the project's row
-    /// lights while one of its sections is on screen.
-    /// </summary>
     private NavigationViewItem? ProjectRowFor(string tag)
     {
         if (!tag.StartsWith("ws:", StringComparison.Ordinal)) return null;
@@ -2012,8 +1871,6 @@ public sealed partial class MainWindow : Window
         }
         search.TextChanged += (_, _) => Filter(); machine.SelectionChanged += (_, _) => Filter();
         Filter(); root.Children.Add(list);
-        // Folders are immediately openable; a sleeping remote must not delay the list.
-        // Bound concurrent reads and reject completion after a reload or navigation.
         using var summarySlots = new SemaphoreSlim(2);
         await Task.WhenAll(remote.Select(folder => folder.PeerKey).Distinct().Select(async peer =>
         {
@@ -2026,7 +1883,7 @@ public sealed partial class MainWindow : Window
                     if (summary is not null) summaries[RemoteWorkspaces.Join(peer, Format.Text(summary, "id"))] = summary;
                 Filter();
             }
-            catch { /* Counts are optional; the folder remains openable. */ }
+            catch { }
             finally { summarySlots.Release(); }
         }));
     }
@@ -2201,11 +2058,6 @@ public sealed partial class MainWindow : Window
         RefreshAccountFooter();
     }
 
-    /// <summary>
-    /// Quiet sidebar refresh, like the Mac terminals watcher. Sessions and
-    /// chats every tick, counts and the account footer on slow ticks. A
-    /// failed call keeps the last rows: a missed poll is not an empty sidebar.
-    /// </summary>
     private async Task RefreshSidebarLiveAsync(bool slow = false)
     {
         if (_sidebarRefreshing)
@@ -2222,7 +2074,6 @@ public sealed partial class MainWindow : Window
             var previousSummaries = _liveSummaries;
             var previousAccount = _liveAccount;
             var previousSshSessions = _liveSshSessions;
-            // Discover newly registered folders before asking for their chats.
             if (slow) await TryLoadFoldersAsync(refresh: true);
             var (sessions, chats) = await SidebarLive.FetchFastAsync(
                 _localFolders.Select(folder => Format.Text(folder, "id"))
@@ -2234,8 +2085,6 @@ public sealed partial class MainWindow : Window
                 var sshGroup = FindNavItem("ssh:" + SSHSection.Hosts);
                 if (sshGroup is not null && sshSessions is not null)
                 {
-                    // Starred servers stay listed with nothing open, as on the
-                    // Mac. A server with a live shell shows its sessions instead.
                     var liveHosts = sshSessions.Where(item => Format.Flag(item, "alive"))
                         .Select(item => Format.Text(item, "hostId")).ToHashSet();
                     var starred = (Format.Items(await AppServices.Host.CallAsync("ssh.host.list")) ?? new JsonArray())
@@ -2281,7 +2130,7 @@ public sealed partial class MainWindow : Window
                     });
                 }
             }
-            catch { /* Keep reachable session rows on a transient host failure. */ }
+            catch { }
             if (slow)
             {
                 _ = RemoteWorkspaces.SweepAsync();
@@ -2329,12 +2178,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Rebuild the live rows under every folder parent from the cached poll:
-    /// alive sessions after the Sessions row, recent chats after the Chat row,
-    /// and count badges on the section rows. Section rows keep their tags and
-    /// order; only the live rows come and go.
-    /// </summary>
     private void RebuildSidebarLive() => RestoreSidebarLayout(RebuildSidebarLiveCore);
 
     private void RebuildSidebarLiveCore()
@@ -2388,9 +2231,6 @@ public sealed partial class MainWindow : Window
             list.Add(chat);
         }
 
-        // Running terminals, then chats, directly under each project, as on
-        // the Mac. Section rows under every project repeated what the
-        // project page's own tabs already offer.
         foreach (var item in NavItems(_nav.MenuItems).Where(row => (row.Tag as string)?.StartsWith("ws:") == true && (row.Tag as string)?.EndsWith(":Launcher") == true).ToList())
         {
             if (item is not NavigationViewItem parent)
@@ -2435,8 +2275,6 @@ public sealed partial class MainWindow : Window
             var desiredChats = new List<NavigationViewItem>();
             if (chatsByFolder.TryGetValue(folderId, out var chats) && _projectsFilter.Trim().Length > 0)
             {
-                // A hit on the folder name keeps every chat under it;
-                // otherwise the filter narrows to matching chats.
                 var folderLabel = RemoteWorkspaces.CachedFolder(folderId) is { } remoteFolder
                     ? (remoteFolder.Name, remoteFolder.MachineLabel)
                     : (Format.Text(folder, "name", folderId), L10n.Text("windows.mainwindow_xaml.this_pc.638a348b"));
@@ -2471,8 +2309,6 @@ public sealed partial class MainWindow : Window
                         chats.Count > SidebarLive.InlineChats ? () => OpenAllChats(folderId) : null));
                 }
             }
-            // "wschat" covers the chat rows and their Show more and See all
-            // rows, which share the prefix.
             NavigationRows.Reconcile(parent.MenuItems, desiredChats, "wschat", desiredSessions.Count, _nav);
             SidebarChrome.AlignProject(parent);
             // A new folder initially loads without history. Expand when its
@@ -2509,10 +2345,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Chat activity can change the Recent order or reveal a previously empty
-    /// No repository row. Compare both local and remote rows before rebuilding.
-    /// </summary>
     private void QueueProjectSidebarUpdate()
     {
         if (SidebarPreferences.Shared.ProjectsDisplay == SidebarProjectsDisplay.ByChat) return;
@@ -2526,11 +2358,6 @@ public sealed partial class MainWindow : Window
         if (!shown.SequenceEqual(wanted)) DispatcherQueue.TryEnqueue(RebuildFolderItems);
     }
 
-    /// <summary>
-    /// Every chat across folders as one timeline: Working, Today, Yesterday,
-    /// the past week's dates, then Older, a page at a time. Same rows as under
-    /// a folder, with the folder named where the age would be.
-    /// </summary>
     private void RebuildChatListCore()
     {
         var localLabel = L10n.Text("windows.mainwindow_xaml.this_pc.638a348b");
@@ -2601,7 +2428,6 @@ public sealed partial class MainWindow : Window
         if (day.Kind == SidebarChatDayKind.Working)
             line.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 6, Height = 6, Fill = Theme.AccentBrush, VerticalAlignment = VerticalAlignment.Center });
         line.Children.Add(new TextBlock { Text = title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Opacity = 0.6 });
-        // The tag doubles as the reconcile key, so a fold redraws the row.
         line.Tag = (title, collapsed);
         var row = new NavigationViewItem { Content = line, Tag = ChatDayPrefix + day.Id, SelectsOnInvoked = false };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, title);
@@ -2652,8 +2478,6 @@ public sealed partial class MainWindow : Window
             _nav.PaneFooter = null;
             return;
         }
-        // The update card sits above the account row, the same slot as the
-        // Mac sidebar footer, so a check reports where it was asked for.
         var paneFooter = new StackPanel();
         if (SidebarUpdateCard.For(AppServices.Update, _showUpdateChecking) is UIElement updateCard)
         {
@@ -2759,7 +2583,6 @@ public sealed partial class MainWindow : Window
         }
         catch
         {
-            // Default size is fine.
         }
     }
 
@@ -2773,16 +2596,9 @@ public sealed partial class MainWindow : Window
         }
         catch
         {
-            // Title already set.
         }
     }
 
-    /// <summary>
-    /// Extend the content into the caption area and hand the titlebar element
-    /// to the OS as the drag region. Code only, never XAML: setting
-    /// ExtendsContentIntoTitleBar in XAML is an error. Failure keeps the
-    /// system bar, the window still works with a 32px strip above the nav.
-    /// </summary>
     private void TryExtendIntoTitleBar()
     {
         try
@@ -2806,10 +2622,6 @@ public sealed partial class MainWindow : Window
         _ => ElementTheme.Default,
     };
 
-    /// <summary>
-    /// A new mode or theme. The other theme first, because native controls
-    /// read their accent again only when the theme changes.
-    /// </summary>
     private void ApplyAppearance()
     {
         Theme.RefreshAccentResources();
@@ -2819,23 +2631,14 @@ public sealed partial class MainWindow : Window
         ApplyChromeColors();
     }
 
-    /// <summary>
-    /// Repaint every flat surface from the theme tokens. Runs once at launch
-    /// and again whenever the system theme changes, so the window frame never
-    /// shows a stale tone. Pages rebuild on navigation and pick the new theme
-    /// up there.
-    /// </summary>
     private void ApplyChromeColors()
     {
-        // A chosen side is known before the tree is. Only Auto has to ask it.
         Theme.WindowTheme = RequestedAppearance() is var chosen and not ElementTheme.Default ? chosen : RootGrid.ActualTheme;
         Theme.InstallControlResources();
         _chromeBackground.Color = Theme.Background;
         _chromeSidebar.Color = Theme.Sidebar;
         _chromeBorder.Color = Theme.Border;
         _inspectorHost.ApplyTheme();
-        // The toolbar bakes its brushes at build time, like the pages do at
-        // navigation: rebuild it so a theme change repaints it too.
         RebuildToolbar();
         SyncPaneChrome();
         TryTitleBarColors();
@@ -2845,11 +2648,6 @@ public sealed partial class MainWindow : Window
         _ = DwmSetWindowAttribute(WindowNative.GetWindowHandle(this), 34, ref noBorder, sizeof(uint));
     }
 
-    /// <summary>
-    /// Keep the pane chrome on the pane state: the titlebar split follows the
-    /// pane edge, and group headers hide while the pane collapses to icons,
-    /// where they would otherwise render as clipped stubs like "GLO" or "WOR".
-    /// </summary>
     private void SyncPaneChrome()
     {
         SyncInspectorFit();
@@ -2868,11 +2666,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// The brand at the top of the sidebar, where the Mac keeps its wordmark.
-    /// A static mark, so every LogoRefresh pulse dips the bars once, like the
-    /// Mac launch-and-refresh motion. Rebuilt per call: panes and themes move.
-    /// </summary>
     private UIElement LogoOpen()
     {
         var content = new StackPanel { Spacing = 0, Margin = new Thickness(0, 0, 0, Theme.SpaceM) };
@@ -2906,12 +2699,6 @@ public sealed partial class MainWindow : Window
         if (account == AppServices.AccountGeneration && ReferenceEquals(_frame.Content, page)) page.RefreshRepositories();
     }
 
-    /// <summary>
-    /// Keep the titlebar split on the pane edge: full length while the pane is
-    /// open, compact length once it collapses to icons. Sidebar tone either
-    /// way, because the rail under it stays on screen: painting it the content
-    /// tone left a dark band over the rail's top whenever the pane closed.
-    /// </summary>
     private void SyncTitleBarSplit()
     {
         TitlePaneColumn.Width = new GridLength(RailWidth + (_nav.IsPaneOpen ? _nav.OpenPaneLength : _nav.CompactPaneLength));

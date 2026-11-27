@@ -6,31 +6,9 @@
 
 import SwiftUI
 
-/// The first thing Home shows on a machine that has never scanned.
-///
-/// What was there instead was one grey sentence pointing at the name of
-/// another screen, which is the worst version of an empty state: it knows what
-/// to do and makes you go and find it.
-///
-/// Three steps, and **the first one arrives done**. Installing is behind you:
-/// you are looking at the app. A rail that opens a third finished reads as
-/// progress rather than as a list of chores, and it is also simply true.
-///
-/// Scanning is step two because it is the one that puts something on this
-/// screen. Signing in is step three and it is not a wall: the Mac reads the
-/// local archive with no account at all, so the card says what an account buys
-/// (these numbers on your phone, and a second computer) rather than implying
-/// nothing works until you have one.
 struct GettingStartedCard: View {
-    /// Whether the account is connected. Not a gate on anything, just which
-    /// step of the rail is live.
     let signedIn: Bool
     let isScanning: Bool
-    /// True while `InsightsModel` is inside its post-scan cooldown, where
-    /// `scan()` returns immediately. The button has to go with it: a scan that
-    /// found nothing leaves this card on screen, and pressing a live button
-    /// that silently does nothing is worse than having no button for ten
-    /// seconds.
     let isCoolingDown: Bool
     let onSignIn: () -> Void
     let onScan: () -> Void
@@ -49,7 +27,6 @@ struct GettingStartedCard: View {
         }
     }
 
-    /// Whether pressing Scan now would actually start one.
     private var canScan: Bool { !isScanning && !isCoolingDown }
 
     private var header: some View {
@@ -74,10 +51,6 @@ struct GettingStartedCard: View {
                 body: L10n.text("apple.gettingstartedcard.you_are_looking_at_it_nothing_else_to_put.4b0687ad"),
                 state: .done
             ),
-            // Scanning before signing in, because scanning is the step that
-            // puts something on this screen and an account is not required for
-            // it. A rail that asks for a sign-in first would be telling a
-            // small lie about what the app needs.
             GettingStartedStep(
                 number: 2,
                 title: isScanning ? L10n.text("apple.gettingstartedcard.scanning.474ad819") : L10n.text("apple.gettingstartedcard.run_the_first_scan.a22d6e64"),

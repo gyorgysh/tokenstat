@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! One host-owned run in an independent process. The viewer never owns its
-//! authority or lifetime. The physical host's private pipe may request Stop;
-//! its EOF stops work, while a lost guardian leaves durable writer claims.
-
 use super::{
     AuthorizedTeamPrincipal, api_error, client, scoped_runs::checkout_digest, scoped_source::Source,
 };
@@ -51,8 +46,6 @@ struct Parent {
 }
 impl Drop for Parent {
     fn drop(&mut self) {
-        // Close control before reaping. Even a failed request cannot leave a
-        // pipe silently authorizing its guardian, or leak a waitable child.
         drop(self.input.take());
         if let Some(child) = self.child.take() {
             let held = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
@@ -75,8 +68,6 @@ impl Drop for Parent {
 }
 fn unavailable() -> DispatchError {
     if fixture_enabled() && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some() {
-        // Stack frames contain no request arguments or process memory. Keep
-        // failure provenance inside the explicitly retained disposable test.
         let trace = std::backtrace::Backtrace::force_capture().to_string();
         eprintln!(
             "Team fixture refusal:\n{}",
@@ -169,8 +160,6 @@ pub(crate) fn main() -> Result<(), DispatchError> {
         && fixture_enabled()
         && std::env::var_os("TOKENSTAT_TEAMS_KEEP_FIXTURE").is_some()
     {
-        // Static phase and public error code only. Never include request text,
-        // authority values or the error message in the diagnostic fixture log.
         eprintln!("Team fixture guardian stage={stage}; code={}", error.code);
     }
     result
@@ -221,8 +210,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     if let Some(program) = &init.program {
         fixture_program(program, &source, &init.issuer)?;
     }
-    // With lanes on, the run works in its own worktree and never in the
-    // publisher's folder. A refused or failed Ask drops the lane again.
+
     *stage = "lane";
     let lane_settings = super::lanes::settings(&principal.value().checkout_id)?;
     let mut lane = match &lane_settings {
@@ -253,8 +241,6 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         || source.ensure_current(),
     ) {
         Err(error) if error.code == "team_run_review_changed" => {
-            // This code is emitted only before admission becomes durable.
-            // Do not turn a stale review into an uncertain lost response.
             drop(lane);
             return event(json!({"event":"rejected","code":"team_run_review_changed"}));
         }
@@ -265,9 +251,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         Ok(AskPreparation::New(prepared)) => prepared,
     };
     let fixture = init.program.is_some();
-    // A real agent reads the frozen context through the scoped SDK and needs
-    // its own sign-in. Both are settled before the run's authority is
-    // admitted: a keychain prompt or a login shell must not spend its lease.
+
     *stage = "provider";
     let launch = match init.program {
         Some(program) => Ok(program),
@@ -290,7 +274,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
             return Err(error);
         }
     };
-    // No canonical/index/transcript lock is held across account HTTP.
+
     *stage = "authority";
     let admission = (|| {
         principal.ensure_account_current()?;
@@ -328,9 +312,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         if !fixture {
             return Ok(());
         }
-        // Fixtures use the same SDK as a real provider. A large conversation
-        // must not become an oversized process stdin or consume its lease
-        // while expanding history before the backend is born.
+
         let context = prepared.context().sdk();
         let input = context.full_if_small(4 * 1024 * 1024)?.unwrap_or_else(|| {
             let mut metadata = context.metadata;
@@ -420,8 +402,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         source.target().workspace.to_string(),
         source.target().id.to_string(),
     );
-    // A record exists before Launching, so a crash before the agent's group
-    // is known can still be released after the computer restarts.
+
     super::recovery::remember(&fence, &workspace, &chat, 0).map_err(map_io)?;
     chats.transition_owned_run(source.target(), &prepared, State::Launching)?;
     let base_program = program.clone();
@@ -434,8 +415,6 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         .take(200)
         .collect::<String>();
     let birth = |group: u32, first: bool| -> io::Result<()> {
-        // Written before birth: a crash after this point can be recovered
-        // once the group is proven gone, and never before.
         super::recovery::remember(&fence, &workspace, &chat, group)?;
         source
             .ensure_current()
@@ -462,8 +441,6 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     let mut process = match process {
         Ok(process) => process,
         Err(error) => {
-            // A failed send after anchor admission is ambiguous. Never turn it
-            // into NotStarted or clear a durable claim from an error alone.
             let _ = chats.transition_owned_run(source.target(), &prepared, State::NeedsRecovery);
             let _ = authority.retire();
             return Err(map_io(error));
@@ -602,16 +579,13 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                 return Ok((terminal, proof, final_output));
             };
             if terminal != State::Succeeded || final_output.is_err() {
-                // A fix attempt that did not finish leaves no half rebase.
                 if terminal != State::NotStarted {
                     super::lanes::abandon(lane);
                 }
                 sdk.retire();
                 return Ok((terminal, proof, final_output));
             }
-            // Landing pushes to the shared remote, so it passes the same gate
-            // as starting an agent: live authority, unchanged checkout, and no
-            // Stop waiting. Anything else keeps the lane and lands nothing.
+
             let stop_waiting = match control.try_recv() {
                 Ok(Ok(Control::Stop { fence })) => fence == prepared.binding().fence,
                 Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => true,
@@ -676,8 +650,6 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                 super::lanes::finish_fix(lane, settings, &message, &mut landing_control)
             };
             if matches!(landing, Landing::Landed { .. }) {
-                // Members' hosts catch up from this one bit. A failed report
-                // only delays them until their next landing notice.
                 let _ = client.checkout_moved(
                     &principal.value().organization_id,
                     &principal.value().checkout_id,
@@ -713,7 +685,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
                     "The check process needs recovery on its publishing computer.",
                 ));
             }
-            // No further agent without a live, renewed authority.
+
             let renewed = authority.renew().is_ok();
             let next = match next {
                 super::lanes::Next::Agent(_) if !renewed => {
@@ -795,18 +767,13 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
     let (terminal, proof) = match execution {
         Ok((terminal, proof, Ok(()))) => (terminal, proof),
         Ok((_, _, Err(error))) => {
-            // OS cleanup is proven, but output persistence needs repair.
-            // Keep both durable fences; never attempt a second stop using a
-            // completed process handle or report successful output delivery.
             let _ = chats.transition_owned_run(source.target(), &prepared, State::NeedsRecovery);
             let _ = authority.retire();
             return Err(error);
         }
         Err(error) => {
             sdk.retire();
-            // A lost host output pipe can still have a fully owned process.
-            // Persist proven cleanup when possible instead of leaving a
-            // needless orphan. Unknown outcomes always keep both fences.
+
             let stopping = chats.transition_owned_run(source.target(), &prepared, State::Stopping);
             if let (Ok(_), Ok(proof)) = (stopping, process.stop()) {
                 let _ = chats.complete_owned_run(source.target(), *prepared, proof, State::Failed);
@@ -819,8 +786,7 @@ fn main_inner(stage: &mut &'static str) -> Result<(), DispatchError> {
         }
     };
     let result = chats.complete_owned_run(source.target(), *prepared, proof, terminal);
-    // The run's writer claim is cleared; the lane goes now, before anyone is
-    // told the run finished, so a lane list never shows finished work.
+
     drop(lane);
     if result.is_ok() {
         super::recovery::forget(&fence);
@@ -834,8 +800,7 @@ pub(super) fn run(
     input: &AskInput,
 ) -> Result<Value, DispatchError> {
     use std::process::{Command, Stdio};
-    // The fixture host is a probe binary, so it names the hostd to run and
-    // may hand the guardian a disposable fake agent instead of a real one.
+
     let (helper, program) = if fixture_enabled()
         && let Some(hostd) = std::env::var_os("TOKENSTAT_TEAM_FIXTURE_HOSTD")
     {
@@ -914,8 +879,6 @@ pub(super) fn run(
     );
     let response: Value = team_process::receive(&mut output).map_err(map_io)?;
     if response["event"] == "running" {
-        // The run outlives this request. The registry keeps its control pipe
-        // open, since EOF stops the guardian, and a reader thread reaps it.
         let fence: Fence =
             serde_json::from_value(response["fence"].clone()).map_err(|_| unavailable())?;
         let input = parent.input.take().ok_or_else(unavailable)?;

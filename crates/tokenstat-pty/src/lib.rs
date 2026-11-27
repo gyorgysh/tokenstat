@@ -39,18 +39,8 @@ mod ownership_tests;
 pub mod program_status;
 use program_status::{ProgramStatus, Tracker as ProgramStatusTracker};
 
-/// How much output to keep per session.
-///
-/// Enough that a client polling a few times a second never loses anything, and
-/// small enough that a runaway `yes` does not eat memory. The terminal emulator
-/// keeps its own scrollback; this is only the handoff window.
 const BUFFER_BYTES: usize = 8 * 1024 * 1024;
-// Keep a bounded replay tail after readers acknowledge output. A second
-// frontend needs terminal state even while the first frontend keeps reading.
 const REPLAY_BYTES: usize = 1024 * 1024;
-/// How much one `pty.read` returns. The ring stays large so a slow viewer
-/// does not lose the middle. A single RPC that base64s the whole window
-/// is what froze a first attach, especially on a phone.
 const READ_CHUNK_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, thiserror::Error)]
@@ -120,26 +110,10 @@ pub struct Chunk {
     pub paused: bool,
 }
 
-/// A Device Status Report asking where the cursor is.
 const CURSOR_POSITION_REQUEST: &[u8] = b"\x1b[6n";
 
-/// The answer: row 1, column 1.
-///
-/// A real terminal reports where its cursor actually is. Nothing here draws a
-/// screen, so there is no cursor to report and the top left corner is the
-/// honest answer for a session that has printed nothing yet.
 const CURSOR_POSITION_REPLY: &[u8] = b"\x1b[1;1R";
 
-/// Whether this output asked the terminal where the cursor is.
-///
-/// It has to be answered. Windows builds its pseudoconsole with
-/// `PSEUDOCONSOLE_INHERIT_CURSOR`, so the console host asks this question
-/// before it will let the program start, and waits for the reply. With nobody
-/// answering, the command never runs at all: no output, no exit, a session that
-/// looks alive until its budget kills it.
-///
-/// `tail` carries the last few bytes of the previous read, because a read
-/// boundary can fall in the middle of the request.
 fn wants_cursor_position(tail: &mut Vec<u8>, bytes: &[u8]) -> bool {
     let split = CURSOR_POSITION_REQUEST.len() - 1;
     tail.extend_from_slice(bytes);
@@ -153,10 +127,8 @@ fn wants_cursor_position(tail: &mut Vec<u8>, bytes: &[u8]) -> bool {
     found
 }
 
-/// A bounded window over one session's output.
 struct Buffer {
     data: Vec<u8>,
-    /// Total bytes ever written, including those since discarded.
     total: u64,
 }
 
@@ -168,13 +140,6 @@ impl Buffer {
         }
     }
 
-    /// Append a read chunk.
-    ///
-    /// `bounded` trims the window from the front when the session is already
-    /// dead. While the session is alive the reader loop holds back-pressure at
-    /// [`BUFFER_BYTES`], so the window cannot grow; once the direct child is
-    /// gone a grandchild can keep the pty open and keep writing with nobody
-    /// reading, and without this trim that output would grow without bound.
     fn push(&mut self, bytes: &[u8], bounded: bool) {
         self.data.extend_from_slice(bytes);
         self.total += bytes.len() as u64;
@@ -184,15 +149,12 @@ impl Buffer {
         }
     }
 
-    /// Offset of the oldest byte still held.
     fn earliest(&self) -> u64 {
         self.total - self.data.len() as u64
     }
 
     fn read_from(&self, offset: u64) -> Chunk {
         let earliest = self.earliest();
-        // A reader behind the window lost bytes. Say how many rather than
-        // quietly resuming, so the UI can show that output is missing.
         let (start, dropped) = if offset < earliest {
             (0usize, earliest - offset)
         } else {
@@ -219,11 +181,6 @@ impl Buffer {
     }
 }
 
-/// The last `max` bytes of everything printed after offset `mark`.
-///
-/// `earliest` is the offset of the first byte still held, so a mark older than
-/// the window means the whole window counts. Pure, so the rule can be tested
-/// without a pty.
 fn tail_since(data: &[u8], earliest: u64, mark: u64, max: usize) -> Vec<u8> {
     let start = mark.saturating_sub(earliest).min(data.len() as u64) as usize;
     let since = &data[start..];
@@ -236,22 +193,12 @@ struct Session {
     buffer: Arc<Mutex<Buffer>>,
     buffer_space: Arc<Condvar>,
     output_ready: Arc<Condvar>,
-    /// Shared with the reader thread, which answers the terminal's own
-    /// questions. See `wants_cursor_position`.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
-    /// Set only after the reader has published every byte and reached EOF.
-    /// The child can exit before the independent output reader catches up.
     output_closed: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
-    /// Output offset at the last keystroke sent to this session.
-    ///
-    /// Everything before it is what the program had already printed when the
-    /// person answered, so a reader asking "is this session waiting on me"
-    /// has to start here rather than at the end of the buffer. See
-    /// `tail_since_input_for_pid`.
     input_mark: Arc<AtomicU64>,
     last_input_at_ms: AtomicU64,
     last_activity: Arc<Mutex<Option<u64>>>,
@@ -294,34 +241,15 @@ impl ProcessWitness {
     }
 }
 
-/// One front end showing a session, and the geometry it can display.
-///
-/// A pty has exactly one size, so two front ends of different shapes cannot
-/// each get their own. The size that works for both is the smaller one in each
-/// axis: the program then wraps inside what the phone can show, and the Mac
-/// draws that same content in part of a wider view, which is correct rather
-/// than merely tolerable. A pty sized to the Mac and shown on a phone is not,
-/// because the wrap points land off the side of the screen.
 #[derive(Debug, Clone, Copy)]
 struct Viewer {
     rows: u16,
     cols: u16,
-    /// Last time this viewer was heard from. A front end that is killed, loses
-    /// its network, or is swiped away never says goodbye, and a viewer that
-    /// nobody can see must not keep the terminal small forever.
     seen_ms: u64,
 }
 
-/// How long a viewer counts without being heard from.
-///
-/// Every front end polls this session for output far more often than this, so
-/// a live viewer refreshes many times over inside the window. It only decides
-/// how long a *dead* one keeps constraining the size, and the explicit detach
-/// on close is what handles the ordinary case, so this can be generous without
-/// anybody waiting on it.
 const VIEWER_TTL_MS: u64 = 15_000;
 
-/// Epoch milliseconds, for activity timestamps.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -366,9 +294,6 @@ pub fn manager() -> &'static Manager {
 pub struct Manager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     next: Mutex<u64>,
-    /// Fully-started login shells waiting to be handed over, so a Shell click
-    /// does not pay a login-shell startup. Kept out of `sessions`: a pooled
-    /// shell has no client until it is taken.
     pool: Mutex<Vec<Arc<Session>>>,
 }
 
@@ -383,13 +308,6 @@ impl Manager {
     /// there is output, and doing that on a request thread would freeze every
     /// other call for as long as the command stayed quiet.
     pub fn spawn(&self, req: &Spawn) -> Result<SessionInfo, PtyError> {
-        // The Shell tile is the click a person watches. A shell that was
-        // started when the daemon was, and kept idle since, hands over its
-        // already-loaded process instead of making the click pay a full
-        // login-shell startup. Colour is part of the deal: a pooled shell was
-        // started with the colour defaults (and no COLORFGBG), so a no-colour
-        // request, or a light-window request that needs COLORFGBG=0;15, takes
-        // the fresh path rather than inheriting the wrong setting.
         if is_shell_profile(req)
             && !req.no_color
             && req.dark.is_none()
@@ -408,9 +326,6 @@ impl Manager {
                         return Ok(info);
                     }
                     Err(_) => {
-                        // The pooled shell was already gone or refused to
-                        // answer. Fall through to a fresh spawn rather than
-                        // losing the click.
                         self.replenish_pool();
                     }
                 }
@@ -492,10 +407,6 @@ impl Manager {
         Ok((info, witness))
     }
 
-    /// Open a pty, spawn the command and start its reader thread. Used by the
-    /// unix shell pool, so it shares one definition of what a session is.
-    /// Windows builds no shell pool, so this stays unix-only rather than
-    /// tripping deny-warnings dead code there.
     #[cfg(unix)]
     fn build_session(
         &self,
@@ -576,7 +487,6 @@ impl Manager {
             let program_status = Arc::clone(&program_status);
             std::thread::spawn(move || {
                 let mut chunk = [0u8; 8 * 1024];
-                // Enough to catch a status request split across two reads.
                 let mut tail: Vec<u8> = Vec::new();
                 loop {
                     let mut buffered = buffer.lock().unwrap_or_else(PoisonError::into_inner);
@@ -619,7 +529,6 @@ impl Manager {
                         Err(_) => break,
                     }
                 }
-                // Pair EOF with the same mutex used by output waiters.
                 let _buffer = buffer.lock().unwrap_or_else(PoisonError::into_inner);
                 output_closed.store(true, Ordering::SeqCst);
                 output_ready.notify_all();
@@ -673,25 +582,8 @@ impl Manager {
         format!("pty-{n}")
     }
 
-    /// Hand a pooled shell over as a real session.
-    ///
-    /// The shell is already fully started and sitting at a prompt (see
-    /// [`Self::build_pool_shell`]), so the click pays for a resize, a `cd`
-    /// into the workspace and a registry insert instead of a full login-shell
-    /// startup. The handoff is invisible in the transcript: the `cd` is
-    /// followed by a unique marker, and once the marker is seen the whole
-    /// pre-handoff buffer is discarded, so a client that reads from offset 0
-    /// sees the shell as it is now, in the requested folder.
-    ///
-    /// If the marker never arrives the handoff **fails** rather than clearing
-    /// the buffer and returning anyway. Clearing a half-started shell was how
-    /// a Shell click became eight seconds of blank pane: the profile was still
-    /// loading, the buffer was wiped, and nothing else printed until it
-    /// finished. Falling through to a fresh spawn is better than a blank pane.
     fn handoff_pooled(&self, shell: Arc<Session>, req: &Spawn) -> Result<SessionInfo, PtyError> {
         let result = (|| {
-            // A pooled shell that exited while idle is not a session to hand
-            // over. (It is still killed on the way out, see below.)
             if !session_is_alive(&shell) {
                 return Err(PtyError::Spawn(
                     "the pooled shell had already exited".into(),
@@ -723,28 +615,18 @@ impl Manager {
                 writer.flush().map_err(|e| PtyError::Spawn(e.to_string()))?;
             }
 
-            // A ready pooled shell answers in milliseconds. A couple of
-            // seconds is only a safety net for a slow `cd` on a network
-            // volume; past that the shell is not the ready one we thought.
             if !wait_for_marker(&shell, &marker, HANDOFF_READY_TIMEOUT) {
                 return Err(PtyError::Spawn(
                     "the pooled shell did not accept the handoff".into(),
                 ));
             }
 
-            // Discard everything before the handoff: the idle prompt, the cd
-            // line, the marker. The client starts at offset 0 with the shell
-            // already in the requested folder. The reader thread may push
-            // while we clear; the buffer lock serializes, and nothing the
-            // client reads predates the handoff.
             clear_session_buffer(&shell);
             *shell
                 .program_status
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner) = ProgramStatusTracker::default();
 
-            // Reprint the prompt the clear just removed, so the pane opens on
-            // a prompt rather than on blank space.
             {
                 let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = writer.write_all(b"\r");
@@ -761,13 +643,7 @@ impl Manager {
                 info.hidden = req.hidden;
                 info.rows = size.rows;
                 info.cols = size.cols;
-                // This session starts now. The process is older, but the
-                // session handed to the caller is not, and a meter counting
-                // from the pool's build time would count somebody else's
-                // turns.
                 info.started_at_ms = now_ms();
-                // The handoff itself counts as activity: the shell has just
-                // answered and is about to print its prompt.
                 *shell
                     .last_activity
                     .lock()
@@ -780,7 +656,6 @@ impl Manager {
             Ok(self.snapshot(&shell))
         })();
 
-        // A shell that failed to hand over must not keep running unowned.
         if result.is_err() {
             let _ = shell
                 .child
@@ -791,16 +666,6 @@ impl Manager {
         result
     }
 
-    /// Build one fully-started login shell for the pool, without registering
-    /// it as a session. The shell sources its own profile, so it needs no
-    /// login environment injected, exactly like the Shell tile it will serve.
-    ///
-    /// **Ready means at a prompt**, not merely forked. `build_session` returns
-    /// as soon as the process exists; a loaded `.zshrc` can still take many
-    /// seconds after that. Parking a half-started shell made every first
-    /// Shell click clear that partial buffer and wait out the rest of the
-    /// profile as a blank pane. The warm path pays that wait on a background
-    /// thread instead, and only parks shells that have answered a marker.
     #[cfg(unix)]
     fn build_pool_shell(&self) -> Option<Arc<Session>> {
         let home = home_dir();
@@ -839,11 +704,6 @@ impl Manager {
         Some(session)
     }
 
-    /// Start a replacement pooled shell in the background after one was taken.
-    ///
-    /// Only the process-wide manager refills from a background thread; a test
-    /// manager keeps exactly the pool the test put there, so tests never spawn
-    /// login shells they did not ask for.
     fn replenish_pool(&self) {
         #[cfg(unix)]
         if !std::ptr::eq(self as *const Manager, manager() as *const Manager) {
@@ -871,8 +731,6 @@ impl Manager {
     pub fn write(&self, id: &str, bytes: &[u8]) -> Result<(), PtyError> {
         let s = self.get(id)?;
         let mut w = s.writer.lock().unwrap_or_else(PoisonError::into_inner);
-        // Remember where the output stood when this keystroke went in, so a
-        // question the person has just answered stops counting as one.
         let total = s
             .buffer
             .lock()
@@ -940,9 +798,6 @@ impl Manager {
         let s = self.get(id)?;
         {
             let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
-            // Only a viewer that has declared a geometry counts. A front end
-            // that never resizes never constrains anything, which keeps an
-            // older client exactly as it was.
             let Some(entry) = viewers.get_mut(viewer) else {
                 return Ok(());
             };
@@ -957,10 +812,6 @@ impl Manager {
     /// immediate, so closing a session on the phone puts the Mac back at once
     /// instead of a quarter of a minute later.
     pub fn drop_viewer(&self, id: &str, viewer: &str) -> Result<(), PtyError> {
-        // A session that is already gone has nothing to give back, and closing
-        // one is exactly when this is called: the front end closes the pty and
-        // then tears its own session down, in that order. Erroring there would
-        // make the ordinary path report a failure that means nothing.
         let Ok(s) = self.get(id) else {
             return Ok(());
         };
@@ -977,13 +828,6 @@ impl Manager {
         Self::apply_agreed_size(&s)
     }
 
-    /// Set the session to the smallest geometry any live viewer needs.
-    ///
-    /// Expired viewers are pruned here rather than on a timer: every path that
-    /// could change the answer already comes through this function.
-    /// Drop viewers that have not refreshed inside [`VIEWER_TTL_MS`] and the
-    /// offsets they were holding. Called from resize and from every read, so
-    /// a phone that died without `pty.detach` cannot pin the 8 MiB ring.
     fn prune_expired_readers(s: &Session) {
         let now = now_ms();
         let active_viewers: HashSet<String> = {
@@ -1014,9 +858,6 @@ impl Manager {
                     Some((r, c)) => Some((r.min(v.rows), c.min(v.cols))),
                 })
         };
-        // Nobody is watching. Leave the size alone: there is no geometry that
-        // is more right than the last one, and resizing a terminal nothing is
-        // showing would only make the program redraw for no reader.
         let Some((rows, cols)) = agreed else {
             return Ok(());
         };
@@ -1222,10 +1063,6 @@ impl Manager {
     }
 
     pub fn list(&self) -> Vec<SessionInfo> {
-        // Clone the handles under the map lock, then snapshot outside it:
-        // snapshot takes the per-session child/info/buffer locks, and holding
-        // the map lock across all of them makes one slow session block every
-        // spawn, close and list in the process.
         let sessions: Vec<Arc<Session>> = self
             .sessions
             .lock()
@@ -1242,14 +1079,7 @@ impl Manager {
         out
     }
 
-    /// Current state, folding in whatever the reader thread and the child have
-    /// since reported.
     fn snapshot(&self, s: &Arc<Session>) -> SessionInfo {
-        // Reap here, so a finished process stops claiming to run. The lock is
-        // only ever held long enough to ask, so waiting for it is cheap, and a
-        // missed reap is not: nothing else ever asks the child again, so a
-        // session whose reap was skipped looks alive until something kills it.
-        // That is also why a poisoned lock is recovered rather than skipped.
         {
             let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
             match child.try_wait() {
@@ -1271,7 +1101,6 @@ impl Manager {
             .clone();
         info.alive = s.alive.load(Ordering::SeqCst);
         let code = s.exit_code.load(Ordering::SeqCst);
-        // `None` while running is not the same as exiting with 0.
         info.exit_code = (code != i32::MIN).then_some(code);
         info.total_bytes = s
             .buffer
@@ -1307,9 +1136,6 @@ impl Manager {
         #[cfg(windows)]
         let hidden = s.info.lock().unwrap_or_else(PoisonError::into_inner).hidden;
         let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
-        // A reaped child's numeric PID may now identify another process.
-        // Never signal it again, and never turn an observation error into a
-        // claim that this owned process has stopped.
         if let Some(status) = child.try_wait()? {
             s.alive.store(false, Ordering::SeqCst);
             s.exit_code
@@ -1322,9 +1148,6 @@ impl Manager {
             && matches!(child.try_wait(), Ok(None))
             && let Some(pid) = child.process_id()
         {
-            // Launchers such as Muse's PowerShell shim own another process.
-            // Kill descendants before the root, while its retained process
-            // handle and live PID still identify this exact agent session.
             kill_windows_process_tree(pid);
         }
         if let Err(error) = child.kill()
@@ -1364,13 +1187,12 @@ pub fn kill_windows_process_tree(pid: u32) {
     let Some(root) = std::env::var_os("SystemRoot") else {
         return;
     };
-    // Resolve the Windows utility directly, rather than a workspace/PATH shim.
     let _ = Command::new(PathBuf::from(root).join("System32/taskkill.exe"))
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .creation_flags(0x08000000)
         .status();
 }
 
@@ -1423,7 +1245,7 @@ fn spawn_session_process(
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            process.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            process.creation_flags(0x08000000);
         }
         #[cfg(unix)]
         {
@@ -1431,8 +1253,6 @@ fn spawn_session_process(
             process.process_group(0);
         }
         let child = process.spawn()?;
-        // Command owns copies of its output handles. Drop them so EOF follows
-        // the child's exit, rather than waiting forever for this parent.
         drop(process);
         return Ok((
             None,
@@ -1452,8 +1272,6 @@ fn spawn_session_process(
         .master
         .take_writer()
         .map_err(|e| PtyError::Spawn(e.to_string()))?;
-    // Finish fallible I/O setup before spawning, so an allocation failure
-    // cannot leave a live child which no session owns.
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -1471,9 +1289,6 @@ fn windows_shell_path(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-/// npm's Windows launchers are forwarding shims. Run their native executable
-/// or Node entry point directly: PowerShell 5.1 and cmd both reinterpret the
-/// JSON quotes, metacharacters and newlines in chat arguments.
 #[cfg(any(windows, test))]
 fn npm_shim_target(source: &str) -> Option<(String, bool)> {
     let lines = source
@@ -1576,9 +1391,6 @@ fn npm_shim_command(command: &str, args: &[String]) -> Option<CommandBuilder> {
     Some(builder)
 }
 
-/// Batch shims require an interpreter, including when launched by a remote
-/// client. Known npm shims bypass the shell to preserve the original argv.
-/// Custom batch scripts retain their interpreter semantics.
 fn session_command(command: &str, args: &[String]) -> CommandBuilder {
     #[cfg(windows)]
     if std::path::Path::new(command)
@@ -1663,30 +1475,18 @@ fn is_executable_shell(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether a request is the interactive shell profile rather than a harness.
-///
-/// The launcher's Shell tile asks for the user's own login shell with its
-/// profile arguments. These requests are the hot path a person clicks, and the
-/// one profile that genuinely does not need the cached login environment, so
-/// they get the fast spawn path and the non-blocking env read.
 #[cfg(unix)]
 fn is_shell_profile(req: &Spawn) -> bool {
     let shell = login_shell();
     if req.command != shell {
         return false;
     }
-    // The Shell tile sends `-il` for zsh and nothing for other shells. Accept
-    // the common reorderings (`-li`, split `-i -l`) so a small catalog drift
-    // does not silently drop the pool path and force a cold startup.
     shell_args_are_login_interactive(&req.args)
 }
 
 #[cfg(unix)]
 fn shell_args_are_login_interactive(args: &[String]) -> bool {
     if args.is_empty() {
-        // Non-zsh shells (and a bare `zsh`) start with no flags. Bare zsh is
-        // the slow path on some profiles; the catalog still uses it for non-
-        // zsh shells, and the pool builds the same shape.
         return true;
     }
     let mut letters = String::new();
@@ -1704,25 +1504,12 @@ fn is_shell_profile(_req: &Spawn) -> bool {
     false
 }
 
-/// How many fully-started login shells to keep ready.
-///
-/// Two, so a second Shell click right after the first does not have to wait
-/// for the pool to rebuild itself. Each is one idle process sitting at a
-/// prompt until it is handed over, which is nothing on a machine that has a
-/// daemon anyway.
 #[cfg(unix)]
 const POOL_SIZE: usize = 2;
 
-/// How long a warm shell may take to reach a prompt before we give up on it.
-///
-/// A loaded interactive profile is the whole reason the pool exists; ten to
-/// fifteen seconds is common on a cold machine with heavy plugins. The wait
-/// runs on the warm thread, never on a click.
 #[cfg(unix)]
 const POOL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// How long a handoff may wait for `cd` + marker from a shell that was already
-/// proven ready when it entered the pool.
 const HANDOFF_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 fn session_is_alive(session: &Session) -> bool {
@@ -1773,8 +1560,6 @@ fn clear_session_buffer(session: &Session) {
 }
 
 fn marker_command(marker: &str) -> String {
-    // Keep the complete marker out of the terminal's echoed input. Seeing
-    // keystrokes is not proof that the shell has executed the command.
     let split = marker.len() / 2;
     format!(
         "printf '%s%s\\n' {} {}\r",
@@ -1783,12 +1568,6 @@ fn marker_command(marker: &str) -> String {
     )
 }
 
-/// Drive a freshly forked shell until it accepts input, then clear its buffer.
-///
-/// The input is queued by the kernel while the profile is still running, and
-/// is processed the moment the shell reaches a prompt. Seeing the marker is
-/// therefore "the profile finished", which is exactly when the shell is safe
-/// to park and later hand over without wiping a half-started startup.
 #[cfg(unix)]
 fn prove_shell_ready(session: &Session, timeout: std::time::Duration) -> bool {
     let marker = format!("__TS_POOL_READY_{}__", next_marker());
@@ -1824,16 +1603,12 @@ fn prove_shell_ready(session: &Session, timeout: std::time::Duration) -> bool {
 pub fn warm_shell_pool() {
     #[cfg(unix)]
     {
-        // Called from both the daemon's entry point and its serve loop; the
-        // second call must not start a second set of profile startups.
         static WARMED: AtomicBool = AtomicBool::new(false);
         if WARMED.swap(true, Ordering::Relaxed) {
             return;
         }
         std::thread::spawn(|| {
             let m = manager();
-            // Start the shells in parallel: on a loaded machine each is a full
-            // profile startup, and doing them serially doubles the warm time.
             let handles: Vec<_> = (0..POOL_SIZE)
                 .map(|_| std::thread::spawn(move || m.build_pool_shell()))
                 .collect();
@@ -1846,11 +1621,6 @@ pub fn warm_shell_pool() {
     }
 }
 
-/// Put a built shell into the pool, or kill it when the pool is already full.
-///
-/// The full case is rare (a replenish finishing while another replenish or the
-/// warm already refilled), but a shell left running with nobody to hand it to
-/// is a process the user did not ask for, so it is stopped rather than leaked.
 #[cfg(unix)]
 fn park_pool_shell(m: &'static Manager, shell: Arc<Session>) {
     let mut pool = m.pool.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1866,15 +1636,11 @@ fn park_pool_shell(m: &'static Manager, shell: Arc<Session>) {
     }
 }
 
-/// Monotonic suffix for handoff markers, so two handoffs in one process can
-/// never confuse their markers.
 fn next_marker() -> u64 {
     static MARKER: AtomicU64 = AtomicU64::new(0);
     MARKER.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Single-quote a string for the shell, escaping an embedded quote so a path
-/// like `O'Brien/` cannot break out of the quoting.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -1900,11 +1666,6 @@ fn home_dir() -> String {
         .unwrap_or_default()
 }
 
-/// PATH for a harness spawn when the login resolve has not finished yet.
-///
-/// launchd's PATH is too small to find Homebrew or `~/.local/bin`. This is
-/// the same conventional list the launcher catalog uses, not a guess at the
-/// user's full profile.
 #[cfg(unix)]
 fn fallback_path() -> String {
     let home = home_dir();
@@ -1949,17 +1710,9 @@ fn nvm_fallback_paths(home: &str) -> Vec<String> {
     out
 }
 
-/// How long a harness spawn may wait for the login-env warm thread.
-///
-/// Shells source their own profile and must not pay this. Harnesses do not,
-/// and a cold spawn under launchd without the full env was measured at several
-/// seconds of plugin work that a Terminal session skipped. The warm thread is
-/// started at daemon boot; this is only a bridge across the first click.
 #[cfg(unix)]
 const LOGIN_ENV_BRIEF_WAIT: std::time::Duration = std::time::Duration::from_millis(400);
 
-/// Keys that must not ride from a launchd / sandbox parent into a session when
-/// the login resolve has not replaced the whole environment yet.
 #[cfg(unix)]
 const HOSTILE_INHERITED_KEYS: &[&str] = &[
     "CI",
@@ -1974,12 +1727,8 @@ const HOSTILE_INHERITED_KEYS: &[&str] = &[
     "NO_COLOR",
 ];
 
-/// Apply the login-shell environment, or a usable fallback, before terminal
-/// overrides. See the call site for why the order and the clear matter.
 #[cfg(unix)]
 fn apply_login_environment(cmd: &mut CommandBuilder, req: &Spawn) {
-    // Shells are `$SHELL -il` (or bare interactive): they source the profile
-    // themselves. Waiting here would double a cold startup.
     let env = if is_shell_profile(req) {
         login_env()
     } else {
@@ -1987,8 +1736,6 @@ fn apply_login_environment(cmd: &mut CommandBuilder, req: &Spawn) {
     };
 
     if let Some(env) = env {
-        // Pure interactive baseline: drop launchd-only keys that are not in
-        // the user's shell, then write every login variable.
         cmd.env_clear();
         for (key, value) in &env.vars {
             cmd.env(key, value);
@@ -2026,15 +1773,9 @@ fn apply_home(cmd: &mut CommandBuilder) {
     }
 }
 
-/// TERM and colour claims the emulator makes, always last so a profile cannot
-/// undo them.
 fn apply_terminal_environment(cmd: &mut CommandBuilder, req: &Spawn) {
-    // Agent CLIs draw boxes and colour. Without this they fall back to
-    // something far uglier, and some refuse interactive mode entirely.
     cmd.env("TERM", "xterm-256color");
     if req.no_color {
-        // The user opted out of colour in settings. Honour it exactly:
-        // NO_COLOR=1 and nothing that overrides it.
         cmd.env("NO_COLOR", "1");
         cmd.env_remove("COLORTERM");
         cmd.env_remove("FORCE_COLOR");
@@ -2067,10 +1808,6 @@ fn apply_terminal_environment(cmd: &mut CommandBuilder, req: &Spawn) {
     }
 }
 
-/// [`login_env`], waiting up to `timeout` if the warm resolve is still running.
-///
-/// Returns `None` when the wait expires still pending, or when the resolve
-/// finished with a failed shell. Starts the warm work if nothing has yet.
 #[cfg(unix)]
 fn brief_login_env(timeout: std::time::Duration) -> Option<Arc<LoginEnv>> {
     warm_login_env();
@@ -2114,8 +1851,6 @@ pub fn login_env() -> Option<Arc<LoginEnv>> {
 /// sites want which read.
 #[cfg(unix)]
 pub fn login_env_ready() -> Option<Arc<LoginEnv>> {
-    // A caller may arrive before any warm call did. Start the resolver; the
-    // once inside it guarantees a single `$SHELL -ilc` run process-wide.
     warm_login_env();
     env_cache().wait_ready()
 }
@@ -2133,7 +1868,6 @@ pub fn login_env_ready() -> Option<Arc<LoginEnv>> {
     None
 }
 
-/// What the cache holds while nobody has asked the login shell yet.
 #[cfg(unix)]
 enum EnvState {
     /// The resolve is still running, or has not started.
@@ -2143,12 +1877,6 @@ enum EnvState {
     Done(Option<Arc<LoginEnv>>),
 }
 
-/// The one cache, shared by the blocking and non-blocking reads and the warm
-/// thread. `Pending` while the resolve runs, so a spawn that does not want to
-/// wait can see "not ready" instead of blocking on a mutex the resolve holds.
-///
-/// A plain struct rather than inline statics so the non-blocking contract is
-/// testable without touching process-wide state.
 #[cfg(unix)]
 struct EnvCache {
     state: Mutex<EnvState>,
@@ -2164,8 +1892,6 @@ impl EnvCache {
         }
     }
 
-    /// What is known right now. `None` while the resolve is still running:
-    /// returning it is an answer, not a promise that no resolve is happening.
     fn snapshot(&self) -> Option<Arc<LoginEnv>> {
         match &*self.state.lock().unwrap_or_else(PoisonError::into_inner) {
             EnvState::Done(env) => env.clone(),
@@ -2174,15 +1900,9 @@ impl EnvCache {
     }
 
     fn wait_ready(&self) -> Option<Arc<LoginEnv>> {
-        // A login profile may wait on an unavailable service indefinitely.
-        // Callers can use their normal fallback while resolution continues.
         self.wait_ready_timeout(std::time::Duration::from_secs(30))
     }
 
-    /// Like [`Self::wait_ready`], but give up after `timeout` still pending.
-    ///
-    /// A timed-out wait returns `None` without marking the resolve failed: the
-    /// warm thread may still finish and later callers can read the answer.
     fn wait_ready_timeout(&self, timeout: std::time::Duration) -> Option<Arc<LoginEnv>> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let deadline = std::time::Instant::now() + timeout;
@@ -2200,8 +1920,6 @@ impl EnvCache {
                         .unwrap_or_else(PoisonError::into_inner);
                     state = next;
                     if result.timed_out() {
-                        // Re-check: a notify and a timeout can race, and the
-                        // answer may have landed in the same moment.
                         if let EnvState::Done(env) = &*state {
                             return env.clone();
                         }
@@ -2225,8 +1943,6 @@ fn env_cache() -> &'static EnvCache {
     CACHE.get_or_init(EnvCache::new)
 }
 
-/// Run `$SHELL -ilc env` and cache the answer. Called at most once per
-/// process, from the warm thread.
 #[cfg(unix)]
 fn resolve_and_store() {
     let shell = login_shell();
@@ -2274,13 +1990,6 @@ pub fn warm_login_env() {
     }
 }
 
-/// Parse `KEY=VALUE` lines between the sentinel markers, ignoring anything a
-/// startup file printed before or after the real environment.
-///
-/// A variable whose value contains a newline (pathological, but legal in POSIX)
-/// loses the continuation lines: the first line still parses and the rest are
-/// skipped as non-`KEY=VALUE` noise. Better one truncated value than a corrupt
-/// parse of everything after it.
 #[cfg(unix)]
 fn parse_env(stdout: &str) -> Option<HashMap<String, String>> {
     const START: &str = "__TOKENSTAT_ENV_START__";
@@ -2294,10 +2003,6 @@ fn parse_env(stdout: &str) -> Option<HashMap<String, String>> {
         if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             continue;
         }
-        // The pty owns the working directory: the child chdirs to the
-        // workspace, and a stale PWD from wherever the daemon was started
-        // would make tools that trust $PWD over getcwd report the wrong
-        // folder.
         if key == "PWD" {
             continue;
         }
@@ -2326,12 +2031,6 @@ mod tests {
         wait_for_timeout(f, std::time::Duration::from_secs(5))
     }
 
-    /// Wait up to `timeout`, polling every 25 ms.
-    ///
-    /// PowerShell starts slowly on a loaded CI runner. Cold .NET JIT plus a
-    /// Defender scan, while sibling tests compile with rustc, once pushed a
-    /// start past the 5 s budget `wait_for` gives. Tests that launch
-    /// PowerShell use 20 s, the same budget the batch shim test already uses.
     fn wait_for_timeout(mut f: impl FnMut() -> bool, timeout: std::time::Duration) -> bool {
         let deadline = std::time::Instant::now() + timeout;
         loop {
@@ -2365,9 +2064,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_login_env_parse_ignores_profile_noise() {
-        // A profile that prints a banner must not corrupt the environment: the
-        // previous PATH-only version took the whole stdout, so one `echo` made
-        // every spawn start with a garbage PATH.
         let out = concat!(
             "Last login: Tue Aug  1 12:00:00 on ttys000\n",
             "Welcome to your machine!\n",
@@ -2389,10 +2085,7 @@ mod tests {
             vars.get("NVM_DIR").map(String::as_str),
             Some("/Users/x/.nvm")
         );
-        // split on the first `=`, so an `=` inside a value survives.
         assert_eq!(vars.get("AUTH_TOKEN").map(String::as_str), Some("abc=def"));
-        // PWD is the pty's business, not the login shell's: the child chdirs
-        // to the workspace, and a stale value would lie to tools that read it.
         assert!(!vars.contains_key("PWD"));
         assert!(!vars.contains_key("not a variable line"));
         assert_eq!(vars.len(), 3);
@@ -2411,9 +2104,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_env_snapshot_does_not_wait_for_a_pending_resolve() {
-        // A shell profile sources its own environment, so its first spawn must
-        // never block on the process-wide login resolve. The snapshot read is
-        // the contract that makes that true: Pending answers None immediately.
         let cache = EnvCache::new();
         assert!(
             cache.snapshot().is_none(),
@@ -2433,8 +2123,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_env_brief_wait_times_out_while_pending() {
-        // Harness spawns may wait briefly for the warm thread, but must not
-        // hang when the resolve never finishes (tests, broken shell).
         let cache = EnvCache::new();
         let started = std::time::Instant::now();
         assert!(
@@ -2479,7 +2167,6 @@ mod tests {
             let cache = Arc::clone(&cache);
             std::thread::spawn(move || cache.wait_ready())
         };
-        // Give the waiter time to park, then finish the resolve on this thread.
         std::thread::sleep(std::time::Duration::from_millis(100));
         let env = Arc::new(LoginEnv {
             path: "/usr/bin:/bin".into(),
@@ -2494,8 +2181,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn shell_quoting_survives_an_apostrophe() {
-        // A path like O'Brien/ must stay inside the quotes, or the handoff cd
-        // would split into two commands and the shell would run the tail.
         assert_eq!(shell_quote("plain"), "'plain'");
         assert_eq!(shell_quote("O'Brien"), "'O'\\''Brien'");
         assert_eq!(shell_quote("a b"), "'a b'");
@@ -2546,17 +2231,6 @@ mod tests {
         }
     }
 
-    /// Wait until a pooled shell is sitting at a prompt, so a handoff test is
-    /// testing the ready case and not the mid-startup fallback.
-    ///
-    /// Readiness is proved by echoing a marker and waiting for it, the same
-    /// probe `prove_shell_ready` uses, rather than by waiting for "any new
-    /// bytes". The bytes after a profile are racy: `prove_shell_ready` clears
-    /// the buffer the moment its marker arrives, and the shell's following
-    /// prompt is sometimes already inside that cleared chunk — on a loaded
-    /// CI runner the buffer could then stay empty for the whole wait even
-    /// though the shell is fine. A marker command always produces output if
-    /// the shell is alive, so the probe cannot starve.
     #[cfg(unix)]
     fn wait_until_prompt(shell: &Arc<Session>) {
         let marker = format!("__TS_PROMPT_{}__", next_marker());
@@ -2571,7 +2245,6 @@ mod tests {
             wait_for_marker(shell, &marker, POOL_READY_TIMEOUT),
             "the pooled shell answered the prompt probe"
         );
-        // Leave the handoff a clean transcript, like `prove_shell_ready` does.
         clear_session_buffer(shell);
     }
 
@@ -2754,8 +2427,6 @@ mod tests {
             .push(shell);
 
         let mut req = shell_req(std::env::temp_dir());
-        // Pooled shells are built without COLORFGBG. A light window needs
-        // COLORFGBG=0;15, so it must not take a pre-started dark-default shell.
         req.dark = Some(false);
         let info = m.spawn(&req).expect("fresh spawn honours light mode");
         assert_eq!(
@@ -2808,21 +2479,13 @@ mod tests {
         m.close(&info.id).unwrap();
     }
 
-    /// Run a script in the platform's own shell.
-    ///
-    /// The two spellings are given side by side rather than hidden behind a
-    /// helper per test, because a fixture that only runs on one platform is a
-    /// fixture that stops being checked on the others.
     fn spawn(m: &Manager, unix: &str, windows: &str) -> SessionInfo {
-        // Both are always passed, only one of them ever runs.
         let _ = (unix, windows);
         #[cfg(unix)]
         let (command, args) = {
             let _ = windows;
             ("/bin/sh".to_string(), vec!["-c".to_string(), unix.into()])
         };
-        // `/V:ON` turns on `!var!` expansion, which a script needs when it sets
-        // a variable and reads it back in the same line.
         #[cfg(windows)]
         let (command, args) = (
             "cmd.exe".to_string(),
@@ -2902,9 +2565,6 @@ mod tests {
             })
             .unwrap();
         let session = m.get(&process.id).unwrap();
-        // Let the real reader finish before driving publication ourselves.
-        // A hidden process uses pipes on Windows; ConPTY both emits setup
-        // bytes and keeps its output pipe open beyond a silent child's exit.
         assert!(wait_for(|| session.output_closed.load(Ordering::SeqCst)));
         *session.buffer.lock().unwrap() = Buffer::new();
         session.output_closed.store(false, Ordering::SeqCst);
@@ -2920,7 +2580,6 @@ mod tests {
         );
         publish.join().unwrap();
         assert_eq!(m.read(&process.id, 0).unwrap().bytes, b"hello");
-        // Already buffered output cannot lose a notification sent before wait.
         let started = Instant::now();
         m.wait_for_output(&process.id, 0, false, Duration::from_secs(5))
             .unwrap();
@@ -2989,8 +2648,6 @@ mod tests {
         let required = true;
         let output = m.read(&s.id, 0).unwrap().bytes;
         m.close(&s.id).unwrap();
-        // Developer checkouts can use an older OS ConPTY. CI and the shipped
-        // Windows app stage the pinned runtime and require the full exchange.
         assert!(
             received || !required,
             "OSC query, reply and status must survive the native PTY/ConPTY path: {}",
@@ -3010,9 +2667,6 @@ mod tests {
             fn GetConsoleMode(handle: *mut c_void, mode: *mut u32) -> i32;
             fn SetConsoleMode(handle: *mut c_void, mode: u32) -> i32;
         }
-        // Match a VT-aware CLI, without relying on a PowerShell profile or
-        // the runner's inherited console modes. Read the actual reply before
-        // reporting a state, so a one-way transport cannot pass this test.
         unsafe {
             let input = GetStdHandle(-10_i32 as u32);
             let output = GetStdHandle(-11_i32 as u32);
@@ -3057,11 +2711,6 @@ mod tests {
             "the process owner must answer capability detection"
         );
     }
-
-    // A pty has one size and can have two front ends. These pin the rule that
-    // makes a phone and a Mac watching the same session both correct: the
-    // session is the smallest geometry any live viewer can show, and a viewer
-    // that leaves takes its constraint with it.
 
     #[test]
     fn one_viewer_gets_exactly_what_it_asked_for() {
@@ -3109,8 +2758,6 @@ mod tests {
 
     #[test]
     fn the_last_viewer_leaving_keeps_the_size_it_left_behind() {
-        // Nothing is showing the session, so no geometry is more right than
-        // another and resizing would make the program redraw for no reader.
         let m = Manager::new();
         let s = stay_busy(&m);
         m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
@@ -3127,7 +2774,6 @@ mod tests {
         let session = m.get(&s.id).expect("session");
         m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
         m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
-        // A front end that was killed or lost its network never detaches.
         {
             let session = m.get(&s.id).expect("session");
             let mut viewers = session
@@ -3142,8 +2788,6 @@ mod tests {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert("phone".into(), 12);
-        // Any call that could change the answer prunes; the Mac's own poll is
-        // what gets there first in practice.
         m.touch_viewer(&s.id, "mac").expect("touch");
         assert!(
             !session
@@ -3159,8 +2803,6 @@ mod tests {
 
     #[test]
     fn touching_an_unknown_viewer_changes_nothing() {
-        // An older front end never sends a viewer id, so it must not be able to
-        // register itself with no geometry and pin the session to nothing.
         let m = Manager::new();
         let s = stay_busy(&m);
         m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
@@ -3541,11 +3183,6 @@ mod tests {
                 .unwrap_or(false)
         }));
 
-        // Reading again from the returned offset does not repeat what the
-        // reader already has, which is what lets a client poll without
-        // reprocessing everything each time. Asserting on the payload rather
-        // than on an empty chunk, because a terminal may still emit control
-        // sequences of its own after the program has said its piece.
         let first = m.read(&s.id, 0).unwrap();
         let second = m.read(&s.id, first.next_offset).unwrap();
         assert!(!String::from_utf8_lossy(&second.bytes).contains("hello-from-pty"));
@@ -3605,9 +3242,6 @@ mod tests {
             })
         }));
         let session = m.get(&process.id).unwrap();
-        // Hold publication while allowing the native child to write and exit.
-        // This deterministically recreates the scheduler ordering that lost
-        // final chat records when liveness alone ended the host's drainer.
         let publication = session.buffer.lock().unwrap();
         std::fs::write(directory.join("go"), b"").unwrap();
         assert!(wait_for(|| {
@@ -3702,8 +3336,6 @@ mod tests {
 
     #[test]
     fn a_running_process_has_no_exit_code() {
-        // None while running is not the same as exiting with 0, and a UI that
-        // conflates them reports "finished" for a live session.
         let m = Manager::new();
         let s = stay_busy(&m);
         let info = m.info(&s.id).unwrap();
@@ -3721,10 +3353,6 @@ mod tests {
             "set /p line= & echo got:!line!",
         );
         std::thread::sleep(std::time::Duration::from_millis(250));
-        // Carriage return, because that is what Return sends. A line feed is
-        // not a line ending to a Windows console, so `set /p` waits for a key
-        // that never comes, and a Unix terminal maps the return to a newline
-        // for the program on the other side anyway.
         m.write(&s.id, b"ping\r").unwrap();
 
         assert!(wait_for(|| {
@@ -3760,9 +3388,6 @@ mod tests {
 
     #[test]
     fn a_cursor_position_request_is_recognised_across_a_read_boundary() {
-        // Windows will not start the command until this is answered, and the
-        // request can arrive in two pieces, so a scan of one read alone would
-        // miss it and hang the session for its whole budget.
         let mut tail = Vec::new();
         assert!(!wants_cursor_position(&mut tail, b"\x1b[6"));
         assert!(wants_cursor_position(&mut tail, b"n"));

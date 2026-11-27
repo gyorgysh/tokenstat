@@ -6,12 +6,6 @@
 
 import SwiftUI
 
-/// The screen the window opens on.
-///
-/// Not Insights, and not an empty Workspaces pane on a fresh install. The
-/// question people have when they open the app is what they have left before
-/// they start, and that is a different question from what they spent last
-/// month. This screen answers the first, Insights answers the second.
 struct HomeView: View {
     @Environment(\.heatmapHover) private var heatmapHover
     @Bindable var model: HomeModel
@@ -20,11 +14,7 @@ struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.hostReady) private var hostReady
-    /// Where the account flow lives, for the sign-in prompt when All machines
-    /// cannot be shown without one.
     var onShowAccount: () -> Void
-    /// The screen that owns scanning, so the getting-started card can run the
-    /// first one without sending anybody to look for the button.
     @Bindable var scanner: InsightsModel
     var onOpenPin: (PinnedWorkStore.Pin) -> Void
     var pinAvailability: (PinnedWorkStore.Pin) -> String?
@@ -32,16 +22,12 @@ struct HomeView: View {
     var recentWork: [DesktopHomeDestination]
     var onOpenRecent: (WorkReference) -> Void
     var onOpenMachine: (Machine) -> Void
-    /// The setup checklist under the greeting. Nil hides it.
     var setupHints: SetupHintsState? = nil
     @State private var layout = HomeLayout.shared
     @State private var editingHome = false
     @State private var pinsStore = PinnedWorkStore.shared
 
     var body: some View {
-        // Same chrome shape as Insights: a fixed bar above the scrolling
-        // content. Refresh lives here, not in the window toolbar, so it is
-        // not a floating mark over the heatmap.
         VStack(spacing: 0) {
             DetailChromeBar(accessory: { scopePicker }) {
                 ToolbarIconButton(systemImage: ActionIcon.layout.symbol, help: L10n.text("apple.homeview.customize_home.642cec6e")) {
@@ -64,11 +50,6 @@ struct HomeView: View {
             }
             ScrollView {
                 WidthReader { width in
-                    // Lazy so plan panels below the fold are not laid out until
-                    // they scroll in. The heatmap at the top is still always
-                    // built, but it is a single Canvas now rather than hundreds
-                    // of day views, so the stack cost is the panels, not the
-                    // year of squares.
                     LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                         if let message = model.errorMessage {
                             ErrorBanner(message: message)
@@ -88,9 +69,6 @@ struct HomeView: View {
                         if showsLimitsSyncHint { limitsSyncHint }
                     }
                 }
-                // Tighter than the old inset all round. This screen is a stack of
-                // cards, and a card already carries its own padding, so the gutter
-                // outside it only has to separate the stack from the window edge.
                 .padding(Theme.Space.s)
             }
         }
@@ -100,22 +78,14 @@ struct HomeView: View {
             DesktopHomeEditor(layout: layout, emptyReason: emptyReason)
         }
         #endif
-        // Launch flow: app splash (logo) → these wireframes with a light pulse
-        // → real content fades in. The splash is owned by RootView.
-        // Leaving the screen while a cell is under the pointer: the popover
-        // must not stay pinned to a grid that is no longer there.
         .onDisappear { model.hover(day: nil) }
         .onChange(of: savedScope) { _, scope in Task { await model.setScope(scope) } }
         .task {
             #if os(macOS)
             try? await AgentProfileCatalog.shared.refresh()
             #endif
-            // Wait until the host splash has finished (or the host already
-            // answers). Loading during splash races ensureHosted and can open
-            // a second in-process archive.
             await Self.waitForHost()
             guard !Task.isCancelled else { return }
-            // Archive first: heatmap and streaks. Vendor limits load after.
             await model.setScope(savedScope)
             await model.refreshIfStale()
         }
@@ -133,15 +103,10 @@ struct HomeView: View {
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
         }
-        // App came back to the front: quiet re-read if the last load is old.
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await model.refreshIfStale() }
         }
-        // Insights Scan wrote new events into the archive; Home must not keep
-        // showing yesterday's heatmap until the window is reopened. The
-        // Inspector's pinned day is cached per-date, so a plain quiet load
-        // would leave it on the pre-scan numbers.
         .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
             Task { await model.reloadAfterSync() }
         }
@@ -227,10 +192,6 @@ struct HomeView: View {
 
     @ViewBuilder
     private var usageSummary: some View {
-        // One panel per figure, like the phone's tiles. Three stats sharing
-        // one card read as one number with footnotes rather than three
-        // answers. The scope already shows in the chrome picker, so the panels
-        // carry no subtitle repeating it.
         if model.calendar != nil {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 figurePanel(title: L10n.text("common.today"), value: model.todayValue.formatted, note: nil)
@@ -254,8 +215,6 @@ struct HomeView: View {
         }
     }
 
-    /// Spin until `info` answers, matching the splash's readiness gate without
-    /// sharing a binding. Bounded so a dead host still shows empty Home.
     private static func waitForHost() async {
         for _ in 0..<100 {
             if await Bridge.hostSettled() { return }
@@ -268,23 +227,7 @@ struct HomeView: View {
         model.isLoading && model.calendar == nil && model.errorMessage == nil
     }
 
-    // MARK: - Panels
 
-    /// One panel per thing this machine can report, in rows.
-    ///
-    /// Every panel in a row is the height of the tallest one in it. Packing
-    /// them into columns instead let each be exactly as tall as its contents,
-    /// which is the honest use of the space and reads as broken: cards on one
-    /// line ending at four different heights look like a layout that failed
-    /// rather than one that fitted. A row of equal boxes is worth the empty
-    /// half of a card with one quota window in it.
-    ///
-    /// A row that does not fill up divides the full width between what it has,
-    /// so a single panel left over spans the window rather than sitting in the
-    /// first third with a hole beside it.
-    ///
-    /// How many panels appear at all depends on what is installed. A vendor
-    /// with nothing to report has no panel.
     @ViewBuilder
     private func panels(width: CGFloat) -> some View {
         VStack(spacing: Theme.Space.s) {
@@ -296,14 +239,9 @@ struct HomeView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
-                // The row takes the tallest panel's own height, and the panels
-                // in it fill that. Without this the row would grow to whatever
-                // height was going spare and every card with it.
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
-        // A panel joins when its vendor or plan data arrives; the fade keeps
-        // that from reading as a layout that just changed under the cursor.
         .animation(.easeOut(duration: 0.18), value: panels.count)
     }
 
@@ -351,21 +289,9 @@ struct HomeView: View {
         return max(1, min(panels.count, fits))
     }
 
-    // MARK: - The plan limits the phone cannot see
 
-    /// Dismissed for good, per person rather than per window.
-    ///
-    /// A suggestion that comes back after every launch is not a suggestion, it
-    /// is an advert. Somebody who decided their quota numbers are not leaving
-    /// this Mac has answered the question, and the answer is kept.
     @AppStorage("home.limitsSyncHint.dismissed") private var limitsSyncHintDismissed = false
 
-    /// Whether to offer the setting that would put these numbers on the phone.
-    ///
-    /// Only with something to share and somewhere to share it. Signed out, the
-    /// setting does nothing and the sentence would be a puzzle. With no panels
-    /// on screen there is nothing to talk about yet, and a hint that appears
-    /// before the first reading arrives looks like an error.
     private var showsLimitsSyncHint: Bool {
         !layout.hidden.contains(.limits)
             && !limitsSyncHintDismissed
@@ -374,13 +300,6 @@ struct HomeView: View {
             && !PlanLimits.visible(model.planLimits).isEmpty
     }
 
-    /// A line offering the setting, and the way out of being offered it.
-    ///
-    /// It says what the phone shows today rather than naming the switch,
-    /// because the reason to want this is the phone being empty. The button
-    /// goes to Account, where the toggle and its own explanation of what leaves
-    /// the machine both live: flipping it from here would turn something off by
-    /// default into something that happened because a card was in the way.
     private var limitsSyncHint: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             Image(systemName: "iphone.and.arrow.forward")
@@ -413,9 +332,6 @@ struct HomeView: View {
         .transition(.opacity)
     }
 
-    /// Local-clock greeting plus the first name. Signed out stays literal.
-    /// Signed in without a name keeps the greeting and drops the name: a
-    /// missing display name and handle say nothing about the session.
     private var greetingTitle: String {
         let hasHistory = (model.calendar?.activeDays ?? 0) > 0
         guard let name = account.account?.title, !name.isEmpty else {
@@ -425,21 +341,12 @@ struct HomeView: View {
         return HomeGreeting.line(name: name, hasHistory: hasHistory)
     }
 
-    /// Whether to say the vendors are still being asked.
-    ///
-    /// Only while nothing has arrived. A panel that is already on screen says
-    /// more than a sentence about a refresh in progress, and every panel
-    /// carries its own spinner.
     private var limitsPending: Bool {
         model.isLoadingLimits && model.planLimits.isEmpty
     }
 
-    // MARK: - Profile
 
     private var profile: some View {
-        // Side by side when the card is wide enough, the numbers under the
-        // name when it is not. Squeezed into one row, a narrow window broke
-        // each figure into a column of single digits.
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: Theme.Space.m) {
                 profileIdentity
@@ -461,10 +368,6 @@ struct HomeView: View {
         )
     }
 
-    /// One panel's worth of room while the vendors are still being asked.
-    ///
-    /// A panel rather than a sentence about waiting. How many there will be
-    /// depends on what is installed, so this claims one and no more.
     private var panelPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             bar(width: 96, height: 11, phase: 0)
@@ -481,15 +384,8 @@ struct HomeView: View {
         .transition(.opacity)
     }
 
-    /// The activity card's own layout, with nothing in it yet.
-    ///
-    /// Same shapes and same heights as the real thing, so the card does not
-    /// jump when the archive answers and the heatmap takes its place. Sharp,
-    /// not blurred: the real card fades in over it.
     private var activityPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            // The height the heatmap reserves for its grid, so the card is the
-            // size it will still be a moment later.
             bar(width: nil, height: 187, phase: 0.12)
         }
         .transition(.opacity)
@@ -501,8 +397,6 @@ struct HomeView: View {
 
     @ViewBuilder
     private var profileIdentity: some View {
-        // Signed in, the name opens the profile window, the same one as in
-        // Account.
         if account.signedIn, let signed = account.account {
             ProfileNameButton(model: account, account: signed, fills: false) { identityContent }
         } else {
@@ -524,18 +418,9 @@ struct HomeView: View {
                 Text(greetingTitle)
                     .font(Theme.font(20, weight: .semibold))
                 if let tier = account.account?.tier, !tier.isEmpty {
-                    // The glyph the profile page uses, not the written
-                    // pill. Beside a 20pt name a crown reads as a mark on
-                    // the person; a word in a capsule reads as a label
-                    // stuck to them.
                     TierMark(tier: tier, size: 16)
                 }
             }
-            // The handle, and nothing else. The privacy sentence that was
-            // here is on the Account screen where someone reading about
-            // privacy would go looking for it, and repeating it on the
-            // screen you see every single launch turns a real guarantee
-            // into a slogan.
             if let signed = account.account, signed.signedIn,
                signed.handle == nil || signed.handle != signed.title
             {
@@ -550,12 +435,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private var profileStats: some View {
-        // Streaks live beside the name rather than inside the activity
-        // card: they are about the person, and the card below is about the
-        // data.
         if isWarming {
-            // Pulsing wireframe in the same three slots the streaks will
-            // fill, so the name does not shift when numbers arrive.
             HStack(spacing: Theme.Space.l) {
                 ForEach(0..<3, id: \.self) { index in
                     VStack(alignment: .leading, spacing: 4) {
@@ -598,18 +478,12 @@ struct HomeView: View {
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
-            // A figure is read whole. Never wrap it digit by digit.
             .lineLimit(1)
             .fixedSize()
         }
     }
 
-    // MARK: - Activity
 
-    /// Switches what the grid counts.
-    ///
-    /// Kept in the fixed chrome so hiding Activity cannot remove the scope
-    /// control for the independently arranged usage summary.
     private var scopePicker: some View {
         #if os(macOS)
         ChromeTabStrip(
@@ -634,13 +508,6 @@ struct HomeView: View {
         #endif
     }
 
-    /// What the figures under the title are counting, said plainly.
-    ///
-    /// Naming the scope matters here more than anywhere else on the screen. The
-    /// same number means two different things depending on whether it is one
-    /// laptop or every machine, and a grid that quietly fell back to local
-    /// while the control still said All machines would be reporting the wrong
-    /// one of the two.
     private var activitySubtitle: String {
         guard let calendar = model.calendar else {
             return L10n.text("apple.homeview.what_each_day_was_worth_at_api_list_price.c29a2633")
@@ -673,21 +540,14 @@ struct HomeView: View {
                     .onPreferenceChange(HoveredCellFrameKey.self) { frame in
                         MainActor.assumeIsolated { heatmapHover?.update(frame) }
                     }
-                    // Read here and stopped here, so it never travels further.
                     .transformPreference(HoveredCellFrameKey.self) { $0 = nil }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
             } else if model.errorMessage != nil {
-                // "We could not look" and "there is nothing" are different
-                // answers, and telling someone with a full archive that they
-                // have never scanned is the wrong one.
                 EmptyHint(text: L10n.text("apple.homeview.the_activity_could_not_be_read_see_the_mes.595eb6b5"))
             } else if model.isLoading {
                 activityPlaceholder
             } else if model.hasConfirmedEmptyActivity {
-                // A brand new install, not a failure, and not an empty state
-                // either: what somebody needs here is the next step, not a
-                // sentence confirming there is nothing.
                 GettingStartedCard(
                     signedIn: account.signedIn,
                     isScanning: scanner.isScanning,
@@ -705,12 +565,6 @@ struct HomeView: View {
         .animation(.easeOut(duration: 0.18), value: model.calendar != nil)
     }
 
-    /// The account grid fell back because a sign-in is missing or stale.
-    ///
-    /// The heatmap below is this machine's own year, and saying that in the
-    /// subtitle is not enough: the fix lives on the Account screen, so offer
-    /// the jump from the card that failed rather than quoting `tokenstat login`
-    /// at somebody who is already sitting in the app.
     private var accountSignInPrompt: some View {
         HStack(spacing: Theme.Space.s) {
             Label(
@@ -736,9 +590,6 @@ struct HomeView: View {
     }
 }
 
-/// Hold a card's own shape while it waits for its first answer.
-///
-/// One panel in the Home grid.
 private struct HomePanel: Identifiable {
     enum Kind {
         case limits(ProviderLimits)

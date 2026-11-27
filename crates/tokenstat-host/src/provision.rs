@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Is this machine finished being set up, and why is it unhappy.
-//!
-//! One call rather than eight, because the setup wizard, the machine's page in
-//! the app and `tokenstat host status` all ask the same question and must not
-//! answer it differently. And one call for the log, so a person can see why a
-//! machine is refusing to work without opening an SSH session to read it.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -34,24 +28,20 @@ fn status() -> Result<Value, String> {
             "handle": status.handle,
             "tier": status.tier,
         }),
-        // Signed out is an answer. Anything else is the account server having
-        // a minute, and reporting that as signed out would send somebody to
-        // sign in again for no reason.
+
         Err(error) if error.is_unauthenticated() => json!({"signedIn": false}),
         Err(error) => json!({"signedIn": null, "error": error.to_string()}),
     };
     let (allowed, pending) = crate::workspace_policy::counts()?;
     Ok(json!({
-        // No desktop app exists for this platform, so the console is the only
-        // thing at this machine. It is what the wizard branches on, and it is
-        // not a guess about whether a screen is plugged in.
+
+
         "headless": cfg!(not(any(target_os = "macos", windows))),
-        // Whether somebody could be sitting at this machine's own display,
-        // read from the session rather than from the operating system's name.
+
+
         "desktop": desktop_session(),
-        // Whether View screen can open here: a desktop install of tokenstat,
-        // not only the CLI and its helper. Clients gate the screen viewer on
-        // this, and fall back to `headless` for a host older than the field.
+
+
         "screen": screen_sharing(),
         "serviceScope": service_scope(),
         "runsAs": runs_as(),
@@ -76,7 +66,6 @@ fn status() -> Result<Value, String> {
 
 #[cfg(feature = "local-host")]
 fn folders() -> usize {
-    // The general folder is not a project somebody added.
     let is_general = crate::general_folder::matcher();
     crate::workspaces::read()
         .workspaces
@@ -90,14 +79,6 @@ fn folders() -> usize {
     0
 }
 
-/// What this machine can run, and whether it is signed in to it.
-///
-/// `signedIn` stays three-valued: a tool whose login this machine has no way
-/// to inspect answers null, and always did. What changed is that some of them
-/// can now be inspected, by looking for the credential store the tool itself
-/// wrote, so a fresh server no longer claims nothing is knowable when the
-/// plain fact is that nobody has signed in yet. `readiness` carries the states
-/// a screen needs; see `agent_readiness`. Guessing is still forbidden.
 #[cfg(feature = "local-host")]
 fn agents() -> Value {
     let catalog = crate::launcher::catalog();
@@ -139,8 +120,6 @@ fn agents() -> Value {
 fn service_scope() -> Value {
     #[cfg(target_os = "linux")]
     {
-        // A system unit belonging to another account may exist alongside
-        // this user's host. Inspect this process, not global unit-file presence.
         std::fs::read_to_string("/proc/self/cgroup")
             .ok()
             .and_then(|groups| linux_service_scope(&groups))
@@ -176,17 +155,6 @@ fn linux_service_scope(groups: &str) -> Option<&'static str> {
     })
 }
 
-/// The account this host, and therefore every agent it launches, runs as.
-///
-/// Said out loud because a root install gives every agent root, and that is a
-/// fact to put next to the operating system version rather than to discover.
-/// Whether this machine has a graphical session for its user.
-///
-/// A Mac and a Windows PC always draw a desktop. Linux may be a server with no
-/// display at all or a workstation running Wayland or X, so it is asked: the
-/// session's own variables first, then the sockets a compositor or X server
-/// leaves behind, because a user service started by systemd usually inherits
-/// neither variable.
 fn desktop_session() -> bool {
     #[cfg(any(target_os = "macos", windows))]
     {
@@ -218,7 +186,6 @@ fn desktop_session() -> bool {
     }
 }
 
-/// The Linux decision, kept free of the environment so it can be tested.
 #[cfg_attr(any(target_os = "macos", windows), allow(dead_code))]
 fn graphical_session(
     wayland_env: bool,
@@ -237,17 +204,6 @@ fn graphical_session(
         })
 }
 
-/// Whether View screen can open on this machine.
-///
-/// Only a desktop install shares a screen. A server running the CLI and its
-/// helper has nothing to show, whatever the operating system.
-///
-/// - macOS and Linux: the desktop app does the capturing, so the answer is
-///   whether it is attached right now (`screen_runtime::provider_attached`).
-///   No Linux desktop app captures yet, so Linux answers false until one
-///   does, then true with no change here.
-/// - Windows: the helper captures by itself, so the answer is whether the
-///   desktop app is installed beside it or has introduced itself.
 fn screen_sharing() -> bool {
     #[cfg(windows)]
     {
@@ -263,9 +219,6 @@ fn screen_sharing() -> bool {
     }
 }
 
-/// The Windows app lives beside this helper (`Tokenstat.exe` next to
-/// `tokenstat-hostd.exe`), in its per-user install folder, or has said hello
-/// over `app.identify` since the helper started. A CLI install has none.
 #[cfg(windows)]
 fn windows_desktop_install() -> bool {
     let beside = std::env::current_exe()
@@ -298,7 +251,6 @@ fn runs_as() -> Value {
     }
 }
 
-/// macOS stores the launch agent and host logs under the current home.
 #[cfg(target_os = "macos")]
 fn home() -> Option<std::path::PathBuf> {
     directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
@@ -310,8 +262,6 @@ struct LogParams {
     lines: Option<u32>,
 }
 
-/// The tail of this host's own log, so somebody can see why it is unhappy
-/// without opening a shell on the machine.
 fn logs(params: &str) -> Result<Value, String> {
     let p: LogParams = serde_json::from_str(params.trim()).unwrap_or(LogParams { lines: None });
     let lines = p.lines.unwrap_or(200).clamp(1, 5000);
@@ -363,8 +313,7 @@ fn journal_output_with_timeout(
         .stderr
         .take()
         .ok_or("Journal errors are unavailable")?;
-    // Drain both streams so a full stderr pipe cannot block stdout. Retain
-    // only their tails: line counts do not bound an individual journal entry.
+
     std::thread::scope(|scope| {
         let errors = scope.spawn(move || output_tail(stderr));
         let output = scope.spawn(move || output_tail(stdout));
@@ -382,10 +331,6 @@ fn journal_output_with_timeout(
     })
 }
 
-/// Wait for a helper with a bound, so a hung reader cannot hang dispatch.
-///
-/// `journalctl` with a line count normally exits at once. If it does not,
-/// kill it and report that rather than blocking the caller forever.
 #[cfg(any(target_os = "linux", all(test, unix)))]
 fn wait_bounded(
     child: &mut std::process::Child,
@@ -398,7 +343,7 @@ fn wait_bounded(
             Some(status) => return Ok(status),
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
-                // Reap before reporting, or the killed helper stays a zombie.
+
                 let _ = child.wait();
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
@@ -465,11 +410,6 @@ fn read_logs(lines: u32) -> Result<String, String> {
     Ok(collected)
 }
 
-/// Last `lines` of a file without reading it whole.
-///
-/// Log files are unbounded; `read_to_string` on a multi-GB file OOMs the
-/// daemon for any allowed device. Read at most the final 512 KiB from the
-/// measured snapshot, then take lines from that window.
 #[cfg(any(target_os = "macos", windows))]
 fn bounded_tail(path: &std::path::Path, lines: u32) -> Result<Vec<String>, String> {
     let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
@@ -494,8 +434,7 @@ fn tail_snapshot(
         .map_err(|error| error.to_string())?;
     let text = String::from_utf8_lossy(&buf);
     let mut all: Vec<&str> = text.lines().collect();
-    // If we started mid-file, the first line is a fragment; drop it unless we
-    // read the whole file.
+
     if start > 0 && !all.is_empty() {
         all.remove(0);
     }
@@ -557,8 +496,6 @@ mod tests {
     #[cfg(all(not(windows), feature = "local-host"))]
     #[test]
     fn a_screen_is_offered_only_while_a_desktop_app_captures() {
-        // Before any desktop app polls, this test process is a CLI host. A
-        // parallel test may already have polled, which is the other half.
         assert!(!screen_sharing() || crate::screen_runtime::provider_attached());
         let _ = crate::screen_runtime::call("screen.capture.list", "{}");
         assert!(screen_sharing());

@@ -7,8 +7,6 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
-/** Discovery is independent of the currently selected team. A new refresh
- * retires all older page completions without discarding visible offline rows. */
 internal class TeamProjectsModel(private val calls: TeamCalls) {
     var organizations by mutableStateOf(TeamManagementPage()); private set
     var projects by mutableStateOf<Map<String, TeamManagementPage>>(emptyMap()); private set

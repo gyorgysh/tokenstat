@@ -20,8 +20,6 @@ struct ClientChatComposer: View {
     var attachments: [ChatAttachment]
     var previews: [String: Data]
     var running: Bool
-    /// A message typed now is read on the agent's next step, rather than
-    /// waiting until the turn ends.
     var sendsAsNote: Bool = false
     var placeholder: String
     var onSend: () -> Void
@@ -143,7 +141,6 @@ struct ClientChatComposer: View {
             photos = []
             Task { await ingest(photos: items, owner: owner) }
         }
-        // Paste is offered from the attach menu. `onPasteCommand` is Mac-only.
     }
 
     private var composerControls: some View {
@@ -156,8 +153,6 @@ struct ClientChatComposer: View {
             showCompactAgent: !compactHeight || expanded
         ) {
             HStack(spacing: Theme.Space.s) {
-                // A local model spends no plan, so the plan's windows would
-                // only suggest that it does.
                 if !model.isSharedSource, LocalChatModel.parse(chat.model) == nil {
                     ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
                         model.showingUsageStats = true
@@ -169,7 +164,6 @@ struct ClientChatComposer: View {
                         .modifier(ComposerChromeButton())
                         .transition(controlTransition)
                 }
-                // Stop stays here even when a queued draft enables Send.
                 if running {
                     Button(L10n.text("common.stop"), .stop, action: onStop)
                         .modifier(ComposerChromeButton())
@@ -259,8 +253,6 @@ struct ClientChatComposer: View {
         .accessibilityLabel(L10n.text("apple.clientchatcomposer.attach.d406ade2"))
     }
 
-    /// Beside the field, where the keyboard's own mic would be. Sending while
-    /// it listens stops it first, so the last words are not lost to a race.
     @ViewBuilder
     private var dictationControl: some View {
         if !model.isSharedSource {
@@ -353,7 +345,6 @@ struct ClientChatComposer: View {
 
     private var canSend: Bool { !cannotSend }
 
-    /// Controls that come and go with what the bar can do right now.
     private var controlTransition: AnyTransition {
         .scale(scale: 0.6).combined(with: .opacity)
     }
@@ -363,8 +354,6 @@ struct ClientChatComposer: View {
     private var cannotSend: Bool {
         if model.isSharedSource { return true }
         if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
-        // A saved copy is read and drafted in, never sent from: the banner
-        // above says why, and the field stays editable for those drafts.
         if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }
         return model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
@@ -415,8 +404,6 @@ struct ClientChatComposer: View {
     }
 }
 
-/// The landing page already owns the surrounding card. Conversation bars
-/// keep their ordinary floating surface and safe-area spacing.
 private struct ClientComposerSurface: ViewModifier {
     let landing: Bool
     @ViewBuilder func body(content: Content) -> some View {
@@ -440,8 +427,6 @@ private struct ChatSendStyle: ViewModifier {
     }
 }
 
-/// A 44-point glyph in the composer chrome. Not a glass circle: that
-/// style is for send, and using it for Stop grew the bar.
 private struct ComposerChromeButton: ViewModifier {
     func body(content: Content) -> some View {
         content

@@ -4,20 +4,11 @@
 
 import SwiftUI
 
-/// Footer for an editor: the same two buttons, the same size, in the same place
-/// on every screen in the library.
-///
-/// A shared view rather than a convention, because the convention is what
-/// failed: the old forms each built their own row and ended up with three
-/// button sizes and delete styled as a link.
 struct SSHEditorFooter: View {
     var saveTitle = L10n.text("common.save")
     var saveIcon: ActionIcon = .save
     var canSave: Bool
     var working: Bool
-    /// What to say while the work is in flight. Defaults from the icon, so
-    /// Connect says "Connecting…" and a save says "Saving…" without every
-    /// caller having to pass a second string.
     var workingTitle: String?
     var onSave: () -> Void
     var onCancel: () -> Void
@@ -41,23 +32,9 @@ struct SSHEditorFooter: View {
                     .disabled(working)
             }
             Spacer()
-            // Never disabled, including while a request is in flight. Held
-            // shut, it left the one way out of a connect that was going to sit
-            // there until the socket gave up unavailable for exactly as long
-            // as somebody wanted it: the screen looked frozen and the button
-            // that would have got them out was the greyed-out one.
             Button(L10n.text("common.cancel"), .dismiss, action: onCancel)
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
-            // A spinner and a verb, rather than the same button greyed out.
-            // Disabled on its own is what a button that will never work looks
-            // like, so a slow connect read as a dead control and people
-            // pressed it again.
-            //
-            // The spinner sits where the glyph does, inside the button. Beside
-            // it, it was a loose piece of chrome floating in the gap between
-            // Cancel and the action, and it moved the action along the row
-            // every time the work started.
             Group {
                 if working {
                     Button(action: {}) {
@@ -67,10 +44,6 @@ struct SSHEditorFooter: View {
                         }
                     }
                 } else {
-                    // Keep the glyph literals visible to the design guard. The
-                    // footer accepts a semantic action, but a dynamic value in
-                    // `Button` would make a future bare button indistinguishable
-                    // from this deliberate choice to the source check.
                     switch saveIcon {
                     case .download: Button(saveTitle, .download, action: onSave)
                     case .done: Button(saveTitle, .done, action: onSave)
@@ -86,9 +59,6 @@ struct SSHEditorFooter: View {
             .disabled(!canSave || working)
         }
         .padding(Theme.Space.m)
-        // The same tone as the chrome bar at the top of the inspector, so the
-        // editor reads as content between two pieces of chrome. A material
-        // here resolved to a flat grey that belonged to no part of the theme.
         .background(Theme.sidebar)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -105,10 +75,6 @@ struct SSHEditorFooter: View {
 /// them. Insights, Tasks and the workspace inspectors all draw their own
 /// groups, so these do too.
 struct SSHEditorBody<Content: View>: View {
-    /// Whether a save or a connect is in flight. The fields go read-only and
-    /// fade while it is, so the form says the same thing the footer's spinner
-    /// does: this is busy, and typing into it now changes nothing that is
-    /// about to be sent.
     var working = false
     @ViewBuilder var content: Content
 
@@ -127,7 +93,6 @@ struct SSHEditorBody<Content: View>: View {
     }
 }
 
-/// A titled group of fields: a quiet caption, then one card.
 struct SSHEditorSection<Content: View>: View {
     var title: String?
     @ViewBuilder var content: Content
@@ -154,11 +119,6 @@ struct SSHEditorSection<Content: View>: View {
     }
 }
 
-/// One labelled control, label above rather than beside.
-///
-/// The inspector column is narrow. A two-column form squeezes the field down
-/// to a few characters there, which is what made typing an address in the
-/// inspector worse than typing it in the sheet it replaced.
 struct SSHEditorField<Content: View>: View {
     let label: String
     @ViewBuilder var content: Content
@@ -175,7 +135,6 @@ struct SSHEditorField<Content: View>: View {
     }
 }
 
-/// A caption under a group, for the sentence that explains it.
 struct SSHEditorNote: View {
     let text: String
 
@@ -188,11 +147,6 @@ struct SSHEditorNote: View {
     }
 }
 
-/// Everything a saved server knows, on one screen.
-///
-/// Grouped by what somebody is deciding: where to connect, how to authenticate,
-/// where it lives in the list, and the settings that only matter when something
-/// is wrong. The old sheet had the first two and nowhere to put the rest.
 struct SSHHostEditor: View {
     let model: SSHLibraryModel
     let hostID: String?
@@ -223,9 +177,6 @@ struct SSHHostEditor: View {
 
     private var isNew: Bool { hostID == nil }
 
-    /// Leave the editor. On the Mac this is the inspector column, so
-    /// `Environment.dismiss` would close the window. On the phone, `onDone`
-    /// already pops the pushed screen by clearing the route.
     private func finish() {
         guard claim() != nil else { return }
         model.drafts.remove(hostID.map(SSHLibraryRoute.host) ?? .newHost(folder: folderID))
@@ -355,9 +306,6 @@ struct SSHHostEditor: View {
         }
         .confirmationDialog(L10n.text("apple.sshlibraryeditors.delete_this_server.c1a65300"), isPresented: $draft.confirmingDelete, titleVisibility: .visible) {
             Button(L10n.text("common.delete"), role: .destructive) {
-                // Leave first, then delete. The delete reloads the list,
-                // and a detail view still bound to the record that just left
-                // it is a row being read while it is removed.
                 finish()
                 Task { await model.delete(host: host) }
             }
@@ -419,7 +367,6 @@ struct SSHHostEditor: View {
     }
 }
 
-/// The fixed palette, as swatches.
 struct SSHColorPicker: View {
     @Binding var selection: String?
 
@@ -448,7 +395,6 @@ struct SSHColorPicker: View {
     }
 }
 
-/// A key: generate one, paste one, see its fingerprint, copy the public half.
 struct SSHKeyEditor: View {
     let model: SSHLibraryModel
     let keyID: String?
@@ -481,9 +427,6 @@ struct SSHKeyEditor: View {
 
     private var isNew: Bool { keyID == nil }
 
-    /// Leave the editor. On the Mac this is the inspector column, so
-    /// `Environment.dismiss` would close the window. On the phone, `onDone`
-    /// already pops the pushed screen by clearing the route.
     private func finish() {
         guard claim() != nil else { return }
         model.drafts.remove(keyID.map(SSHLibraryRoute.key) ?? .newKey)
@@ -635,8 +578,6 @@ struct SSHKeyEditor: View {
         guard let owner = claim() else { return }
         do {
             let id = "key_\(UUID().uuidString)"
-            // The store and ownership check are one actor turn. A detached
-            // store could import a key after this editor's account retired.
             let reference = try SSHSecretStore.store(material.privateKey, id: id, biometric: biometric)
             let key = SSHKeyRecord(
                 id: id, label: label, algorithm: material.algorithm,
@@ -686,7 +627,6 @@ struct SSHKeyEditor: View {
     }
 }
 
-/// A snippet, with the whole screen to write it in.
 struct SSHSnippetEditor: View {
     let model: SSHLibraryModel
     let snippetID: String?
@@ -714,9 +654,6 @@ struct SSHSnippetEditor: View {
 
     private var isNew: Bool { snippetID == nil }
 
-    /// Leave the editor. On the Mac this is the inspector column, so
-    /// `Environment.dismiss` would close the window. On the phone, `onDone`
-    /// already pops the pushed screen by clearing the route.
     private func finish() {
         guard claim() != nil else { return }
         model.drafts.remove(snippetID.map(SSHLibraryRoute.snippet) ?? .newSnippet)
@@ -732,15 +669,6 @@ struct SSHSnippetEditor: View {
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.top, Theme.Space.s)
             }
-            // `SSHEditorBody`, like every other editor in this file. This one
-            // was a bare VStack, which is why it and no other could take the
-            // window apart: a stack cannot absorb content taller than the
-            // column it is in, so a long command box, a wrapped explanation
-            // and a checkbox together demanded more height than the inspector
-            // had and the hosted column grew to satisfy them. The split view
-            // then pushed the rest of the window out of place, and it stayed
-            // wrong until a different destination remounted the column. A
-            // scroll view answers the same demand by scrolling.
             SSHEditorBody(working: working) {
                 TextField(L10n.text("apple.sshlibraryeditors.name.dcd1d522"), text: $draft.snippet.title)
                     .textFieldStyle(.themed)
@@ -834,7 +762,6 @@ struct SSHSnippetEditor: View {
     }
 }
 
-/// A folder: a name, a colour, and where it sits.
 struct SSHFolderEditor: View {
     let model: SSHLibraryModel
     let folderID: String?
@@ -863,9 +790,6 @@ struct SSHFolderEditor: View {
 
     private var isNew: Bool { folderID == nil }
 
-    /// Leave the editor. On the Mac this is the inspector column, so
-    /// `Environment.dismiss` would close the window. On the phone, `onDone`
-    /// already pops the pushed screen by clearing the route.
     private func finish() {
         guard claim() != nil else { return }
         model.drafts.remove(folderID.map(SSHLibraryRoute.folder) ?? .newFolder(parent: parentID))
@@ -941,10 +865,6 @@ struct SSHFolderEditor: View {
     }
 }
 
-/// Which servers this machine has decided to trust.
-///
-/// A screen because it is the answer to a real question ("why is it asking me
-/// again?") and to a real emergency ("this fingerprint changed").
 struct SSHKnownHostsView: View {
     let model: SSHLibraryModel
 
@@ -980,11 +900,6 @@ struct SSHKnownHostsView: View {
     }
 }
 
-/// What `~/.ssh/config` already describes, offered as a checklist.
-///
-/// Read only: the file belongs to ssh and tokenstat does not write to another
-/// tool's data. Servers already saved are shown and skipped rather than hidden,
-/// so the count on screen matches the file.
 struct SSHConfigImportView: View {
     let model: SSHLibraryModel
     let onDone: () -> Void
@@ -1010,9 +925,6 @@ struct SSHConfigImportView: View {
 
     private var newCount: Int { candidates.filter { !$0.alreadySaved }.count }
 
-    /// Leave the editor. On the Mac this is the inspector column, so
-    /// `Environment.dismiss` would close the window. On the phone, `onDone`
-    /// already pops the pushed screen by clearing the route.
     private func finish() {
         guard claim() != nil else { return }
         model.drafts.remove(.importConfig)

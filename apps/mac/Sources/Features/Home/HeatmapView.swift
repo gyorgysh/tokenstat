@@ -25,37 +25,22 @@ import SwiftUI
 /// point back to a cell with the same packing math.
 struct HeatmapView: View {
     let calendar: ActivityCalendar
-    /// Clicking a day pins it in the inspector.
     var onSelect: ((HeatCell) -> Void)?
     var selectedDate: String?
-    /// The pointer moved over (or left) a day. The parent owns the detail
-    /// fetch and the popover, so this only carries which cell it is.
     var onHover: ((HeatCell?) -> Void)?
 
     @State private var hovered: HoveredSlot?
 
-    /// The named coordinate space the popover reads cell frames in. Set on the
-    /// window's root view so a frame here is a window-space frame no matter
-    /// how deep the heatmap sits in the split view.
     static let coordinateSpace = "tokenstat.window"
 
     private let gutter: CGFloat = 30
-    /// Gap as a fraction of a cell, so the grid keeps its texture at any size.
-    /// A fixed 3 point gap between 28 point squares reads as a solid block.
     private let gapRatio: CGFloat = 0.2
-    /// Corner radius of each day square, kept in one place so Canvas and the
-    /// hover ring agree.
     private let cellCorner: CGFloat = 2.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HeatmapFittedLayout(heightForWidth: gridHeight(for:)) {
                 GeometryReader { proxy in
-                    // Quantised before anything is derived from it. There are 371
-                    // squares here, and a live drag otherwise hands this a new
-                    // sub-pixel width every frame, each one a new cell size and a
-                    // new frame for every square. Rounding to 4 points turns most
-                    // frames of a drag into the same grid.
                     let width = quantised(proxy.size.width, step: 4)
                     let cell = cellSize(for: width)
                     let gap = gapSize(for: width, cell: cell)
@@ -73,10 +58,6 @@ struct HeatmapView: View {
                             grid(layout: layout)
                         }
                     }
-                    // Centred, not leading. Once the cell and the gap are both at
-                    // their ceilings a very wide card has width left over, and all
-                    // of it collecting on one side reads as the grid having failed
-                    // to reach the edge. `.top` is horizontally centred.
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
@@ -96,23 +77,8 @@ struct HeatmapView: View {
         #endif
     }
 
-    /// The largest a square is allowed to get.
-    ///
-    /// The grid is seven rows tall whatever the width, so an uncapped cell size
-    /// makes a wide window grow the heatmap vertically until it is the tallest
-    /// thing on the screen. It also overran the height reserved for it and drew
-    /// through the legend underneath.
     private let maxCell: CGFloat = 16
 
-    /// Square size that makes `weeks` columns span the width, up to `maxCell`.
-    ///
-    /// Solved rather than guessed. With `gap = k·cell` the width is
-    /// `gutter + gap + weeks × (cell + gap)`, which rearranges to this. Picking
-    /// a size and hoping is what left a year of squares ending two thirds
-    /// across a full-screen window.
-    ///
-    /// The lower bound is real too: under about seven points the five heat
-    /// levels stop being distinguishable.
     private func cellSize(for width: CGFloat) -> CGFloat {
         guard calendar.weeks > 0, width > 0 else { return 11 }
         let columns = CGFloat(calendar.weeks)
@@ -120,11 +86,6 @@ struct HeatmapView: View {
         return min(max(fitted, 7), maxCell)
     }
 
-    /// Gap that spends whatever width the capped cells did not.
-    ///
-    /// Once the cell hits its ceiling the leftover width has to go somewhere,
-    /// and widening the gaps keeps the grid spanning the card without making it
-    /// taller. Capped in turn, or a very wide window scatters the squares.
     private func gapSize(for width: CGFloat, cell: CGFloat) -> CGFloat {
         guard calendar.weeks > 0, width > 0 else { return cell * gapRatio }
         let columns = CGFloat(calendar.weeks)
@@ -134,9 +95,6 @@ struct HeatmapView: View {
 
     private let maxGapRatio: CGFloat = 0.5
 
-    /// Use the same width calculation for drawing and reserved height. A
-    /// Layout supplies the height directly, without measuring into @State and
-    /// making a second layout pass during every resize.
     private func gridHeight(for proposedWidth: CGFloat) -> CGFloat {
         let width = quantised(proposedWidth, step: 4)
         let cell = cellSize(for: width)
@@ -145,9 +103,6 @@ struct HeatmapView: View {
     }
 
     private func months(layout: GridLayout) -> some View {
-        // Absolute placement rather than a stack of spacers: a month label is
-        // wider than the column it belongs to, so laying them out in sequence
-        // pushes every later one out of alignment with its week.
         ZStack(alignment: .leading) {
             Color.clear.frame(height: 11)
             ForEach(calendar.months) { month in
@@ -183,8 +138,6 @@ struct HeatmapView: View {
                 .equatable()
             .allowsHitTesting(false)
 
-            // One ring for the hovered day. Drawn as a real view so it stays
-            // crisp on top of the canvas without redrawing every cell.
             if let selected = selectedSlot {
                 RoundedRectangle(cornerRadius: corner)
                     .strokeBorder(Theme.accent, lineWidth: 1.5)
@@ -206,8 +159,6 @@ struct HeatmapView: View {
                     .allowsHitTesting(false)
             }
 
-            // Transparent hit target covering the canvas. Maps pointer location
-            // to a cell with the same packing math the canvas uses.
             Color.clear
                 .contentShape(Rectangle())
                 .onContinuousHover { phase in
@@ -276,8 +227,6 @@ struct HeatmapView: View {
     }
 
     private func setHovered(_ slot: HoveredSlot?) {
-        // Avoid thrashing the parent hover handler and the popover preference
-        // when the pointer stays inside the same square.
         if slot == hovered { return }
         hovered = slot
         onHover?(slot?.day)
@@ -333,8 +282,6 @@ struct HeatmapView: View {
         }
     }
 
-    /// Only alternate rows are labelled, so the gutter stays quiet. Same choice
-    /// the CLI makes.
     private static func rowLabel(_ row: Int) -> String {
         switch row {
         case 0: return L10n.text("apple.heatmapview.mon.f40d7f51")
@@ -345,11 +292,6 @@ struct HeatmapView: View {
     }
 }
 
-/// Packing constants for one render of the heatmap grid.
-///
-/// Built once per layout pass from the measured width, then shared by the
-/// canvas, the hit tester, the hover ring, and the popover anchor so those
-/// four can never disagree about where a day sits.
 private struct GridLayout {
     var cell: CGFloat
     var gap: CGFloat
@@ -378,16 +320,12 @@ private struct GridLayout {
         )
     }
 
-    /// Map a point in content coordinates to a day, or nil for a gap / blank
-    /// future cell / outside the grid.
     func slot(at point: CGPoint, in rows: [[HeatCell?]]) -> HoveredSlot? {
         guard point.x >= 0, point.y >= 0, cell > 0 else { return nil }
         let column = Int(point.x / stride)
         let row = Int(point.y / stride)
         guard row >= 0, row < rows.count else { return nil }
         guard column >= 0, column < rows[row].count else { return nil }
-        // Reject the gap band between cells so moving through a gutter clears
-        // the hover rather than sticking to the previous day.
         let localX = point.x - CGFloat(column) * stride
         let localY = point.y - CGFloat(row) * stride
         guard localX <= cell, localY <= cell else { return nil }
@@ -396,18 +334,12 @@ private struct GridLayout {
     }
 }
 
-/// The cell under the pointer, with its grid index so the ring and the
-/// popover anchor can be placed without scanning the year for a date match.
 private struct HoveredSlot: Equatable {
     var day: HeatCell
     var row: Int
     var column: Int
 }
 
-/// Where the hovered heatmap cell sits, in window coordinates.
-///
-/// A small value so the preference key can stay nil when nothing is hovered:
-/// the popover reads a nil frame as "hide".
 struct HoveredCellFrame: Equatable {
     var date: String
     var frame: CGRect
@@ -420,8 +352,6 @@ struct HoveredCellFrameKey: PreferenceKey {
     }
 }
 
-/// Static cells are independent of hover/selection. Equatable prevents pointer
-/// state from rebuilding the canvas while retaining the original cell rendering.
 struct HeatmapCellsCanvas: View, Equatable {
     let rows: [[HeatCell?]]
     let cell: CGFloat
@@ -432,9 +362,6 @@ struct HeatmapCellsCanvas: View, Equatable {
     var body: some View {
         Canvas { context, _ in
             guard !palette.isEmpty else { return }
-            // Cells never overlap. Combine equal shades so a year takes at
-            // most two fills per palette level instead of one fill per day.
-            // Locked days keep their separate opacity bucket.
             var paths = Array(repeating: Path(), count: palette.count * 2)
             for (rowIndex, row) in rows.enumerated() {
                 for (column, day) in row.enumerated() {
@@ -456,7 +383,6 @@ struct HeatmapCellsCanvas: View, Equatable {
     }
 }
 
-/// The reader gets its real height in the same pass that supplies its width.
 private struct HeatmapFittedLayout: Layout {
     var heightForWidth: (CGFloat) -> CGFloat
 

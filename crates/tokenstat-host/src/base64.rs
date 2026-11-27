@@ -49,8 +49,7 @@ pub fn encode(input: &[u8]) -> String {
 /// byte is worse than a refused write.
 pub fn decode(input: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    // Most chunks contain only complete, unpadded quanta. Decode those
-    // directly; the tail below retains whitespace and strict padding checks.
+
     let bytes = input.as_bytes();
     let mut offset = 0;
     while offset + 4 <= bytes.len() {
@@ -101,11 +100,11 @@ pub fn decode(input: &str) -> Result<Vec<u8>, String> {
             count = 0;
         }
     }
-    // Padding must complete the last quantum; missing or extra marks fail.
+
     if count != (4 - padding) % 4 {
         return Err("truncated base64".into());
     }
-    // Unused bits must be zero so distinct encodings cannot alias a byte.
+
     if count == 2 && quantum[1] & 0b0000_1111 != 0 || count == 3 && quantum[2] & 0b0000_0011 != 0 {
         return Err("not canonical base64: unused bits are set".into());
     }
@@ -140,8 +139,6 @@ mod tests {
 
     #[test]
     fn every_byte_survives_a_round_trip() {
-        // Terminal output is arbitrary bytes, including invalid UTF-8 and a
-        // half-finished escape sequence, so this has to be exact.
         let all: Vec<u8> = (0..=255u8).collect();
         assert_eq!(decode(&encode(&all)).unwrap(), all);
 
@@ -263,7 +260,6 @@ mod tests {
 
     #[test]
     fn rubbish_is_refused_rather_than_guessed() {
-        // A mangled keystroke would be typed into a live shell.
         assert!(decode("not base64!").is_err());
         assert!(decode("Z").is_err());
     }
@@ -271,8 +267,7 @@ mod tests {
     #[test]
     fn trailing_garbage_and_loose_padding_are_refused() {
         assert!(decode("Zg==garbage").is_err());
-        // 'h' is index 33, whose low bits are not the zero a one-byte value
-        // leaves spare: non-canonical, and refused rather than rounded.
+
         assert!(decode("Zh==").is_err());
         assert!(decode("Zm9vYg==x").is_err());
         assert!(decode("Zg").is_err());

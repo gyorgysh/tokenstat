@@ -72,23 +72,16 @@ internal static class AppInstaller
             Directory.Delete(staging, recursive: true);
         }
         Directory.CreateDirectory(staging);
-        // Extracted beside the install first, so an extract that fails part
-        // way through has not touched the application the user is running.
-        // Only when a whole folder is verified is anything swapped, and that
-        // swap happens after this process has exited.
         try
         {
             ZipFile.ExtractToDirectory(zipPath, staging, overwriteFiles: true);
             FlattenExtractedTree(staging);
-            // An archive must not supply its own successful-verification marker.
             File.Delete(Path.Combine(staging, "PENDING-UPDATE.txt"));
             var stagedExe = Path.Combine(staging, "Tokenstat.exe");
             if (!File.Exists(stagedExe) || !File.Exists(Path.Combine(staging, "tokenstat-hostd.exe")))
             {
                 throw new Failure(L10n.Text("windows.appinstaller.the_download_did_not_contain_the_complete.484b8f83"));
             }
-            // A stale host can hand back an older release than this app. Staging
-            // it would turn the next restart into a downgrade.
             var staged = VersionOf(stagedExe);
             if (staged is null || CompareVersions(staged, AppInfo.Version) <= 0)
             {
@@ -99,7 +92,7 @@ internal static class AppInstaller
         }
         catch
         {
-            try { Directory.Delete(staging, recursive: true); } catch { /* Preserve the original failure. */ }
+            try { Directory.Delete(staging, recursive: true); } catch { }
             throw;
         }
         finally
@@ -108,11 +101,6 @@ internal static class AppInstaller
         }
     }
 
-    /// <summary>
-    /// The zip is about 100 MB and is never read again once extracted or
-    /// refused: a retry downloads afresh. Its folder goes too when it is the
-    /// host's own per-download temp folder.
-    /// </summary>
     private static void DeleteDownload(string zipPath)
     {
         try
@@ -128,7 +116,6 @@ internal static class AppInstaller
         }
         catch
         {
-            // Temp files are the system's to sweep if this cannot.
         }
     }
 
@@ -145,11 +132,6 @@ internal static class AppInstaller
 
     public static bool StagingReady => IsStagingReady(StagingDirectory);
 
-    /// <summary>
-    /// The version already verified and waiting beside the install, when it is
-    /// newer than this app. A staged folder that is not newer is leftover from
-    /// an earlier cycle and is removed, so a restart can never downgrade.
-    /// </summary>
     public static string? ReadyStagedVersion()
     {
         var staging = StagingDirectory;
@@ -162,7 +144,7 @@ internal static class AppInstaller
         {
             return version;
         }
-        try { Directory.Delete(staging, recursive: true); } catch { /* Retried on the next check. */ }
+        try { Directory.Delete(staging, recursive: true); } catch { }
         return null;
     }
 
@@ -171,7 +153,6 @@ internal static class AppInstaller
         && File.Exists(Path.Combine(staging, "tokenstat-hostd.exe"))
         && File.Exists(Path.Combine(staging, "PENDING-UPDATE.txt"));
 
-    /// <summary>The release version stamped into an app executable, without build metadata.</summary>
     internal static string? VersionOf(string exe)
     {
         try
@@ -186,10 +167,6 @@ internal static class AppInstaller
         }
     }
 
-    /// <summary>
-    /// Semantic version order: numeric major.minor.patch, then a release sorts
-    /// above any prerelease of the same numbers. Build metadata is ignored.
-    /// </summary>
     internal static int CompareVersions(string left, string right)
     {
         static (int[] numbers, string? pre) Parse(string value)
@@ -231,15 +208,6 @@ internal static class AppInstaller
         return aIds.Length.CompareTo(bIds.Length);
     }
 
-    /// <summary>
-    /// Swap the staged folder into place and start the fresh copy.
-    ///
-    /// A helper script does the move after this process has exited: Windows
-    /// locks the running exe, so this process cannot replace its own folder.
-    /// The script waits for the exit rather than sleeping a fixed while, moves
-    /// the old folder aside rather than deleting it, and puts it back when the
-    /// swap fails, so a failed update leaves the previous version in place.
-    /// </summary>
     public static void Relaunch()
     {
         var dest = SelfInstall.IsRunningFromInstall
@@ -315,16 +283,11 @@ internal static class AppInstaller
             "  }",
             "}",
             "if ($moved) { Log 'update applied' } else { Log 'update not applied; restarting the installed version' }",
-            // Older builds kept the browser profile inside the install folder.
-            // Carry it out before the old folder goes, so an update does not
-            // sign anybody out of the sites they use in the app.
             $"$profile = '{Escape(Tokenstat.Pages.WebViewProfile.Folder)}'",
             "$legacy = Join-Path $prev 'Tokenstat.exe.WebView2'",
             "if ($moved -and (Test-Path -LiteralPath $legacy) -and -not (Test-Path -LiteralPath $profile)) {",
             "  try { Move-Item -LiteralPath $legacy -Destination $profile -ErrorAction Stop } catch { Log ('browser profile kept in place: ' + $_.Exception.Message) }",
             "}",
-            // Finish migration before the new app can create an empty profile.
-            // If migration fails, retain its only surviving copy for recovery.
             "if ($moved -and (Test-Path -LiteralPath $prev) -and -not (Test-Path -LiteralPath $legacy)) { Remove-Item -LiteralPath $prev -Recurse -Force -ErrorAction SilentlyContinue }",
             "if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -WorkingDirectory $dest }",
             "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
@@ -346,11 +309,6 @@ internal static class AppInstaller
         Environment.Exit(0);
     }
 
-    /// <summary>
-    /// Apply a staged folder from `--apply-update`. Same aside-and-swap shape
-    /// as the relaunch script, with the same rollback: a failure after the old
-    /// folder moved aside puts it back rather than leaving nothing on disk.
-    /// </summary>
     public static void ApplyStaged(string staging)
     {
         var dest = SelfInstall.InstallDirectory;
@@ -359,8 +317,6 @@ internal static class AppInstaller
             return;
         }
         var stagedExe = Path.Combine(staging, "Tokenstat.exe");
-        // Never a downgrade: the staged version must be newer than the one
-        // installed, the same rule the relaunch path applies.
         var installedVersion = VersionOf(Path.Combine(dest, "Tokenstat.exe"));
         var stagedVersion = VersionOf(stagedExe);
         if (stagedVersion is null
@@ -372,11 +328,8 @@ internal static class AppInstaller
         var prev = dest.TrimEnd('\\') + ".prev-" + Guid.NewGuid().ToString("N");
         if (Directory.Exists(prev))
         {
-            try { Directory.Delete(prev, true); } catch { /* ignore */ }
+            try { Directory.Delete(prev, true); } catch { }
         }
-        // Same patience as the relaunch script: a helper the task scheduler
-        // restarts, or a browser process still closing, can hold the folder
-        // for a moment.
         var moved = false;
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (!moved)
@@ -407,13 +360,13 @@ internal static class AppInstaller
         {
             if (Directory.Exists(prev) && !Directory.Exists(dest))
             {
-                try { Directory.Move(prev, dest); } catch { /* ignore */ }
+                try { Directory.Move(prev, dest); } catch { }
             }
             return;
         }
         SelfInstall.RefreshUninstallKey();
         if (Tokenstat.Pages.WebViewProfile.MoveLegacyFrom(prev))
-            try { Directory.Delete(prev, true); } catch { /* ignore */ }
+            try { Directory.Delete(prev, true); } catch { }
         Launch(Path.Combine(dest, "Tokenstat.exe"), dest);
     }
 
@@ -542,7 +495,7 @@ internal static class AppInstaller
         var error = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(30000))
         {
-            try { process.Kill(entireProcessTree: true); } catch { /* Already exited. */ }
+            try { process.Kill(entireProcessTree: true); } catch { }
             throw new Failure(L10n.Text("windows.appinstaller.signature_verification_timed_out_please_tr.a59201e9"));
         }
         if (process.ExitCode != 0)

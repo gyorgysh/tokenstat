@@ -4,23 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Serving other machines, and reaching them.
-//!
-//! # Both directions live here
-//!
-//! Serving turns this daemon into something another machine can ask questions
-//! of. Reaching turns it into the thing that asks. A front end only ever talks
-//! to its own local daemon: to look at another machine it calls `remote.call`
-//! here, and this forwards. That is why the Mac app needs no handshake code,
-//! and why an iPad client will not either.
-//!
-//! # Serving is off until somebody turns it on
-//!
-//! Binding a port is not a default. A remote client can spawn processes and
-//! write files, which is a larger permission than the commit button, so the
-//! daemon listens only after the user says to, and serves only peers a person
-//! approved. See `docs/remote-transport.md`.
 
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
@@ -58,9 +42,6 @@ mod tunnel_runtime;
 use crate::session::Session;
 use tokenstat_remote::tunnel::ChannelPurpose;
 
-/// A response is bounded so a peer cannot ask this end to allocate without
-/// limit. 64 MB is far above any real answer (the largest is a file's text)
-/// and far below anything that hurts.
 const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 
 /// What the user chose about remote reach. Persisted, because a daemon under
@@ -98,12 +79,6 @@ impl Default for RemoteSettings {
     }
 }
 
-/// Beside the machine key rather than in the data directory generally.
-///
-/// Whether this machine serves is part of *which machine this is*, so it
-/// follows `TOKENSTAT_IDENTITY_DIR` along with the key. Without that, two
-/// daemons on one computer share one setting and the second one to start
-/// silently contradicts the first.
 fn settings_path() -> Result<std::path::PathBuf, String> {
     Ok(tokenstat_identity::identity_dir()
         .map_err(|e| e.to_string())?
@@ -111,8 +86,6 @@ fn settings_path() -> Result<std::path::PathBuf, String> {
 }
 
 pub fn load_settings() -> RemoteSettings {
-    // A settings file that will not parse must not stop the daemon starting,
-    // and the safe reading of an unreadable file is "not serving".
     settings_path()
         .ok()
         .and_then(|path| std::fs::read_to_string(path).ok())
@@ -132,18 +105,12 @@ fn direct_running() -> &'static AtomicBool {
     &RUNNING
 }
 
-/// Port held by the direct listener, or zero while it is not listening.
-///
-/// The old implementation advertised 7878 even when its bind had failed. The
-/// candidate contract reports only a socket the accept loop actually owns.
 #[cfg(feature = "local-host")]
 fn direct_port() -> &'static AtomicUsize {
     static PORT: AtomicUsize = AtomicUsize::new(0);
     &PORT
 }
 
-/// Port held by the IPv6 direct listener, or zero when there is none. Usually
-/// the same number as the IPv4 one, but a separate socket that may differ.
 #[cfg(feature = "local-host")]
 fn direct_port6() -> &'static AtomicUsize {
     static PORT: AtomicUsize = AtomicUsize::new(0);
@@ -180,9 +147,6 @@ pub(crate) struct DirectCandidate {
     pub priority: u16,
 }
 
-/// Candidates recently offered by each peer over an authenticated connection.
-/// They are deliberately memory-only. A candidate becomes durable only after
-/// connecting and presenting the peer's pinned Noise key.
 fn offered_direct_candidates() -> &'static Mutex<HashMap<String, Vec<DirectCandidate>>> {
     static CANDIDATES: OnceLock<Mutex<HashMap<String, Vec<DirectCandidate>>>> = OnceLock::new();
     CANDIDATES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -207,17 +171,6 @@ pub struct TunnelState {
     pub registered: bool,
 }
 
-/// The session a peer will be answered from.
-///
-/// On a Mac with `local-host`, only the host daemon registers one. The
-/// in-process bridge deliberately does not, so `remote.serve` fails with words
-/// rather than opening a tunnel owned by a window: a machine other machines
-/// depend on must not stop serving because somebody quit an app.
-///
-/// On a phone (`local-host` off) there is no daemon. The process *is* the host
-/// for the client role, so [`session_for_serving`] opens a client session when
-/// none is registered yet. That is what lets Workspaces turn the tunnel on and
-/// dial a Mac.
 fn registered_session() -> &'static Mutex<Option<Arc<Mutex<Session>>>> {
     static SESSION: OnceLock<Mutex<Option<Arc<Mutex<Session>>>>> = OnceLock::new();
     SESSION.get_or_init(|| Mutex::new(None))
@@ -239,15 +192,11 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
         return Ok(session);
     }
 
-    // Phone / iPad: no hostd, no unix socket. A client session is enough to
-    // hold the tunnel for outbound dials; inbound is limited to what a client
-    // build can answer, which is intentional.
     #[cfg(not(feature = "local-host"))]
     {
         let session = Arc::new(Mutex::new(Session::open_client(None)?));
         register_session(Arc::clone(&session));
-        // Tail expression: on a client build the block below is compiled out
-        // and this is the end of the function.
+
         Ok(session)
     }
 
@@ -321,7 +270,7 @@ pub(crate) fn start_team_reach(owner: crate::account_session::AccountSnapshot) {
 pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     register_session(Arc::clone(&session));
     let settings = load_settings();
-    // Personal reach and explicitly shared Team checkouts reuse one socket.
+
     start_tunnel_if_enabled(session, &settings);
     #[cfg(feature = "local-host")]
     start_direct_if_enabled();
@@ -344,11 +293,7 @@ fn start_direct_if_enabled() {
                 return;
             }
         };
-        // Keep 7878 for compatibility with old invites, but a port conflict is
-        // not a reason to lose direct reach. Every new candidate includes the
-        // actual port this listener obtained.
-        // A router that maps only same-numbered ports, with another host
-        // already on 7878, sets `avoid_default_port`. See `direct_reach`.
+
         let preferred = if direct_reach::avoid_default_port().load(Ordering::Acquire) {
             "0.0.0.0:0"
         } else {
@@ -374,9 +319,7 @@ fn start_direct_if_enabled() {
             .map_or(0, |address| usize::from(address.port()));
         direct_port().store(port, Ordering::Release);
         let _ = server.set_nonblocking(true);
-        // IPv6 is a second socket, IPv6-only, so it never contends with the
-        // IPv4 one for the port. Without it a host with a global IPv6 address
-        // could not be reached on it at all.
+
         let mut server6 = bind_direct_ipv6(port as u16)
             .or_else(|| bind_direct_ipv6(0))
             .map(|listener| tokenstat_remote::Server::from_listener(listener, &identity))
@@ -402,11 +345,9 @@ fn start_direct_if_enabled() {
                 None | Some(Accepted::Idle) => true,
                 Some(Accepted::Served) => false,
                 Some(Accepted::Failed) => {
-                    // IPv4 keeps serving. Losing the IPv6 socket only drops
-                    // its candidates.
                     server6 = None;
                     direct_port6().store(0, Ordering::Release);
-                    // Close its firewall pinholes now, not at the next check.
+
                     direct_reach::nudge();
                     true
                 }
@@ -478,14 +419,6 @@ fn stop_direct() {
     }
 }
 
-/// Wait for the accept loop to let go of port 7878 before binding it again.
-///
-/// The loop polls the flag every 100 ms, so a pause and a resume close
-/// together (a lid closed and opened, the app quit and reopened) used to race:
-/// the replacement bound while the old thread still owned the socket, failed
-/// with "address in use", and both threads then exited leaving no listener at
-/// all. Bounded, because waiting forever for a thread that has already died
-/// would be worse than trying the bind.
 #[cfg(feature = "local-host")]
 fn await_direct_stopped() {
     for _ in 0..20 {
@@ -496,7 +429,6 @@ fn await_direct_stopped() {
     }
 }
 
-/// Whether the accept loop still holds the listening socket.
 #[cfg(feature = "local-host")]
 fn direct_bound() -> &'static AtomicBool {
     static BOUND: std::sync::OnceLock<AtomicBool> = std::sync::OnceLock::new();
@@ -513,21 +445,9 @@ fn account_token() -> Result<String, String> {
         .ok_or_else(|| "sign in to tokenstat.ai before enabling remote reach".into())
 }
 
-/// The HELLO credential in hand, and when it stops being usable.
 struct HeldCredential {
     owner: String,
     token: String,
-    /// When the relay stops accepting it, as a wall-clock instant in
-    /// milliseconds since the epoch. `None` for the legacy login bearer, which
-    /// does not expire.
-    ///
-    /// **Wall clock, not [`Instant`], and that is the whole point.** On macOS
-    /// `Instant` stops advancing while the machine is asleep, and so does
-    /// `thread::sleep`. The relay expires a credential on a calendar. A laptop
-    /// that slept eight hours of a twelve hour credential used to believe it
-    /// still had most of the term left, so nothing refreshed, the socket was
-    /// denied `token_expired`, and the machine read as offline until somebody
-    /// noticed. The two clocks have to be the same clock.
     expires_at_ms: Option<i64>,
 }
 
@@ -538,15 +458,6 @@ fn held_credential() -> &'static Mutex<Option<HeldCredential>> {
 
 const CREDENTIAL_REFRESH_MARGIN: Duration = Duration::from_secs(600);
 
-/// The HELLO credential, minting one only when there is a reason to.
-///
-/// `force` is for a credential the relay refused: mint whatever the cache says.
-/// Otherwise a token still comfortably inside its term is reused. Every
-/// `remote.tunnel` request used to mint, and a phone sends one each time it
-/// opens a host or pulls to refresh, so the machine spent its hourly mint
-/// budget replacing a credential that was working. It also handed the relay a
-/// moving target: each new token superseded the one the live socket was about
-/// to reconnect with.
 fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
     let owner = crate::account_session::current_or_capture()?;
     if !force
@@ -554,9 +465,7 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
         && let Some(held) = guard.as_ref().filter(|held| held.owner == owner.id)
     {
         owner.ensure_current()?;
-        // The lifetime left, not None: the caller schedules the refresh
-        // loop from what comes back, and a cache hit that said "no
-        // expiry" would start a tunnel nothing ever refreshed.
+
         match held.expires_at_ms {
             None => return Ok((held.token.clone(), None)),
             Some(at) => {
@@ -576,13 +485,6 @@ fn seconds_left(at_ms: i64) -> Option<u64> {
     (left_ms > 0).then_some((left_ms / 1000) as u64)
 }
 
-/// When the relay will stop accepting a freshly minted credential.
-///
-/// The absolute time the account issued is preferred over `expires_in`,
-/// because it is the value the relay itself compares against and it survives a
-/// slow mint. `expires_in` is the fallback for a response whose timestamp will
-/// not parse, which is a server contract change rather than something a client
-/// should fall over on.
 fn credential_deadline_ms(token: &tokenstat_sync::profile::TunnelToken) -> i64 {
     token
         .expires_at
@@ -593,21 +495,6 @@ fn credential_deadline_ms(token: &tokenstat_sync::profile::TunnelToken) -> i64 {
         })
 }
 
-/// Register the machine on the account directory, then mint a short-lived
-/// tunnel:connect token for HELLO.
-///
-/// The long-lived login bearer is used only against an account host that has
-/// no mint route at all. The relay refuses it otherwise, and falling back on a
-/// plan or registration refusal would turn a message the user can act on
-/// ("register this machine", "remote reach is a paid feature") into a generic
-/// tunnel denial minutes later.
-///
-/// Registration is mandatory on the first mint for a login and key, and best-effort
-/// afterwards: a transient 5xx (or a captive-portal redirect) on the register
-/// route must not turn a renewal the account can already serve into "tunnel
-/// unavailable". The one refusal registration cannot fix is a mint answering
-/// `machine_not_registered`, which drives a single re-register before the
-/// second attempt.
 fn mint_hello_token() -> Result<(String, Option<u64>), String> {
     let owner = crate::account_session::current_or_capture()?;
     let client = owner
@@ -647,9 +534,6 @@ fn mint_hello_token() -> Result<(String, Option<u64>), String> {
     result
 }
 
-/// Registration belongs to the login receipt and actual machine key, rather
-/// than to the process. A key rotation or another account gets its own first
-/// registration, and a failed first attempt remains retryable.
 type RegisteredIdentity = (String, String, tokenstat_identity::PublicKey);
 fn registered_identity() -> &'static Mutex<Option<RegisteredIdentity>> {
     static REGISTERED: OnceLock<Mutex<Option<RegisteredIdentity>>> = OnceLock::new();
@@ -663,8 +547,6 @@ fn mint_hello_token_impl(
     mut register: impl FnMut(&str, &MachineIdentity, &str) -> Result<(), String>,
     mut mint: impl FnMut(&str) -> Result<tokenstat_sync::profile::TunnelToken, ProfileError>,
 ) -> Result<(String, Option<u64>), String> {
-    // Phones (no local-host) register as clients so they do not upload usage.
-    // They still use a device slot. Macs remain hosts.
     #[cfg(feature = "local-host")]
     let kind = "host";
     #[cfg(not(feature = "local-host"))]
@@ -675,29 +557,18 @@ fn mint_hello_token_impl(
 
     let mut minted = mint(machine_id);
     if matches!(minted, Err(ProfileError::MachineNotRegistered)) {
-        // The account stopped knowing this machine (unlinked, re-registered
-        // elsewhere). One registration retry is the whole fix: it re-publishes
-        // the key the mint binds to. More than one is the same answer to the
-        // same question.
         register(machine_id, identity, kind)?;
         minted = mint(machine_id);
     }
 
     match minted {
         Ok(tok) => {
-            // A mint only succeeds for a registered machine, so a renewal that
-            // skipped registration (best-effort after the first mint) still
-            // means the machine is on the account directory.
             let deadline = credential_deadline_ms(&tok);
             hold_pinned_credential(&tok.token, Some(deadline))?;
-            // The lifetime the caller schedules from is measured against the
-            // deadline rather than taken from `expires_in`, so a mint that took
-            // ten seconds does not hand back a half-life ten seconds too long.
+
             Ok((tok.token, Some(seconds_left(deadline).unwrap_or(0))))
         }
         Err(ProfileError::Unsupported(reason)) => {
-            // An account host from before tunnel tokens still accepts the sync
-            // bearer on HELLO, if its relay has the legacy path open.
             eprintln!("remote: {reason}; falling back to the login bearer");
             let owner = crate::account_session::current_or_capture()?;
             let legacy = owner
@@ -714,8 +585,6 @@ fn mint_hello_token_impl(
 }
 
 fn hold_pinned_credential(token: &str, expires_at_ms: Option<i64>) -> Result<(), String> {
-    // The pure mint fixtures have no installed request context. Production
-    // minting always enters through tunnel_hello_token with a captured owner.
     let Some(owner) = crate::account_session::current_snapshot() else {
         return Ok(());
     };
@@ -748,10 +617,6 @@ fn clear_held_credential() {
     }
 }
 
-/// Serializes tunnel start so two callers cannot both create a session.
-///
-/// A retry tick and a foreground nudge may both mint a credential. The caller
-/// that waits here rechecks the owned socket before doing network work.
 static STARTING: Mutex<()> = Mutex::new(());
 
 fn tunnel_paused() -> &'static AtomicBool {
@@ -792,26 +657,12 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     tunnel_lifecycle::start(session, settings);
 }
 
-/// Keep trying to bring remote reach up, in the background, until it is up or
-/// the user turns it off.
-///
-/// One retry thread at a time. The delay doubles from ten seconds to one
-/// minute: a laptop opening its lid, a network coming back, or an account host
-/// that was briefly down all resolve inside that window without anybody
-/// visiting a settings screen. The ceiling is a minute rather than five,
-/// because what it bounds is how long a machine reads as offline after the
-/// thing that was wrong stopped being wrong. One attempt a minute is nothing
-/// to an account host, and five minutes of "offline" is a long time to somebody
-/// looking at their own laptop.
 fn is_permanent_start_error(error: &str) -> bool {
     let lower = error.to_lowercase();
-    // Plan refusals stay off the tight retry loop so a free account does
-    // not mint every ten seconds. They are not permanent across an
-    // entitlement change: `nudge` and `reconsider_plan` try again.
+
     lower.contains("sign in") || is_plan_start_error(error) || lower.contains("device limit")
 }
 
-/// The account host refused a mint because this plan cannot open a tunnel.
 fn is_plan_start_error(error: &str) -> bool {
     let lower = error.to_lowercase();
     lower.contains("paid-plan")
@@ -846,7 +697,6 @@ fn retry_start_later(session: Arc<Mutex<Session>>) {
     });
 }
 
-/// Doubling retry delay for a failed mint, one minute up to fifteen.
 fn next_retry(previous: Option<u64>) -> u64 {
     match previous {
         None => 60,
@@ -858,10 +708,6 @@ pub(crate) fn stop_tunnel() {
     tunnel_lifecycle::stop();
 }
 
-/// Put this machine's key and name on the account directory, when remote reach
-/// is on. Called when the tunnel comes up and after a rename; it is the
-/// opt-in part of "reach machines from anywhere", so a plain sync never
-/// triggers it.
 fn register_with_account(settings: &RemoteSettings) {
     if !settings.tunnel {
         return;
@@ -925,8 +771,6 @@ pub(crate) fn register_if_tunnel_enabled() {
     });
 }
 
-/// Publish this client's key and name to the account directory. A refresh of
-/// an already-linked phone does not use a second slot.
 #[cfg(not(feature = "local-host"))]
 fn register_client_identity() {
     let outcome = (|| -> Result<(), String> {
@@ -942,25 +786,12 @@ fn register_client_identity() {
         .map_err(|e| e.to_string())
     })();
     if let Err(error) = outcome {
-        // Not fatal and not shown: an unnamed phone still works, and the next
-        // sign-in or connect registers it again.
         eprintln!("remote: could not publish this device's name: {error}");
     }
 }
 
-/// The account's machine directory, and when it was fetched.
-///
-/// Cached because [`account_peer_label`] runs inside the inbound handshake,
-/// once per channel the relay dials. Without this, every dial from a phone
-/// paid an HTTP round trip to the account host before the connection could be
-/// authorized, so a slow account host read to the user as a slow tunnel, and a
-/// phone opening a host or pulling to refresh spent one directory fetch per
-/// screen. The directory changes when somebody adds or renames a device, which
-/// is not something the handshake path has to see within the second.
 struct Directory {
     owner: String,
-    /// Wall clock, so a machine that slept does not treat an overnight cache
-    /// as fresh. Same reason the tunnel credential is measured this way.
     fetched_at_ms: i64,
     machines: Vec<Value>,
 }
@@ -971,10 +802,6 @@ fn account_directory() -> &'static Mutex<Option<Directory>> {
 }
 
 const DIRECTORY_TTL_MS: i64 = 60_000;
-/// A device the cache has never seen may have registered since it was filled,
-/// so a miss is allowed to refetch. Bounded, because a peer that is not on the
-/// account at all is exactly what an unwanted dial looks like, and each one
-/// must not be able to make this machine call out.
 const DIRECTORY_MISS_REFETCH_MS: i64 = 10_000;
 
 fn last_directory_miss() -> &'static Mutex<Option<(String, i64)>> {
@@ -982,7 +809,6 @@ fn last_directory_miss() -> &'static Mutex<Option<(String, i64)>> {
     AT.get_or_init(|| Mutex::new(None))
 }
 
-/// The machine list, from cache unless it is older than the TTL.
 impl Directory {
     fn for_owner(&self, owner: &str, now: i64, fresh: bool) -> Option<Vec<Value>> {
         let age = now.checked_sub(self.fetched_at_ms)?;
@@ -1012,8 +838,7 @@ fn account_machines(force: bool) -> Vec<Value> {
             Vec::new()
         };
     }
-    // Use the captured client's request, never a fresh global credential read.
-    // An old HTTP response cannot become the next account's directory.
+
     let Ok(status) = owner.status(true) else {
         return if owner.ensure_current().is_ok() {
             cached(false).unwrap_or_default()
@@ -1057,18 +882,12 @@ pub(crate) fn seed_account_directory(machines: Vec<Value>) {
     }
 }
 
-/// Forget the cached directory. Called when remote reach stops, because the
-/// next start may be a different account.
 fn clear_account_directory() {
     if let Ok(mut guard) = account_directory().lock() {
         *guard = None;
     }
 }
 
-/// Same-account devices on `/me` are approved without a second tap. The phone
-/// and Mac already share the login, and requiring Machines then Approve for
-/// that is noise. Revoked peers never reach this path (authorize keeps them
-/// revoked).
 fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
     account_peer_label_hex(&tokenstat_identity::hex(peer))
 }
@@ -1082,9 +901,7 @@ pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
     if let Some(label) = account_peer_label_hex_cached(want) {
         return Some(label);
     }
-    // Not in what we hold. A device that registered since the cache was
-    // filled is the ordinary reason, so refetch once, rate limited. The
-    // cached lookup above never fetches, so this is the single fetch.
+
     let owner = crate::account_session::current_or_capture().ok()?;
     let now = jiff::Timestamp::now().as_millisecond();
     let may_refetch = last_directory_miss().lock().is_ok_and(|mut at| {
@@ -1100,8 +917,7 @@ pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
         return None;
     }
     let _ = account_machines(true);
-    // Stale rows may keep the device list useful while offline, but must not
-    // silently approve a previously unknown peer after their proof expired.
+
     account_peer_label_hex_cached(want)
 }
 
@@ -1122,13 +938,8 @@ pub(crate) fn account_peer_label_hex_cached(want: &str) -> Option<String> {
     label_for(&held, want)
 }
 
-/// This peer's display name, from a machine directory already in hand.
 fn label_for(machines: &[Value], want: &str) -> Option<String> {
     for machine in machines {
-        // `continue`, not `?`. One machine in the directory without a key (a
-        // computer that only ever synced) would otherwise end the search for
-        // every machine after it, and which ones those are depends on the
-        // order the server happened to answer in.
         let Some(key) = machine
             .get("public_identity")
             .or_else(|| machine.get("identity"))
@@ -1214,18 +1025,10 @@ impl Route {
     }
 }
 
-/// Answer one peer for as long as it stays connected.
-///
-/// The body is `server::respond`, unchanged, plus a keep-awake hook that
-/// looks at the method name. That is the entire point of the design: this
-/// transport adds a handshake and a frame, and asks the same dispatch the
-/// same way. A method cannot exist here and be missing over the socket,
-/// because neither transport knows what a method is.
 fn serve_peer(
     mut connection: tokenstat_remote::Connection,
     session: &Mutex<Session>,
-    // Stream claims still need `local-host`. The route is recorded on every
-    // build so Account can say how a peer reached this machine.
+
     route: Route,
 ) {
     if !load_settings().tunnel || tunnel_paused().load(Ordering::Acquire) {
@@ -1234,41 +1037,26 @@ fn serve_peer(
     }
     let peer = connection.peer_key();
     remember_route(&tokenstat_identity::hex(&peer), route);
-    // A machine cannot serve itself. A self-dial through the tunnel, or a
-    // mistaken local pair that pinned this machine's own key, would otherwise
-    // pass the approval check with its own store and answer itself.
+
     if MachineIdentity::load_or_create().is_ok_and(|identity| identity.public_key() == peer) {
         return;
     }
 
-    // The first message decides what this connection is. A stream claim
-    // (`{"stream": "<token>"}`) means the peer opened a reservation with
-    // `stream.open` and is handing this connection to its pump; anything else
-    // is a request and the connection joins the request/response loop.
     let first = match connection.receive(MAX_MESSAGE) {
         Ok(bytes) => bytes,
         Err(_) => return,
     };
-    // Only a build that can own a terminal can hand one over. Without
-    // `local-host` there are no reservations, so a stream claim is just an
-    // unrecognized first message and the connection carries on as a request.
+
     if !load_settings().tunnel || tunnel_paused().load(Ordering::Acquire) {
         connection.close();
         return;
     }
     #[cfg(feature = "local-host")]
     if let Some(token) = crate::remote_stream::parse_handshake(&String::from_utf8_lossy(&first)) {
-        // `accept` hands the connection to the pump, or closes it when the
-        // token is not a live reservation: nobody gets a stream this machine
-        // did not open for them. Either way this connection is spoken for.
         crate::remote_stream::accept(&token, connection, route);
         return;
     }
 
-    // The same per-request approval check, on the first request and on every
-    // request after it. Connections are held open and reused, so a peer
-    // revoked while connected would otherwise keep being answered until it
-    // chose to hang up. Revocation has to mean the next request.
     if !load_settings().tunnel
         || tunnel_paused().load(Ordering::Acquire)
         || !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer))
@@ -1307,20 +1095,11 @@ fn serve_peer(
     }
 }
 
-/// Same dispatch as the unix socket, plus the inbound-work sleep assertion.
-///
-/// The method table is still only in `dispatch`. This is the one place a
-/// remote request is known to be inbound, which is the only time the Mac
-/// should stay awake for a closed app.
 fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str, route: Route) -> String {
     if crate::host_policy::should_refuse_inbound(line) {
         return crate::host_policy::refuse_inbound(line);
     }
-    // Approved is not the same as let in. Every device on the account is
-    // auto-approved on first contact, and this is where a device that was
-    // never explicitly allowed stops short of the work on this machine. Here
-    // rather than in dispatch, because a local caller is the owner and has
-    // nothing to ask permission for.
+
     if let Some(refusal) = crate::workspace_policy::refuse_unpermitted(line, peer) {
         return refusal;
     }
@@ -1330,17 +1109,6 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str, route: Route
     })
 }
 
-/// Connections held open per peer, keyed by public key hex and the purpose
-/// they were dialled for.
-///
-/// A handshake is three round trips and a Diffie-Hellman, which is far too much
-/// to pay per call when a remote terminal polls for output. Held open and
-/// reused, exactly like the unix socket pool on the client side.
-///
-/// The purpose is part of the key on purpose: the relay meters a channel under
-/// the label it opened with, so a pooled terminal channel reused for a chat
-/// call would bill the chat's bytes to the terminal. One small pool per label
-/// keeps the attribution honest.
 type PeerPool = HashMap<(String, ChannelPurpose), Vec<Idle>>;
 
 fn pool() -> &'static Mutex<PeerPool> {
@@ -1359,26 +1127,13 @@ fn pool() -> &'static Mutex<PeerPool> {
                 }
             })
             .is_err()
-        {
-            // The walk also happens on every checkout and checkin, so a
-            // process where the thread could not start still reaps whenever
-            // it has traffic; only a machine idle in both senses keeps the
-            // sockets.
-        }
+        {}
     });
     pool
 }
 
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
 
-/// A connection waiting to be used again, and when it stopped being used.
-///
-/// The timestamp is the whole point. Without it a pooled connection was held
-/// open for the life of the process: a few per peer and purpose, a map key
-/// for every peer ever dialled, and nothing anywhere that ever closed one.
-/// That is not a leak in the sense of a lost handle, and it is still a
-/// descriptor count that only goes up, which is the same thing to a process
-/// that has run out of them.
 struct Idle {
     connection: tokenstat_remote::Connection,
     since: Instant,
@@ -1386,32 +1141,15 @@ struct Idle {
 
 const MAX_IDLE_PER_PEER: usize = 4;
 
-/// How long a connection may sit unused before it is closed.
-///
-/// A handshake is three round trips and a Diffie-Hellman, so the pool has to
-/// outlast the gap between a terminal's polls, which is milliseconds, and the
-/// gap between somebody's glances at a screen, which is seconds. A minute
-/// covers both with room to spare and is far shorter than the hours a machine
-/// sits with the app open and nothing to say.
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The safety valve on connections to one peer at once.
-///
-/// Not a queue: a burst of legitimate calls is normal and waiting for a slot
-/// would be a deadlock waiting for a reason. This is far above anything the
-/// app does on purpose, so tripping it means something is looping, and being
-/// told that is better than the process running out of descriptors and
-/// reporting it against whichever file lost the race. See `open_files`.
 const MAX_LIVE_PER_PEER: usize = 64;
 
-/// Connections dialled and not yet finished with, for the ceiling above and
-/// for `info`.
 fn live() -> &'static Mutex<HashMap<String, usize>> {
     static LIVE: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
     LIVE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Total live peer connections, read without taking the map's lock.
 static LIVE_TOTAL: AtomicUsize = AtomicUsize::new(0);
 
 /// Holds one peer's slot for as long as the caller holds this.
@@ -1475,14 +1213,10 @@ fn last_routes() -> &'static Mutex<HashMap<String, Route>> {
     ROUTES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// How many peer routes are remembered. Peers come and go; without a ceiling
-/// a long-lived daemon keeps an entry for every machine it ever dialled.
 const MAX_REMEMBERED_ROUTES: usize = 256;
 
 fn remember_route(peer: &str, route: Route) {
     if let Ok(mut map) = last_routes().lock() {
-        // Bounded: entries for peers that were removed from the store
-        // otherwise accumulate for the life of the daemon.
         if !map.contains_key(peer)
             && map.len() >= MAX_REMEMBERED_ROUTES
             && let Some(first) = map.keys().next().cloned()
@@ -1493,15 +1227,9 @@ fn remember_route(peer: &str, route: Route) {
     }
 }
 
-/// This-device payload counters and the peers currently using a connection.
-///
-/// Direct and relay are counted separately on purpose. Direct never belongs
-/// in the account relay allowance. These numbers live in this process only.
 fn traffic_json() -> Value {
     let (direct_bytes, relay_bytes) = tokenstat_remote::payload_bytes();
-    // Read the three maps, then let them go. `live()` is what every peer call
-    // takes and drops a slot in, so naming peers, which reads the peer store
-    // from disk, must not happen while it is held.
+
     let counted: Vec<(String, usize, usize, Option<Route>)> = {
         let live_map = live().lock().ok();
         let pool_map = pool().lock().ok();
@@ -1511,9 +1239,6 @@ fn traffic_json() -> Value {
             keys.extend(live_map.keys().cloned());
         }
         if let Some(ref pool_map) = pool_map {
-            // The pool is keyed by peer and purpose; `info` reports per peer,
-            // so purposes fold together here. The relay still meters them
-            // apart: that split lives in the open frame, not in this count.
             keys.extend(pool_map.keys().map(|(peer, _)| peer.clone()));
         }
         keys.into_iter()
@@ -1535,10 +1260,6 @@ fn traffic_json() -> Value {
                     .as_ref()
                     .and_then(|held| held.get(&peer).copied())
                     .or_else(|| {
-                        // The pool can hold both kinds at once (a live direct
-                        // call beside an idle relay channel), so the last entry
-                        // may describe the wrong channel. Prefer a direct one:
-                        // it is the route traffic actually takes.
                         pool_map.as_ref().and_then(|held| {
                             held.iter()
                                 .filter(|((key, _), _)| key == &peer)
@@ -1558,7 +1279,7 @@ fn traffic_json() -> Value {
             })
             .collect()
     };
-    // One store read for the whole list rather than one per peer.
+
     let store = PeerStore::cached().ok();
     let peers: Vec<Value> = counted
         .into_iter()
@@ -1589,49 +1310,17 @@ fn traffic_peer_label(peer: &str, store: Option<&PeerStore>) -> String {
         .unwrap_or_else(|| tokenstat_identity::fingerprint(&key))
 }
 
-/// How long the first `no_such_peer` is remembered, and the ceiling the
-/// doubling stops at.
-///
-/// The floor used to be 15 seconds while the app re-dialled a failed peer
-/// every 30, so the cache expired before every single retry and suppressed
-/// nothing: a machine that had been off for an hour still cost the relay a
-/// channel open twice a minute. The floor now outlasts that retry, and a peer
-/// that stays absent is asked less and less often.
-///
-/// The ceiling is two minutes rather than something larger because this is
-/// also how long a machine that just woke up stays invisible. `remote.nudge`
-/// clears the whole cache, and the app nudges on wake and when connectivity
-/// comes back, so the ceiling is the worst case for a machine nobody told us
-/// about rather than the normal one.
 const UNREACHABLE_FLOOR_MS: i64 = 45_000;
 const UNREACHABLE_CEILING_MS: i64 = 120_000;
-/// After a local path change, the first few `no_such_peer` answers are the
-/// far machine reconnecting, not proof it is gone. Suppressing on those
-/// would hide it for 45s–2min while the phone retries at 1/2/4s.
 const ABSENCE_GRACE_MS: i64 = 15_000;
 
-/// One peer's absence: when it was last answered `no_such_peer`, and how many
-/// times in a row.
 #[derive(Clone, Copy)]
 struct Absence {
-    /// Wall clock, for the same reason the tunnel credential is measured that
-    /// way: `Instant` stops advancing while a Mac is asleep, so an absence
-    /// recorded before the lid closed would still read as fresh hours later
-    /// and hide a peer that had been back the whole time.
     since_ms: i64,
     strikes: u32,
 }
 
 impl Absence {
-    /// How long this absence is trusted before the peer is dialled again.
-    ///
-    /// The first miss is worth nothing. A dial can land in the moment between
-    /// a peer's daemon starting and its HELLO registering, and the relay only
-    /// holds an open for a key it saw recently, so a machine that has been off
-    /// for a while genuinely answers `no_such_peer` once on the way back.
-    /// Suppressing on that one answer would hide it until the wait ran out.
-    /// Suppressing from the second confirms it is really gone and still spares
-    /// the relay everything after that.
     fn suppresses(&self) -> bool {
         self.strikes > 0 && self.age_ms() < self.ttl_ms()
     }
@@ -1640,32 +1329,18 @@ impl Absence {
         jiff::Timestamp::now().as_millisecond() - self.since_ms
     }
 
-    /// Doubling from the floor, capped, so a machine that has been off all day
-    /// is asked once every couple of minutes rather than twice a minute.
     fn ttl_ms(&self) -> i64 {
         let doubled = UNREACHABLE_FLOOR_MS.saturating_mul(1i64 << self.strikes.min(3));
         doubled.min(UNREACHABLE_CEILING_MS)
     }
 
-    /// Worth remembering at all. A confirmed absence that is long past its
-    /// wait, and a first miss that nothing followed up, are both just noise in
-    /// the map.
     fn worth_keeping(&self) -> bool {
         self.age_ms() < UNREACHABLE_CEILING_MS
     }
 }
 
-/// Peers the relay has told us are not on the tunnel, remembered briefly.
-///
-/// The app reconciles remote workspaces on a timer, and every poll used to
-/// dial the peer again. For a machine whose tunnel was off or whose daemon
-/// was down, that meant a fresh `no_such_peer` channel open per poll on the relay.
-/// Inside the TTL the dial fails fast instead, with the same words, without
-/// another round trip.
 struct Unreachable {
     cache: HashMap<String, Absence>,
-    /// Wall clock until which `no_such_peer` is not recorded. A local path
-    /// change starts this so the far machine's reconnect is not a 45s floor.
     grace_until_ms: i64,
 }
 
@@ -1689,9 +1364,7 @@ fn note_unreachable_locked(state: &mut Unreachable, peer_hex: &str) {
     if jiff::Timestamp::now().as_millisecond() < state.grace_until_ms {
         return;
     }
-    // A strike only counts against an absence still inside its window. A
-    // peer that was missing an hour ago and is missing again now is not on
-    // its second consecutive miss, it is on its first.
+
     let strikes = state
         .cache
         .get(peer_hex)
@@ -1706,33 +1379,23 @@ fn note_unreachable_locked(state: &mut Unreachable, peer_hex: &str) {
     );
 }
 
-/// Remember that the relay says this peer is not on the tunnel, and lengthen
-/// the wait if it has said so before.
 fn note_unreachable(peer_hex: &str) {
     if let Ok(mut state) = unreachable().lock() {
         note_unreachable_locked(&mut state, peer_hex);
     }
 }
 
-/// Forget a peer's absence. A dial that connected is proof it is back, and the
-/// next failure should start from the floor rather than from where the last
-/// outage left off.
 fn clear_unreachable(peer_hex: &str) {
     if let Ok(mut state) = unreachable().lock() {
         state.cache.remove(peer_hex);
     }
 }
 
-/// Forget every absence. `remote.nudge` means the ground truth just changed
-/// (the network came back, the machine woke), so what the relay said about a
-/// peer thirty seconds ago is no longer worth trusting.
 fn clear_all_unreachable() {
     if let Ok(mut state) = unreachable().lock() {
         state.cache.clear();
     }
-    // The network just changed, so a LAN that was not there a moment ago may
-    // be there now. Whatever was learned about direct routes was learned on
-    // the old path.
+
     if let Ok(mut misses) = direct_misses().lock() {
         misses.clear();
     }
@@ -1807,15 +1470,11 @@ pub(crate) fn direct_candidates() -> Vec<DirectCandidate> {
     Vec::new()
 }
 
-/// Active, non-loopback IPv4 interface addresses. The IPv6 listener is a
-/// separate socket with its own candidates below.
 #[cfg(all(feature = "local-host", unix))]
 fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
     let mut found = BTreeSet::new();
     let mut first = std::ptr::null_mut();
-    // SAFETY: `getifaddrs` initializes `first` on success. Every node and
-    // address is read only while the returned list is alive, and the one
-    // matching `freeifaddrs` call runs before returning.
+
     unsafe {
         if libc::getifaddrs(&mut first) != 0 {
             return Vec::new();
@@ -1847,8 +1506,6 @@ fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
     found.into_iter().collect()
 }
 
-/// A portable fallback for platforms where interface enumeration has not been
-/// wired to the native API yet. The mDNS candidate still participates there.
 #[cfg(all(feature = "local-host", not(unix)))]
 fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
     preferred_route_ipv4()
@@ -1859,9 +1516,6 @@ fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
 
 #[cfg(feature = "local-host")]
 fn preferred_route_ipv4() -> Option<Ipv4Addr> {
-    // UDP connect chooses a route but sends no packet. This gives Windows and
-    // other non-Unix hosts at least the address of their active interface,
-    // and covers Unix systems whose interface enumeration was restricted.
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("1.1.1.1:443").ok()?;
     match socket.local_addr().ok()?.ip() {
@@ -1870,9 +1524,6 @@ fn preferred_route_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
-/// Global unicast IPv6 addresses, the one on the default IPv6 route first.
-/// These need no address translation: a peer can dial them wherever the
-/// router's firewall lets it, which `direct_reach` asks for where it can.
 #[cfg(feature = "local-host")]
 fn local_ipv6_addresses() -> Vec<Ipv6Addr> {
     #[cfg_attr(not(unix), allow(unused_mut))]
@@ -1914,8 +1565,6 @@ fn preferred_route_ipv6() -> Option<Ipv6Addr> {
     }
 }
 
-/// 2000::/3 without documentation space and Teredo. Unique-local and
-/// link-local addresses are left to the IPv4 LAN candidates.
 #[cfg(feature = "local-host")]
 fn usable_global_ipv6(ip: Ipv6Addr) -> bool {
     let segments = ip.segments();
@@ -1939,7 +1588,7 @@ fn usable_public_address(address: SocketAddr) -> bool {
                 && !(octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
                 && octets[0] < 240
         }
-        // The listener is IPv4. Do not advertise an address it does not own.
+
         std::net::IpAddr::V6(_) => false,
     }
 }
@@ -1955,8 +1604,6 @@ fn usable_direct_ipv4(ip: Ipv4Addr) -> bool {
 
 #[cfg(feature = "local-host")]
 fn local_mdns_hostname() -> Option<String> {
-    // Status polls call this often; a hostname does not change within one
-    // daemon's lifetime often enough to justify asking every time.
     static HOSTNAME: OnceLock<Option<String>> = OnceLock::new();
     HOSTNAME.get_or_init(local_hostname).clone()
 }
@@ -2012,8 +1659,7 @@ pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCand
                 && direct_candidate_address_is_usable(&candidate.address)
         })
         .collect::<Vec<_>>();
-    // Rank before capping, so a crowded list keeps its best routes instead of
-    // whichever eight arrived first.
+
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.priority));
     let mut seen = BTreeSet::new();
     candidates.retain(|candidate| seen.insert(candidate.address.clone()));
@@ -2023,18 +1669,10 @@ pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCand
             offered.remove(peer_hex);
         } else {
             offered.insert(peer_hex.to_string(), candidates);
-            // A list is not a working TCP path. Successful Noise already
-            // clears the miss in dial_peer_for. Clearing it here made every
-            // off-LAN RPC re-race LAN during cooldown.
         }
     }
 }
 
-/// Whether a candidate address may be dialled at all. Runs on everything an
-/// authenticated peer offers, because a hint is not proof: a literal address
-/// must be routeable to another machine, and a name must look like one. The
-/// pinned Noise handshake remains the real gate; this only keeps a hint from
-/// pointing sockets at this machine's own loopback or link-local space.
 fn direct_candidate_address_is_usable(address: &str) -> bool {
     if let Ok(socket) = address.parse::<SocketAddr>() {
         return match socket.ip() {
@@ -2050,8 +1688,7 @@ fn direct_candidate_address_is_usable(address: &str) -> bool {
             }
         };
     }
-    // Names reach here only when the string is not a bare socket literal,
-    // which is exactly how `.local` candidates look.
+
     let Some((host, port)) = address.rsplit_once(':') else {
         return false;
     };
@@ -2087,19 +1724,9 @@ fn is_refreshing_direct() -> bool {
     REFRESHING_DIRECT.with(|flag| flag.get())
 }
 
-/// The least time between two candidate probes for the same peer.
-///
-/// A probe is a full relay round trip. During a direct cooldown the answer
-/// cannot be used until the cooldown expires, so asking once per minute keeps
-/// the list fresh for the moment it does, while asking on every dial spent a
-/// relay round trip per attachment download for nothing.
 const CANDIDATE_REFRESH_INTERVAL_MS: i64 = DIRECT_MISS_FLOOR_MS;
-/// How soon a failed candidate probe may be retried. Shorter than the
-/// success interval: a failure says nothing about the peer's addresses, only
-/// that this attempt could not reach it.
 const CANDIDATE_RETRY_MS: i64 = 10_000;
 
-/// When the peer was last asked for its listen addresses.
 fn last_candidate_refresh() -> &'static Mutex<HashMap<String, i64>> {
     static STATE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -2118,10 +1745,6 @@ fn claim_candidate_refresh(peer_hex: &str) -> bool {
     true
 }
 
-/// Record the outcome of a candidate probe. A failed probe (the relay was
-/// down, the peer was unreachable) must not suppress the next retry for the
-/// full minute: back it off briefly instead, so recovery after a transient
-/// failure waits seconds rather than a probe interval.
 fn note_candidate_refresh(peer_hex: &str, succeeded: bool) {
     let Ok(mut asked) = last_candidate_refresh().lock() else {
         return;
@@ -2137,12 +1760,6 @@ fn note_candidate_refresh(peer_hex: &str, succeeded: bool) {
     }
 }
 
-/// Whether this dial should first ask the peer for current listen addresses.
-///
-/// Skip when a nested candidate probe is already in flight, and skip when we
-/// already have a live-looking route: the upcoming dial will try it. Refresh
-/// when there is nothing to try, or when the last direct attempt is cooling
-/// down, so a relay round trip can replace a stale LAN address.
 fn should_refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) -> bool {
     if is_refreshing_direct() {
         return false;
@@ -2170,8 +1787,6 @@ fn is_unknown_method(error: &str) -> bool {
 }
 
 fn parse_peer_candidate_list(value: &Value) -> Vec<DirectCandidate> {
-    // Per item, not all or nothing: one malformed entry must not discard the
-    // whole list and force a call onto the relay.
     value
         .get("candidates")
         .and_then(Value::as_array)
@@ -2196,8 +1811,6 @@ fn parse_legacy_direct_candidate(value: &Value) -> Option<DirectCandidate> {
         })
 }
 
-/// Ask the peer what it is listening on right now. Uses the existing dial
-/// ladder, including the relay, then stores the answer for the payload dial.
 fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
     if !should_refresh_peer_direct_candidates(peer_hex, remembered) {
         return;
@@ -2206,8 +1819,6 @@ fn refresh_peer_direct_candidates(peer_hex: &str, remembered: Option<&str>) {
 }
 
 fn refresh_peer_candidate_list(peer_hex: &str) {
-    // The probe itself is relayed traffic, and during a cooldown its answer
-    // cannot be used yet. One per minute per peer, not one per dial.
     if !claim_candidate_refresh(peer_hex) {
         return;
     }
@@ -2238,15 +1849,6 @@ fn fetch_peer_direct_candidates(peer_hex: &str) -> Result<Vec<DirectCandidate>, 
     }
 }
 
-/// Addresses this machine currently accepts for a direct Noise connection.
-///
-/// An authenticated peer may ask. Empty is a real answer: this device is not
-/// listening, so the caller should use the relay. Screen view permission is
-/// not required, because listing listen addresses is not viewing a desktop.
-/// The list can include a mapped public address. That is intentional: files
-/// and terminals need a current WAN candidate without a screen grant. The
-/// Noise pin is still the gate. An approved account device is already trusted
-/// to reach this machine.
 fn advertised_direct_candidates() -> Result<Value, String> {
     crate::request_context::remote_peer()
         .ok_or("direct candidates must be requested by an authenticated peer")?;
@@ -2274,17 +1876,9 @@ fn candidates_for_peer(peer_hex: &str, remembered: Option<&str>) -> Vec<DirectCa
     candidates
 }
 
-/// How long a direct address is left alone after it failed.
-///
-/// A minute at first, doubling, capped. The remembered address is a
-/// `<host>.local` name, which is exactly right on the LAN it was learned on
-/// and worthless anywhere else, and it is tried first on every dial of every
-/// purpose. Off that LAN each dial paid a DNS lookup and up to a two second
-/// connect before the relay was asked, on calls that happen on timers.
 const DIRECT_MISS_FLOOR_MS: i64 = 60_000;
 const DIRECT_MISS_CEILING_MS: i64 = 600_000;
-// With no relay fallback, suppressing direct also suppresses the only route.
-// Keep retries bounded without making a brief interruption a minute offline.
+
 const DIRECT_ONLY_MISS_FLOOR_MS: i64 = 2_000;
 const DIRECT_ONLY_MISS_CEILING_MS: i64 = 8_000;
 
@@ -2315,9 +1909,6 @@ impl DirectMiss {
         }
     }
 
-    /// Skip the direct attempt for now. Unlike an absence, the first miss
-    /// counts. Direct-only callers retry sooner because they have no alternate
-    /// route to answer during the cooldown.
     fn suppresses(&self, relay_fallback: bool) -> bool {
         self.age_ms() < self.retry_delay_ms(relay_fallback)
     }
@@ -2342,7 +1933,6 @@ fn direct_retry_ready(peer_hex: &str, relay_fallback: bool) -> bool {
         .is_some_and(|miss| miss.suppresses(relay_fallback))
 }
 
-/// Backoff measures failed attempts, not how often callers use the relay.
 fn try_direct_with_backoff<T>(
     peer_hex: &str,
     has_candidates: bool,
@@ -2361,8 +1951,6 @@ fn try_direct_with_backoff<T>(
 
 fn note_direct_miss(peer_hex: &str, relay_fallback: bool) {
     if let Ok(mut misses) = direct_misses().lock() {
-        // Concurrent RPCs can fail the same route together. They are one failed
-        // round, not successive retries that should extend the cooldown.
         if misses
             .get(peer_hex)
             .is_some_and(|miss| miss.suppresses(relay_fallback))
@@ -2432,8 +2020,7 @@ fn peer_request(method: &str, params: &Value) -> String {
         method: &'a str,
         params: &'a Value,
     }
-    // Borrow payloads such as attachment chunks instead of copying them into
-    // another JSON tree. These fields contain only serializable JSON values.
+
     serde_json::to_string(&Request {
         id: 0,
         method,
@@ -2444,9 +2031,7 @@ fn peer_request(method: &str, params: &Value) -> String {
 
 fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<String, String> {
     crate::request_context::refuse_remote("remote forwarding")?;
-    // A pooled connection authenticated earlier, before the owner may have
-    // revoked this destination. Check disk before every request, including
-    // pooled calls, so another process's trust changes take effect here too.
+
     let key = public_key_from_hex(peer_hex).map_err(|error| error.to_string())?;
     let store = PeerStore::load().map_err(|error| error.to_string())?;
     if !store.is_approved(&key) {
@@ -2458,14 +2043,9 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
     drop(store);
     let request = peer_request(method, params);
     let allow_relay = params.get("allowRelay").and_then(Value::as_bool) == Some(true);
-    // Held for the whole call, pooled connection included: a connection taken
-    // out of the pool is as live as a freshly dialled one while it is in use.
+
     let _slot = LiveSlot::take(peer_hex)?;
 
-    // Attachment payloads must not borrow an unlabelled pooled RPC channel:
-    // the relay meters file bytes against the account's shared allowance, so a
-    // Files channel has its own pool, which ordinary calls never reuse. This still uses the same authenticated direct-first
-    // dial ladder.
     if is_attachment_transfer(method) {
         let pooled = checkout(peer_hex, ChannelPurpose::Files);
         let mut connection = match pooled {
@@ -2473,8 +2053,6 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
                 connection
             }
             _ => {
-                // A new transfer gets another direct-first chance. Chunks keep
-                // their channel; they do not pay a new handshake per frame.
                 if method == "chat.fileCapabilities" {
                     clear_direct_miss(peer_hex);
                 }
@@ -2490,9 +2068,7 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
                 checkin(peer_hex, ChannelPurpose::Files, connection);
                 return Ok(answer);
             }
-            // The same one-redial rule as below: a freshly dialled connection
-            // closing before the first answer is usually the far daemon
-            // replacing its listener, not a real failure.
+
             Err(tokenstat_remote::RemoteError::Closed) => {
                 let mut redialled = dial_peer_as(peer_hex, ChannelPurpose::Files)?;
                 if redialled.is_relay() && is_file_payload(method) && !allow_relay {
@@ -2508,10 +2084,6 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
         }
     }
 
-    // One retry on a pooled connection, for a peer daemon that restarted. A
-    // fresh connection failing is a real failure and is reported. The pool is
-    // keyed by purpose, so a chat call never borrows a terminal channel and
-    // bills its bytes to the wrong label on the relay.
     let purpose = purpose_for_method(method);
     if let Some(mut pooled) = checkout(peer_hex, purpose) {
         match round_trip(&mut pooled, request.as_bytes(), answer_idle(method)) {
@@ -2519,8 +2091,7 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
                 checkin(peer_hex, purpose, pooled);
                 return Ok(answer);
             }
-            // The request may have reached the host. Its receipt, not a
-            // transport redial, decides what a send may do next.
+
             Err(error) if refuses_redial(method) => {
                 return Err(error.to_string());
             }
@@ -2531,11 +2102,7 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
     let mut fresh = dial_peer_as(peer_hex, purpose)?;
     let idle = answer_idle(method);
     let answer = round_trip(&mut fresh, request.as_bytes(), idle);
-    // A freshly dialled connection that closes before the first answer usually
-    // means the far daemon was just replacing its listener, the same reconnect
-    // window `tunnel_dial` retries through. One redial rides over it; anything
-    // more is a real failure and should be reported as one. A send, or a Git
-    // call that already started work on the desktop, is not started again.
+
     if !refuses_redial(method)
         && answer
             .as_ref()
@@ -2551,8 +2118,6 @@ fn call_peer_value(peer_hex: &str, method: &str, params: &Value) -> Result<Strin
     Ok(answer)
 }
 
-// The initiating device's account pays for this channel. A host's account
-// cannot supply the caller's allowance when manually paired across accounts.
 fn file_capability_answer(
     method: &str,
     connection: &tokenstat_remote::Connection,
@@ -2595,13 +2160,6 @@ fn is_attachment_transfer(method: &str) -> bool {
     is_file_payload(method) || method.starts_with("chat.file")
 }
 
-/// The relay label for one forwarded call.
-///
-/// The relay meters a whole channel under the label it opened with, so the
-/// label has to be chosen before the dial, from the method. Terminal and chat
-/// traffic and workspace navigation name themselves here; other RPC stays `unknown`, which is the
-/// right answer for an old client and the wrong one for a call site in this
-/// binary that simply forgot (see `dial_peer_for`).
 fn purpose_for_method(method: &str) -> ChannelPurpose {
     if method.starts_with("chat.") {
         ChannelPurpose::Chat
@@ -2621,8 +2179,6 @@ fn purpose_for_method(method: &str) -> ChannelPurpose {
     } else if method.starts_with("pty.") {
         ChannelPurpose::Pty
     } else if method.starts_with("ssh.") {
-        // Every ssh.* method is an ssh.session terminal call. The proxy
-        // stream shares the label; both are a shell on the far machine.
         ChannelPurpose::Ssh
     } else {
         ChannelPurpose::Unknown
@@ -2666,8 +2222,6 @@ pub(crate) fn dial_peer_for(
             error,
         )
         .map(|connection| {
-            // This fresh dial already checked direct. Pooled reuse waits for
-            // the next interval, or a network nudge, before checking again.
             if let Ok(mut checked) = last_relay_direct_check().lock() {
                 checked.insert(peer_hex.to_string(), Instant::now());
             }
@@ -2693,9 +2247,7 @@ impl PeerDialContext {
         let peer = store
             .get(&key)
             .ok_or("that machine is not in this one's peer list")?;
-        // Refused here as well as by the far end. Calling a revoked peer would
-        // otherwise dial, handshake, and be turned away, which is slower and reads
-        // as a network problem rather than as the decision it is.
+
         if !store.is_approved(&key) {
             return Err(format!(
                 "{} is not approved on this machine, so nothing is sent to it",
@@ -2725,9 +2277,7 @@ impl PeerDialContext {
             refresh_peer_direct_candidates(peer_hex, self.address.as_deref());
         }
         let mut candidates = candidates_for_peer(peer_hex, self.address.as_deref());
-        // Filter before measuring: backoff counts failed attempts, and an offer of
-        // loopback-only addresses that nothing dials is not an attempt. The race
-        // below re-checks, since an offer can land between here and the dial.
+
         candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
         let settings = settings();
         let (connection, address) = try_direct_with_backoff(
@@ -2738,16 +2288,13 @@ impl PeerDialContext {
         )?;
         crate::account_session::check_current()?;
         clear_direct_miss(peer_hex);
-        // Persistence follows proof: TCP connected and the pinned key
-        // completed Noise. Merely advertising a candidate never writes it.
+
         let _ = remember_direct_address(peer_hex, &address);
         remember_route(peer_hex, Route::Direct);
         Ok(connection)
     }
 }
 
-/// Try every candidate concurrently and take the first one that authenticates.
-/// The result includes the winning address so only proven routes reach disk.
 fn dial_direct_candidates(
     peer_hex: &str,
     candidates: Vec<DirectCandidate>,
@@ -2757,8 +2304,7 @@ fn dial_direct_candidates(
 ) -> Result<(tokenstat_remote::Connection, String), String> {
     const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(900);
     const RACE_TIMEOUT: Duration = Duration::from_millis(1_100);
-    // Screen again at the dial, so even a remembered address written by an
-    // older build or a stale offer cannot send a socket somewhere private.
+
     let mut candidates = candidates;
     candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
     if candidates.is_empty() {
@@ -2923,8 +2469,7 @@ fn tunnel_dial(
              the relay says it is not on the tunnel right now"
         ));
     }
-    // Signed in is a precondition for the session's HELLO; the multiplexed
-    // session itself was started when remote reach turned on.
+
     let _ = account_token()?;
     if tunnel_lifecycle::current()?.is_none() {
         start_tunnel_if_enabled(session_for_serving()?, settings);
@@ -2933,18 +2478,7 @@ fn tunnel_dial(
         tunnel_lifecycle::state().ok().and_then(|state| state.error)
             .unwrap_or_else(|| "This device's remote connection is paused. Open tokenstat on this device or turn on Always-on host, then connect again.".into())
     })?;
-    // The target's relay socket can be mid-reconnect (its daemon restarted),
-    // which the relay answers with an ERROR channel, or the pairing can drop
-    // before the answer arrives. All of those are transient, so a few short
-    // retries ride over them instead of showing a failure that resolved
-    // itself a second later.
-    // A whole-ladder budget, not three independent tries. Each attempt can
-    // spend ten seconds waiting for the relay to pair the channel and another
-    // ten on the handshake, so three of them plus the sleeps between is a
-    // minute of one thread and one of the app's connections for a machine that
-    // is asleep. The retries exist for a peer whose daemon is mid-restart,
-    // which comes back in a second or two, so a short overall budget keeps
-    // what they are for and drops what they cost.
+
     let started = std::time::Instant::now();
     let mut last = String::new();
     for attempt in 0..3 {
@@ -2971,14 +2505,7 @@ fn tunnel_dial(
             }
             Err(error) => {
                 last = error.to_string();
-                // `no_such_peer` is the relay's settled answer, not a race it
-                // lost. The relay already holds an open for a key that was
-                // live recently, precisely so a dial arriving mid-reconnect
-                // waits rather than fails, so by the time this end hears
-                // `no_such_peer` the reconnect window has already been sat
-                // out. Retrying spends two more channel opens to be told the
-                // same thing twice more, which is most of what a machine that
-                // is simply switched off costs the relay.
+
                 if last.contains("no_such_peer") {
                     note_unreachable(&peer_hex);
                     break;
@@ -2995,20 +2522,8 @@ fn tunnel_dial(
     ))
 }
 
-/// How long a peer may say nothing before a forwarded call gives up.
-///
-/// Not a deadline on the answer: the budget resets as each frame arrives, so a
-/// peer that is slow but talking is never cut off. It is there for the peer
-/// that has stopped talking altogether, which on a Mac means the lid closed.
-/// The relay only notices that when its keepalive fails, and until then this
-/// end would hold a thread, a connection and one of the app's pool slots on a
-/// machine that is asleep.
 const ANSWER_IDLE: Duration = Duration::from_secs(45);
 
-/// Git LFS setup, a reviewed pull, and a reviewed push answer once, after
-/// minutes of silence. The phone's own patience for those calls is ten
-/// minutes. Cutting the forwarder at 45 seconds leaves the desktop command
-/// running and lets a retry start a second install or upload.
 const QUIET_WORK_IDLE: Duration = Duration::from_secs(600);
 
 fn answer_idle(method: &str) -> Duration {
@@ -3016,8 +2531,6 @@ fn answer_idle(method: &str) -> Duration {
         method,
         "launcher.install" | "launcher.reinstall" | "launcher.update"
     ) {
-        // Installers answer only after exit, including their captured output.
-        // Allow the host's full deadline plus pipe-drain and response time.
         crate::INSTALLER_TIMEOUT + Duration::from_secs(30)
     } else if matches!(
         method,
@@ -3029,7 +2542,6 @@ fn answer_idle(method: &str) -> Duration {
     }
 }
 
-/// A closed connection may already have started work that must not run twice.
 fn refuses_redial(method: &str) -> bool {
     matches!(
         method,
@@ -3047,15 +2559,6 @@ fn refuses_redial(method: &str) -> bool {
 
 const DIAL_BUDGET: Duration = Duration::from_secs(12);
 
-/// How long to wait before dialling again, or `None` to give up.
-///
-/// `screen_already_open` is a teardown that has not landed yet, not a settled
-/// no. The relay allows one screen channel per account, so a session being
-/// replaced holds the slot until its CH_CLOSE arrives, and the viewer's dial
-/// can beat it there by a second. Failing on that answer is what used to send
-/// the app into its own reconnect ladder and turn one late close into a storm,
-/// so it waits longer than the transport blips do: those come back inside a
-/// couple of hundred milliseconds, a teardown crossing the relay does not.
 fn dial_retry_pause(last: &str, attempt: u32) -> Option<Duration> {
     let handover = last.contains("screen_already_open");
     let retryable = handover
@@ -3101,8 +2604,7 @@ fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Con
             idle.retain(|held| !held.connection.is_relay());
         }
     }
-    // Not `get_mut(peer)?`: a peer nobody has dialled yet would return before
-    // the empty keys the reap above left behind were dropped.
+
     let taken = map
         .get_mut(&(peer.to_string(), purpose))
         .and_then(|idle| {
@@ -3125,9 +2627,6 @@ fn checkout(peer: &str, purpose: ChannelPurpose) -> Option<tokenstat_remote::Con
     taken
 }
 
-/// Frequent RPCs keep a relay socket alive indefinitely. Try direct again
-/// before the next request, without sending or replaying that request during
-/// discovery. A failed probe leaves the working relay available.
 fn prefer_pooled_direct(
     peer: &str,
     connection: tokenstat_remote::Connection,
@@ -3136,8 +2635,6 @@ fn prefer_pooled_direct(
     if connection.is_relay() && claim_relay_direct_check(peer) {
         match dial(peer) {
             Ok(direct) => {
-                // Only idle channels are replaced. Calls already in flight
-                // finish on their existing connection.
                 if let Ok(mut held) = pool().lock() {
                     for ((held_peer, _), idle) in held.iter_mut() {
                         if held_peer == peer {
@@ -3191,13 +2688,6 @@ fn checkin(peer: &str, purpose: ChannelPurpose, connection: tokenstat_remote::Co
     }
 }
 
-/// Close everything that has sat unused past the timeout, and forget any peer
-/// left holding nothing.
-///
-/// Run both on a timer, so the last connections a session leaves behind are
-/// closed even if nothing ever calls that peer again, and on the way past
-/// each call, which keeps a burst of traffic from letting anything idle out
-/// from under the next caller.
 fn reap(map: &mut HashMap<(String, ChannelPurpose), Vec<Idle>>) {
     let now = Instant::now();
     for idle in map.values_mut() {
@@ -3206,8 +2696,6 @@ fn reap(map: &mut HashMap<(String, ChannelPurpose), Vec<Idle>>) {
     map.retain(|_, idle| !idle.is_empty());
 }
 
-/// The unix socket sends `params` as a JSON value; so does this. An empty
-/// string is `{}` rather than an error, matching `dispatch::parse`.
 fn parse_params(params: &str) -> Value {
     let trimmed = params.trim();
     if trimmed.is_empty() {
@@ -3235,9 +2723,7 @@ pub(crate) fn call(
             "remote.relayFallback" => set_relay_fallback(params),
             "remote.nudge" => nudge(params),
             "remote.reconsiderPlan" => reconsider_plan(),
-            // Authenticated peers ask this of the machine they are reaching, so
-            // terminals, files and screen can all try a current LAN address before
-            // the relay. It is not a `remote.*` owner method: those stay local.
+
             "direct.candidates" => advertised_direct_candidates(),
             _ => return None,
         })
@@ -3263,29 +2749,17 @@ struct RelayFallbackParams {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct NudgeParams {
-    /// Drop a live socket and reconnect. A path change (Wi-Fi to cellular)
-    /// leaves a socket that still looks fresh: the last ping was seconds ago
-    /// on the old route.
     reconnect: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct ForwardParams {
-    /// The peer's public key as hex. Not a label: a label is advisory and two
-    /// machines may share one.
     peer: String,
     method: String,
     params: Value,
 }
 
-/// Wake the tunnel after the network comes back or the machine wakes from
-/// sleep.
-///
-/// The supervisor sizes its reconnect backoff for a network that may still be
-/// dead. A connectivity restore means it is not, so the next reconnect should
-/// not wait out the rest of that backoff. When no session is live, this tries
-/// the same start a retry tick would, now rather than later.
 fn nudge(params: &str) -> Result<Value, String> {
     crate::request_context::refuse_remote("remote control")?;
     let p: NudgeParams = if params.trim().is_empty() {
@@ -3293,19 +2767,14 @@ fn nudge(params: &str) -> Result<Value, String> {
     } else {
         serde_json::from_str(params.trim()).unwrap_or_default()
     };
-    // What the relay said about a peer a minute ago was true of a network that
-    // has since changed. Every absence is forgotten here so a machine that came
-    // back with this one is dialled at once rather than waiting out a backoff
-    // it earned while the network was down.
+
     clear_all_unreachable();
     begin_absence_grace();
     #[cfg(feature = "local-host")]
     direct_reach::nudge();
     #[cfg(feature = "local-host")]
     crate::remote_stream::invalidate_all_pty_lists();
-    // A plan refusal is off the retry loop on purpose. Foreground, wake and
-    // connectivity restore must still ask again: the account may have
-    // become Patron since the last mint.
+
     let last_was_plan = tunnel_lifecycle::state()
         .ok()
         .and_then(|state| state.error)
@@ -3330,21 +2799,13 @@ fn nudge(params: &str) -> Result<Value, String> {
     Ok(json!({"nudged": true, "reconnect": p.reconnect}))
 }
 
-/// Re-check the plan gate after entitlement changes.
-///
-/// `not_on_this_plan` stops the start retry loop so a free account does not
-/// hammer the mint. After a purchase (or after `/me` shows Patron) this is
-/// the one call that remints and, if the user left the switch on, brings
-/// the socket up without anybody flipping it.
 fn reconsider_plan() -> Result<Value, String> {
     crate::request_context::refuse_remote("remote control")?;
     let settings = load_settings();
     if !settings.tunnel {
         return Ok(json!({"reconsidered": true, "tunnel": false}));
     }
-    // Already READY: drop a leftover plan refusal and leave the mint alone.
-    // Every app launch used to remint here, which spent the hourly budget
-    // replacing a credential that was working.
+
     if let Some(owned) = tunnel_lifecycle::current()?
         && owned.socket()?.status().connected
     {
@@ -3365,11 +2826,6 @@ fn reconsider_plan() -> Result<Value, String> {
     }
 }
 
-/// Overlay the live socket onto the last recorded start/mint state.
-///
-/// A successful READY must drop a stale `not_on_this_plan` (or any other
-/// leftover). Merging `live.error` only when it is set used to keep a plan
-/// refusal on screen after the socket had already come up.
 fn merge_live_tunnel_status(
     stored: &mut TunnelState,
     live: &tokenstat_remote::tunnel::TunnelStatus,
@@ -3388,29 +2844,25 @@ fn status() -> Result<Value, String> {
     let tunnel_state = tunnel_lifecycle::state()?;
     let direct_candidates = direct_candidates();
     Ok(json!({
-        // What the user chose, and what is actually true. They differ while
-        // the tunnel is being refused, and a screen that showed only the
-        // toggle would invite a Connect that can never work.
+
+
         "tunnel": settings.tunnel,
-        // What the tunnel is actually doing: the toggle can be on while the
-        // daemon is being refused (plan gate, revoked token, endpoint down),
-        // and a screen that cannot tell the difference will offer a Connect
-        // that can never work.
+
+
         "tunnelOnline": settings.tunnel && tunnel_state.connected,
         "tunnelRegistered": settings.tunnel && tunnel_state.registered,
         "teamTunnelOnline": tunnel_state.connected && current_team_scope(&crate::account_session::current_or_capture()?).is_ok_and(|scope| team_reach::active(&scope)),
         "tunnelError": tunnel_state.error,
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
-        // The check a person will actually perform. See
-        // `tokenstat_identity::key_words`: same key, said in a way somebody
-        // reads aloud instead of skimming.
+
+
         "words": tokenstat_identity::key_words(&identity.public_key()),
         "label": tokenstat_identity::machine_label(),
-        // Useful for an invite as well as diagnostics. These are addresses,
-        // never credentials; the receiver still authenticates the key above.
+
+
         "directCandidates": direct_candidates,
-        // This device only. Direct bytes are not the account relay allowance.
+
         "traffic": traffic_json(),
         "relayFallback": settings.relay_fallback,
     }))
@@ -3423,15 +2875,13 @@ fn set_relay_fallback(params: &str) -> Result<Value, String> {
     let mut settings = load_settings();
     settings.relay_fallback = request.enabled;
     save_settings(&settings)?;
-    if !request.enabled {
-        // A disabled fallback must not revive a pooled relay connection on
-        // the next call. In-flight calls finish on the route they already own.
-        if let Ok(mut held) = pool().lock() {
-            for idle in held.values_mut() {
-                idle.retain(|item| !item.connection.is_relay());
-            }
-            held.retain(|_, idle| !idle.is_empty());
+    if !request.enabled
+        && let Ok(mut held) = pool().lock()
+    {
+        for idle in held.values_mut() {
+            idle.retain(|item| !item.connection.is_relay());
         }
+        held.retain(|_, idle| !idle.is_empty());
     }
     Ok(json!({"relayFallback": settings.relay_fallback}))
 }
@@ -3487,10 +2937,7 @@ fn forward(params: &str) -> Result<Value, crate::error::DispatchError> {
     if p.peer.is_empty() || p.method.is_empty() {
         return Err("remote.call needs a peer and a method".into());
     }
-    // `remote.call` reaching another machine's `remote.call` would let one
-    // approved peer use this machine as a hop to a third it was never
-    // approved by. Trust is not transitive, and this is the line where that
-    // would stop being true.
+
     if p.method.starts_with("remote.") {
         return Err("a remote call cannot ask a peer to make another remote call".into());
     }
@@ -3508,8 +2955,6 @@ fn forward(params: &str) -> Result<Value, crate::error::DispatchError> {
     )
 }
 
-/// Preserve the far host's error code. A lost or malformed send response is
-/// uncertain delivery, not a refusal that a client may edit and retry.
 fn forwarded_result(
     method: &str,
     answer: Result<String, String>,
@@ -3753,8 +3198,7 @@ mod tests {
                 connection
                     .send(br#"{"ok":true,"result":{"version":"14"}}"#)
                     .unwrap();
-                // Revocation closes the idle connection without writing the
-                // next request. A replay would arrive as an ordinary frame.
+
                 assert!(
                     connection
                         .receive_within(4096, Duration::from_secs(5))
@@ -3842,8 +3286,7 @@ mod tests {
             ((), true)
         })
         .unwrap();
-        // The grant never fetches: the label is best-effort from the held
-        // directory, so this isolated test opens no relay connection.
+
         crate::workspace_policy::set_allowed_by_with_label(
             &phone_key,
             true,
@@ -3894,8 +3337,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             let connection = server.accept().unwrap().unwrap();
             let session = Mutex::new(Session::open_client(None).unwrap());
-            // This fixture opts in only after setup. Its loopback listener is
-            // the transport; it never starts a relay or LAN listener.
+
             save_settings(&RemoteSettings {
                 tunnel: true,
                 ..RemoteSettings::default()
@@ -4049,9 +3491,6 @@ mod tests {
 
     #[test]
     fn chat_and_terminal_calls_name_their_relay_label() {
-        // What the relay meters a channel under is decided here, from the
-        // method, before the dial. Attachments never reach this: they bypass
-        // the pool on dedicated Files channels above.
         assert_eq!(purpose_for_method("chat.send"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.events"), ChannelPurpose::Chat);
         assert_eq!(purpose_for_method("chat.list"), ChannelPurpose::Chat);
@@ -4167,8 +3606,6 @@ mod tests {
         assert!(failure.contains("Relay fallback is off"), "{failure}");
     }
 
-    /// Trust is not transitive. An approved peer must not be able to use this
-    /// machine as a hop to a third one that never approved it.
     #[test]
     fn borrowed_peer_requests_keep_the_existing_wire_format() {
         for raw in [
@@ -4375,9 +3812,6 @@ mod tests {
         MachineIdentity::from_secret([7u8; 32])
     }
 
-    /// A mint response shaped like a real one: `expires_at` and `expires_in`
-    /// describe the same moment. They have to agree, because the deadline is
-    /// read from the absolute time and the lifetime is derived back out of it.
     fn test_token() -> tokenstat_sync::profile::TunnelToken {
         let ttl = 43_200;
         tokenstat_sync::profile::TunnelToken {
@@ -4388,9 +3822,6 @@ mod tests {
         }
     }
 
-    /// A transient registration failure must not block a renewal the account
-    /// can already serve. That is the P0 hardening: a 5xx on the register
-    /// route used to read as "tunnel unavailable" until the next retry.
     #[test]
     fn a_registration_hiccup_does_not_block_a_renewal() {
         let (token, expires) = mint_hello_token_impl(
@@ -4402,15 +3833,11 @@ mod tests {
         )
         .expect("a renewal must survive a register hiccup");
         assert_eq!(token, "tsk_deadbeef_secret");
-        // A range, not the exact lifetime: what comes back is measured from
-        // the deadline to now, so a slow mint legitimately reports a second or
-        // two less than the token was issued for.
+
         let left = expires.expect("a minted credential expires");
         assert!((43_195..=43_200).contains(&left), "got {left}");
     }
 
-    /// Registration stays mandatory on the first mint of a process: a machine
-    /// the account has never seen must not get a token that binds nothing.
     #[test]
     fn registration_still_gates_the_first_mint() {
         let err = mint_hello_token_impl(
@@ -4424,8 +3851,6 @@ mod tests {
         assert!(err.contains("no account host"), "{err}");
     }
 
-    /// A mint refusal that says the machine is not registered drives one
-    /// re-register, then a second mint. That is the repair the refusal names.
     #[test]
     fn a_not_registered_refusal_re_registers_then_mints() {
         let mut registers = 0;
@@ -4499,10 +3924,6 @@ mod tests {
         assert_eq!(stored.error.as_deref(), Some("connection refused"));
     }
 
-    /// The floor has to outlast the app's own retry for the cache to suppress
-    /// anything at all. It used to be shorter, so every scheduled re-dial found
-    /// the entry expired and spent a channel open learning what the relay had
-    /// already said.
     #[test]
     fn an_absence_outlasts_the_apps_retry_and_then_lengthens() {
         let now = jiff::Timestamp::now().as_millisecond();
@@ -4522,9 +3943,6 @@ mod tests {
         assert!(second.ttl_ms() > first.ttl_ms());
     }
 
-    /// A machine that has been off all day must not become invisible for
-    /// longer than the ceiling: that is how long it stays missing after it
-    /// comes back, for anybody who did not nudge.
     #[test]
     fn an_absence_never_grows_past_the_ceiling() {
         let now = jiff::Timestamp::now().as_millisecond();
@@ -4541,9 +3959,6 @@ mod tests {
         }
     }
 
-    /// The first `no_such_peer` buys nothing. A dial can land between a peer's
-    /// daemon starting and its HELLO registering, and suppressing on that one
-    /// answer hides a machine that is already back.
     #[test]
     fn one_miss_does_not_hide_a_peer_that_is_coming_back() {
         let now = jiff::Timestamp::now().as_millisecond();
@@ -4574,9 +3989,6 @@ mod tests {
         assert!(!stale.worth_keeping());
     }
 
-    /// A dial that connected is proof the peer is back, so the next outage
-    /// starts counting from the floor rather than from where the last one
-    /// stopped.
     #[test]
     fn connecting_forgets_an_absence() {
         let peer = "cd".repeat(32);
@@ -4593,9 +4005,6 @@ mod tests {
         state.cache.clear();
     }
 
-    /// A local path change must not start the 45s floor on the first miss:
-    /// that miss is the far machine reconnecting, and the phone retries at
-    /// 1/2/4s inside this window.
     #[test]
     fn a_nudge_opens_a_grace_before_absences_count() {
         let peer = "ab".repeat(32);
@@ -4622,11 +4031,6 @@ mod tests {
         assert!(held_credential().lock().unwrap().is_none());
     }
 
-    /// The deadline comes from the account's own absolute time, because that
-    /// is the value the relay compares against. Deriving it from `expires_in`
-    /// starts the clock when the answer arrived rather than when it was
-    /// issued, which hands back a term slightly longer than the one the relay
-    /// will honour.
     #[test]
     fn the_deadline_is_the_time_the_account_issued() {
         let token = tokenstat_sync::profile::TunnelToken {
@@ -4640,9 +4044,6 @@ mod tests {
         assert_eq!(credential_deadline_ms(&token), expected);
     }
 
-    /// A response whose timestamp will not parse is a server contract change,
-    /// not a reason to leave the machine without remote reach. `expires_in`
-    /// carries it.
     #[test]
     fn an_unparsable_expiry_falls_back_to_the_lifetime() {
         let token = tokenstat_sync::profile::TunnelToken {
@@ -4654,18 +4055,12 @@ mod tests {
         assert!((595..=600).contains(&left), "got {left}");
     }
 
-    /// A deadline that has passed is not "a very small amount of time left".
-    /// Reporting seconds there would let a dead credential look refreshable.
     #[test]
     fn a_passed_deadline_has_no_time_left() {
         let a_minute_ago = jiff::Timestamp::now().as_millisecond() - 60_000;
         assert_eq!(seconds_left(a_minute_ago), None);
     }
 
-    /// The reason this is measured on the calendar at all: a Mac that slept
-    /// through most of a credential's term must read as nearly expired, not as
-    /// nearly fresh. A held credential inside the refresh margin is re-minted
-    /// rather than handed back.
     #[test]
     fn a_credential_inside_the_margin_is_not_reused() {
         let nearly_up = (jiff::Timestamp::now()
@@ -4680,13 +4075,12 @@ mod tests {
 
     #[test]
     fn a_screen_handover_is_retried_and_a_settled_refusal_is_not() {
-        // The relay's answer while the previous channel is still closing.
         assert_eq!(
             dial_retry_pause("channel error: screen_already_open", 0),
             Some(Duration::from_millis(750)),
             "a handover has to wait for the old close to land"
         );
-        // A transport blip comes back sooner than a teardown crosses the relay.
+
         assert_eq!(
             dial_retry_pause("tunnel not connected", 0),
             Some(Duration::from_millis(200))
@@ -4868,7 +4262,6 @@ mod tests {
         }
     }
 
-    // The addresses themselves only exist in a build that can listen on one.
     #[cfg(feature = "local-host")]
     #[test]
     fn direct_candidates_reject_addresses_that_cannot_reach_a_peer() {
@@ -4881,7 +4274,6 @@ mod tests {
         assert!(usable_direct_ipv4(Ipv4Addr::new(10, 2, 3, 4)));
     }
 
-    // A router mapping only exists in a build that can be reached directly.
     #[cfg(feature = "local-host")]
     #[test]
     fn router_mapping_candidates_must_be_public_ipv4() {

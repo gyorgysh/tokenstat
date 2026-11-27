@@ -6,10 +6,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 
-/// The provider caches a conversation for one model, for a few minutes or an
-/// hour after the last turn. The host records the size, model and lifetime on
-/// the conversation as `promptCache`. No percentage of a plan is shown:
-/// nobody publishes how tokens map onto one.
 object ChatCacheRules {
     const val MINIMUM_TOKENS = 50_000L
 
@@ -24,15 +20,12 @@ object ChatCacheRules {
 
     fun tokens(chat: JsonObject?): Long = cache(chat)?.number("tokens") ?: 0
 
-    /// How long the cache has been gone, or null while it holds.
     fun idle(chat: JsonObject?, nowMs: Long): Long? {
         val cache = cache(chat) ?: return null
         val idle = nowMs - (cache.number("atMs") ?: return null)
         return idle.takeIf { it > (cache.number("ttlMs") ?: 0) }
     }
 
-    /// A warm cache on another model. A cold one costs the same either way,
-    /// and the send question covers it.
     fun switching(chat: JsonObject?, next: String, nowMs: Long): Boolean {
         val cache = cache(chat) ?: return false
         val at = cache.number("atMs") ?: return false
@@ -40,7 +33,6 @@ object ChatCacheRules {
         return (cache.text("selection") ?: "") != next
     }
 
-    /// The model the provider says answered, or the setting it ran with.
     fun cachedModel(chat: JsonObject?): String? =
         cache(chat)?.let { it.text("model")?.takeIf(String::isNotBlank) ?: it.text("selection") }
 

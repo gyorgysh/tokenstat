@@ -6,12 +6,6 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/// Unsent text, one small file per conversation, so a closed app does not lose
-/// it. Attachments are not kept: they are whole files and may be gone.
-///
-/// The owner already names the account, computer and conversation. Writes wait
-/// for a pause in the typing and land off the main thread. Reading answers
-/// from what is waiting first, so a sent draft can never come back.
 class ChatDraftFiles(
     private val directory: File,
     private val capacity: Int = 300,
@@ -45,14 +39,12 @@ class ChatDraftFiles(
         writer.schedule({ save(owner, text) }, if (text.isEmpty()) 0 else delayMs, TimeUnit.MILLISECONDS)
     }
 
-    /// The app is leaving the screen, and may not come back.
     fun flush() {
         val waiting = synchronized(pending) { pending.toMap() }
         waiting.forEach { (owner, text) -> writer.execute { save(owner, text) } }
     }
 
     private fun save(owner: String, text: String) = synchronized(pending) {
-        // A newer edit has its own save.
         if (pending[owner] != text) return@synchronized
         pending.remove(owner)
         val file = File(directory, name(owner))

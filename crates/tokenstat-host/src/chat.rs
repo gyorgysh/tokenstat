@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! Workspace-scoped conversations with local agents.
-//!
-//! The archive never sees this data. Conversations, prompts, and raw backend
-//! output live under the host data directory and are intentionally absent from
-//! sync. A chat is one short-lived process per turn; the backend's own session
-//! token is what joins those processes into a conversation.
 
 use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
@@ -36,55 +31,24 @@ const LEGACY_EVENTS_CAP: u64 = 1024 * 1024;
 #[path = "chat_usage_cache.rs"]
 mod usage_cache;
 const PAGE_EVENTS: usize = 300;
-/// Screen opening and tail polling stay smaller than deliberate history reads.
 const PAGE_EVENTS_MAX: usize = 4_000;
-/// Mirrors ChatPaging.hostHistoryPageEventsMax in the Apple client.
 const HISTORY_PAGE_EVENTS_MAX: usize = 8_000;
-/// How much is read from disk at a time while walking backwards.
 const PAGE_CHUNK: u64 = 64 * 1024;
-/// The most one page may weigh, whatever its event count. A conversation full
-/// of long patches reaches this long before it reaches `PAGE_EVENTS_MAX`, so
-/// this moves with the client's page sizes: triple those and leave this, and
-/// dense pages stop where they always did.
 const PAGE_BYTES: u64 = 2 * 1024 * 1024;
-/// The most that will be read to find a single record's beginning. A record
-/// longer than this is one nothing can display anyway, and the read stops
-/// rather than pulling the whole archive into memory looking for a newline.
 const PAGE_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
-/// Short enough to ride the next step. A longer note is its own message.
 const STEER_NOTE_MAX_CHARS: usize = 1_500;
-/// The most assistant text the end-of-turn output-link pass reads. Links are
-/// taken from the final reply, so only its tail has to survive.
 const ASSISTANT_TEXT_TAIL: usize = 512 * 1024;
-/// The most raw backend spill kept for one turn, and how much of it survives
-/// a truncation. The spill exists so a parser fix can rematerialize a turn,
-/// not so one runaway turn can grow without bound.
 const RAW_CAP: u64 = 8 * 1024 * 1024;
 const RAW_RETAIN: u64 = 4 * 1024 * 1024;
-/// How long a pending approval stays answerable.
-///
-/// Tied to the hook's own deadline rather than picked. The hook stops waiting
-/// at [`crate::chat_gate::GATE_DEADLINE_SECONDS`] and denies, so an approval
-/// that outlived that is a card which can no longer do anything: pressing
-/// Allow on it would report success while the tool had already been refused.
 const APPROVAL_TTL_MS: i64 = crate::chat_gate::GATE_DEADLINE_SECONDS as i64 * 1000;
 const POLL: Duration = Duration::from_millis(400);
 const STREAM_BATCH: Duration = Duration::from_millis(20);
 const DRAIN_BACKLOG_BYTES: u64 = 256 * 1024;
 const DRAIN_BURST_BYTES: usize = 4 * 1024 * 1024;
 const EXIT_STATUS_GRACE: Duration = Duration::from_secs(3);
-/// A persona draft is one short text transform. Anything past this is a run
-/// that has gone wrong, and the wizard says so rather than waiting on it.
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(90);
 static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-/// Separates records made inside the same millisecond.
-///
-/// A timestamp is useful when looking through the on-disk chat directory, but
-/// it is not an identifier: dropping two files or opening two chats quickly
-/// enough used to give them the same name and let the latter overwrite the
-/// former. The sequence is process-wide, so it also covers simultaneous
-/// clients without making an id depend on a filesystem round trip.
 static RECORD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn workspace_writer_error(error: tokenstat_workspace::writer::Error) -> DispatchError {
@@ -285,8 +249,6 @@ pub struct Persona {
     pub updated_at_ms: i64,
 }
 
-/// On-disk persona file. Older installs stored a bare array. Every write is
-/// this object, temporary-file plus rename.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PersonaIndex {
@@ -296,12 +258,6 @@ struct PersonaIndex {
     default_by_workspace: HashMap<String, String>,
 }
 
-/// Names for a workspace's first persona.
-///
-/// Long enough that somebody with a folder per project sees a new one each
-/// time. `starter_name` walks the list from a hash of the workspace id and
-/// steps forward past any name already in use, so a repeat needs more open
-/// workspaces than there are names here.
 const STARTER_NAMES: [&str; 48] = [
     "Abby", "Ada", "Alfie", "Anna", "Archie", "Ben", "Charlie", "Clara", "Daisy", "Danny", "Ellie",
     "Emma", "Eva", "Felix", "Finn", "Freddie", "George", "Grace", "Harry", "Hazel", "Henry",
@@ -310,7 +266,6 @@ const STARTER_NAMES: [&str; 48] = [
     "Sophie", "Teddy", "Theo", "Tom", "Zoe",
 ];
 
-/// Recognizes untouched starters from the previous naming set.
 const LEGACY_STARTER_NAMES: [&str; 48] = [
     "Alder", "Alto", "Amber", "Arbor", "Ash", "Aster", "Basil", "Birch", "Cairn", "Cedar",
     "Cinder", "Clay", "Cove", "Delta", "Dune", "Ember", "Fern", "Flint", "Glade", "Harbour",
@@ -319,7 +274,6 @@ const LEGACY_STARTER_NAMES: [&str; 48] = [
     "Sage", "Slate", "Sora", "Thistle", "Umber", "Vale", "Wren",
 ];
 
-// Let the CLI's own instructions guide new chats unless the person adds a brief.
 const STARTER_BRIEF: &str = "";
 
 const PREVIOUS_STARTER_BRIEF: &str = "Read the code before changing it. The call sites \
@@ -331,7 +285,6 @@ proof: read what the tests actually assert. Do not stop at the edit. Finish \
 when the change is verified, and say plainly what you checked, what you did \
 not, and what the real tradeoffs were.";
 
-/// The first shipped starter brief, retained for migration.
 const LEGACY_STARTER_BRIEF: &str = "You understand the local context before \
 changing anything. Prefer the smallest complete change. Preserve existing \
 work. Explain real tradeoffs. Verify what you change.";
@@ -383,10 +336,6 @@ pub struct ApprovalDecision {
 fn default_mode() -> String {
     "plan".into()
 }
-/// The mode for a chat created without one. Execute, like the clients: a
-/// new conversation exists to get something done, and a planning turn does
-/// nothing that was asked for. Stored records with no mode keep reading as
-/// plan, so no existing conversation changes underneath anyone.
 fn default_new_chat_mode() -> String {
     "execute".into()
 }
@@ -447,22 +396,15 @@ enum StoredEvent {
         at_ms: i64,
         backend: String,
     },
-    /// An approval belongs in the transcript, not in a disconnected modal.
-    /// The queue remains the source of truth for its live decision; this
-    /// record preserves the place where the agent paused after it is settled.
-    Approval { approval: Approval, at_ms: i64 },
-    /// One agent handing the conversation to another.
-    ///
-    /// Recorded in full, brief included, for the same reason the instructions
-    /// card exists: this is text tokenstat put in front of somebody's agent,
-    /// so the conversation is where they can read it.
+    Approval {
+        approval: Approval,
+        at_ms: i64,
+    },
     Handoff {
         to: String,
         brief: String,
         at_ms: i64,
     },
-    /// A question the agent asked in its reply, found while it streamed.
-    /// See `chat_question`. The block stays in the reply text too.
     Question {
         id: String,
         question: String,
@@ -473,8 +415,6 @@ enum StoredEvent {
         backend: String,
         at_ms: i64,
     },
-    /// The person's answer, and how it was sent on: `note` rode a running
-    /// turn, `queued` waits for the turn to end, `sent` started a turn.
     Answer {
         #[serde(rename = "questionId")]
         question_id: String,
@@ -482,9 +422,6 @@ enum StoredEvent {
         delivery: String,
         at_ms: i64,
     },
-    /// An answer that was parked for the agent and never reached it: Stop,
-    /// a cleared note, a new message, or a restart dropped it. The question
-    /// is open again on every device.
     AnswerWithdrawn {
         #[serde(rename = "questionId")]
         question_id: String,
@@ -494,28 +431,18 @@ enum StoredEvent {
 
 struct ParkedAnswer {
     question_id: String,
-    /// The words the answer added to the note, so a replaced or restored
-    /// note can be checked for whether it still carries them.
     note: String,
-    /// A dropped answer stays journaled until its withdrawal is written.
     withdrawn: bool,
 }
 
-/// Answers riding parked notes in this process, by conversation.
-///
-/// Mirrored by question id to a file beside a lease this process holds, so
-/// the next process can tell which answers died with this one and reopen
-/// their questions. See [`Store::withdraw_orphaned_answers`].
 #[derive(Default)]
 struct ParkedAnswers {
     by_chat: HashMap<String, Vec<ParkedAnswer>>,
     owner: Option<(crate::chat_receipts::OwnerLease, PathBuf)>,
 }
 
-/// What an incoming backend is told, and whether the person is told about it.
 struct Handover {
     brief: String,
-    /// True only when the previous turn ran on a different agent.
     announce: bool,
 }
 
@@ -542,34 +469,16 @@ pub struct Store {
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
     live_speed: Mutex<HashMap<String, (String, Arc<crate::chat_live::Launch>)>>,
-    /// Local app origin for parked continuations; never part of chat storage.
     #[cfg(target_os = "macos")]
     desktop_apps: Mutex<HashMap<String, String>>,
-    /// Conversations whose live process the person explicitly stopped.
-    /// Memory-only and consumed by drain: a persisted `running` bit after a
-    /// daemon restart is stale state, not evidence that somebody pressed Stop.
     killed: Mutex<HashSet<String>>,
     personas: Mutex<PersonaIndex>,
     approvals: Arc<Mutex<Vec<Approval>>>,
-    /// Per-turn credentials are intentionally memory-only. The 0600 file a
-    /// hook reads contains the opaque value, while this map is what binds it
-    /// to exactly one live conversation at the daemon boundary.
     turn_tokens: Mutex<HashMap<String, TurnBinding>>,
-    /// One short note the person added while a turn was running. Memory only.
-    /// It rides the next step, or becomes the next message if the turn ends
-    /// first. A restart drops it rather than sending it later unasked.
     steers: Mutex<HashMap<String, String>>,
-    /// Conversations whose parked note must not start a turn. A removed note
-    /// sets this so a delivery that already holds the text comes back without
-    /// launching. A person's own send, or a newer note, clears it.
     suppress_follow_up: Mutex<HashSet<String>>,
-    /// Answers that ride the parked note in `steers`. Never locked together
-    /// with `steers`, for the same reason as `suppress_follow_up`.
     parked_answers: Mutex<ParkedAnswers>,
-    /// Blocking questions observed by this daemon. Answered questions remain
-    /// known until the next user turn so a withdrawn answer can reopen them.
     question_attention: Mutex<HashMap<String, HashMap<String, bool>>>,
-    /// Short-lived final states for the work overview, independent of push tokens.
     completed_work: Mutex<HashMap<String, CompletedWork>>,
     usage_cache: Mutex<usage_cache::Cache>,
 }
@@ -581,8 +490,6 @@ struct CompletedWork {
     finished_at: Instant,
 }
 
-/// How `send` finished. A suppressed follow-up is a note the person cleared,
-/// so the caller must not treat it as a turn that started.
 enum SendOutcome {
     Started(Conversation),
     Suppressed(Conversation),
@@ -602,11 +509,6 @@ struct TurnBinding {
     backend: String,
 }
 
-/// Retires a turn credential that never reached the drain thread owning it.
-///
-/// Every fallible step between minting the token and a successful spawn runs
-/// with this guard alive. Missing one would leave a token in the map that
-/// hooks could still present, and its file on disk, after the send refused.
 struct PendingTurnCredential {
     store: Arc<Store>,
     token: Option<String>,
@@ -622,7 +524,6 @@ impl PendingTurnCredential {
         }
     }
 
-    /// The spawned turn's drain thread now owns cleanup. Disarm.
     fn release(&mut self) {
         self.token = None;
         self.file = None;
@@ -640,11 +541,6 @@ impl Drop for PendingTurnCredential {
     }
 }
 
-/// Retires a private muse hook home that never reached the drain thread.
-///
-/// Every fallible step between installing that home and a successful spawn
-/// runs with this guard alive. Missing one would leave the home on disk
-/// after the send refused.
 struct PendingMuseHome {
     root: Option<PathBuf>,
 }
@@ -658,7 +554,6 @@ impl PendingMuseHome {
         self.root = Some(root);
     }
 
-    /// The spawned turn's drain thread now owns cleanup.
     fn release(&mut self) -> Option<PathBuf> {
         self.root.take()
     }
@@ -672,32 +567,20 @@ impl Drop for PendingMuseHome {
     }
 }
 
-/// Muse takes its note through a private hook home, which only a unix host
-/// builds. Elsewhere a note would never ride a step, so it is refused and
-/// the client queues the words instead.
 fn note_backend(backend: &str) -> bool {
     matches!(backend, "claude" | "codex" | "cursor") || (backend == "muse" && cfg!(unix))
 }
 
-/// Whether a turn of this chat reads a parked note on its next step. Muse
-/// takes one on every model step. The others only stop at a step when they
-/// ask before tools. Steering, answering and the standing question rule all
-/// ask this one place, so they cannot disagree about it.
 fn takes_notes_mid_turn(chat: &Conversation) -> bool {
     note_backend(&chat.backend)
         && (chat.backend == "muse" || chat.autonomy == "standard")
         && !cursor_plan(chat)
 }
 
-/// A Cursor plan turn runs without its gate plugin (see
-/// `automations::chat_agent_command`), so no post hook is there to carry a note.
 fn cursor_plan(chat: &Conversation) -> bool {
     chat.backend == "cursor" && chat.mode == "plan"
 }
 
-/// A Windows bypass turn keeps the tool's own home, where it was signed in,
-/// rather than relocate at all. Hooked turns use the private home everywhere:
-/// its credential link carries the sign-in along.
 fn private_codex_home(has_hooks: bool) -> bool {
     cfg!(unix) || has_hooks
 }
@@ -755,8 +638,6 @@ impl Store {
     }
 
     fn load_at(root: PathBuf) -> Self {
-        // Freeze acceptance while deciding which persisted turns lost their
-        // owner. Failure to obtain the gate is not proof of an interruption.
         let recovery = crate::chat_receipts::Operation::removal(&root).ok();
         let mut conversations = fs::read(root.join("conversations.json"))
             .ok()
@@ -767,7 +648,6 @@ impl Store {
         let mut migrated = false;
         let mut interrupted = Vec::new();
         for chat in &mut conversations {
-            // Another daemon or in-process host may still own this turn.
             if chat.running
                 && recovery.is_some()
                 && crate::chat_receipts::RunnerLease::try_acquire(&root, &chat.id)
@@ -843,8 +723,6 @@ impl Store {
         store
     }
 
-    /// Apply one operation to the current durable index, never a stale snapshot.
-    /// Publish to memory only after the replacement succeeds.
     fn edit_index_locked<T>(
         &self,
         _lifecycle: &crate::work_handoff_store::Guard,
@@ -935,8 +813,6 @@ impl Store {
                 Ok(())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound && memory.is_empty() => {
-                // A genuinely new archive has no index yet. Transcript files
-                // without their index are a storage failure, not an empty list.
                 let entries = fs::read_dir(&self.root).map_err(|error| error.to_string())?;
                 for entry in entries {
                     if entry
@@ -1003,10 +879,7 @@ impl Store {
                 branch: chat.branch.clone(),
             })
             .collect();
-        // An approval that is waiting must survive the host cap even when an
-        // old conversation needs it. Work in progress follows, then ordinary
-        // recency. The phone applies its device-local unread priority after
-        // this because read receipts intentionally never leave that device.
+
         rows.sort_by(|left, right| {
             right
                 .needs_attention
@@ -1018,7 +891,6 @@ impl Store {
         rows
     }
 
-    /// Conversations with an open approval or an unanswered question.
     fn waiting_on_person(&self) -> HashSet<String> {
         let now = now_ms();
         let mut waiting: HashSet<String> = self
@@ -1192,8 +1064,8 @@ impl Store {
             .collect();
         Ok(json!({
             "personas": personas,
-            // Empty means this workspace has chosen to have none, which is a
-            // different answer from "we have not looked yet".
+
+
             "defaultId": default.map(|persona| persona.id).unwrap_or_default(),
         }))
     }
@@ -1221,11 +1093,7 @@ impl Store {
         shell_prefix: Option<String>,
     ) -> Result<Approval, String> {
         let chat = self.get(conversation_id)?;
-        // A shell tool is never allowed by its bare name. The verb names the
-        // tool, not the command, so matching it would approve anything the
-        // agent later runs through it. Shell approval is exact: a saved
-        // two-word prefix has to equal the prefix this request derived, and a
-        // command too compound to have one always comes back as a card.
+
         let shell_call = shell_prefix.is_some() || crate::chat_brain::is_shell(verb);
         let allowed = if shell_call {
             shell_prefix.as_ref().is_some_and(|prefix| {
@@ -1238,9 +1106,6 @@ impl Store {
         };
         let now = now_ms();
         let approval = Approval {
-            // A timestamp alone collides for back-to-back tool requests. The
-            // sequence keeps request IDs unique for this daemon lifetime,
-            // which is all the in-memory approval queue needs.
             id: format!(
                 "approval-{now}-{}",
                 APPROVAL_SEQUENCE.fetch_add(1, Ordering::Relaxed)
@@ -1270,14 +1135,7 @@ impl Store {
                     at_ms: now,
                 },
             )?;
-            // This fixed reason carries no prompt, path, or tool details.
-            // Paired devices learn only that an answer is needed, then fetch
-            // the ordinary protected conversation API themselves.
-            //
-            // Not while somebody has this conversation on screen. The approval
-            // card is already in front of them, and a phone buzzing about the
-            // question its own screen is asking is the app talking over
-            // itself. See `crate::presence`.
+
             if !already_waiting && !crate::presence::is_watched(conversation_id) {
                 let pending = Arc::downgrade(&self.approvals);
                 let conversation = conversation_id.to_string();
@@ -1325,8 +1183,7 @@ impl Store {
             .get(turn_token)
             .cloned()
             .ok_or("the chat turn credential is invalid or expired")?;
-        // Serialize admission with Send, Stop and turn retirement. A hook
-        // that waited for that lock must still belong to the same live turn.
+
         let _acceptance =
             crate::chat_receipts::Operation::conversation(&self.root, &binding.conversation_id)?;
         let binding = self
@@ -1386,8 +1243,7 @@ impl Store {
             return Err("chat.toolResult needs callId".into());
         }
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, &id)?;
-        // A result that waited behind Send or Stop may belong to a turn
-        // already retired. Never write it into the following turn.
+
         let binding = self
             .turn_tokens
             .lock()
@@ -1422,8 +1278,7 @@ impl Store {
             .map(|binding| binding.conversation_id.clone())
             .ok_or("the chat turn credential is invalid or expired")?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, &id)?;
-        // A turn may finish while this waits behind a send or Stop. Resolve
-        // the credential again before taking any newer turn's note.
+
         let binding = self
             .turn_tokens
             .lock()
@@ -1441,9 +1296,7 @@ impl Store {
             .get(&id)
             .cloned();
         let Some(note) = note else { return Ok(None) };
-        // The note becomes a user message when the agent takes it. Keep it
-        // parked if writing fails, and serialize consumption with replacement,
-        // cancellation and idle delivery so it appears exactly once.
+
         let at_ms = now_ms();
         self.append(
             &id,
@@ -1495,8 +1348,7 @@ impl Store {
                 "That note is too long to ride the next step. Send it as its own message.".into(),
             );
         }
-        // A new note replaces the person's last one, never an answer riding
-        // beside it: the answer is already recorded against its question.
+
         let parked = match self.parked_answer_notes(id) {
             Some(answers) => format!("{note}\n\n{answers}"),
             None => note.to_string(),
@@ -1540,15 +1392,11 @@ impl Store {
             crate::workspace_policy::require_current_access()?;
             self.withdraw_pending_answers(id);
             let question = self.open_question(id, question_id)?;
-            // An earlier idle answer may already have launched even though its
-            // answer row could not be written. Replay its shared receipt before
-            // deciding to park a note on that very same running turn.
+
             let ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())
                 .map_err(DispatchError::delivery_unknown)?;
             let receipt = ledger.get(&crate::chat_receipts::question_key(question_id));
-            // The agent already has that earlier answer, whatever is typed now.
-            // Record what it was given, or the card could only ever be closed
-            // by retyping those exact words.
+
             if let Some((sent, steered)) =
                 receipt.and_then(|receipt| self.delivered_answer(id, &question, receipt))
             {
@@ -1602,7 +1450,7 @@ impl Store {
                         at_ms: now_ms(),
                     },
                 )?;
-                // Beside a note the person already parked, never instead of it.
+
                 {
                     let mut steers = self.steers.lock().unwrap_or_else(PoisonError::into_inner);
                     let merged = match steers.get(id) {
@@ -1620,10 +1468,7 @@ impl Store {
             }
             note
         };
-        // Sent first and recorded after: a send that did not start leaves the
-        // question open, so the person can try again.
-        // Keep acceptance through launch and recording the answer. Otherwise
-        // a second device can accept the same question between those steps.
+
         let outcome = self.send_under_acceptance(
             id,
             &note,
@@ -1646,9 +1491,7 @@ impl Store {
             },
         )
         .map_err(DispatchError::delivery_unknown)?;
-        // The question's own durable answer now prevents replays. Only retire
-        // the receipt after syncing that proof, keeping incomplete answers
-        // protected even past the normal message receipt retention window.
+
         OpenOptions::new()
             .read(true)
             .write(true)
@@ -1659,9 +1502,6 @@ impl Store {
         Ok(json!({ "delivery": delivery, "conversation": outcome.into_conversation() }))
     }
 
-    /// The answer an accepted idle launch already gave the agent, read back
-    /// from the message it put on the timeline. None when the receipt is not
-    /// settled or that row is not there to read.
     fn delivered_answer(
         &self,
         id: &str,
@@ -1702,7 +1542,7 @@ impl Store {
                         .map(str::to_owned);
                 }
                 Some("answer") if about_it => answered = true,
-                // The answer never reached the agent, so the question is open.
+
                 Some("answerWithdrawn") if about_it => answered = false,
                 _ => {}
             }
@@ -1732,8 +1572,7 @@ impl Store {
         let Some(note) = self.claim_idle_steer(id)? else {
             return Ok(json!({ "delivered": false }));
         };
-        // Keep finalization with the send. A hook or another device must not
-        // park a new answer between launch and forgetting the delivered ones.
+
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         match self.send_under_acceptance(id, &note, &[], None, None, None, true, None, false) {
             Ok(SendOutcome::Started(chat)) => {
@@ -1744,17 +1583,12 @@ impl Store {
                 }))
             }
             Ok(SendOutcome::Suppressed(_)) => {
-                // Clear already retired this note (suppress was consumed by
-                // send). A newer parked note is already in `steers`. Restoring
-                // here would put a cleared note back.
                 self.reconcile_parked_answers(id);
                 Ok(json!({ "delivered": false }))
             }
             Err(error) => {
                 self.restore_steer_under_acceptance(id, &note, &error);
                 if error.code == crate::error::DELIVERY_UNKNOWN {
-                    // It may well have launched. Reopening the question then
-                    // would invite the same answer twice.
                     self.take_parked_answers(id);
                 } else {
                     self.reconcile_parked_answers(id);
@@ -1789,10 +1623,6 @@ impl Store {
         }
     }
 
-    /// Forget a parked note and refuse a delivery that already holds its text.
-    ///
-    /// The two maps are never locked together. Holding both is how a clear and
-    /// a delivery would wait on each other.
     fn retire_steer(&self, id: &str) {
         self.steers
             .lock()
@@ -1856,10 +1686,6 @@ impl Store {
         (!notes.is_empty()).then(|| notes.join("\n\n"))
     }
 
-    /// Reopen every parked answer whose words are no longer in the parked
-    /// note. A cleared note and a new message both drop the note, and an
-    /// answer recorded against its question would otherwise read as given to
-    /// an agent that never saw it.
     fn reconcile_parked_answers(&self, id: &str) {
         let note = self
             .steers
@@ -1888,8 +1714,6 @@ impl Store {
         self.withdraw_pending_answers(id);
     }
 
-    /// Called under conversation acceptance (or the startup recovery gate).
-    /// Failed appends keep their journal entry for another attempt.
     fn withdraw_pending_answers(&self, id: &str) {
         let dropped: Vec<_> = {
             let parked = self
@@ -1936,10 +1760,6 @@ impl Store {
         self.persist_parked_answers(&mut parked);
     }
 
-    /// Mirror this process's parked answers, by question id, to its own file.
-    ///
-    /// Best effort. A file that cannot be written costs only the reopening
-    /// after a restart, never the answer itself.
     fn persist_parked_answers(&self, parked: &mut ParkedAnswers) {
         if parked.owner.is_none() {
             if parked.by_chat.is_empty() {
@@ -1979,9 +1799,6 @@ impl Store {
         }
     }
 
-    /// Reopen the questions whose answers were parked by a process that has
-    /// since ended. Its lease is free exactly when it is gone, and a parked
-    /// note never outlives the process that held it.
     fn withdraw_orphaned_answers(&self) {
         let dir = self.root.join("parked-answers");
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -1993,7 +1810,7 @@ impl Store {
                 continue;
             }
             let lock = path.with_extension("lock");
-            // A live owner still holds its lease and may yet deliver these.
+
             let Ok(Some(lease)) = crate::chat_receipts::OwnerLease::try_acquire(&lock) else {
                 continue;
             };
@@ -2032,16 +1849,13 @@ impl Store {
                 false
             };
             drop(lease);
-            // A journal awaiting another attempt keeps the same lock inode.
+
             if recovered {
                 let _ = fs::remove_file(&lock);
             }
         }
     }
 
-    /// A follow-up delivery may be refused when the person cleared the note or
-    /// parked a newer one after this text was claimed. A person's own send
-    /// clears that refusal and is never skipped.
     fn follow_up_should_skip(&self, id: &str, follow_up: bool) -> bool {
         if !follow_up {
             self.suppress_follow_up
@@ -2073,8 +1887,6 @@ impl Store {
         Ok(running || active)
     }
 
-    /// Take the note only while nothing is running. The acceptance lock is
-    /// dropped with this function, before a delivery tries to send.
     fn claim_idle_steer(&self, id: &str) -> Result<Option<String>, String> {
         validate_record_id(id)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
@@ -2089,9 +1901,6 @@ impl Store {
             .remove(id))
     }
 
-    /// Put a note back when the send that was supposed to carry it did not
-    /// start, and the turn is still idle. A newer note, a cleared note, or a
-    /// turn that started in between wins, and this copy is dropped.
     #[cfg(test)]
     fn restore_steer_if_idle(&self, id: &str, note: &str, error: &DispatchError) {
         let Ok(_acceptance) = crate::chat_receipts::Operation::conversation(&self.root, id) else {
@@ -2101,8 +1910,6 @@ impl Store {
     }
 
     fn restore_steer_under_acceptance(&self, id: &str, note: &str, error: &DispatchError) {
-        // The process can finish before this retry decision runs. An idle
-        // conversation does not prove a failed acknowledgement never launched.
         if error.code == crate::error::DELIVERY_UNKNOWN {
             return;
         }
@@ -2120,8 +1927,6 @@ impl Store {
         }
     }
 
-    /// Give one spawned turn an opaque credential. This is separate from the
-    /// conversation id so a hook cannot be replayed after the turn finishes.
     fn register_turn_token(&self, conversation_id: &str, backend: &str) -> Result<String, String> {
         let mut bytes = [0u8; 24];
         getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
@@ -2217,20 +2022,15 @@ impl Store {
                     if !chat.allowed_shell_prefixes.contains(prefix) {
                         chat.allowed_shell_prefixes.push(prefix.clone());
                     }
-                } else if !crate::chat_brain::is_shell(&out.verb) {
-                    // A compound shell command has no prefix worth saving, and
-                    // saving the bare tool verb would allow every future
-                    // command through that tool. The answer still stands for
-                    // this call; nothing is remembered.
-                    if !chat.allowed_tools.contains(&out.verb) {
-                        chat.allowed_tools.push(out.verb.clone());
-                    }
+                } else if !crate::chat_brain::is_shell(&out.verb)
+                    && !chat.allowed_tools.contains(&out.verb)
+                {
+                    chat.allowed_tools.push(out.verb.clone());
                 }
                 Ok(())
             })?;
         }
-        // Publish only after the remembered rule is saved. Hooks may resume
-        // immediately when this decision becomes visible.
+
         out.decision = Some(
             if choice.starts_with("allow") {
                 "allow"
@@ -2250,11 +2050,7 @@ impl Store {
         } else {
             return Err("no pending approval with that id".into());
         }
-        // Write the answer back to the timeline. The queue holds the live
-        // decision only until the request expires, so without this a
-        // conversation reopened tomorrow shows a card that looks like it is
-        // still waiting for an answer somebody already gave. The transcript is
-        // where "what happened here" has to survive.
+
         self.append(
             &out.conversation_id,
             &StoredEvent::Approval {
@@ -2285,9 +2081,7 @@ impl Store {
             persona.created_at_ms = now;
         }
         persona.updated_at_ms = now;
-        // Derived from the id, so a persona keeps its face through a rename
-        // and through every edit of its brief. A caller that wants a different
-        // one sends a different seed; zero means "give me the usual one".
+
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
@@ -2390,9 +2184,7 @@ impl Store {
             &draft_prompt(brief, name),
             DRAFT_TIMEOUT.as_secs(),
         )?;
-        // Its own directory, not the workspace. A draft is a sentence in and a
-        // sentence out; giving it somebody's repository to sit in would be
-        // handing it a chance to do something nobody asked for.
+
         let cwd = std::env::temp_dir().join("tokenstat-persona-draft");
         fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
         let _prompt_file =
@@ -2450,13 +2242,10 @@ impl Store {
             return Err("chat.create needs a workspaceId".into());
         }
         crate::workspaces::folder(&input.workspace_id)?;
-        // Omitted means the workspace default. An explicit empty id is No
-        // persona. Either way, existing chats are left alone.
+
         let persona =
             self.resolve_create_persona(&input.workspace_id, input.persona_id.as_deref())?;
-        // A persona no longer names an agent, so the agent is the caller's
-        // choice or the conversation's default. That is what lets one persona
-        // be used with any backend, and survive a switch mid-conversation.
+
         let backend = input.backend;
         if backend.trim().is_empty() {
             return Err("chat.create needs a backend".into());
@@ -2614,9 +2403,6 @@ impl Store {
             changes.backend.is_some() || changes.model.is_some() || changes.effort.is_some();
         let mut switched_pty = None;
         if let Some(fast) = changes.fast_mode {
-            // The per-conversation acceptance lock serializes setup changes,
-            // but the global index lock must stay available to the drainer
-            // while the CLI acknowledges a runtime control.
             let selected = self.get(id)?;
             let current = {
                 let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -2679,10 +2465,8 @@ impl Store {
                 crate::chat_sessions::remember(&safe_join(&self.root, id)?, chat)?;
                 preserve_legacy_resume(chat);
                 chat.backend = backend;
-                // A model/effort value and a backend session are backend-
-                // specific. Do not send stale setup or a legacy token to the
-                // newly selected agent. A previously used backend can still
-                // recover its own token from `resume_tokens`.
+
+
                 chat.model = None;
                 chat.effort = None;
                 chat.fast_mode = false;
@@ -2695,9 +2479,8 @@ impl Store {
             if let Some(effort) = changes.effort {
                 chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
             }
-            // Grok's account model list can be temporarily unavailable after
-            // restart. Renaming a chat or changing unrelated setup must not
-            // erase its saved speed; launch still validates the actual pair.
+
+
             if (chat.backend != "grok" || model_changed)
                 && !crate::chat_fast::available(&chat.backend, chat.model.as_deref())
             {
@@ -2751,8 +2534,6 @@ impl Store {
         if result.is_err()
             && let Some((pty, _)) = switched_pty
         {
-            // A runtime change whose saved record failed must not continue
-            // using a paid setting that none of the clients can see.
             let _ = self.stop_pty(id, &pty);
         }
         result
@@ -2824,9 +2605,6 @@ impl Store {
         Ok(removed)
     }
 
-    /// Both the in-memory selection and the persisted index must still name
-    /// this exact conversation. The lifecycle lock is held by the caller, so
-    /// another process cannot delete it between this check and a handoff write.
     fn handoff_conversation(
         &self,
         workspace_id: &str,
@@ -2948,9 +2726,7 @@ impl Store {
         if let Some(draft) = &request.draft {
             self.attachment_paths(id, &draft.attachment_ids)?;
         }
-        // A new conversation has an index entry before it has any events.
-        // Initialize only while ownership is locked and verified; the storage
-        // layer itself must never recreate a deleted conversation directory.
+
         fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
         crate::work_handoff_store::put(&directory, request, authenticated_device, now_ms())
     }
@@ -3011,10 +2787,7 @@ impl Store {
     pub fn instructions(&self, id: &str) -> Result<Value, String> {
         let chat = self.get(id)?;
         let name = self.persona_name(&chat);
-        // What tokenstat adds, shown exactly as the agent gets it. The name
-        // belongs on this side rather than in the brief: it is ours, not
-        // something the person wrote, and it must not become editable text
-        // that can drift from the name on the persona.
+
         let mut added = String::new();
         if !name.trim().is_empty() {
             added.push_str(&crate::chat_turn::name_rule(name.trim()));
@@ -3064,9 +2837,7 @@ impl Store {
             .as_ref()
             .filter(|s| s.requested_model == chat.model);
         let mut snapshot = stored.map(|s| s.snapshot.clone()).unwrap_or_default();
-        // Selecting another model does not replace the backend session's
-        // goal. Reuse only that durable activity when its session is known;
-        // context and per-run activity still belong to the selected model.
+
         if stored.is_none()
             && let Some(previous) = backend_stored.as_ref().filter(|s| {
                 s.snapshot.session_id.is_some() && s.snapshot.session_id == chat.resume_token
@@ -3093,9 +2864,7 @@ impl Store {
                 window_source = Some("catalog");
             }
         }
-        // A launch agent's environment can differ from the login shell used
-        // to start agents. Reuse that cached environment without running a
-        // shell probe from an inspector read.
+
         let login = tokenstat_pty::login_env();
         let config_environment = |key: &str| match &login {
             Some(environment) => environment.vars.get(key).map(PathBuf::from),
@@ -3194,9 +2963,7 @@ impl Store {
         }
         let previous = crate::chat_inspection::load(&directory.join("inspection.json"))
             .filter(|s| s.backend == backend);
-        // Goals belong to the backend session and can remain active between
-        // turns. A fresh parser's lack of telemetry must not clear a goal.
-        // Plans and agents remain owned by this parser's single run.
+
         if !snapshot.activity.goal_reported
             && let Some(previous) = previous.as_ref()
             && snapshot.session_id == previous.snapshot.session_id
@@ -3230,9 +2997,7 @@ impl Store {
                     })
                 })
             });
-        // A new Claude run reports its prompt before it repeats modelUsage.
-        // Keep the capacity's explicit model identity across that gap; never
-        // apply another model's window, including an unresolved default.
+
         if snapshot.context_window.is_none()
             && let Some(window) = last_window
                 .as_ref()
@@ -3493,9 +3258,7 @@ impl Store {
             cursor: (start > 0).then(|| make_cursor(start, len, first)),
             has_earlier: start > 0,
             reset,
-            // Only with the newest page. It is the whole conversation's
-            // figure, it does not change as somebody reads backwards, and it
-            // is the one thing here that has to look past the window.
+
             usage: if include_usage && (cursor.is_none() || reset) {
                 Some(self.conversation_usage(&chat, &path)?)
             } else {
@@ -3504,8 +3267,6 @@ impl Store {
         })
     }
 
-    /// Saved vendor counts fill gaps left by older live-stream parsers. The
-    /// numeric snapshot is bounded and never includes prompts in the reply.
     fn conversation_usage(&self, chat: &Conversation, path: &Path) -> Result<Value, String> {
         let muse_root = if chat.resume_tokens.contains_key("muse")
             || (chat.backend == "muse" && chat.resume_token.is_some())
@@ -3567,7 +3328,6 @@ impl Store {
             if muse.is_some() && record["backend"] == "muse" {
                 if record["event"]["kind"] == "session" {
                     if !has_muse_session {
-                        // If session markers exist, preceding usage is inherited.
                         stored_muse = Ok(crate::work_transcript_identity::UsageTotals::default());
                     }
                     has_muse_session = true;
@@ -3594,14 +3354,12 @@ impl Store {
         if has_transcript && let Some(directory) = path.parent() {
             add_usage_value(&mut totals, &sharing::chain_usage(directory)?.value())?;
         }
-        // Only Codex raw output carries `turn.completed`. Without this gate
-        // every first-page read of any other chat scanned its raw folder.
+
         let used_codex =
             chat.backend == "codex" || chat.resume_tokens.contains_key("codex") || seen_codex;
         if used_codex && !retained_turns {
             let recovery = legacy_codex.get_or_insert_with(|| LegacyCodexUsage::load(path));
-            // Vendor logs are optional repair inputs. Their size, permissions
-            // or availability must not make a verified transcript unreadable.
+
             if let Ok(recovery) = recovery
                 && let Ok(recovered) = recovery.recover()
             {
@@ -3614,13 +3372,7 @@ impl Store {
             } else {
                 None
             };
-            // A retained summary already includes its discarded prefix, and
-            // a fork's copied history belongs to the original vendor session.
-            // Only reconcile complete visible turns created in this conversation.
-            // The older aggregate has no per-backend attribution, so repairing
-            // it from the full vendor log would count those tokens twice.
-            // A partial turn before the first surviving user stays at its
-            // recorded total until there is a complete turn to reconcile.
+
             let since_ms = retained_since
                 .map(|at| at.unwrap_or(i64::MAX))
                 .unwrap_or(chat.created_at_ms)
@@ -3631,14 +3383,8 @@ impl Store {
                 let stored = if retained_since.is_none() {
                     stored_muse?
                 } else {
-                    // Legacy retention can leave timestamps on either side of
-                    // its surviving user boundary. Resolve that cutoff first,
-                    // then reread without keeping historical records in memory.
                     let mut stored = crate::work_transcript_identity::UsageTotals::default();
-                    // A fork strips old Session markers. The current token's
-                    // marker distinguishes inherited records even when their
-                    // timestamp equals the fork's creation millisecond. Older
-                    // transcripts without markers retain the timestamp fallback.
+
                     let mut current_session = !has_muse_session;
                     visit_usage_repair_records(path, true, |record| {
                         if record["backend"] == "muse" && record["event"]["kind"] == "session" {
@@ -3657,7 +3403,7 @@ impl Store {
                     })?;
                     stored
                 };
-                // A missing or older vendor log does not erase already recorded usage.
+
                 if let Some(extra) = usage_difference(&recovered, &stored.value())? {
                     let _ = add_usage_value(&mut totals, &extra);
                 }
@@ -3717,14 +3463,6 @@ impl Store {
         })
     }
 
-    /// The handover an incoming backend should be given, if any.
-    ///
-    /// Due whenever this conversation has history the selected backend has not
-    /// seen: either it has no session of its own, or another backend owns the
-    /// latest agent event. That is not the same question as whether the
-    /// conversation changed hands, which is why `announce` is separate: an
-    /// agent that cannot resume itself needs the summary on every turn, and
-    /// saying "handed to" every turn described a switch that never happened.
     fn handover(&self, chat: &Conversation) -> Result<Option<Handover>, String> {
         let mut previous = None;
         self.visit_events_backwards(&chat.id, |event| {
@@ -3739,10 +3477,7 @@ impl Store {
         {
             return self.continuation(source);
         }
-        // A resume token proves only that this backend remembers the point at
-        // which it last ran. If another backend has spoken since then, that
-        // old session is precisely the one that needs a handover. It is current
-        // only when it also owns the latest agent event.
+
         if chat.resume_tokens.contains_key(&chat.backend)
             && previous.as_deref() == Some(chat.backend.as_str())
         {
@@ -3813,13 +3548,6 @@ impl Store {
         }))
     }
 
-    /// What the first turn of a continuing chat is told about the chat it
-    /// continues: where the full history is, and the exchange it ended on.
-    ///
-    /// Not the history itself. Carrying it over is exactly the cost the
-    /// person avoided by starting fresh, so the agent reads it only when the
-    /// person refers to something it does not have. None when the earlier
-    /// chat is gone.
     fn continuation(&self, source_id: &str) -> Result<Option<Handover>, String> {
         let Ok(source) = self.get(source_id) else {
             return Ok(None);
@@ -3864,9 +3592,7 @@ impl Store {
                 tail_chars(reply.trim(), CONTINUATION_REPLY_CHARS)
             ));
         }
-        // Name the cache the new session gives up. A warm multi-hour chat
-        // can hold hundreds of thousands of cached tokens; the new login
-        // starts cold and pays to rebuild them as it rereads context.
+
         if let Some(cache) = source.prompt_cache.as_ref() {
             let age_mins = now_ms().saturating_sub(cache.at_ms).max(0) / 60_000;
             brief.push_str(&format!(
@@ -3880,9 +3606,6 @@ impl Store {
         }))
     }
 
-    /// The person's last message and the agent text after it. The reply is
-    /// collected from the end and stops growing once it is long enough to
-    /// cut, so a very long last turn costs no more than a short one.
     fn last_exchange(&self, id: &str) -> Result<(Option<String>, String), String> {
         let mut asked = None;
         let mut pieces = Vec::new();
@@ -3920,16 +3643,14 @@ impl Store {
         profile: Option<String>,
     ) -> Result<Conversation, String> {
         let source = self.get(id)?;
-        // Same logins: a continuation is the same work.
+
         let target = profile.unwrap_or_else(|| {
             source
                 .profile_id
                 .clone()
                 .unwrap_or_else(|| crate::profiles::SYSTEM.into())
         });
-        // A handoff already made for this chat onto this profile is the
-        // continuation. Reopening it keeps one chat per profile instead of
-        // one per switch, so going back and forth never litters the list.
+
         if let Some(existing) = self.list(&source.workspace_id).into_iter().find(|chat| {
             chat.continued_from.as_deref() == Some(source.id.as_str())
                 && chat
@@ -3950,27 +3671,19 @@ impl Store {
             mode: Some(source.mode.clone()),
             autonomy: Some(source.autonomy.clone()),
             budget_seconds: Some(source.budget_seconds),
-            // The persona is copied below as it stands on the source, brief
-            // included, so a persona edited or removed since does not change
-            // or refuse the continuation.
+
             persona_id: Some(String::new()),
             profile_id: Some(target),
         })?;
         self.edit_conversation(&created.id, |chat| {
             chat.persona_id = source.persona_id.clone();
             chat.system_prompt = source.system_prompt.clone();
-            // Approval grants belong to the original conversation, just as
-            // they do when forking it. A new chat must ask again.
+
             chat.continued_from = Some(source.id.clone());
             Ok(chat.clone())
         })
     }
 
-    /// Keep the handover on disk beside the timeline it was folded from.
-    ///
-    /// Three reasons, all real: a person can read what their agent was told,
-    /// a later parser fix can regenerate it, and the full export beside it
-    /// (`history.md`) is what long handovers point the new agent at.
     fn write_brain(&self, id: &str, brief: &str) -> Result<(), String> {
         let path = safe_join(&self.root, id)?.join("brain.md");
         fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
@@ -4044,16 +3757,13 @@ impl Store {
         key: &str,
         receipt: crate::chat_receipts::Receipt,
     ) -> Result<(), String> {
-        // Read back before writing: two sends into the same conversation
-        // would otherwise write the file over each other's entries.
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let directory = self.verified_append_directory(id)?;
         fs::create_dir_all(directory).map_err(|e| e.to_string())?;
         let mut ledger = crate::chat_receipts::Ledger::load(self.receipts_path(id), now_ms())?;
         ledger.put(key.to_string(), receipt)?;
         ledger.save()?;
-        // A first send may have created the conversation directory. Persist
-        // that parent entry too, before allowing the agent to start.
+
         #[cfg(unix)]
         File::open(&self.root)
             .and_then(|directory| directory.sync_all())
@@ -4103,8 +3813,6 @@ impl Store {
         Ok(receipt)
     }
 
-    /// Send setup uses the current durable conversation after acquiring the
-    /// acceptance lock, not a snapshot from a different Store or before deletion.
     fn current_send_conversation(&self, id: &str) -> Result<Conversation, String> {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
         let chats = self
@@ -4154,10 +3862,6 @@ impl Store {
         .map(SendOutcome::into_conversation)
     }
 
-    /// `follow_up` is a parked note being sent after its turn ended. A clear
-    /// (or a newer parked note) can suppress a follow-up that already claimed
-    /// the text, and this returns the conversation without launching. A
-    /// person's own send is never that path.
     #[allow(clippy::too_many_arguments)]
     fn send_inner(
         self: &Arc<Self>,
@@ -4184,8 +3888,6 @@ impl Store {
         )
     }
 
-    /// The caller holds the conversation acceptance lock through any related
-    /// timeline writes, such as marking a question answered.
     #[allow(clippy::too_many_arguments)]
     fn send_under_acceptance(
         self: &Arc<Self>,
@@ -4205,9 +3907,7 @@ impl Store {
         if typed.is_empty() && attachment_ids.is_empty() {
             return Err("chat.send needs text or an attachment".into());
         }
-        // An image can be the whole message. The CLIs still need words on
-        // argv, so an empty caption sends a neutral viewing prompt. The
-        // timeline records what actually went out, attachments included.
+
         let viewing;
         let prompt = if typed.is_empty() {
             viewing = "What is shown in the attached images?".to_string();
@@ -4217,16 +3917,8 @@ impl Store {
         };
         let mut chat = self.current_send_conversation(id)?;
         sharing::require_personal_send(&chat)?;
-        // Before the running guard, deliberately. The case this exists for is
-        // a send whose answer went missing, and the turn it started is
-        // usually still going: "this chat is already responding" would be a
-        // failure where the truth is that the message was taken.
-        //
-        // The device is the authenticated peer rather than anything in the
-        // body, so one client cannot claim another's receipt and skip a send.
+
         let receipt_key = if let Some(question_id) = question_id {
-            // One question can be answered from any device. Its acceptance
-            // belongs to the question, rather than to a particular peer.
             Some(crate::chat_receipts::question_key(question_id))
         } else {
             match client_message_id {
@@ -4259,8 +3951,7 @@ impl Store {
                     crate::chat_receipts::ReceiptState::Accepted => {
                         return Ok(SendOutcome::Started(chat));
                     }
-                    // A missing transcript row cannot prove that spawn never
-                    // happened. Preserve this receipt for explicit review.
+
                     crate::chat_receipts::ReceiptState::Pending
                     | crate::chat_receipts::ReceiptState::NeedsRecovery => {
                         return Err(DispatchError::delivery_unknown(
@@ -4285,15 +3976,11 @@ impl Store {
                 "This conversation changed before your message was sent. Review the latest conversation and try again. Your pending copy stays here.",
             ));
         }
-        // After a receipt replay, which must not clear a Stop, and before the
-        // running guard, which would turn a retired note into an error the
-        // caller then puts back.
+
         if self.follow_up_should_skip(id, follow_up) {
             return Ok(SendOutcome::Suppressed(chat));
         }
-        // A failed drainer write can leave a running bit without a runner.
-        // Acceptance is locked by the caller, and the kernel lease proves
-        // this is idle. Repair it here rather than requiring a daemon restart.
+
         if chat.running
             && !self
                 .active
@@ -4321,9 +4008,7 @@ impl Store {
         {
             return Err("this chat is already responding".into());
         }
-        // Lease before install. Another instance holding the runner is the
-        // sharper truth than "agent not installed" on a machine that does
-        // not have this backend on PATH, and CI runners often have none.
+
         let runner = crate::chat_receipts::RunnerLease::try_acquire(&self.root, id)?
             .ok_or("This conversation is already running in another instance of tokenstat.")?;
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
@@ -4346,10 +4031,7 @@ impl Store {
         }
         let attachments = self.attachment_paths(id, attachment_ids)?;
         let response_output_dir = self.prepare_response_output_dir(id)?;
-        // The chat's profile decides whose login the agent uses. Nothing
-        // for the machine's own, so every chat from before profiles runs as
-        // it always did. A removed profile stops the turn rather than quietly
-        // using the machine's account.
+
         crate::profiles::check_workspace_lock(&chat.workspace_id, chat.profile_id.as_deref())?;
         let profile_environment = crate::profiles::environment(
             chat.profile_id.as_deref(),
@@ -4359,9 +4041,7 @@ impl Store {
         let profile_login = profile_environment
             .first()
             .map(|(_, path)| PathBuf::from(path));
-        // A profile's own login that was never signed in fails inside the
-        // agent with advice to sign in "on this computer", which would sign
-        // in the machine's login instead. Say which login and where.
+
         if profile_login.is_some()
             && let Some(profile) = chat.profile_id.as_deref()
             && let Ok(status) = crate::launcher::check_sign_in_for(
@@ -4386,9 +4066,6 @@ impl Store {
             .get(&chat.backend)
             .map(String::as_str)
             .or_else(|| {
-                // Existing conversations predate the per-backend map. Their
-                // legacy token is safe only until the first backend switch,
-                // which clears it above.
                 chat.resume_tokens
                     .is_empty()
                     .then_some(chat.resume_token.as_deref())
@@ -4410,9 +4087,7 @@ impl Store {
             output_dir: &response_output_dir,
             backend: &chat.backend,
         });
-        // How to ask the person something, for this kind of turn: a turn that
-        // does not ask before tools must never wait, and one whose agent can
-        // take a note mid-turn can be answered without stopping.
+
         composed.append_standing(&crate::chat_question::rule(
             chat.autonomy == "standard",
             takes_notes_mid_turn(&chat),
@@ -4423,10 +4098,7 @@ impl Store {
         if let Some(plan) = crate::chat_plan::rule(&chat.backend) {
             composed.append_standing(&plan);
         }
-        // Two separate things ride the same channel this turn. The standing
-        // rules repeat for as long as they are unchanged; the handover is sent
-        // exactly once, to the agent that has just been handed a conversation
-        // it did not have.
+
         let standing_due = standing_is_due(&chat, &composed.standing_fingerprint);
         let handover = if compact { None } else { self.handover(&chat)? };
         let mut instructions = String::new();
@@ -4445,12 +4117,7 @@ impl Store {
         } else {
             composed.user_text.as_str()
         };
-        // The daemon asks its own tool calls back through itself. A relative
-        // PATH lookup would be wrong under launchd and inside the private
-        // environment an agent CLI runs in, so this is the absolute path and
-        // `chat_gate` is what turns it into a runnable command line.
-        // Muse still needs the helper on a bypass turn. Its note rides a model
-        // step whether or not the turn asks first.
+
         let asks_before_tools = chat.autonomy == "standard";
         let muse_note = chat.backend == "muse" && note_backend("muse");
         let helper = if asks_before_tools || muse_note {
@@ -4461,9 +4128,7 @@ impl Store {
         let agy_customization_dir =
             (chat.backend == "agy" && chat.autonomy == "standard").then(|| self.agy_hook_home(id));
         let grok_allow_rules = grok_allow_rules(&chat);
-        // The command keeps Cursor's `--force` only beside this plugin. It is
-        // written below, with the other homes, and a failure there aborts the
-        // turn before anything spawns. A plan turn loads no plugin.
+
         let cursor_hook_home =
             (chat.backend == "cursor" && helper.is_some() && !cursor_plan(&chat))
                 .then(|| self.cursor_hook_home(id));
@@ -4508,9 +4173,7 @@ impl Store {
         } else {
             None
         };
-        // Until a process is spawned, this credential is this function's to
-        // retire. Any `?` below would otherwise leave its token registered and
-        // its file on disk after the send has already failed.
+
         let mut pending_credential = turn
             .as_ref()
             .map(|(token, file)| PendingTurnCredential::new(self, token.clone(), file.clone()));
@@ -4532,9 +4195,7 @@ impl Store {
                 "TOKENSTAT_CHAT_TURN_FILE".into(),
                 turn_file.display().to_string(),
             ));
-            // The hook must decide before the CLI's own timeout kills it. A
-            // killed hook is a non-blocking error to every one of these
-            // backends, which means the tool runs.
+
             environment.push((
                 crate::chat_gate::DEADLINE_ENV.into(),
                 crate::chat_gate::GATE_DEADLINE_SECONDS.to_string(),
@@ -4562,8 +4223,7 @@ impl Store {
             environment.extend(profile_environment);
             None
         };
-        // Like Codex, Grok keeps its sessions inside its private home, so the
-        // home must outlive the turn for the next message to resume it.
+
         if chat.backend == "grok"
             && let Some(helper) = &helper
         {
@@ -4607,10 +4267,7 @@ impl Store {
                 "OPENCODE_CONFIG_CONTENT".into(),
                 crate::opencode_cli::gate_config(generation, &plugin).to_string(),
             ));
-            // The raw path, not a command line. The plugin spawns this as
-            // argv rather than through a shell, so the quoting every other
-            // backend needs would become part of the filename here. The
-            // variable is named for which of the two it carries.
+
             environment.push((
                 crate::chat_gate::HELPER_PATH_ENV.into(),
                 helper.display().to_string(),
@@ -4628,9 +4285,7 @@ impl Store {
                 .map(|(_, file)| file.as_path())
                 .ok_or(crate::chat_gate::MUSE_NOTE_PREPARE)?;
             let socket = crate::server::default_socket_path()?;
-            // Mirror the same config root Muse inherited before this turn's
-            // override. A customized XDG home can hold its sign-in as well as
-            // its settings, and the login shell can supply it to a daemon.
+
             let login = tokenstat_pty::login_env();
             let config_root = match &login {
                 Some(environment) => environment.vars.get("XDG_CONFIG_HOME").map(PathBuf::from),
@@ -4673,12 +4328,9 @@ impl Store {
                 "Update the agent CLI and use Tokenstat hostd to run native compaction.".into(),
             );
         }
-        // Written before anything is started, so a host that dies between the
-        // spawn and its answer leaves a record to reconcile against rather
-        // than a message the next attempt would run a second time.
+
         crate::workspace_policy::require_current_access()?;
-        // Reserve a new revision durably before launch. Even a failed spawn
-        // consumes it: another client must review the changed launch intent.
+
         let branch = tokenstat_workspace::git::current_branch(&workspace.path);
         crate::account_session::check_current()?;
         if !compact {
@@ -4704,8 +4356,7 @@ impl Store {
                 },
             )?;
         }
-        // Capture the working tree before the process can edit it. Taking
-        // this snapshot in the drainer races the agent's first patch.
+
         let measure = (chat.backend == "codex")
             .then(|| crate::chat_edit_measure::EditMeasure::start(Path::new(&workspace.path)));
         if let Err(error) = crate::account_session::check_current()
@@ -4741,15 +4392,14 @@ impl Store {
             Ok(info) => info,
             Err(error) => {
                 tokenstat_sync::push::abandon_activity(id, activity_revision);
-                // Nothing was delivered, so the receipt has to go with it or
-                // the next attempt would be refused as a repeat.
+
                 if let Some(key) = &receipt_key {
                     let _ = self.drop_receipt(id, key);
                 }
                 return Err(error.into());
             }
         };
-        // The process exists and its drain thread will retire the credential.
+
         if let Some(pending) = pending_credential.as_mut() {
             pending.release();
         }
@@ -4766,19 +4416,11 @@ impl Store {
         }
         let recorded = (|| -> Result<Conversation, String> {
             let running = self.set_running(id, true)?;
-            // Only once the process exists. A spawn that failed delivered nothing,
-            // and marking it sent would silently drop this conversation's rules
-            // from every later turn on that backend.
+
             if standing_due && !compact {
                 self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
             }
-            // The handover goes on the timeline, brief and all. It is text
-            // tokenstat put in front of somebody's agent, so their conversation is
-            // where it should be readable. Only when the conversation actually
-            // changed hands, though: the same agent being handed its own history
-            // again is plumbing, and a row saying so after every reply reads as
-            // the chat talking to itself. `brain.md` is still written either way,
-            // so what the agent was told is always on disk.
+
             if let Some(handover) = &handover {
                 self.write_brain(id, &handover.brief)?;
                 if handover.announce {
@@ -4820,9 +4462,7 @@ impl Store {
             if !compact {
                 self.retitle_if_untitled(id, prompt)?;
             }
-            // The person's own message is on the timeline. A note parked for
-            // the turn this replaces must not ride the next tool of the new
-            // one. A follow-up is that note, so it is left for the hooks.
+
             if !follow_up {
                 self.steers
                     .lock()
@@ -4836,8 +4476,7 @@ impl Store {
                 .open(self.events_path(id))
                 .and_then(|file| file.sync_all())
                 .map_err(|e| e.to_string())?;
-            // The turn is running and the message is on the timeline. A repeat of
-            // this id now gets the conversation back and starts nothing.
+
             if let Some(key) = &receipt_key {
                 self.write_receipt(
                     id,
@@ -4860,9 +4499,7 @@ impl Store {
             revision: activity_revision,
             maintenance: compact,
         };
-        // Preserve the backend's original stream per turn. Structured events
-        // are what the UI reads, but raw output lets a parser correction
-        // rematerialize an older conversation without rerunning an agent.
+
         let raw_path = self.raw_path(id, now_ms());
         let turn_token = turn.as_ref().map(|(token, _)| token.clone());
         let turn_file = turn.as_ref().map(|(_, file)| file.clone());
@@ -4948,8 +4585,7 @@ impl Store {
         validate_record_id(id)?;
         let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
-        // Routing storage must never prevent the person from stopping a
-        // process. Acceptance excludes the scheduler throughout both steps.
+
         self.stop_locked(id, branch, false)?;
         self.router_cancel_locked(id).map_err(|error| {
             format!("The turn stopped, but routing cancellation could not be saved: {error}")
@@ -4991,8 +4627,7 @@ impl Store {
                 stopping: false,
             });
         }
-        // Acceptance remains locked while the stop path takes its own lease.
-        // A live owner releases ownership itself after its cleanup.
+
         drop(idle_lease);
         let has_note = self
             .steers
@@ -5041,10 +4676,7 @@ impl Store {
                     return Err(error.to_string());
                 }
             }
-            // A missing PTY may be orphaned, or its drainer may have closed
-            // it just before final cleanup. Only a free runner lease proves
-            // we can repair it here. Otherwise keep the running guard until
-            // that cleanup ends, so the next Send cannot race its lease.
+
             if tokenstat_pty::manager().info(&pty).is_err()
                 && self
                     .active
@@ -5053,8 +4685,6 @@ impl Store {
                     .get(id)
                     .is_some_and(|current| current == &pty)
             {
-                // The process already ended. A late Stop mark must not
-                // survive the drainer and label the next turn as stopped.
                 self.killed
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -5065,8 +4695,7 @@ impl Store {
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
                         .remove(id);
-                    // No drainer owns this orphan. A failed write remains
-                    // recoverable through the idle path on a later retry.
+
                     let _ = self.stop_running(id, branch);
                 }
             }
@@ -5092,9 +4721,7 @@ impl Store {
                         .into(),
                 );
             }
-            // After the conversation is known to be this instance's, and
-            // before `running` is cleared. A missing id still takes the
-            // existing error and leaves any note alone.
+
             let chat = self.get(id)?;
             self.append(
                 id,
@@ -5163,8 +4790,7 @@ impl Store {
             (chat.budget_seconds > 0)
                 .then(|| Instant::now() + Duration::from_secs(chat.budget_seconds))
         });
-        // Codex names the files it edits but not the lines, so they are
-        // measured here. See `chat_edit_measure`.
+
         let mut measured = |events: Vec<Event>| match measure.as_mut() {
             Some(measure) => measure.observe(events),
             None => events,
@@ -5186,8 +4812,6 @@ impl Store {
                         .and_then(|chat| chat.run_started_at_ms)
                         .unwrap_or(0)
             {
-                // This runner alone owns its process and cleanup. Never unlink
-                // another owner's lease or let a replacement race the drainer.
                 let _ = self.stop(id);
                 let _ = fs::remove_file(&stop_path);
             }
@@ -5231,18 +4855,13 @@ impl Store {
                     );
                     self.record_tool_images(id, backend, activity_revision, parser.take_images());
                     if muse_sign_in_required {
-                        // Muse exec waits for browser login instead of exiting.
-                        // This is only its own normalized startup challenge;
-                        // guided sign-in runs in a separate launcher PTY.
                         let _ = manager.kill(pty);
                     }
-                    // Mid-turn, so the card is in front of the person while
-                    // an answer can still reach this turn.
+
                     self.record_questions(id, backend, questions.scan(&assistant_text));
                 }
             }
-            // Check budgets on every bounded chunk, including a fast backlog
-            // read. A large producer must never bypass Stop or its deadline.
+
             let status = manager.info(pty);
             if status.as_ref().is_ok_and(|info| info.alive)
                 && deadline.is_some_and(|when| Instant::now() >= when)
@@ -5252,10 +4871,6 @@ impl Store {
             match status {
                 Err(_) => break,
                 Ok(info) if !info.alive => {
-                    // EOF and child exit can arrive in either order. Drain
-                    // the reader's last bytes before finalizing inspection,
-                    // images and status, with a bounded grace for descendants
-                    // that inherit stdout or a child that closes it and hangs.
                     let eof_at = eof_at.get_or_insert_with(Instant::now);
                     let stopped = self
                         .killed
@@ -5273,8 +4888,6 @@ impl Store {
                         break;
                     }
                     if received_bytes > 0 {
-                        // A finished producer can leave many bounded chunks.
-                        // Consume that backlog without one polling delay each.
                         continue;
                     }
                 }
@@ -5290,9 +4903,7 @@ impl Store {
                 Ok(_) => {}
             }
             burst_bytes = 0;
-            // Bound publication work during fast streams, but wake promptly
-            // for the first output after an idle period. The timeout still
-            // checks Stop and budgets when the provider produces no output.
+
             if received_bytes > 0 {
                 std::thread::sleep(STREAM_BATCH);
             }
@@ -5301,7 +4912,7 @@ impl Store {
                 Err(_) => break,
             }
         }
-        // One final read catches output written immediately before exit.
+
         if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset)
             && !chunk.bytes.is_empty()
         {
@@ -5403,8 +5014,7 @@ impl Store {
             }],
         );
         let _ = self.mark_last_message(id, now_ms(), "agent");
-        // Same rule as the approval above: a turn that ended in front of
-        // somebody has already told them.
+
         if let Some(reason) = chat_notification(status)
             .filter(|_| !crate::presence::is_watched(id) && self.routing_notifications_enabled(id))
         {
@@ -5421,8 +5031,6 @@ impl Store {
         let _ = manager.close(pty);
     }
 
-    // A following send must not reuse turn directories until their previous
-    // owner has finished cleanup. A late drainer cannot retire a newer turn.
     fn finish_turn(
         &self,
         id: &str,
@@ -5431,15 +5039,10 @@ impl Store {
         retire_credentials: impl FnOnce(),
         cleanup: impl FnOnce(),
     ) -> Result<(), String> {
-        // This turn's credential and turn file are its own whatever the
-        // conversation is doing now. A newer turn owning the conversation
-        // must not keep a dead turn's token or file alive.
         retire_credentials();
         let branch = self.folder_branch(id);
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
-        // Hands off only when a newer turn owns the conversation. An unowned
-        // one is still this drainer's to retire: its cleanup must run even
-        // when the guard below was already released elsewhere.
+
         if self
             .active
             .lock()
@@ -5452,17 +5055,13 @@ impl Store {
         self.deny_pending_approvals(id);
         cleanup();
         let status = self.stop_running(id, branch);
-        // The guard goes even when that write fails, or every later send is
-        // refused as already responding while Stop reports success without
-        // changing anything. A newer turn cannot have appeared in between:
-        // sends are refused while this entry is present.
+
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
         drop(runner);
-        // Only the archive this process serves: a store opened over another
-        // directory must not read or write beside that one.
+
         if STORE
             .get()
             .is_some_and(|served| std::ptr::eq(&**served, self))
@@ -5611,9 +5210,6 @@ impl Store {
         }
     }
 
-    /// Copy only explicit, correlated image evidence into the same private
-    /// attachment store used by shared files. The original may disappear
-    /// after a screenshot tool returns; remote clients need durable bytes.
     fn record_tool_images(
         &self,
         id: &str,
@@ -5729,9 +5325,6 @@ impl Store {
         }
     }
 
-    /// Turn explicit local-file links in the final reply into durable chat
-    /// attachments. The link is the agent's declaration of intent; arbitrary
-    /// paths mentioned in prose or printed by a tool are never copied.
     fn record_response_attachments(
         &self,
         id: &str,
@@ -5826,7 +5419,6 @@ impl Store {
         }
     }
 
-    /// The caller holds the root lifecycle lock until all writes finish.
     fn verified_append_directory(&self, id: &str) -> Result<PathBuf, String> {
         validate_record_id(id)?;
         let chats = self
@@ -5879,8 +5471,6 @@ impl Store {
             return Err("conversation event exceeds the record limit".into());
         }
         if let Err(error) = file.write_all(&encoded) {
-            // An ordinary I/O failure must not leave half a JSON record.
-            // A process crash is detected by the complete-tail check above.
             file.set_len(end).map_err(|e| e.to_string())?;
             return Err(error.to_string());
         }
@@ -5943,10 +5533,6 @@ impl Store {
         })
     }
 
-    /// The branch the conversation's folder is on now, or `None` when the
-    /// folder cannot be found. It spawns git, so callers read it before
-    /// taking the acceptance lock: a slow or network-mounted folder must not
-    /// hold up answers and steers to the conversation while git runs.
     fn folder_branch(&self, id: &str) -> Option<Option<String>> {
         self.get(id)
             .ok()
@@ -5967,8 +5553,7 @@ impl Store {
             }
             Ok(chat.clone())
         })?;
-        // Ordinary drainers already posted their exact ending and retired
-        // the binding. This covers Stop recovering a missing PTY/drainer.
+
         tokenstat_sync::push::activity_in_background(
             id,
             chat.run_revision.unwrap_or(chat.send_revision),
@@ -5992,8 +5577,6 @@ impl Store {
             Ok(())
         })
     }
-    /// Remember what this turn left in the prompt cache. It does not move
-    /// `updated_at_ms`: a finished turn already did, and this is bookkeeping.
     fn record_prompt_cache(
         &self,
         id: &str,
@@ -6025,8 +5608,6 @@ impl Store {
             Ok(())
         })
     }
-    /// Remember that one backend now holds this version of the conversation's
-    /// standing rules, so the next turn on it can be the person's words alone.
     fn mark_standing_sent(&self, id: &str, backend: &str, fingerprint: &str) -> Result<(), String> {
         self.edit_conversation(id, |chat| {
             chat.standing_sent
@@ -6044,8 +5625,6 @@ impl Store {
     }
 
     fn events_path(&self, id: &str) -> PathBuf {
-        // `id` is validated at every public entry point; this is internal.
-        // Fall back to a safe name if called with an unexpected value.
         let safe = safe_file_name(id);
         self.root.join(safe).join("events.ndjson")
     }
@@ -6062,9 +5641,6 @@ impl Store {
         self.root.join(safe_file_name(id)).join("codex-hook")
     }
 
-    /// Older turns deleted this home during cleanup. Give a fresh Codex
-    /// session the stored conversation instead of resuming a missing rollout.
-    /// Keep this decision local until the new session reports its own token.
     fn codex_session_missing(&self, chat: &Conversation) -> bool {
         chat.backend == "codex"
             && private_codex_home(chat.autonomy == "standard")
@@ -6077,10 +5653,6 @@ impl Store {
         }
     }
 
-    /// Claude Code deletes old session transcripts on its own schedule, and
-    /// `--resume` of one it no longer has fails the turn. Start a fresh
-    /// session with the handover instead. Team runs keep their own Claude
-    /// home, so only private chats are checked here.
     fn recover_claude_session(&self, chat: &mut Conversation, profile: Option<&Path>) {
         self.recover_claude_session_using(chat, |token| match profile {
             Some(home) => crate::chat_cache::claude_session_in_home(home, token),
@@ -6110,9 +5682,6 @@ impl Store {
         }
     }
 
-    /// A turn that failed because Claude no longer had its session. Forget
-    /// that session now, so Try again starts a fresh one with the handover
-    /// rather than failing the same way.
     fn forget_missing_claude_session(&self, id: &str) {
         let Ok(mut chat) = self.get(id) else {
             return;
@@ -6132,10 +5701,6 @@ impl Store {
         });
     }
 
-    /// Chats whose last turn predates the prompt cache record get one from
-    /// their newest stored Claude stream, so the idle question covers them
-    /// too. Only recent ones: Claude Code drops old sessions, and a chat
-    /// without its session starts a new one instead of reading everything.
     fn backfill_prompt_caches(&self) {
         const RECENT: std::time::Duration = std::time::Duration::from_secs(45 * 24 * 60 * 60);
         const TAIL: u64 = 1024 * 1024;
@@ -6243,8 +5808,6 @@ impl Store {
         }
     }
 
-    /// Keep the old ID in the private history, but rebuild the launch's
-    /// standing rules and handover before starting a replacement session.
     fn invalidate_native_session(&self, chat: &mut Conversation) {
         if let Ok(_lifecycle) = crate::work_handoff_store::lifecycle_lock(&self.root)
             && let Ok(directory) = safe_join(&self.root, &chat.id)
@@ -6269,21 +5832,10 @@ impl Store {
         chat.standing_sent.remove(&chat.backend);
     }
 
-    /// The folder this conversation's outputs are staged in.
-    ///
-    /// The path stays stable for the life of the conversation because it is
-    /// named inside the standing file rule, and a path that moved every turn
-    /// would move the standing fingerprint with it and re-send the rules on
-    /// every turn. It lives under the private data directory rather than the
-    /// shared temp directory, and `prepare_response_output_dir` empties and
-    /// recreates it fresh for each turn.
     fn response_output_dir(&self, id: &str) -> PathBuf {
         self.root.join(safe_file_name(id)).join("output")
     }
 
-    /// Create this turn's staging directory fresh, accessible only to the
-    /// user. A leftover from a crashed turn is removed first so its files can
-    /// never be mistaken for this turn's output.
     fn prepare_response_output_dir(&self, id: &str) -> Result<PathBuf, String> {
         let directory = self.response_output_dir(id);
         if fs::symlink_metadata(&directory).is_ok() {
@@ -6314,14 +5866,11 @@ impl Store {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            // Set at creation, not afterward: a credential briefly readable
-            // under the process umask would defeat the point of this file.
+
             options.mode(0o600);
         }
         let mut file = options.open(&path).map_err(|error| error.to_string())?;
         if let Err(error) = file.write_all(token.as_bytes()) {
-            // A half-written credential file is still a credential-shaped
-            // file; the send has failed, so it must not stay behind.
             let _ = fs::remove_file(&path);
             return Err(error.to_string());
         }
@@ -6336,9 +5885,6 @@ impl Store {
         self.root.join(safe_file_name(id)).join("cursor-hook")
     }
 
-    /// Persistent for the life of the conversation, unlike the other homes.
-    /// See `chat_gate::write_grok_home`: grok keeps its sessions in here, so
-    /// deleting it after a turn would delete the thing `--resume` needs.
     fn grok_hook_home(&self, id: &str) -> PathBuf {
         self.root.join(safe_file_name(id)).join("grok-home")
     }
@@ -6428,8 +5974,6 @@ impl Store {
         }
         let mut index = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(id) = index.default_by_workspace.get(workspace_id).cloned() {
-            // A stored empty id is a decision, not a gap. Nothing is minted
-            // and nothing is adopted: this workspace wants no persona.
             if id.is_empty() {
                 return Ok(None);
             }
@@ -6489,10 +6033,7 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
-        // Two saves can overlap. A fixed temp name let the second writer
-        // rename the first writer's half-written file into place, and a crash
-        // could leave that truncated file where the next load would trust it.
-        // The pid plus a process-wide counter gives each attempt its own file.
+
         let temporary = ChatTemporary(self.root.join(format!(
             ".personas-{}-{:x}.tmp",
             std::process::id(),
@@ -6506,11 +6047,6 @@ impl Store {
         fs::rename(&temporary.0, self.root.join("personas.json")).map_err(|e| e.to_string())
     }
 
-    /// Settle anything nobody answered, and forget what is long settled.
-    ///
-    /// A timeout is a denial, and it goes onto the timeline like any other, so
-    /// a person coming back to the conversation reads "this was refused
-    /// because nobody was here" rather than a card frozen mid-question.
     fn prune_approvals(&self) {
         let now = now_ms();
         let expired: Vec<Approval> = {
@@ -6544,9 +6080,6 @@ impl Store {
     }
 }
 
-// One provider read can contain hundreds of token records. Persist adjacent
-// prose together so each token does not reopen and lock the transcript. This
-// adds no waiting and keeps every non-text event in its original position.
 fn coalesce_stream_deltas(events: Vec<Event>) -> Vec<Event> {
     const MAX_DELTA_BYTES: usize = 64 * 1024;
     let mut out = Vec::with_capacity(events.len().min(64));
@@ -6569,16 +6102,10 @@ fn coalesce_stream_deltas(events: Vec<Event>) -> Vec<Event> {
     out
 }
 
-/// Consume large already-buffered tool/image output without one polling
-/// delay per 256 KiB. Small token streams keep their existing batching. A
-/// finite burst yields normally even if a producer keeps the queue full.
 fn drain_buffered_output(received: usize, pending: u64, burst: usize) -> bool {
     received > 0 && pending >= DRAIN_BACKLOG_BYTES && burst < DRAIN_BURST_BYTES
 }
 
-/// A closed output stream has a finite tail: finish consuming it even when
-/// parsing or archiving previous chunks spent the reconciliation grace.
-/// Waiting for inherited stdout or an unknown child exit remains bounded.
 fn wait_for_exit_status(
     exit: Option<i32>,
     output_end: Option<u64>,
@@ -6610,8 +6137,7 @@ fn chat_notification(status: &str) -> Option<tokenstat_sync::push::Reason> {
     match status {
         "ok" => Some(tokenstat_sync::push::Reason::ChatFinished),
         "error" => Some(tokenstat_sync::push::Reason::ChatFailed),
-        // Stop came from the person at a keyboard. It is not news to them and
-        // must never be narrated as a failed turn on another device.
+
         _ => None,
     }
 }
@@ -6624,12 +6150,6 @@ fn has_live_approval(approvals: &[Approval], conversation_id: &str, now: i64) ->
     })
 }
 
-/// Append one backend chunk to the turn's raw spill, keeping the file bounded.
-///
-/// Raw output is what lets a parser correction rematerialize an old turn, so
-/// it is kept rather than dropped. The cap keeps one runaway turn from filling
-/// the data directory: when the file would pass it, the oldest bytes go and a
-/// marker line records that they did.
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     use std::io::{Read, Seek, SeekFrom};
     fs::create_dir_all(path.parent().ok_or("invalid chat raw path")?).map_err(|e| e.to_string())?;
@@ -6644,7 +6164,7 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // A spill from an older build may predate the 0600 creation mode.
+
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
     }
@@ -6658,8 +6178,7 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
     file.seek(SeekFrom::Start(start))
         .map_err(|e| e.to_string())?;
     file.read_exact(&mut tail).map_err(|e| e.to_string())?;
-    // A chunk boundary can land mid-line. Drop the partial first line rather
-    // than keep a record no reader can parse.
+
     match tail.iter().position(|byte| *byte == b'\n') {
         Some(newline) => drop(tail.drain(..=newline)),
         None => tail.clear(),
@@ -6826,9 +6345,6 @@ fn copy_fork_files(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Write a chat-owned file at user-only permissions, refusing to follow a
-/// symlink at the path. Raw output, `brain.md` and `history.md` are private
-/// records; the process umask is not a permission model.
 fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
@@ -6841,18 +6357,13 @@ fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // A file from an older build may predate the 0600 creation mode.
+
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|error| error.to_string())?;
     }
     file.write_all(contents).map_err(|error| error.to_string())
 }
 
-/// One timeline row for a file the person attached to their own message.
-///
-/// Derived from the staged file, never from client text: the name is the
-/// leaf on disk, the size is measured, and the media type comes from the
-/// extension table, so a row cannot claim an image it does not have.
 fn attachment_event(id: &str, path: &Path) -> Event {
     let name = path
         .file_name()
@@ -6891,7 +6402,7 @@ fn safe_file_name(name: &str) -> String {
     if cleaned.is_empty() {
         return "attachment".into();
     }
-    // Files travel between Unix and Windows, including from agents' outputs.
+
     let stem = cleaned.split('.').next().unwrap_or("").to_ascii_uppercase();
     if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (stem.len() == 4
@@ -6904,16 +6415,6 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-/// Append the turn's reply text, and say how many bytes were dropped from the
-/// front, so anything holding an offset into the text can move it along.
-///
-/// Any other event between two runs of text ends a line: a tool call, an
-/// edit, a thought, a usage report or an attachment. The agent wrote them as
-/// separate blocks, every client draws them as separate rows, and joined back
-/// to back a fence that closed one block or opened the next would sit
-/// mid-line, where the question scanner rightly refuses to see a fence. A
-/// client would still strip that block from the reply, and the question
-/// would be lost from both places.
 fn collect_agent_text(events: &[Event], text: &mut String) -> usize {
     for event in events {
         match event {
@@ -6922,8 +6423,7 @@ fn collect_agent_text(events: &[Event], text: &mut String) -> usize {
             _ => {}
         }
     }
-    // Trim in one pass once the buffer is twice the tail, rather than moving
-    // it on every delta.
+
     if text.len() > ASSISTANT_TEXT_TAIL * 2 {
         let mut cut = text.len() - ASSISTANT_TEXT_TAIL;
         while cut < text.len() && !text.is_char_boundary(cut) {
@@ -6935,8 +6435,6 @@ fn collect_agent_text(events: &[Event], text: &mut String) -> usize {
     0
 }
 
-/// Extract only Markdown destinations that unambiguously name a local file.
-/// Plain paths in prose and command output do not count as consent to copy.
 fn response_file_paths(text: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
@@ -6949,8 +6447,6 @@ fn response_file_paths(text: &str) -> Vec<PathBuf> {
         let destination = if raw.starts_with('<') && raw.ends_with('>') {
             &raw[1..raw.len() - 1]
         } else if raw.contains(char::is_whitespace) {
-            // Markdown titles and unwrapped paths with spaces are ambiguous.
-            // The prompt tells agents to use angle brackets for that case.
             continue;
         } else {
             raw
@@ -6959,16 +6455,13 @@ fn response_file_paths(text: &str) -> Vec<PathBuf> {
             .strip_prefix("file://")
             .or_else(|| destination.strip_prefix("sandbox:"))
             .unwrap_or(destination);
-        // Markdown links may contain either POSIX paths or native Windows
-        // paths. Keep the absolute-path boundary: relative links and URLs do
-        // not grant permission to read from the machine.
+
         let is_absolute = local.starts_with('/') || Path::new(local).is_absolute();
         if !is_absolute {
             continue;
         }
         let decoded = percent_decode_path(local);
-        // `file:///C:/...` is the URL spelling Windows commonly emits. The
-        // leading slash is a URL separator, not part of the drive path.
+
         let decoded = if cfg!(windows)
             && decoded.starts_with('/')
             && decoded.as_bytes().get(2) == Some(&b':')
@@ -7063,14 +6556,6 @@ fn media_type_for_path(path: &Path) -> Option<String> {
     )
 }
 
-/// Whether this turn has to carry the conversation's standing rules.
-///
-/// A backend with a system-prompt flag is given them every turn, because a
-/// flag costs nothing and re-sending is what makes editing a persona take
-/// effect immediately. A backend without one has them prepended to the turn,
-/// so it is told only when it has not already seen this exact version. Sending
-/// them every time is what put a paragraph of plumbing in front of every
-/// sentence somebody wrote.
 fn standing_is_due(chat: &Conversation, fingerprint: &str) -> bool {
     crate::chat_turn::accepts_system_prompt(&chat.backend)
         || chat.standing_sent.get(&chat.backend).map(String::as_str) != Some(fingerprint)
@@ -7091,17 +6576,6 @@ fn title_from_prompt(prompt: &str) -> String {
     }
 }
 
-/// Read the saved personas, bringing older ones forward.
-///
-/// A persona used to carry a backend, model, effort, mark and autonomy. Serde
-/// drops those on the way in, which is the whole migration for them: they were
-/// duplicates of conversation state and there is nothing to preserve. The one
-/// field that has to be filled is the face seed, because a persona saved
-/// before faces existed must not get a different one on every launch.
-///
-/// The file used to be a bare array. Missing `workspace_id` is the shared
-/// legacy case: those records stay available everywhere and are never
-/// reassigned.
 fn load_persona_index(root: &Path) -> PersonaIndex {
     let bytes = match fs::read(root.join("personas.json")) {
         Ok(bytes) => bytes,
@@ -7117,16 +6591,13 @@ fn load_persona_index(root: &Path) -> PersonaIndex {
     } else {
         PersonaIndex::default()
     };
-    // Recognize old names while their shipped brief is still present.
+
     migrate_starter_names(&mut index);
     for persona in &mut index.personas {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
-        // Match the shipped text itself: saving a face or resaving an unchanged
-        // starter also advances updated_at_ms. Neither makes that text custom.
-        // Shared/renamed personas and custom briefs stay intact. Existing
-        // conversations keep their copied brief.
+
         if persona.workspace_id.is_some()
             && persona.created_at_ms > 0
             && (STARTER_NAMES.contains(&persona.name.as_str())
@@ -7148,7 +6619,7 @@ fn migrate_starter_names(index: &mut PersonaIndex) {
         let Some(workspace) = persona.workspace_id.as_deref() else {
             continue;
         };
-        // A saved edit or a custom brief belongs to the person who wrote it.
+
         if persona.created_at_ms <= 0
             || persona.created_at_ms != persona.updated_at_ms
             || !matches!(
@@ -7204,7 +6675,6 @@ fn mint_persona_id(existing: &[Persona]) -> String {
     }
 }
 
-/// A human-sortable, process-unique id for chat records that become paths.
 fn mint_record_id(prefix: &str) -> String {
     let sequence = RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}-{}-{sequence}", now_ms())
@@ -7221,18 +6691,6 @@ fn starter_name(workspace_id: &str, taken: &HashSet<String>) -> &'static str {
     STARTER_NAMES[start]
 }
 
-/// The number a persona's drawn character comes from.
-///
-/// Taken from the id rather than the name, so renaming "Reviewer" to "Careful
-/// reviewer" does not hand somebody a stranger. `| 1` because zero is the
-/// sentinel for "not set yet", and a persona whose id happens to hash to zero
-/// would otherwise be re-seeded on every load.
-/// What the drafting agent is asked for.
-///
-/// Strict about the shape because the answer is parsed, and strict about the
-/// voice because a persona brief is read by another model afterwards: second
-/// person, about behaviour rather than tools, and short enough that it does
-/// not crowd out the person's own words on every turn.
 fn draft_prompt(brief: &str, name: Option<&str>) -> String {
     let name_rule = match name.map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) => format!("Keep this name exactly: \"{name}\". Do not rename it."),
@@ -7262,13 +6720,6 @@ fn finish_draft(reply: &str, fallback_brief: &str, name: Option<&str>) -> Result
     Ok(draft)
 }
 
-/// Pull the draft out of whatever the agent actually said.
-///
-/// Models wrap JSON in prose and in code fences however clearly they are asked
-/// not to, so the outermost braces are found rather than assumed. A reply that
-/// cannot be read is an error the wizard shows, never a half-parsed persona:
-/// the person's own words stay in the field and they try again or write it
-/// themselves.
 fn draft_from_reply(reply: &str, fallback_brief: &str) -> Result<Value, String> {
     let start = reply
         .find('{')
@@ -7311,9 +6762,6 @@ pub(crate) fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Recover message metadata for an index written before those fields existed.
-/// Event archives are capped, so this is a bounded startup read performed once
-/// per legacy conversation and persisted back into the index immediately.
 fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
     let bytes = fs::read(path).ok()?;
     let text = std::str::from_utf8(&bytes).ok()?;
@@ -7322,8 +6770,7 @@ fn last_message_in(path: &Path) -> Option<(i64, &'static str)> {
         match event {
             StoredEvent::User { at_ms, .. } => Some((at_ms, "user")),
             StoredEvent::Agent { at_ms, .. } => Some((at_ms, "agent")),
-            // A question rides an agent reply and an answer rides a message,
-            // and each of those is counted where it is recorded.
+
             StoredEvent::Approval { .. }
             | StoredEvent::Handoff { .. }
             | StoredEvent::Question { .. }
@@ -7364,17 +6811,6 @@ pub fn backends(force: bool) -> Vec<Value> {
                 let id = map.get("id").and_then(Value::as_str).unwrap_or("");
                 map.insert(
                     "gateTier".into(),
-                    // Grok used to be `rules`: launched `--permission-mode
-                    // dontAsk` with allow rules fixed at spawn, it could not
-                    // ask about anything else, it could only refuse. It now
-                    // runs against a private `$GROK_HOME` holding tokenstat's
-                    // own `PreToolUse` hook, so it asks like the rest.
-                    // Muse's headless approval UI is not tokenstat's hook
-                    // protocol, so expose it as an explicit Bypass choice.
-                    // Bypass invokes Muse's `--yolo` mode: no approvals and
-                    // no workspace sandbox for that explicitly trusted run.
-                    // Cursor runs a private `--plugin-dir` holding the same
-                    // hook, so it asks too. See `chat_gate::write_cursor_plugin`.
                     json!(if matches!(id, "sh" | "muse") {
                         "bypassOnly"
                     } else {
@@ -7402,9 +6838,7 @@ pub fn backends(force: bool) -> Vec<Value> {
                 backend["readiness"] = profile["readiness"].clone();
                 backend["signIn"] = profile["signIn"].clone();
                 backend["canCheckSignIn"] = profile["canCheckSignIn"].clone();
-                // The daily check's answer, so the picker can mark an agent
-                // that is behind. Only a real newer version marks it: an
-                // agent with nothing to compare (Muse) never does.
+
                 if let Some(row) = profile["id"]
                     .as_str()
                     .and_then(crate::agent_updates::cached)
@@ -7414,11 +6848,7 @@ pub fn backends(force: bool) -> Vec<Value> {
                     backend["installedVersion"] = row["version"].clone();
                 }
             }
-            // Chat advertises the live list where enumeration works and the
-            // curated list where it cannot (Claude's aliases, Muse's Spark
-            // set): both arrive from `automations::backends` already merged.
-            // Only a missing agent advertises nothing. The agent's own
-            // default remains usable when enumeration is unsupported or fails.
+
             backend["modelListStatus"] = json!(crate::agent_models::list_status(&id));
             if backend["installed"] == false {
                 backend["models"] = json!(Vec::<String>::new());
@@ -7430,17 +6860,12 @@ pub fn backends(force: bool) -> Vec<Value> {
         .collect()
 }
 
-/// The local servers' models and how much each holds, read once per list.
-/// Loopback only, and a refused port answers at once, so this costs nothing
-/// on a machine with no local model server running.
 fn local_model_catalog() -> (
     Vec<crate::local_models::LocalProvider>,
     std::collections::HashMap<(String, String), u64>,
 ) {
     let local = crate::local_models::discover().unwrap_or_default();
-    // How much each local model holds, asked once per list rather than once
-    // per agent. A picker warns about a model too small for an agent's
-    // instructions.
+
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     let contexts: std::collections::HashMap<(String, String), u64> = local
         .iter()
@@ -7471,9 +6896,6 @@ pub fn with_local_models(mut backends: Vec<Value>) -> Vec<Value> {
     backends
 }
 
-/// Put the models a running local server offers into an agent's list, after
-/// its own. `localModels` carries a readable name for each, so a client can
-/// show "LM Studio: Qwen3" while an older one still offers the plain id.
 fn add_local_models(
     backend: &mut Value,
     id: &str,
@@ -7552,16 +6974,12 @@ pub(crate) fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel
     };
     let environment = crate::launcher::model_environment(&command, Some(provider), Some(local))?;
     Ok(match backend {
-        // OpenCode looks the model up as `provider/model` in the config the
-        // environment registers.
         "opencode" | "opencode2" => TurnModel {
             cli: Some(format!("{provider}/{local}")),
             environment,
             leading_args: Vec::new(),
         },
-        // Codex has to be told to leave its cloud account out of it. A
-        // config override rather than `--oss`, because chat runs Codex as a
-        // live app server, which takes `-c` and refuses launch-only flags.
+
         "codex" => TurnModel {
             cli: Some(local.to_owned()),
             environment,
@@ -7575,15 +6993,6 @@ pub(crate) fn turn_model(backend: &str, model: Option<&str>) -> Result<TurnModel
     })
 }
 
-/// Grok evaluates explicit rules before its headless `dontAsk` fallback. A
-/// saved non-shell tool name maps to its documented bare `ToolPrefix`.
-///
-/// Shell calls are deliberately left out. `Bash(prefix*)` matched anything
-/// that merely began with the prefix, so an appended `; curl …` passed an
-/// allow meant for `git status`. An exact rule would instead refuse the
-/// ordinary flags that made the prefix worth saving. So the `PreToolUse` hook
-/// stays the one gate for shells, where `request_approval` matches the
-/// derived prefix exactly and answers a repeat without a card.
 fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
     let mut rules: Vec<String> = chat
         .allowed_tools
@@ -7636,15 +7045,6 @@ pub struct EventPage {
     pub usage: Option<Value>,
 }
 
-/// Fold every usage record in the archive.
-///
-/// The meter says "this conversation", so it cannot be added up from the page
-/// somebody happens to be looking at: reading backwards would make the number
-/// climb. Counted here once, when a conversation opens.
-///
-/// Cheap despite reading the file, because usage is a few dozen records out
-/// of thousands and a substring test skips the rest without parsing them.
-/// No unbounded vendor-file walks on a sidebar hover.
 const VENDOR_USAGE_BYTES: u64 = 32 * 1024 * 1024;
 const VENDOR_USAGE_FILES: usize = 256;
 const VENDOR_USAGE_ENTRIES: usize = VENDOR_USAGE_FILES * 4;
@@ -7669,7 +7069,7 @@ fn usage_difference(total: &Value, recorded: &Value) -> Result<Option<Value>, St
     for key in ["turns", "input", "output", "cacheRead", "cacheWrite"] {
         let count = total[key].as_u64().ok_or("invalid vendor usage")?;
         let previous = recorded[key].as_u64().ok_or("invalid recorded usage")?;
-        // Logs may lag a live stream while the vendor is still flushing.
+
         extra[key] = json!(count.saturating_sub(previous));
     }
     extra["cost"] = json!(
@@ -7736,8 +7136,6 @@ impl LegacyCodexUsage {
         Ok(Self { files, recorded })
     }
 
-    // Mark the bounded set of raw logs already represented in the transcript
-    // instead of retaining every historical usage timestamp.
     fn record(&mut self, time: i64) {
         if time == i64::MAX {
             return;
@@ -7787,8 +7185,6 @@ impl LegacyCodexUsage {
     }
 }
 
-/// Muse keeps sessions under year/month/day, independently of the project's
-/// creation date. Probe date directories rather than reading unrelated logs.
 fn muse_session_directory(root: &Path, token: &str) -> Result<Option<PathBuf>, String> {
     validate_record_id(token)?;
     let direct = root.join(token);
@@ -7853,8 +7249,6 @@ fn charge_vendor_entry(remaining: &mut usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Bound discovery itself, including unrelated files and directories. Applying
-/// the file cap after a recursive walk still lets that walk block a chat read.
 fn muse_usage_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
     let mut directories = vec![directory.to_path_buf()];
     let mut remaining = VENDOR_USAGE_ENTRIES;
@@ -7906,10 +7300,6 @@ fn muse_log_usage(directory: &Path, since_ms: i64) -> Result<Value, String> {
     Ok(totals.value())
 }
 
-/// Repair needs usage and session boundaries, not tool bodies. Keep one Codex
-/// record even if it has no usage: it establishes that legacy raw output may
-/// need recovery after a backend switch. Muse also needs user boundaries and
-/// segment summaries to distinguish retained and inherited turns.
 fn usage_repair_record(line: &[u8], muse_history: bool, seen_codex: &mut bool) -> Option<Value> {
     #[derive(Deserialize)]
     struct EventHeader {
@@ -7941,9 +7331,7 @@ fn usage_repair_record(line: &[u8], muse_history: bool, seen_codex: &mut bool) -
             return None;
         }
     }
-    // Keep the Value parser's handling of unusual envelopes such as
-    // duplicate selectors or non-object events. Only verified records
-    // can establish a previous Codex session.
+
     let record: Value = serde_json::from_slice(line).ok()?;
     *seen_codex |= record["backend"] == "codex";
     Some(record)
@@ -7976,9 +7364,6 @@ fn visit_usage_repair_records(
     Ok(())
 }
 
-/// Read a transcript with memory bounded by one record. The length captured
-/// at the start is the snapshot boundary; a growing file is left for the next
-/// read, and truncation is an error rather than an incomplete usage total.
 fn visit_transcript_lines(
     file: fs::File,
     mut visit: impl FnMut(&[u8], u64) -> Result<(), String>,
@@ -8056,13 +7441,6 @@ fn open_transcript(path: &Path) -> Result<Option<fs::File>, String> {
             Ok(Some(file))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            // A missing transcript is a new conversation, which genuinely has
-            // no usage. But an ancestor that exists and is not a directory
-            // means the transcript is unreachable rather than absent, and
-            // that must error instead of reporting a zero that is not real.
-            // The open error alone cannot tell them apart: Unix reports a
-            // file used as a directory distinctly, Windows reports both
-            // cases as not found.
             if blocked_ancestor(path) {
                 return Err("conversation transcript is not reachable".into());
             }
@@ -8103,13 +7481,6 @@ fn usage_totals_in_file(
     Ok(totals.value())
 }
 
-/// Whether `path` can never name a file because something above it exists
-/// and is not a directory.
-///
-/// Follows links: a symlink to a directory is a way through, not a wall.
-/// A dangling link reads as missing rather than blocked, which keeps a new
-/// conversation's empty totals rather than erroring on a path that simply
-/// is not there yet.
 fn blocked_ancestor(path: &Path) -> bool {
     let mut current = path.parent();
     while let Some(ancestor) = current {
@@ -8122,8 +7493,6 @@ fn blocked_ancestor(path: &Path) -> bool {
     false
 }
 
-/// The newest turn's raw stream in a chat's `raw` folder. Files are named
-/// by the turn's start time, so the largest name is the latest turn.
 fn newest_raw_stream(raw: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
     fs::read_dir(raw)
         .ok()?
@@ -8138,7 +7507,6 @@ fn newest_raw_stream(raw: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
         .map(|(_, path, modified)| (path, modified))
 }
 
-/// At most `limit` bytes from the end of a file, starting at a line.
 fn read_tail(path: &Path, limit: u64) -> Option<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = fs::File::open(path).ok()?;
@@ -8242,7 +7610,6 @@ fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
-/// Read exactly `[start, end)`.
 fn read_region(path: &Path, start: u64, end: u64) -> Option<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
     if end <= start {
@@ -8272,13 +7639,6 @@ fn retained_prefix(bytes: &[u8], base: u64) -> bool {
         || record.get("kind").and_then(Value::as_str) == Some("retainedUsage")
 }
 
-/// Parse whole records out of a region, stamping each with where it starts.
-///
-/// `seq` is a persisted logical position, or the original byte offset for a
-/// legacy record. Retention materializes legacy positions before moving them,
-/// so loading older pages and trimming history both preserve row identity.
-/// A line that is not an object is skipped. The file is written one JSON
-/// object per line, and anything else in it is damage.
 fn records(bytes: &[u8], base: u64) -> Vec<Value> {
     records_with_positions(bytes, base, true)
 }
@@ -8309,20 +7669,6 @@ fn records_with_positions(bytes: &[u8], base: u64, stable: bool) -> Vec<Value> {
     out
 }
 
-/// Names a client reads, written beside the ones the archive holds.
-///
-/// `Event` and `StoredEvent` are tagged enums carrying
-/// `rename_all = "camelCase"`, which renames the *variants* and not their
-/// fields. So the archive holds `at_ms`, `call_id`, `cache_read`,
-/// `cache_write`, `cost_usd` and `exit_code`, while every client reads those
-/// in camel case and has been getting nothing for them: a tool call never
-/// matched its own end and drew twice, a tool had no start to measure a
-/// duration from, and cache and cost were always zero.
-///
-/// Fixed on the way out rather than on the way in. Every archive already on
-/// disk carries the old spelling, so a client would have to accept both
-/// whatever the store did next, and this is the one place both the page and
-/// the tail pass through.
 const ALIASES: [(&str, &str); 6] = [
     ("at_ms", "atMs"),
     ("call_id", "callId"),
@@ -8332,8 +7678,6 @@ const ALIASES: [(&str, &str); 6] = [
     ("exit_code", "exitCode"),
 ];
 
-/// Added beside the original, never instead of it: the host's own readers,
-/// the handover brief among them, come through here too.
 fn alias(object: &mut serde_json::Map<String, Value>) {
     for (from, to) in ALIASES {
         if object.contains_key(to) {
@@ -8345,8 +7689,6 @@ fn alias(object: &mut serde_json::Map<String, Value>) {
     }
 }
 
-/// Read the next batch at a physical record boundary. Leave a partial final
-/// record for the next poll; its bytes must not advance the client's cursor.
 fn read_forward(path: &Path, start: u64, end: u64) -> Result<(Vec<u8>, u64, bool), String> {
     use std::io::{Read, Seek, SeekFrom};
     if start >= end {
@@ -8394,12 +7736,6 @@ fn read_forward(path: &Path, start: u64, end: u64) -> Result<(Vec<u8>, u64, bool
     Ok((bytes, next, false))
 }
 
-/// Walk backwards from `end` until `limit` whole records are in hand.
-///
-/// Answers where the page starts and the bytes from there to `end`. The walk
-/// is bounded three ways: by the record count, by `PAGE_BYTES`, and by
-/// `PAGE_RECORD_BYTES` for the pathological case of one enormous record. It
-/// never reads the whole archive to hand back the end of it.
 fn read_back(path: &Path, end: u64, limit: usize) -> Result<(u64, Vec<u8>), String> {
     read_back_checked(path, end, limit, false)
 }
@@ -8422,14 +7758,11 @@ fn read_back_checked(
         if whole >= limit {
             break;
         }
-        // The weight bound only applies once there is something to hand
-        // back. A single record longer than a page has to be read to its
-        // beginning or it could never be shown at all.
+
         if whole > 0 && buffered >= PAGE_BYTES {
             break;
         }
-        // One byte before a maximum-size row establishes its boundary when
-        // the archive also contains a retained usage summary.
+
         if buffered > PAGE_RECORD_BYTES {
             break;
         }
@@ -8440,8 +7773,7 @@ fn read_back_checked(
             return Err("conversation changed or could not be read; retry search".into());
         }
         let head = region.unwrap_or_default();
-        // Count newly completed rows while walking backwards. The partial
-        // row at the front is excluded until its preceding newline arrives.
+
         for byte in head.iter().rev() {
             if *byte == b'\n' {
                 whole += usize::from(partial_has_content);
@@ -8457,19 +7789,13 @@ fn read_back_checked(
     for chunk in chunks.into_iter().rev() {
         buffer.extend_from_slice(&chunk);
     }
-    // Everything before the first newline belongs to a record that began
-    // earlier, unless the walk reached the beginning of the file.
+
     let at = alignment(&buffer, start).unwrap_or(0);
     let text = &buffer[at..];
     if count_records(text) == 0 {
-        // A window with nothing whole in it, which only a record past
-        // `PAGE_RECORD_BYTES` can produce. Answer with where the window
-        // begins so the walk still moves backwards: handing back the offset
-        // it was given would ask the same question again forever.
         return Ok((start, Vec::new()));
     }
-    // More records than were asked for, because reading happens in chunks.
-    // Keep the newest `limit` of them.
+
     let mut starts = vec![0usize];
     for (index, byte) in text.iter().enumerate() {
         if *byte == b'\n' && index + 1 < text.len() {
@@ -8481,7 +7807,6 @@ fn read_back_checked(
     Ok((start + at as u64 + cut as u64, text[cut..].to_vec()))
 }
 
-/// Where the first whole record in the buffer begins, if there is one.
 fn alignment(buffer: &[u8], start: u64) -> Option<usize> {
     if start == 0 {
         return Some(0);
@@ -8499,10 +7824,6 @@ fn count_records(bytes: &[u8]) -> usize {
         .count()
 }
 
-/// The first record identifies a retained generation even after the file
-/// grows past its pre-trim size. New and compacted records start with their
-/// unique sequence, so a bounded prefix suffices even for a large first row.
-/// Legacy bytes stay unchanged until compaction writes that sequence prefix.
 fn archive_generation(path: &Path) -> Result<u64, String> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
@@ -8619,7 +7940,7 @@ mod tests {
         fs::remove_file(root.join("conversations.json")).unwrap();
         assert!(store.refresh_index().is_err());
         let cold = Store::load_at(root.clone());
-        // An orphaned transcript is retained and reported, never rebuilt/deleted.
+
         fs::create_dir_all(root.join("orphan")).unwrap();
         fs::write(root.join("orphan/events.ndjson"), b"{}\n").unwrap();
         assert!(cold.refresh_index().is_err());
@@ -8724,8 +8045,7 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
-        // Invalid JSON must not suppress a later valid Codex marker. Duplicate
-        // selectors follow Value's last-key behavior before marking it seen.
+
         let unusual = br#"{"backend":"codex", bad}
 {"backend":"muse","backend":"codex","event":{"kind":"toolEnd"}}
 {"backend":"codex","event":{"kind":"toolEnd"}}
@@ -8737,9 +8057,6 @@ mod tests {
         assert_eq!(selected[1]["event"]["input"], 8);
     }
 
-    /// A throwaway archive of `count` records, each a little different in
-    /// length and some of them multi-byte, so a page boundary that split a
-    /// character or a record would show up as a missing or broken row.
     fn archive(name: &str, lines: &[String]) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "tokenstat-chat-page-{}-{}-{}.ndjson",
@@ -9021,10 +8338,7 @@ mod tests {
             .unwrap();
         assert!(page.has_earlier, "weight still bounds a page");
         assert!(page.start > 0);
-        // The old three-quarter-megabyte bound could hold at most 62 of
-        // these records. Carrying at least 150 proves the bound moved with
-        // the larger client pages, while stopping short of all 200 proves
-        // a bound is still there.
+
         assert!(
             (150..200).contains(&page.events.len()),
             "expected most but not all of the heavy records, got {}",
@@ -9241,7 +8555,6 @@ mod tests {
         }
     }
 
-    /// cargo test -p tokenstat-host --lib benchmark_streaming_latency -- --ignored --nocapture
     #[test]
     #[ignore = "manual host output-to-transcript latency measurement"]
     fn benchmark_streaming_latency() {
@@ -9645,9 +8958,6 @@ mod tests {
                                 assert_eq!(&id[12..13], "4");
                                 assert!(matches!(&id[16..17], "8" | "9" | "a" | "b"));
                                 if let Some(accepted) = outcome {
-                                    // Match the adapter's atomic publication. A
-                                    // direct write briefly exposes an empty
-                                    // response and can mean delivery_unknown.
                                     let reply = response_dir.join(format!("response-{id}.json"));
                                     let temporary = reply.with_extension("tmp");
                                     fs::write(
@@ -9777,19 +9087,14 @@ mod tests {
                 }
                 if outcome.is_some() {
                     manager.kill(&process.id).unwrap();
-                    // Windows termination can be accepted before its retained
-                    // process handle signals exit. Prove the fixture is gone
-                    // before asserting a definite refusal for the next input.
+
                     let until = Instant::now() + Duration::from_secs(5);
                     while manager.info(&process.id).unwrap().alive {
                         assert!(Instant::now() < until, "The killed fixture did not exit");
                         std::thread::sleep(Duration::from_millis(10));
                     }
                     assert!(manager.info(&process.id).unwrap().exit_code.is_some());
-                    // A phone can still display a running, steer-capable
-                    // snapshot after the CLI has exited. This refusal must
-                    // prove that no input or receipt was accepted, so the
-                    // client can leave the same message waiting safely.
+
                     assert!(store.get("steering").unwrap().running);
                     let requests = fs::read_dir(&directory)
                         .unwrap()
@@ -9878,7 +9183,7 @@ mod tests {
     fn live_output_backlogs_make_progress_in_bounded_bursts() {
         assert!(drain_buffered_output(256 * 1024, 1024 * 1024, 256 * 1024));
         assert!(!drain_buffered_output(1024, DRAIN_BACKLOG_BYTES - 1, 1024));
-        // An empty or failed read must never spin against a stale snapshot.
+
         assert!(!drain_buffered_output(0, u64::MAX, 0));
         assert!(!drain_buffered_output(
             256 * 1024,
@@ -9890,9 +9195,6 @@ mod tests {
 
     #[test]
     fn chat_completion_waits_for_the_exit_status_after_pty_eof() {
-        // EOF and process exit are separate observations. The policy used by
-        // drain must defer completion until the exit status arrives, without
-        // depending on an OS's controlling-terminal or pipe EOF behavior.
         assert!(wait_for_exit_status(
             None,
             Some(0),
@@ -9939,8 +9241,6 @@ mod tests {
 
     #[test]
     fn chat_completion_after_pty_eof_is_bounded_and_can_be_stopped() {
-        // Explicit Stop and Muse's authentication failure already establish
-        // the result. Neither must spend the remaining grace waiting to reap.
         assert!(!wait_for_exit_status(
             None,
             Some(0),
@@ -9973,9 +9273,6 @@ mod tests {
 
     #[test]
     fn chat_completion_drains_a_finite_tail_after_the_exit_grace() {
-        // A completed producer can leave several 256 KiB reads. Archiving a
-        // tool image or writing transcript events may spend the grace between
-        // reads, but EOF proves that no descendant can extend this backlog.
         let end = 1_200_000;
         let elapsed = EXIT_STATUS_GRACE + Duration::from_secs(1);
         for exit in [None, Some(0), Some(7)] {
@@ -9998,7 +9295,7 @@ mod tests {
                     false,
                     elapsed
                 ));
-                // An inherited output handle still uses the absolute bound.
+
                 assert!(!wait_for_exit_status(
                     exit, None, 0, stopped, false, elapsed
                 ));
@@ -10272,7 +9569,7 @@ mod tests {
 
         let token = store.register_turn_token("chat-test", "claude").unwrap();
         assert_eq!(store.take_steer_for_token(&token).unwrap(), Some(parked));
-        // Delivered: nothing is left to withdraw, whatever happens next.
+
         store.steer_clear("chat-test").unwrap();
         assert_eq!(withdrawn(&store, "chat-test", &question), 0);
     }
@@ -10285,7 +9582,6 @@ mod tests {
         let owner = Store::at(root.path().join("chat"));
         owner.park_answer("chat-test", "question-1", "note".into());
 
-        // The owner still holds its lease, so its answers may yet arrive.
         reader.withdraw_orphaned_answers();
         assert_eq!(withdrawn(&reader, "chat-test", "question-1"), 0);
 
@@ -10362,7 +9658,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("chat-test".into());
-        // Pause finalization after the send has consumed Stop's marker.
+
         let parked = store.parked_answers.lock().unwrap();
         let delivering = Arc::clone(&store);
         let delivery = std::thread::spawn(move || delivering.steer_deliver("chat-test"));
@@ -10428,8 +9724,6 @@ mod tests {
         assert_eq!(found.len(), 1, "{reply:?}");
         assert_eq!(found[0].question, "Which database?");
 
-        // Clients draw a usage report as its own row, so a block right after
-        // one opens its own line here too.
         let mut reply = String::new();
         let usage = Event::Usage {
             input: 1,
@@ -10520,7 +9814,7 @@ mod tests {
         prepare_live_chat(&store, "chat-test");
         let question = ask(&store, "chat-test", "Pick one?");
         store.set_running("chat-test", false).unwrap();
-        // The fixture's workspace does not exist, so no CLI is started.
+
         assert!(store.answer_question("chat-test", &question, "B").is_err());
         assert_eq!(
             store.open_question("chat-test", &question).unwrap(),
@@ -11034,15 +10328,14 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        // The handover names the cache the new login gives up.
+
         let brief = store.continuation("chat-old").unwrap().unwrap();
         assert!(
             brief
                 .brief
                 .contains("180000 cached input tokens for claude")
         );
-        // Continuing onto the same profile reopens the handoff instead of
-        // starting another chat.
+
         let reopened = store
             .continue_in_new("chat-old", Some("p_work".into()))
             .unwrap();
@@ -11270,7 +10563,7 @@ mod tests {
             store.get("chat-test").unwrap().resume_token.as_deref(),
             Some(OLD)
         );
-        // A failed fresh launch reports no replacement, even after its home is recreated.
+
         fs::create_dir_all(store.codex_home("chat-test").join("sessions")).unwrap();
         let reopened = Store::load_at(store.root.clone());
         assert_eq!(
@@ -11570,8 +10863,7 @@ mod tests {
         store.steer("chat-test", "Send once.").unwrap();
         store.set_running("chat-test", false).unwrap();
         let note = store.claim_idle_steer("chat-test").unwrap().unwrap();
-        // A spawned turn may have drained before its failed transcript or
-        // receipt write returns to steerDeliver. It is already idle here.
+
         store.restore_steer_if_idle(
             "chat-test",
             &note,
@@ -11679,8 +10971,6 @@ mod tests {
             ),
         );
 
-        // A live speed entry advertises native steering for other backends, so
-        // the muse refusal below is the backend rule and not a missing process.
         let mut native = serde_json::to_value(store.list("workspace-a")).unwrap();
         store.attach_pending_steers(&mut native);
         assert_eq!(native[0]["nativeSteer"], true);
@@ -11705,7 +10995,7 @@ mod tests {
         fs::write(root.join("runner-ready"), b"ready").unwrap();
         let mut release = [0];
         std::io::stdin().read_exact(&mut release).unwrap();
-        // No Rust destructors: the kernel must release ownership after a crash.
+
         std::process::exit(23);
     }
 
@@ -11754,7 +11044,7 @@ mod tests {
         assert!(foreign.remove("owned-turn").is_err());
         assert!(foreign.remove_all("workspace-a").is_err());
         assert!(!store.events_path("owned-turn").exists());
-        // Even a failed running-bit write cannot make the live lease disappear.
+
         store.set_running("owned-turn", false).unwrap();
         let error = foreign
             .send(
@@ -11843,7 +11133,7 @@ mod tests {
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "dead-session");
         store.set_running("dead-session", true).unwrap();
-        // No drain thread is coming for this one: the manager never knew it.
+
         store
             .active
             .lock()
@@ -12180,8 +11470,6 @@ mod tests {
         );
         assert!(!store.live_work().iter().any(|row| row.0 == "chat-b1"));
 
-        // A recents fetch must not serialize the sensitive/full conversation
-        // record. These are the complete keys allowed on that route.
         let value = serde_json::to_value(&recent[0]).unwrap();
         let keys: HashSet<_> = value
             .as_object()
@@ -12211,7 +11499,7 @@ mod tests {
     fn conversations_are_workspace_scoped_and_events_are_offset_tailable() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
-        // Unit test the durable mechanics without requiring a registered folder.
+
         let chat = Conversation {
             team_share: None,
             team_journal_initialized: false,
@@ -12277,7 +11565,6 @@ mod tests {
         assert!(next > 0);
         assert!(store.list("workspace-b").is_empty());
 
-        // The same two records, read from the end instead of the beginning.
         let page = store.event_page("chat-test", None, 1).unwrap();
         assert!(page.usage.is_some(), "normal opens still include usage");
         let preview = store
@@ -12304,9 +11591,6 @@ mod tests {
             "every record says where it is, so a row keeps its name"
         );
 
-        // A cursor from an archive that has since been trimmed cannot be
-        // honoured, and the answer says so rather than paging the wrong
-        // records.
         let stale = make_cursor(0, u64::MAX, 0);
         let answer = store.event_page("chat-test", Some(&stale), 10).unwrap();
         assert!(answer.reset);
@@ -12390,9 +11674,7 @@ mod tests {
             .attachment_paths("chat-test", &[attachment.id])
             .unwrap();
         assert_eq!(fs::read(&files[0]).unwrap(), b"hello");
-        // A backend with no image flag is told the path; one with a flag is
-        // handed the file and told nothing, so it cannot describe its own
-        // attachment back to the person.
+
         let spoken = crate::chat_turn::compose(crate::chat_turn::Inputs {
             persona_name: "",
             prompt: "Inspect this",
@@ -12404,8 +11686,6 @@ mod tests {
         assert!(spoken.user_text.contains("diagram.png"));
     }
 
-    /// A conversation with nothing behind it, for the receipt paths, which
-    /// all decide before anything is spawned.
     fn conversation_for_receipts(store: &Store, id: &str) {
         store.conversations.lock().unwrap().push(Conversation {
             team_share: None,
@@ -13351,8 +12631,7 @@ mod tests {
         let store = Arc::new(Store::at(root.path().join("chat")));
         conversation_for_receipts(&store, "idle-send");
         store.set_running("idle-send", true).unwrap();
-        // Missing workspace prevents a launch; reaching that check demonstrates
-        // that this send has repaired the idle guard without a restart.
+
         let error = store
             .send(
                 "idle-send",
@@ -13399,7 +12678,7 @@ mod tests {
                 },
             )
             .unwrap();
-        // Retention can leave logical positions above physical offsets.
+
         let path = store.events_path("original");
         let mut record: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         record["seq"] = json!(900_000);
@@ -13482,8 +12761,7 @@ mod tests {
                 },
             )
             .unwrap();
-        // No actual authentication or network request: this process models
-        // Muse waiting for browser login after printing its own challenge.
+
         let process = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: "/bin/sh".into(),
@@ -13603,8 +12881,7 @@ mod tests {
                     assert!(Instant::now() < deadline, "speed request was never sent");
                     std::thread::sleep(Duration::from_millis(10));
                 };
-                // The drainer can publish the session while the provider is
-                // acknowledging speed. This acquires both index locks.
+
                 responder_store
                     .set_resume("fast-live", "codex", "session-from-drainer")
                     .unwrap();
@@ -13703,8 +12980,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
         conversation_for_receipts(&store, "grok-saved");
-        // Simulate loading a previously supported selection that the current
-        // account catalog cannot enumerate. No CLI probe or global cache edit.
+
         store
             .edit_conversation("grok-saved", |chat| {
                 chat.backend = "grok".into();
@@ -14012,8 +13288,7 @@ mod tests {
         let fork = store.fork("original").unwrap();
         retune_chat(&store, &fork.id, "muse", "standard");
         store.set_resume(&fork.id, "muse", "session-new").unwrap();
-        // A copied record can share the fork's creation millisecond. Its
-        // logical position still precedes the new vendor Session marker.
+
         let path = store.events_path(&fork.id);
         let mut copied: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         copied["at_ms"] = json!(fork.created_at_ms);
@@ -14723,7 +13998,6 @@ mod tests {
                         })
                         .unwrap();
                     } else {
-                        // Simulate another process changing the durable grant.
                         fs::write(&policy, br#"{"allowed":[]}"#).unwrap();
                     }
                     drop(acceptance);
@@ -15384,8 +14658,7 @@ mod tests {
         let renamed = store.search_snapshot("workspace-a", "chat-search").unwrap();
         assert_eq!(renamed.title, "Renamed elsewhere");
         assert_ne!(renamed.revision, snapshot.revision);
-        // Another store/process removes it while this store still holds the
-        // original in-memory index. No old content may escape that stale view.
+
         fs::write(
             store.root.join("conversations.json"),
             br#"{"conversations":[]}"#,
@@ -15405,7 +14678,7 @@ mod tests {
         store.save().unwrap();
         let path = store.attachment_path("chat-handoff", "att-one", "design.png");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        // A sparse file over the byte-transfer cap is still cheap to describe.
+
         fs::File::create(&path)
             .unwrap()
             .set_len(ATTACHMENT_CAP as u64 + 1)
@@ -15540,7 +14813,6 @@ mod tests {
             .unwrap_err();
         assert!(conflict.message.contains("different message"), "{conflict}");
 
-        // And a name that could shape a key in the ledger is refused.
         let bad = store
             .send("chat-receipt", "hello", &[], Some("../escape"), None, None)
             .unwrap_err();
@@ -15556,7 +14828,7 @@ mod tests {
         let _runner = crate::chat_receipts::RunnerLease::try_acquire(&store.root, "chat-running")
             .unwrap()
             .unwrap();
-        // Without a receipt this is the ordinary refusal.
+
         let busy = store
             .send("chat-running", "hello", &[], None, None, None)
             .unwrap_err();
@@ -15661,8 +14933,7 @@ mod tests {
                 },
             )
             .unwrap();
-        // Abruptly exit at the durable acceptance boundary. No destructors
-        // run, and absence of a transcript must not grant a second launch.
+
         std::process::exit(23);
     }
 
@@ -15807,7 +15078,6 @@ mod tests {
                 .starts_with("Review changes carefully.")
         );
 
-        // Editing a persona cannot reach back into a copy already taken.
         let edited = store
             .save_persona(Persona {
                 name: "Careful reviewer of Rust".into(),
@@ -15816,14 +15086,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(saved.system_prompt, "Review changes carefully.");
-        // A rename must not hand somebody a stranger.
+
         assert_eq!(edited.seed, saved.seed);
     }
 
-    /// A persona saved before this shrank carried a backend, model, effort,
-    /// mark and autonomy. Those were duplicates of conversation state and go
-    /// away. The face is the one thing that has to be invented, and it has to
-    /// be invented the same way every time.
     #[test]
     fn old_personas_migrate_and_keep_a_stable_face() {
         let root = tempfile::tempdir().unwrap();
@@ -15852,7 +15118,7 @@ mod tests {
         assert_eq!(personas[0].system_prompt, "Review changes carefully.");
         assert!(personas[0].workspace_id.is_none());
         assert_ne!(personas[0].seed, 0);
-        // Loaded twice, same face. Otherwise every launch is a new character.
+
         assert_eq!(
             load_persona_index(&store).personas[0].seed,
             personas[0].seed
@@ -15886,8 +15152,6 @@ mod tests {
         assert!(open.contains("familiar human first name"));
     }
 
-    /// A model wraps JSON in prose and in fences however clearly it is asked
-    /// not to, and a draft that cannot be read must never become a persona.
     #[test]
     fn a_persona_draft_is_read_out_of_whatever_the_agent_said() {
         let wrapped = draft_from_reply(
@@ -15902,7 +15166,6 @@ mod tests {
             "You explain Rust errors patiently."
         );
 
-        // Snake case, because half of them answer that way.
         let snake = draft_from_reply(
             r#"{"name":"Reviewer","system_prompt":"You review."}"#,
             "fallback",
@@ -15940,9 +15203,6 @@ mod tests {
 
     #[test]
     fn chat_keeps_model_choices_for_claude_and_muse() {
-        // Claude offers curated aliases. Muse offers its live catalog or the
-        // fallback while discovery is pending or fails. Neither installed
-        // agent is pinned to Default; a missing one advertises nothing.
         for backend in backends(false) {
             let id = backend["id"].as_str().unwrap();
             if !matches!(id, "claude" | "muse") {
@@ -16003,7 +15263,7 @@ mod tests {
                     size_bytes: None,
                 }],
                 error: None,
-                // An Ollama too old for Anthropic's API is not offered to Claude.
+
                 anthropic: false,
             },
         ];
@@ -16059,9 +15319,6 @@ mod tests {
         assert!(claude.get("efforts").is_some());
     }
 
-    /// A handover is due exactly when somebody switched agent mid-conversation.
-    /// Not on a first turn, which has nothing to hand over, and not on a
-    /// resume, where the agent already remembers.
     #[test]
     fn a_handover_is_due_only_when_a_conversation_changes_hands() {
         let root = tempfile::tempdir().unwrap();
@@ -16148,9 +15405,6 @@ mod tests {
             "a real change of agent belongs on the timeline"
         );
 
-        // Merely having a codex session does not make it current: Claude still
-        // owns the latest event, so resuming this token needs the intervening
-        // history.
         chat.resume_tokens.insert("codex".into(), "thread-1".into());
         assert!(store.handover(&chat).unwrap().is_some());
 
@@ -16177,10 +15431,6 @@ mod tests {
         assert!(returned.announce);
     }
 
-    /// An agent that cannot resume itself is handed its own history on every
-    /// turn, and that is correct. Saying "handed to" about it is not: nothing
-    /// changed hands, and the transcript filled with rows describing a switch
-    /// that never happened.
     #[test]
     fn re_briefing_the_same_agent_is_not_announced() {
         let root = tempfile::tempdir().unwrap();
@@ -16255,10 +15505,6 @@ mod tests {
         );
     }
 
-    /// Choosing no persona has to survive the next chat.
-    ///
-    /// It did not: a workspace with no default read as one nobody had set up,
-    /// so the next conversation minted a starter and the choice was gone.
     #[test]
     fn a_workspace_may_choose_to_have_no_persona() {
         let root = tempfile::tempdir().unwrap();
@@ -16290,8 +15536,6 @@ mod tests {
         );
     }
 
-    /// A persona with no folder of its own belongs to all of them. The host
-    /// has always allowed it; nothing surfaced it until the editor did.
     #[test]
     fn a_persona_without_a_folder_is_visible_in_every_folder() {
         let root = tempfile::tempdir().unwrap();
@@ -16377,8 +15621,6 @@ mod tests {
             backend: "codex",
         });
 
-        // Codex has no system-prompt flag, so its first turn carries the
-        // rules and every later turn is the person's words alone.
         assert!(standing_is_due(&chat, &composed.standing_fingerprint));
         store
             .mark_standing_sent("chat-standing", "codex", &composed.standing_fingerprint)
@@ -16400,7 +15642,6 @@ mod tests {
         });
         assert!(standing_is_due(&chat, &edited.standing_fingerprint));
 
-        // Claude takes a flag, so repeating costs nothing and it is always due.
         chat.backend = "claude".into();
         store
             .mark_standing_sent("chat-standing", "claude", &composed.standing_fingerprint)
@@ -16788,8 +16029,7 @@ mod tests {
         assert!(agy_hooks.contains("hook agy pre"));
         assert!(agy_hooks.contains("hook agy post"));
         let _ = fs::remove_dir_all(agy_home);
-        // Grok's home is the one that must survive the turn, because its
-        // sessions live inside it and `--resume` needs them.
+
         let grok_home = store.grok_hook_home("chat-test");
         crate::chat_gate::write_grok_home(&grok_home, helper, None).unwrap();
         let grok_hooks = fs::read_to_string(grok_home.join("hooks/tokenstat.json")).unwrap();
@@ -16822,9 +16062,7 @@ mod tests {
             None,
             "a hook gets pending without parking a connection"
         );
-        // An approval is written twice on purpose: where the agent paused,
-        // and again with the answer, so a conversation reopened later shows
-        // the outcome instead of a question frozen mid-ask.
+
         let (events, _) = store.events("chat-test", 0).unwrap();
         assert_eq!(events.len(), 4);
         assert_eq!(events[0]["approval"]["id"], hook_approval.id);
@@ -16886,8 +16124,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(broader.decision, None);
-        // A compound command has no prefix worth saving, so "always allow"
-        // must not fall back to saving the bare shell tool verb.
+
         let compound = store
             .request_approval(
                 "chat-test",
@@ -17364,16 +16601,12 @@ mod tests {
                 file.write_all(b"\n").unwrap();
             }
             let records = if backend == "codex" {
-                // A boundary timestamp belongs to the next raw log. The
-                // terminal timestamp is outside every half-open interval.
                 vec![
                     json!({"backend":"codex","event":{"kind":"usage","input":7},"at_ms":199}),
                     json!({"backend":"codex","event":{"kind":"usage","input":11},"atMs":200}),
                     json!({"backend":"codex","event":{"kind":"usage","input":13},"at_ms":i64::MAX}),
                 ]
             } else {
-                // Inherited usage predates the current session marker even
-                // when its timestamp is within the recovered vendor range.
                 vec![
                     json!({"backend":"muse","event":{"kind":"usage","input":100},"at_ms":300}),
                     json!({"backend":"muse","event":{"kind":"session","id":"session-current"},"at_ms":200}),
@@ -17863,7 +17096,6 @@ mod tests {
         );
     }
 
-    // Reproduce older hosts rewriting an archive; current writers keep it intact.
     fn simulate_legacy_retention(path: &Path) {
         let bytes = fs::read(path).unwrap();
         if bytes.len() as u64 > LEGACY_EVENTS_CAP {

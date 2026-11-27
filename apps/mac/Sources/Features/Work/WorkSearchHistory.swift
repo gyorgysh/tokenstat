@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Optional history shares saved work's encryption, expiry and scope cleanup.
-/// Preferences contain only consent; query text and destination labels are sealed.
 @MainActor @Observable
 final class WorkSearchHistory {
     struct Destination: Codable, Identifiable, Sendable {

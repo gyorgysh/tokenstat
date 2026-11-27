@@ -41,12 +41,8 @@ import ai.tokenstat.tokenstat.ui.search.SearchOpen
 import ai.tokenstat.tokenstat.ui.search.SearchPlace
 import ai.tokenstat.tokenstat.ui.search.SearchPlaces
 
-/// Pins the ported pure logic to the same answers the Apple client's Swift
-/// originals produce, so both platforms cannot drift apart silently.
 class PortedLogicTest {
 
-    // HomeGreeting.phrase — expected values computed from Greeting.swift's
-    // pool and dayOfYear % pool.count rule.
     @Test
     fun greetingMorning() {
         assertEquals("Good morning", HomeGreeting.phrase(hour = 8, hasHistory = false, dayOfYear = 0))
@@ -64,9 +60,6 @@ class PortedLogicTest {
     fun greetingPoolIsStablePerDay() {
         assertEquals("Welcome", HomeGreeting.phrase(8, hasHistory = false, dayOfYear = 3))
         assertEquals("Welcome back", HomeGreeting.phrase(8, hasHistory = true, dayOfYear = 3))
-        // Index 4 is Back at it only with history; otherwise it repeats the
-        // time-of-day phrase. Fixed length means the flip changes only this
-        // returning slot.
         assertEquals("Good morning", HomeGreeting.phrase(8, hasHistory = false, dayOfYear = 4))
         assertEquals("Back at it", HomeGreeting.phrase(8, hasHistory = true, dayOfYear = 4))
     }
@@ -99,8 +92,6 @@ class PortedLogicTest {
         assertEquals("2.0B", compactTokens(2_000_000_000))
     }
 
-    // groupedCount — the reading of Swift's `.formatted()`: full grouped
-    // counts for the Insights row subtitle, never compacted.
     @Test
     fun eventCountsGroup() {
         val previous = java.util.Locale.getDefault()
@@ -118,8 +109,6 @@ class PortedLogicTest {
 
     @Test
     fun moneyFormatsMicros() {
-        // Rates are published in US dollars: en_US USD whatever the device
-        // locale, like Money in Bridge/Models.swift.
         assertEquals("$1.50", money(1_500_000L))
     }
 
@@ -201,13 +190,11 @@ class PortedLogicTest {
         assertEquals(true, vaultPasswordProblems("Correct-Horse9").isEmpty())
         assertEquals(true, vaultPasswordProblems("short").contains("At least 12 characters"))
         assertEquals(true, vaultPasswordProblems("lowercase12!").contains("An uppercase letter"))
-        // Eastern Arabic digits must not count as a number: the host uses ASCII.
         assertEquals(true, vaultPasswordProblems("Correct-Horse١٢").contains("A number"))
     }
 
     @Test
     fun vaultPasswordChecksUnicodeScalarsForEveryRule() {
-        // Deseret uppercase letters occupy two UTF-16 chars, but are one letter.
         assertEquals(emptyList<String>(), vaultPasswordProblems("\uD801\uDC00abcdefghij9!"))
         assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9\uD801\uDC00"))
         assertEquals(listOf("A special character"), vaultPasswordProblems("Abcdefghijk9\uD835\uDFCE"))
@@ -274,8 +261,6 @@ class PortedLogicTest {
 
     @Test
     fun refusedCredentialReconnectsEvenWhenItMentionsSignIn() {
-        // The refused-credential sentence used to contain "sign in again",
-        // which sent people to fix something already being fixed.
         val error = friendlyError("tunnel credential refused, sign in again")
         assertEquals("Reconnecting", error.title)
         assertEquals(true, error.canRetry)
@@ -329,9 +314,6 @@ class PortedLogicTest {
         )
     }
 
-    // RelativeClock.label — the shared phrasing behind RelativeTimeText.
-    // Full words like Foundation's numeric relative style, rounded to the
-    // nearest, with weeks past six days so older stamps stay relative.
     @Test
     fun relativeClockLabels() {
         val now = 1_700_000_000_000L
@@ -362,8 +344,6 @@ class PortedLogicTest {
         assertNull(HostStatsFormat.routeLabel(null))
     }
 
-    // RunOutcome.tint — every status in RunVisuals.swift maps to the same
-    // TsColors slot on both platforms.
     @Test
     fun runOutcomeTints() {
         assertEquals(LightColors.stateWorking, RunOutcome.tint("running", LightColors))
@@ -457,7 +437,6 @@ class PortedLogicTest {
         assertEquals("Terminal", RecentPlaces.title(term.first()))
         val termIn = RecentPlaces.record(emptyList(), "peer1", "ws1", "My folder", RecentPlaces.Kind.TERMINAL, "t1", 1000L)
         assertEquals("Terminal in My folder", RecentPlaces.title(termIn.first()))
-        // Path-shaped names never land in the store.
         val bad = RecentPlaces.record(emptyList(), "peer1", "ws1", "/tmp/evil", RecentPlaces.Kind.WORKSPACE, null, 1000L)
         assertEquals("Repository", bad.first().workspaceName)
         assertEquals(0, RecentPlaces.record(emptyList(), "peer1", "ws1", "X", RecentPlaces.Kind.CHAT, null, 1000L).size)
@@ -547,8 +526,6 @@ class PortedLogicTest {
         assertEquals(true, DeviceCopy.reach(false, false, false).contains("Enable remote access"))
     }
 
-    // isHeadlessPlatform — port of the Apple fallback: Linux and the server
-    // distros hide View screen, everything else (and silence) keeps it.
     @Test
     fun headlessPlatformsHideTheScreenRow() {
         assertEquals(true, DeviceCopy.isHeadlessPlatform("Linux · x86_64"))
@@ -575,7 +552,6 @@ class PortedLogicTest {
         assertEquals(null, DeviceCopy.hostShowsScreen(screen = null, headless = null))
     }
 
-    // HostContracts — the host-update gate mirrors RemoteHostFeature at 14.
     @Test
     fun hostUpdateNeedsProtocol14() {
         assertEquals(true, HostContracts.supportsHostUpdate(null))
@@ -596,7 +572,6 @@ class PortedLogicTest {
         assertEquals(91.0, LimitLogic.peakPercent(listOf(12.0, 91.0)), 0.0)
     }
 
-    // HostStatsFormat — missing readings stay missing, never zero.
     @Test
     fun statsReadingsMatchAppleWords() {
         assertEquals("…", HostStatsFormat.powerLabel(false, null, null, false, false))

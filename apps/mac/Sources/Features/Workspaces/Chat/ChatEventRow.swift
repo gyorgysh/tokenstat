@@ -8,8 +8,6 @@ import AppKit
 import UIKit
 #endif
 
-/// One coalesced transcript block: a user turn, assistant markdown, a tool,
-/// an edit, an approval, or a quiet usage line.
 struct ChatEventRow: View {
     let item: ChatDisplayItem
     let defaultAgentName: String
@@ -17,8 +15,6 @@ struct ChatEventRow: View {
     let attachmentData: Data?
     let isPending: Bool
     let resolve: (ChatApproval, String) -> Void
-    /// The conversation's face, used when a turn fails so the same character
-    /// that was thinking is the one that droops.
     var attachmentFile: URL? = nil
     var imageResources: [ChatImageResource] = []
     var attachmentIsLoading = false
@@ -26,31 +22,18 @@ struct ChatEventRow: View {
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
     var canOpenAttachment: () -> Bool = { false }
     var faceSeed: UInt64 = 0
-    /// The row still being written. Its markdown is rebuilt on every token,
-    /// so selectable chains (one SelectionOverlay each) are held back until
-    /// the turn ends. Copy buttons stay live throughout.
     var isLive = false
-    /// Stable per rendered row, including when another window shows this chat.
     @State private var markdownCacheID = UUID().uuidString
-    /// Whether this row may run the transcript's spinner. One row does; the
-    /// rest of a set of running tools say "Running" in words. See
-    /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
     var expandsOutput = false
     var compactTools = false
     var toggleGroup: (String) -> Void = { _ in }
     var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
     var answeringQuestion = false
-    /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
-    /// Opens the folder's changes beside the chat, at one file or all of
-    /// them. Nil where there is no live folder to open.
     var reviewChanges: ((String?) -> Void)? = nil
     var reviewTurnChanges: ((ChatTurnChanges, String?) -> Void)? = nil
     #if os(macOS)
-    /// Whole-card hover for the copy action. Scoping this to the header
-    /// saved nothing measurable once segment init was cached and the pin
-    /// storms were fixed, and it made the button undiscoverable.
     @State private var hovering = false
     #endif
 
@@ -66,8 +49,6 @@ struct ChatEventRow: View {
         #endif
     }
 
-    /// The answer card's edge firms up under the pointer, with the copy
-    /// button, so the card reads as the thing the button copies.
     private var answerEdgeOpacity: Double {
         #if os(macOS)
         hovering && !isLive ? 1 : 0.72
@@ -172,13 +153,6 @@ struct ChatEventRow: View {
             }
             .accessibilityLabel(L10n.text("apple.chateventrow.new_turn_with_0.9f95018a", "\(agentLabel(backend))"))
         case let .thinking(text):
-            // Agents write their reasoning in markdown like everything else,
-            // so a plain Text left `##` and `**` on screen as punctuation.
-            // Quiet headings, because this is an aside and has to keep
-            // reading as one.
-            //
-            // The copy action floats overlaid, never in layout: a header row
-            // would put a blank strip over every aside even while hidden.
             VStack(alignment: .leading, spacing: 2) {
                 MessageMarkdown(
                     text,
@@ -237,10 +211,6 @@ struct ChatEventRow: View {
         case let .attachment(attachment) where attachment.mediaType?.hasPrefix("image/") == true:
             EmptyView()
         case let .attachment(attachment):
-            // Stable identity across attachment polls: the revision prop
-            // still redraws the row through Equatable when bytes arrive, but
-            // recreating the row here restarted the decode and collapsed and
-            // regrew its height on every poll.
             ChatResponseAttachment(
                 attachment: attachment, data: attachmentData, file: attachmentFile,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
@@ -312,7 +282,6 @@ private func userBubble(_ text: String, selectable: Bool, steer: Bool = false) -
         }
 }
 
-/// `.textSelection(.enabled)` only when the row is meant to pay for an overlay.
 private struct SelectableWhen: ViewModifier {
     var enabled: Bool
     init(_ enabled: Bool) { self.enabled = enabled }
@@ -326,12 +295,6 @@ private struct SelectableWhen: ViewModifier {
     }
 }
 
-/// One measured text instead of a row per line.
-///
-/// An expanded diff as `DiffBody` is hundreds of attribute-graph nodes that
-/// every transcript measuring pass re-stamps; a live sample of a stopped
-/// application sat in exactly that. One `Text` with colored runs measures
-/// once, selects and copies as a whole, and reads the same.
 func diffColoredText(_ patch: String, lineLimit: Int, clipLongLines: Bool = true) -> (text: AttributedString, cut: Int) {
     var out = AttributedString()
     var shown = 0
@@ -351,9 +314,6 @@ func diffColoredText(_ patch: String, lineLimit: Int, clipLongLines: Bool = true
     return (out, total - shown)
 }
 
-/// Image dimensions from the file header, without decoding pixels. Used to
-/// reserve an attachment row's frame before its image arrives, so the decode
-/// landing shifts no layout mid-scroll.
 enum ChatImageDims {
     private static let cache: NSCache<NSData, NSNumber> = {
         let cache = NSCache<NSData, NSNumber>()
@@ -388,10 +348,6 @@ enum ChatImageDims {
     }
 }
 
-/// A response file is part of the conversation, not a path printed into it.
-/// Images get a useful inline preview; every other type gets the same compact
-/// openable file card. Data came through the owning host, so this also works
-/// for chats running on another paired machine.
 private struct ChatResponseAttachment: View {
     let attachment: ChatAttachment
     let data: Data?
@@ -463,10 +419,6 @@ private struct ChatResponseAttachment: View {
         }
         .buttonStyle(.plain)
         .disabled(isLoading || opening != nil)
-        // Idle only. The transcript stack drops hit testing while scrolling
-        // so a file card sliding under the pointer cannot start a hover
-        // storm, the same gate the copy buttons use. Hover comes back 0.35s
-        // after the last moved frame.
         .onHover { hovering = $0 }
         .help(data == nil && file == nil ? L10n.text("apple.chateventrow.download_0.465e0e80", "\(attachment.name)") : L10n.text("apple.chateventrow.open_0.e71b4013", "\(attachment.name)"))
         }
@@ -562,30 +514,16 @@ private struct ChatResponseAttachment: View {
     }
 }
 
-/// A lightweight streaming cue that sits at the same left edge as an agent
-/// reply. It makes an in-progress turn feel like a conversation without
-/// reserving the visual weight of another card. Height is fixed so a mood
-/// change cannot shove the transcript.
 struct ChatWorkingIndicator: View {
-    /// The conversation's own face, so the thing that moves while you wait is
-    /// the character you already associate with this chat.
     var seed: UInt64
     var mood: PersonaMood = .thinking
-    /// What a running tool is doing, in words. Empty leaves the mood's own word.
     var step: String? = nil
     var startedAt: Date? = nil
-    /// Still, because the reader is somewhere else in the conversation. The
-    /// character and the light across its words redraw every frame, and
-    /// off screen that was work stolen from the scroll the reader is doing.
     var still = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            // Thinking is the one state that can last a minute, and one loop
-            // held that long stops reading as thought and starts reading as a
-            // hang. So the character keeps changing what thinking looks like.
-            // Everything else here is short and says exactly one thing.
             ZStack {
                 if !reduceMotion, mood == .thinking || mood == .waiting {
                     Circle()
@@ -604,11 +542,7 @@ struct ChatWorkingIndicator: View {
             }
             .frame(width: 30, height: 30)
             .environment(\.personaMotionAllowed, !still)
-            // Face swaps must not animate or the seat height jitters. Phrase
-            // morph keeps its own withAnimation below.
             .transaction { $0.animation = nil }
-            // Just the words beside the character, no chrome. The light that
-            // sweeps across them is what says the turn is still going.
             HStack(spacing: 6) {
                 SeatLivePhrase(mood: mood, step: step, animate: !reduceMotion && !still)
                     .layoutPriority(1)
@@ -647,8 +581,6 @@ private struct SeatLivePhrase: View {
     }
 
     var body: some View {
-        // One Text whose string changes inside an animation, so the glyphs
-        // morph from one phrase into the next instead of swapping lines.
         Text(text)
             .font(Theme.font(13, weight: .medium))
             .foregroundStyle(Theme.accent)
@@ -677,12 +609,6 @@ private struct SeatLivePhrase: View {
     }
 }
 
-/// A soft band of light that sweeps across the words on a steady loop.
-///
-/// It is the one motion that says "still going" at a glance without asking
-/// for attention: slow, even, and clipped to the letters so nothing around
-/// the pill moves. Driven by the clock rather than view state, so a phrase
-/// change never restarts or stutters it.
 private struct SeatShimmer: View {
     var text: String
     private let period: Double = 2.6
@@ -732,13 +658,6 @@ struct ChatHandoffRow: View {
     }
 }
 
-/// One tool call, waiting on a person, in the place it happened.
-///
-/// Inline rather than a sheet. A modal over a streaming transcript loses your
-/// place, and a prompt that can only be answered one way is how a turn wedges.
-/// The card carries a countdown because the wait is bounded: the backend gives
-/// up after `chat_gate::GATE_TIMEOUT_SECONDS` and the request is refused, and
-/// a deadline nobody can see is a trap rather than a safeguard.
 struct ChatApprovalCard: View {
     let approval: ChatApproval
     let isPending: Bool
@@ -818,7 +737,6 @@ struct ChatApprovalCard: View {
     }
 }
 
-/// One action row for the inline request. Offer Always allow only when a rule can be saved.
 struct ChatApprovalActions: View {
     let approval: ChatApproval
     let resolve: (ChatApproval, String) -> Void
@@ -838,11 +756,6 @@ struct ChatApprovalActions: View {
     }
 }
 
-/// How an approval reads once it has an answer.
-///
-/// Named states rather than "no longer waiting". Somebody scrolling back wants
-/// to know what happened, and "this was denied" and "nobody was here in time"
-/// are different things that both stopped the same tool.
 struct ChatApprovalOutcome {
     let title: String
     let detail: String
@@ -889,13 +802,6 @@ struct ChatApprovalOutcome {
     }
 }
 
-/// Compared by value so a transcript can skip a row that did not move.
-///
-/// The closures are the same two functions on every draw and cannot be
-/// compared. Attachment bytes are not compared either: presence, loading and
-/// error are enough. The revision is global (one file arriving used to
-/// rebuild every markdown row in the window), so only an attachment card
-/// looks at it, and even there presence wins over the counter.
 extension ChatEventRow: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item
@@ -908,7 +814,6 @@ extension ChatEventRow: Equatable {
             && (lhs.reviewTurnChanges == nil) == (rhs.reviewTurnChanges == nil)
             && lhs.imageResources == rhs.imageResources
         else { return false }
-        // Kind-specific inputs, so a preview-to-live switch does not rebuild every row.
         switch lhs.item.kind {
         case .attachment:
             return lhs.attachmentIsLoading == rhs.attachmentIsLoading
@@ -929,12 +834,6 @@ extension ChatEventRow: Equatable {
 }
 
 
-/// The answer card around a reply, or around one piece of a long reply.
-///
-/// Pieces of one reply (`ChatReplySplit`) draw as a single card: only the
-/// first has the rounded top, only the last the rounded bottom, the sides
-/// run through, and each later piece closes the transcript's row gap. A cut
-/// between paragraphs keeps the paragraph spacing inside the card.
 struct ReplyCardChrome: ViewModifier {
     let part: ChatReplyPart?
     let edgeOpacity: Double
@@ -959,7 +858,6 @@ struct ReplyCardChrome: ViewModifier {
     }
 }
 
-/// A card's fill, rounded only at the ends that close it.
 struct ReplyCardShape: Shape {
     var top: Bool
     var bottom: Bool
@@ -976,8 +874,6 @@ struct ReplyCardShape: Shape {
     }
 }
 
-/// A card's outline without the edges where it continues into the next
-/// piece, so the pieces of one reply show no seams.
 struct ReplyCardEdge: Shape {
     var top: Bool
     var bottom: Bool
@@ -986,11 +882,8 @@ struct ReplyCardEdge: Shape {
     func path(in rect: CGRect) -> Path {
         let r = rect.insetBy(dx: 0.5, dy: 0.5)
         var path = Path()
-        // An open end runs a little past the edge, so the next piece's side
-        // meets it without a gap on any pixel grid.
         let topY = top ? r.minY + radius : rect.minY - 0.5
         let bottomY = bottom ? r.maxY - radius : rect.maxY + 0.5
-        // Leading side, then the bottom when it closes here.
         path.move(to: CGPoint(x: r.minX, y: topY))
         path.addLine(to: CGPoint(x: r.minX, y: bottomY))
         if bottom {
@@ -1000,7 +893,6 @@ struct ReplyCardEdge: Shape {
         } else {
             path.move(to: CGPoint(x: r.maxX, y: bottomY))
         }
-        // Trailing side, then the top when it closes here.
         path.addLine(to: CGPoint(x: r.maxX, y: topY))
         if top {
             path.addQuadCurve(to: CGPoint(x: r.maxX - radius, y: r.minY), control: CGPoint(x: r.maxX, y: r.minY))

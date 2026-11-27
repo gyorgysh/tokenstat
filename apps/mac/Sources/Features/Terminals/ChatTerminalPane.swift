@@ -3,8 +3,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// Project shells and saved SSH servers beside a chat. Closing the pane
-/// leaves its host-owned sessions running and available in the sidebar.
 struct ChatTerminalPane: View {
     let folder: WorkspaceFolder
     @Bindable var terminals: TerminalsModel
@@ -181,8 +179,6 @@ struct ChatTerminalPane: View {
             else { await LaunchCatalog.shared.resolve() }
         }
         guard !Task.isCancelled, isActive, request?.id == intent.id else { return }
-        // Consume before selecting or starting, so tab remounts never spawn
-        // another shell or override a later manual session selection.
         request = nil
         if intent.newTerminal {
             let available = peer.map { LaunchCatalog.shared.remoteAvailable(for: $0) } ?? LaunchCatalog.shared.available

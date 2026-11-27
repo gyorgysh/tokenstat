@@ -32,7 +32,6 @@ class ChatModelPayloadTest {
     @Test fun aStaleSizeCannotAllowAnOversizedRead() {
         val file = temporary.newFile()
         RandomAccessFile(file, "rw").use { it.setLength(MODEL_PREVIEW_BYTES.toLong() + 1) }
-        // Reproduce the size check seeing old metadata before the file grows.
         val stale = object : File(file.path) { override fun length(): Long = 16 }
         assertNull("The opened file must still obey the preview limit", readModelPreviewBytes(stale))
     }

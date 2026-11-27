@@ -6,13 +6,6 @@
 
 import SwiftUI
 
-/// The selected note, in the same column a task gets.
-///
-/// Notes were the one list in the app with no inspector: a note could be
-/// written and archived and nothing else, so the body text somebody typed on
-/// their phone could not be read on the Mac, let alone edited. Tasks had all
-/// of that a pane away. This is the same pane, with the fields a note has
-/// rather than the ones an agent run needs.
 struct NotesInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
@@ -41,9 +34,6 @@ struct NotesInspector: View {
 
     private enum Field: Hashable { case title, notes }
 
-    /// The selection, but only while it is a note. The board and this screen
-    /// share one selected card, so arriving here with a task selected must
-    /// show the empty state rather than an editor for something else.
     private var note: TodoCard? {
         guard let card = model.selectedCard, card.isNote else { return nil }
         return card
@@ -155,7 +145,6 @@ struct NotesInspector: View {
                     }.pickerStyle(.segmented).labelsHidden()
                 }
                 ZStack(alignment: .topLeading) {
-                    // Keep native editing/undo state when switching to Preview.
                     notesEditor
                         .disabled(preview)
                         .opacity(preview ? 0 : 1)
@@ -184,8 +173,6 @@ struct NotesInspector: View {
                     notesDraft = saved.body
                 }
 
-                // A note belongs somewhere, and until now the only way to
-                // change where was to write it again in the right place.
                 AppMenuPicker(
                     title: L10n.text("apple.notesinspector.project.98595978"),
                     options: [(value: "", label: L10n.text("apple.notesinspector.unassigned.14d33bd0"))]
@@ -250,17 +237,12 @@ struct NotesInspector: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 }
-                // Archive is beside this and is the reversible one. Deleting
-                // a note is the only permanent thing this pane can do, and a
-                // misclick a few points to the right of Archive must not be
-                // the way somebody finds that out.
                 Button(L10n.text("common.delete"), .delete) { confirmingDelete = true }
                     .buttonStyle(DestructiveButtonStyle())
             }
         }
     }
 
-    // MARK: - Drafts
 
     private func markDirtyIfNeeded() {
         guard let id = loadedID else { return }

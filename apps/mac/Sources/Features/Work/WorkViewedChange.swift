@@ -2,8 +2,6 @@
 import Foundation
 import CryptoKit
 
-/// An explicitly viewed snapshot. Source text is sealed for reading; only
-/// commit metadata and file names enter the disposable search index.
 struct WorkViewedChange: Codable, Sendable, Identifiable {
     let reference: WorkReference
     let title: String
@@ -84,7 +82,6 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
         let payload: Data
     }
 
-    /// Bound text, metadata and JSON structure before allocating encoded copies.
     static func prepare(owner: WorkReference, commit: CommitDetail?, diff: FileDiff?) -> Prepared? {
         let budget = 8 * 1024 * 1024
         guard (commit != nil) != (diff != nil), fitsCacheBudget(owner: owner, commit: commit, diff: diff, limit: budget) else { return nil }
@@ -103,8 +100,6 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
         return Prepared(reference: reference, revision: revision, payload: data)
     }
 
-    /// Conservative structural allowances include keys, punctuation and numbers.
-    /// Empty lines and metadata-only patches cost space even with no source text.
     static func fitsCacheBudget(owner: WorkReference, commit: CommitDetail?, diff: FileDiff?, limit: Int) -> Bool {
         var bytes = ByteBudget(remaining: limit)
         guard bytes.consume(512), bytes.string(owner.scope.origin), bytes.string(owner.scope.identity),
@@ -122,7 +117,7 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
                 guard bytes.consume(128), bytes.string(file.path) else { return false }
             }
         } else if let diff {
-            guard bytes.string(diff.path) else { return false } // The snapshot title repeats the path.
+            guard bytes.string(diff.path) else { return false }
         }
         for file in commit?.diffs ?? diff.map({ [$0] }) ?? [] {
             guard bytes.consume(64), bytes.string(file.path) else { return false }
@@ -148,8 +143,6 @@ struct WorkViewedChange: Codable, Sendable, Identifiable {
         mutating func string(_ text: String) -> Bool {
             guard consume(2), consume(text.utf8.count) else { return false }
             for byte in text.utf8 {
-                // JSON control escapes can take six bytes; slashes, quotes
-                // and backslashes take two with JSONEncoder's defaults.
                 if byte < 0x20 { remaining -= 5 }
                 else if byte == 0x22 || byte == 0x5C || byte == 0x2F { remaining -= 1 }
                 if remaining < 0 { return false }

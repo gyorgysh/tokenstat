@@ -17,8 +17,6 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     let peak = store.peak_hour_for(q)?;
 
     if json {
-        // The headline shows what this would have cost at list rates; the
-        // machine-readable form gets the same figure or it understates value.
         let prices = PriceTable::load_with_catalog();
         let total_value: EquivalentValue = models
             .iter()
@@ -38,21 +36,9 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         return Ok(());
     }
 
-    // Days the archive measured, plus days a vendor recorded work for and
-    // nothing can price.
-    //
-    // One number, because the question is how many days were worked and that is
-    // known: the vendor's activity log says so. Not being able to price a day
-    // is a fact about the tokens, not about the day, and the grid and the floor
-    // note are where that uncertainty belongs. Reporting 50 here denied that a
-    // week of work happened at all.
     let unmeasured_days = crate::render::unmeasured_days(store, q).len() as u64;
 
     let c = &totals.counters;
-    // Split the headline the way the tools themselves do. Cache reads dwarf
-    // everything else, often by two orders of magnitude, so folding them into
-    // one "total tokens" figure makes it unrecognizable next to what Claude
-    // Code's own usage view reports.
     let in_out = c
         .input_fresh
         .unwrap_or(0)
@@ -92,8 +78,6 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         println!("  {DIM}{first} to {last}{peak_txt}{DIM:#}");
     }
 
-    // One load for the table and the notes below it. The catalog
-    // is a megabyte of JSON, so parsing it twice per report is not free.
     let prices = PriceTable::load_with_catalog();
 
     let day_values = values_by_key(&store.report_by_model(GroupBy::Day, q)?, &prices);
@@ -148,9 +132,6 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             let a = accent();
             let c = &m.counters;
             let label = sanitize_label(&model_label(&m.key));
-            // What this model's usage would have cost at list rates. It was not
-            // billed that way on a plan, so it is labelled as value, never as
-            // money charged. `~` marks estimate floors (Cursor Auto).
             println!(
                 "  {}  {}  {}  {}  {}  {}  {a}{}{a:#}",
                 ui::pad_right(&label, w),
@@ -164,8 +145,6 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         }
     }
 
-    // Plan usage is not money. Saying so explicitly is a product requirement,
-    // not a nicety.
     let mut router_floor = false;
     let mut from_catalog = false;
     let mut missing: Vec<String> = Vec::new();
@@ -193,9 +172,6 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     println!(
         "  {DIM}List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.{DIM:#}"
     );
-    // Name what each `~` actually is. "Estimate" alone leaves the reader
-    // guessing whether it means rounded or sourced from somewhere else. Both
-    // reasons can apply at once, so they share one line rather than stacking.
     let mut why: Vec<&str> = Vec::new();
     if router_floor {
         why.push("Cursor Auto at Composer 2.5 list rates as a floor");
@@ -225,16 +201,9 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     Ok(())
 }
 
-/// Today in the user's timezone. Re-exported from the core, which owns the
-/// calendar this anchors, so the CLI and the app cannot disagree about which
-/// day it is.
 pub(super) use tokenstat_core::activity::today;
 
-/// Weeks that fit the current terminal, so a wide window is not required to
-/// read the grid and a narrow one does not wrap into noise.
 fn heat_weeks(max_weeks: usize) -> usize {
-    // COLUMNS wins when set, so a piped or captured run can still ask for the
-    // full year that a narrow window would otherwise trim.
     let cols = std::env::var("COLUMNS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -244,7 +213,6 @@ fn heat_weeks(max_weeks: usize) -> usize {
     max_weeks.clamp(1, fits.max(8))
 }
 
-/// Draw the calendar: month strip, weekday gutter, cells, legend.
 fn heat_block(cal: &ui::HeatCalendar, legend: bool) {
     println!("  {DIM}{}{DIM:#}", cal.header());
     for (r, row) in cal.rows.iter().enumerate() {
@@ -253,10 +221,6 @@ fn heat_block(cal: &ui::HeatCalendar, legend: bool) {
             match cell {
                 None => line.push_str("  "),
                 Some(c) if c.unmeasured => {
-                    // Its own mark, not level 0. A day off and a day whose
-                    // transcripts were deleted before the first scan both have
-                    // no tokens, and drawing them alike says the second never
-                    // happened.
                     line.push_str(&format!("{DIM}{}{DIM:#} ", ui::heat_unknown_cell()));
                 }
                 Some(c) => {
@@ -277,8 +241,6 @@ fn heat_block(cal: &ui::HeatCalendar, legend: bool) {
             let s = ui::heat_style(level);
             scale.push_str(&format!("{s}{}{s:#} ", ui::heat_cell()));
         }
-        // "less" + five swatches + "more", flush with the right edge of the
-        // grid the way the web version sits under its last column.
         let plain = "less ".len() + 5 * ui::HEAT_COL + "more".len();
         let lead = cal.width().saturating_sub(plain);
         println!(
@@ -317,8 +279,6 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
                 )
             })
             .collect();
-        // Money in microdollars, so the profile page can render exact figures
-        // without a float ever touching the wire.
         println!(
             r#"{{"days":[{}],"weeks":{},"cost_micros":{},"tokens":{},"shade_by":"tokens","active_days":{},"streak_current":{},"streak_best":{},"busiest_day":{}}}"#,
             cells.join(","),
@@ -421,8 +381,6 @@ pub fn wrapped(
         .iter()
         .filter_map(|m| EquivalentValue::price(&prices, &model_label(&m.key), &m.counters))
         .sum();
-    // Busiest by token volume, so this line and the heatmap below it agree on which
-    // day was the big one.
     let day_tokens = daily_tokens(&days);
     let busiest_day = day_tokens.iter().max_by_key(|(_, tokens)| *tokens);
     let top_project = projects.first();
@@ -484,8 +442,6 @@ pub fn wrapped(
     }
     if !days.is_empty() {
         println!();
-        // Wrapped is a calendar year, not a rolling window: anchor on the last
-        // day of the year that has already happened, and reach back to January.
         let year_end = jiff::civil::date(y as i16, 12, 31);
         let now = today(tz);
         let anchor = if now < year_end { now } else { year_end };

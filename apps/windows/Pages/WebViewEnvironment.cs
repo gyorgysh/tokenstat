@@ -28,8 +28,6 @@ internal static class WebViewEnvironment
     {
         lock (Gate)
         {
-            // A failed start is not cached: the runtime may be installed or
-            // repaired while the app keeps running.
             if (_environment is null || _environment.IsFaulted || _environment.IsCanceled)
             {
                 _environment = CreateAsync();
@@ -45,11 +43,6 @@ internal static class WebViewEnvironment
             null, ProfileFolder, new CoreWebView2EnvironmentOptions());
     }
 
-    /// <summary>
-    /// Carry an existing profile out of the install folder once, so moving it
-    /// does not sign anybody out. Best effort: a profile still in use stays
-    /// where it is and a fresh one starts in the new place.
-    /// </summary>
     private static void MoveLegacyProfile()
     {
         try
@@ -59,8 +52,6 @@ internal static class WebViewEnvironment
             {
                 return;
             }
-            // Beside this exe, or beside the previous version an update has
-            // just moved aside and has not deleted yet.
             var install = AppContext.BaseDirectory.TrimEnd('\\', '/');
             var legacy = new[]
             {
@@ -75,7 +66,6 @@ internal static class WebViewEnvironment
         }
         catch
         {
-            // The runtime creates an empty profile in the new place.
         }
     }
 }

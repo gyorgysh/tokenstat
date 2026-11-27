@@ -71,10 +71,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/// One file as a full page, port of the iOS phone `ClientFileEditor`: find
-/// and replace, save states under the buffer, conflict handling when the host
-/// copy moved, and a discard confirm. The host is re-read before every save
-/// over `workspace.read`; the draft goes through `workspace.write`.
 @Composable
 fun WorkspaceFileEditorPage(
     model: AppViewModel,
@@ -188,7 +184,6 @@ fun WorkspaceFileEditorPage(
         if (dirty) confirmDiscard = true else onClose()
     }
 
-    // System back must honor the same unsaved-draft guard as the toolbar.
     BackHandler { requestClose() }
     LaunchedEffect(peer, workspace, path) { load() }
 

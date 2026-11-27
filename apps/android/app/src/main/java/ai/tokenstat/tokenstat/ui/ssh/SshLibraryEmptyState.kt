@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import ai.tokenstat.tokenstat.ui.theme.Space
 import androidx.compose.runtime.Composable
 
-/** The library's next step stays next to its search and Add controls. */
 @Composable
 internal fun SshLibraryEmptyState(
     tab: Int,

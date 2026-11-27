@@ -3,11 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The exact task run, with a door into that folder's files and history.
-///
-/// This is not a chat. The transcript stays the selected result. Compact
-/// layouts push Changes or History and return here. Wide iPad keeps the run
-/// visible and reviews the folder beside it.
 struct ClientTaskResultView: View {
     let peer: String
     let hostName: String
@@ -23,9 +18,6 @@ struct ClientTaskResultView: View {
     @State private var folderMissing = false
     @State private var inspectorSurface: TaskResultWorkspaceSurface = .changes
     @State private var pushedSurface: TaskResultWorkspaceSurface?
-    /// Wide iPad only: the review pane beside the run. Hiding it gives the
-    /// transcript the full width; the selection is kept, so showing it again
-    /// returns to the same Changes/History tab.
     @State private var showsInspector = true
     @State private var attachError: String?
     @Environment(\.dismiss) private var dismiss

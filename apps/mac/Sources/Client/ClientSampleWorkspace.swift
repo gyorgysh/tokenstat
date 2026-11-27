@@ -8,20 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// What the product is, before anybody rents anything.
-///
-/// Setting a machine up costs money and half an hour, and until now that had to
-/// happen before somebody could see what they were getting. This is the ten
-/// seconds in front of it: a task, the answer, the one line that changed, and
-/// what the reading looks like.
-///
-/// It is a picture and says so, twice, in the places somebody would otherwise
-/// mistake for their own data. Nothing here is running: there is no machine, no
-/// agent and no account involved, and `scripts/check-sample-offline.sh` keeps it
-/// that way.
-///
-/// Leaving lands back where setup was. No step is marked finished by having
-/// looked at this, because none of them is.
 struct ClientSampleWorkspace: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -133,10 +119,6 @@ struct ClientSampleWorkspace: View {
         .accessibilityLabel("\(turn.speaker == .person ? L10n.text("apple.clientsampleworkspace.you.08b04193") : L10n.text("apple.clientsampleworkspace.the_agent.750a4ad2")): \(turn.text)")
     }
 
-    /// A diff line, marked by its sign as well as its colour.
-    ///
-    /// Green and red alone are the oldest way to make a diff unreadable, and a
-    /// sample is exactly where somebody is looking at one for the first time.
     private func diffRow(_ line: ClientSampleStore.Change) -> some View {
         HStack(alignment: .top, spacing: Theme.Space.s) {
             Text(sign(line.kind))

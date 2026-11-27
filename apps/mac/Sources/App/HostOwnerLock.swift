@@ -8,12 +8,6 @@
 import Darwin
 import Foundation
 
-/// Shared lock the host helper watches when Always-on host is off.
-///
-/// Each tokenstat process holds a shared flock on `host-owner.lock`. hostd
-/// probes with a non-blocking exclusive lock: if that succeeds, no app is
-/// open and the helper may exit. A clean quit also kills the job. This lock
-/// covers force-quit and crash, where `applicationWillTerminate` never runs.
 enum HostOwnerLock {
     private static var fd: Int32 = -1
 
@@ -28,13 +22,8 @@ enum HostOwnerLock {
             atPath: parent,
             withIntermediateDirectories: true
         )
-        // In-process terminals may outlive this app. An inherited descriptor
-        // would keep hostd's owner probe locked after the app has exited.
         let opened = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
         guard opened >= 0 else { return }
-        // Shared: two tokenstat processes (debug and the installed app) must
-        // both count as an owner. hostd's exclusive probe fails while either
-        // holds this.
         guard flock(opened, LOCK_SH) == 0 else {
             close(opened)
             return

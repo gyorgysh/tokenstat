@@ -2,8 +2,6 @@
 import Foundation
 import ImageIO
 
-/// Bound decoded memory, not only the compressed download size. A small PNG
-/// can contain millions of pixels even though an avatar needs only a thumbnail.
 enum AvatarImageDecode {
     static let maxPixelSize = 256
 

@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! The only filesystem capability offered to a Team agent. Native file and
-//! command tools stay disabled. Relative opens never follow links, Git metadata
-//! is unavailable, and writes cannot change a multiply-linked file.
-
 use serde_json::{Value, json};
 use std::{
     fs,

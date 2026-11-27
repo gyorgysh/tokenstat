@@ -11,11 +11,6 @@ using Windows.UI;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// What a run of source text is. Mirrors the Mac SyntaxKind, which mirrors
-/// the highlight kinds from the core. The highlighter sends kinds and never
-/// colours, which is what lets the theme switch for free.
-/// </summary>
 internal enum SyntaxKind
 {
     Keyword,
@@ -31,13 +26,9 @@ internal enum SyntaxKind
     Operator,
     Punctuation,
     Markup,
-    /// <summary>A kind this build does not know. Newer core, older app: colour it as plain text.</summary>
     Unknown,
 }
 
-/// <summary>
-/// Brand colours from tokenstat.ai. Same tokens as the Mac Theme.
-/// </summary>
 internal static class Theme
 {
     private static bool _controlsInstalled;
@@ -65,7 +56,6 @@ internal static class Theme
         foreach (var key in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "TextControlBorderBrush",
             "TextControlBorderBrushPointerOver", "TabViewItemHeaderBorderBrush" })
             resources[key] = BorderBrush;
-        // Native resting backgrounds are transparent white; see Clear.
         foreach (var key in new[] { "SubtleFillColorTransparentBrush", "NavigationViewItemBackground",
             "ListViewItemBackground", "ComboBoxItemBackground", "AppBarButtonBackground", "HyperlinkButtonBackground" })
             resources[key] = ClearBrush;
@@ -74,7 +64,6 @@ internal static class Theme
         resources["TabViewBackground"] = TabStripBrush;
     }
 
-    /// <summary>Focus rings, checks and selection take these from the platform.</summary>
     public static void RefreshAccentResources()
     {
         if (Application.Current is null) return;
@@ -90,8 +79,6 @@ internal static class Theme
             resources["SystemAccentColorDark3"] = Hex(0x351A8D);
             return;
         }
-        // The dark side draws with the light steps and the light side with
-        // the dark ones, so each gets the accent that reads on it.
         var palette = AppAppearance.Shared.Palette;
         resources["SystemAccentColor"] = Accent;
         foreach (var key in new[] { "SystemAccentColorLight1", "SystemAccentColorLight2", "SystemAccentColorLight3" })
@@ -100,8 +87,6 @@ internal static class Theme
             resources[key] = Hex(palette.Light.Accent);
     }
 
-    // RequestedTheme is the app preference; ActualTheme follows system
-    // changes while the window is alive. The shell supplies its current root.
     private static ElementTheme? _windowTheme;
     private static readonly List<WeakReference<SolidColorBrush>> LiveBrushes = new();
     private static readonly ConditionalWeakTable<SolidColorBrush, Func<Color>> BrushColors = new();
@@ -117,13 +102,10 @@ internal static class Theme
                 return;
             }
             _windowTheme = value;
-            // Called by the window's ActualThemeChanged handler on the UI
-            // thread. Recolor in place so controls retain drafts and focus.
             Recolor();
         }
     }
 
-    /// <summary>Repaint every live brush, after the window or the chosen theme changes.</summary>
     public static void Recolor()
     {
         for (var index = LiveBrushes.Count - 1; index >= 0; index--)
@@ -143,10 +125,6 @@ internal static class Theme
         _brushesSincePrune = 0;
     }
 
-    /// <summary>
-    /// The chosen theme's colour, or the brand's own on the Default theme,
-    /// whose values here are the website's and stay exact.
-    /// </summary>
     private static Color Themed(Func<AppearanceColors, uint> key, uint light, uint dark, bool blackInOled = false)
     {
         var appearance = AppAppearance.Shared;
@@ -155,10 +133,8 @@ internal static class Theme
         return Hex(key(IsDark ? appearance.Palette.Dark : appearance.Palette.Light));
     }
 
-    /// <summary>The logo keeps the brand's colours on the Default theme only.</summary>
     public static bool ShowsBrandColors => !AppAppearance.Shared.IsThemed;
 
-    /// <summary>Text and glyphs on an accent fill: white on the violet, near black on a pale accent.</summary>
     public static Color OnAccent
     {
         get
@@ -185,49 +161,32 @@ internal static class Theme
 
     public static Color Accent => Themed(static side => side.Accent, 0x6A3DFF, 0x8B5CF6);
     public static Color Secondary => Themed(static side => side.Secondary, 0xC026D3, 0xE879F9);
-    // A pull request's state, in the colours every forge uses for it.
     public static Color PullOpen => Hex(IsDark ? 0x3FB950u : 0x1A7F37u);
     public static Color PullMerged => Hex(IsDark ? 0xA371F7u : 0x8250DFu);
     public static Color PullClosed => Hex(IsDark ? 0xF85149u : 0xCF222Eu);
     public static Color Background => Themed(static side => side.Background, 0xFBFBFD, 0x08070D, blackInOled: true);
     public static Color Sidebar => Themed(static side => side.Sidebar, 0xF3F2F8, 0x12101D, blackInOled: true);
-    /// <summary>A card on OLED is a step off black, which is how depth works where there is no light.</summary>
     public static Color Panel => AppAppearance.Shared.IsOled ? Hex(0x0C0C0F) : Themed(static side => side.Panel, 0xFFFFFF, 0x100E1A);
-    /// <summary>Behind a tab strip. A step darker than the pane under it, so the strip reads as chrome.</summary>
     public static Color TabStrip => Themed(static side => side.Sidebar, 0xF3F2F8, 0x08070D, blackInOled: true);
     public static Color Border => AppAppearance.Shared.IsOled ? Color.FromArgb(15, 255, 255, 255) : Themed(static side => side.Border, 0xE7E7EE, 0x211D33);
     public static Color RowHighlight => AccentSoft;
-    /// <summary>The row that is actually selected. Tinted with the accent at 18 percent opacity, matching the Mac rowSelected.</summary>
     public static Color RowSelected => Color.FromArgb(46, Accent.R, Accent.G, Accent.B);
-    /// <summary>A selected row nested inside a selected one. Neutral, not tinted, matching the Mac rowSelectedNested.</summary>
     public static Color RowSelectedNested => Themed(static side => side.Selection, 0xE8E7F0, 0x26213D);
     public static Color AccentSoft => Themed(static side => side.Selection, 0xF0ECFF, 0x1B1430);
-    /// <summary>Quiet circular seat behind a small chrome glyph. Black at 6 percent in light mode, white at 9 percent in dark mode, matching the Mac controlSeat.</summary>
     public static Color ControlSeat => IsDark
         ? Color.FromArgb(23, 255, 255, 255)
         : Color.FromArgb(15, 0, 0, 0);
     public static Color ControlGlyph => Hex(IsDark ? 0xA8A5B5u : 0x6B6876u);
-    /// <summary>The same glyph while the pointer is over it.</summary>
     public static Color ControlGlyphHover => Hex(IsDark ? 0xE9E7F0u : 0x2A2831u);
-    /// <summary>
-    /// Caption button pressed fill. Hover reuses ControlSeat, a press wants a
-    /// deeper neutral at about twice the hover weight, in both themes.
-    /// Translucent like the hover: it lands on the content tone the buttons sit
-    /// over, and the OS caption painter only honors these colors where that
-    /// composition works.
-    /// </summary>
     public static Color CaptionPressed => IsDark
         ? Color.FromArgb(46, 255, 255, 255)
         : Color.FromArgb(31, 0, 0, 0);
     public static Color Success => Accent;
     public static Color Warning => Color.FromArgb(255, 0xE0, 0xA9, 0x3B);
     public static Color Danger => Color.FromArgb(255, 0xD6, 0x45, 0x3F);
-    /// <summary>A session that is doing something right now. The accent, like success, but named separately so the two can diverge.</summary>
     public static Color StateWorking => Accent;
     public static Color StateIdle => Hex(IsDark ? 0x6E6A80u : 0x9A97A6u);
-    /// <summary>Muted green for added lines. A diff is the one place this colour is not a traffic light.</summary>
     public static Color DiffAdded => Hex(IsDark ? 0x5FBF8Bu : 0x2E8B57u);
-    /// <summary>Muted red for removed lines, matching the Mac Theme.</summary>
     public static Color DiffRemoved => Hex(IsDark ? 0xE8827Cu : 0xC2453Fu);
 
     public static Color[] Heat { get; } =
@@ -248,10 +207,6 @@ internal static class Theme
         Hex(0xE879F9),
     ];
 
-    /// <summary>
-    /// The ramp in use. A chosen theme and OLED bring their own, whose quiet
-    /// step is the border tone: on black a black cell would vanish.
-    /// </summary>
     public static Color[] HeatRamp
     {
         get
@@ -269,19 +224,8 @@ internal static class Theme
         return ramp[i];
     }
 
-    /// <summary>
-    /// Default text colour for explicitly colored glyphs and syntax ranges.
-    /// Follow the window theme rather than the application resource lookup,
-    /// which can still resolve the launch theme during a system change.
-    /// </summary>
     public static Color DefaultText => Hex(IsDark ? 0xFFFFFFu : 0x000000u);
 
-    /// <summary>
-    /// Colour for a syntax kind. The whole palette in one place, transcribed
-    /// from the Mac Theme. Variables, operators and punctuation stay the text
-    /// colour: colouring every token is how a file ends up unreadable, so most
-    /// of it must not be coloured.
-    /// </summary>
     public static Color Syntax(SyntaxKind kind) => kind switch
     {
         SyntaxKind.Keyword => Accent,
@@ -297,11 +241,6 @@ internal static class Theme
     };
 
     public static SolidColorBrush Brush(Color color) => new(color);
-    /// <summary>
-    /// A private brush whose semantic color follows the window theme. Keep
-    /// providers static or capture only value data, never a page or control.
-    /// Weak ownership lets a discarded visual tree and its providers collect.
-    /// </summary>
     public static SolidColorBrush Brush(Func<Color> color)
     {
         var brush = new SolidColorBrush(color());

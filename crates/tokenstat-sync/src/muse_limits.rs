@@ -23,7 +23,6 @@ use serde::Deserialize;
 use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 use zeroize::{Zeroize, Zeroizing};
 
-// This account route is outside /v1, unlike Muse's model API.
 const ACCOUNT_URL: &str = "https://api.meta.ai/muse-code/key";
 const MAX_BYTES: u64 = 128 * 1024;
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
@@ -160,7 +159,6 @@ fn cli_reading(usage: CliUsage) -> ProviderLimits {
     };
     let observed_at_ms = allowance.as_of_ms.unwrap_or_else(now_ms);
     let mut windows = Vec::new();
-    // Everyday's rolling window is the same 5-hour gauge Home already knows.
     if let Some(window) = allowance.window.and_then(|w| w.reading("5-hour".into())) {
         windows.push(window);
     }
@@ -214,7 +212,6 @@ fn account_usage() -> ProviderLimits {
         Ok(client) => client,
         Err(_) => return unavailable("Could not prepare the Muse account request."),
     };
-    // Stamp the request, rather than making a delayed reply look newer.
     let observed_at_ms = now_ms();
     let response = match client
         .post(ACCOUNT_URL)
@@ -239,8 +236,6 @@ fn account_usage() -> ProviderLimits {
             status => format!("Muse returned {status} for its account endpoint."),
         });
     }
-    // The reply also contains a credential. Bound it, do not log it, and
-    // deserialize only the fields eligible for the limits cache/sync.
     let mut raw = Zeroizing::new(String::new());
     if response
         .take(MAX_BYTES + 1)

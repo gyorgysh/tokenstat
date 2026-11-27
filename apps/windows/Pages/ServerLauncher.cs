@@ -6,7 +6,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Saved names and connection state, without exposing SSH endpoints.</summary>
 internal static class ServerLauncher
 {
     internal static string Name(JsonNode host) => SshHostPlatform.SessionLabel(host);
@@ -16,11 +15,6 @@ internal static class ServerLauncher
         return (hosts ?? new JsonArray()).OfType<JsonNode>().OrderByDescending(host => Format.Flag(host, "favorite"))
             .ThenBy(host => Format.Long(host, "sortIndex")).ThenBy(Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
-    /// <summary>
-    /// Saved servers in the launcher column, like the Mac: a heading with
-    /// Manage servers on the right, then one row per server that says what a
-    /// click does. Not a card of its own, so it lines up with the tiles.
-    /// </summary>
     internal static async Task<UIElement> CreateAsync(Func<JsonNode, Task> open, Action manage)
     {
         var body = new StackPanel { Spacing = Theme.SpaceS };
@@ -28,7 +22,7 @@ internal static class ServerLauncher
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.Children.Add(new FontIcon { Glyph = "\uE968", FontSize = 14, VerticalAlignment = VerticalAlignment.Center }); // Network
+        header.Children.Add(new FontIcon { Glyph = "\uE968", FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
         var title = new TextBlock
         {
             Text = L10n.Text("windows.serverlauncher.servers"),

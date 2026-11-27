@@ -6,26 +6,14 @@
 
 import SwiftUI
 
-/// How a transcript stays with the latest turn without chasing every token.
-///
-/// Structural changes (a new row, thinking becoming working, the live seat
-/// arriving or leaving) may ease the viewport to the bottom. Streamed text
-/// grows in place and the pin is silent, because animating that pin is what
-/// made the live character look like it was travelling.
 enum TranscriptFollow {
     static let spaceName = "chat-scroll"
-    /// The transcript's own content, which a scroll does not move. A row's
-    /// place in it changes only when something above the row changes size.
     static let contentSpaceName = "chat-content"
-    /// How far from the bottom counts as "still with the conversation".
     static let threshold: CGFloat = 56
-    /// The live Thinking/Working seat. Fixed so a mood change cannot shove
-    /// the rest of the transcript.
     static let seatHeight: CGFloat = 34
     static let bottomID = "chat-bottom"
     static let structureDuration: Double = 0.14
 
-    /// Identity of the rows, not the length of the text inside them.
     static func structureToken(
         items: [ChatDisplayItem],
         busy: Bool,
@@ -37,13 +25,6 @@ enum TranscriptFollow {
         return "\(items.count)-\(last)-\(mood)"
     }
 
-    /// What the live seat's character is doing.
-    ///
-    /// One function for both transcripts, because a chat on the Mac and the
-    /// same chat on a phone should not disagree about whether the agent is
-    /// thinking or already answering. Streaming prose is `.speaking`, not
-    /// `.thinking`: the difference is the whole reason the seat has a face on
-    /// it rather than a spinner.
     static func liveMood(
         items: [ChatDisplayItem],
         busy: Bool,
@@ -59,10 +40,6 @@ enum TranscriptFollow {
         return .thinking
     }
 
-    /// The newest running step, in the words the seat shows.
-    ///
-    /// Waiting still wins in the indicator. This only names a tool or an edit
-    /// that is still going. A finished row keeps its own card.
     static func liveStep(_ items: [ChatDisplayItem]) -> String? {
         for item in items.reversed() {
             switch item.kind {
@@ -71,7 +48,6 @@ enum TranscriptFollow {
             case let .edit(state) where state.running:
                 return SeatStep.phrase(verb: L10n.text("common.edit"), target: state.path)
             case let .group(group) where group.running && group.liveVerb != nil:
-                // Folded away, still the step the seat should name.
                 return SeatStep.phrase(verb: group.liveVerb, target: group.liveTarget)
             default:
                 continue
@@ -100,15 +76,12 @@ enum TranscriptFollow {
             switch item.kind {
             case let .tool(state): return state.running
             case let .edit(state): return state.running
-            // A closed group spins for the steps it hides. An open one
-            // leaves it to the running step below it.
             case let .group(group): return group.running && !group.open
             default: return false
             }
         }?.id
     }
 
-    /// Growing prose. Used to pin without animation.
     static func streamExtent(_ items: [ChatDisplayItem]) -> Int {
         guard let last = items.last else { return 0 }
         switch last.kind {
@@ -132,7 +105,6 @@ enum TranscriptFollow {
 /// this wide. Older built rows are reached by sliding it, not by widening it.
 enum TranscriptSlice {
     static let length = 1500
-    /// How far one "show earlier" tap slides toward the start.
     static let step = 600
 
     static func clampOffset(_ offset: Int, count: Int) -> Int {
@@ -140,8 +112,6 @@ enum TranscriptSlice {
         return min(max(0, offset), count - length)
     }
 
-    /// `olderOffset` is how many newest rows sit below the slice. Zero glues
-    /// it to the end, which is the default and the follow pin.
     static func range(count: Int, olderOffset: Int) -> Range<Int> {
         guard count > 0 else { return 0..<0 }
         guard count > length else { return 0..<count }
@@ -186,7 +156,6 @@ enum TranscriptSlice {
     static let measuredWholeMost = 256
     static let measuredWholeHeight = 40_000.0
 
-    /// Whether `rows` can be measured whole. See `measuredWhole`.
     static func measuresWhole(_ rows: [ChatDisplayItem]) -> Bool {
         if rows.count <= measuredWhole { return true }
         guard rows.count <= measuredWholeMost else { return false }
@@ -198,8 +167,6 @@ enum TranscriptSlice {
         return true
     }
 
-    /// The built rows, split into the lazy head and the measured tail.
-    /// `whole` allows a slice with little to lay out to be measured entirely.
     static func measuredTailStart(_ rows: [ChatDisplayItem], whole: Bool = false) -> Int {
         if whole, measuresWhole(rows) { return 0 }
         var count = 0
@@ -226,20 +193,15 @@ enum TranscriptSlice {
         clampOffset(olderOffset + min(step, limit), count: count)
     }
 
-    /// One step back towards the newest rows.
     static func revealingLater(count: Int, olderOffset: Int, limit: Int = step) -> Int {
         clampOffset(olderOffset - min(step, limit), count: count)
     }
 
-    /// Offset that puts `id` in the slice as its last row, so a scroll to
-    /// that row has newer context below it rather than above it.
     static func revealing(_ id: String, in items: [ChatDisplayItem]) -> Int {
         guard let at = items.firstIndex(where: { $0.id == id }) else { return 0 }
         return clampOffset(items.count - at - 1, count: items.count)
     }
 
-    /// Keep the slice on its first surviving row. A prepended page can
-    /// replace the first row with a plan or fold it into another group.
     static func holding(_ ids: [String], in items: [ChatDisplayItem], current: Int) -> Int {
         for id in ids {
             if let index = items.firstIndex(where: { $0.id == id }) {
@@ -251,27 +213,13 @@ enum TranscriptSlice {
 
 }
 
-/// Where a transcript is scrolled to, in the one shape everything that cares
-/// about it reads.
-///
-/// Two routes produce it and they have to agree. `onScrollGeometryChange`
-/// answers exactly, on every frame, without a view update. Older systems have
-/// no such call and measure it with a geometry reader and a preference, which
-/// is what this always did and what costs a view update per frame.
 struct TranscriptMetrics: Equatable {
-    /// How far the top of the loaded conversation is above the viewport.
-    /// Large at the bottom of a long chat, zero at the very beginning.
     var distanceFromTop: CGFloat
-    /// How far the end is below it. Zero means the reader is with the latest
-    /// turn.
     var distanceFromBottom: CGFloat
     var contentHeight: CGFloat
     var viewportHeight: CGFloat
-    /// Nil on systems without scroll phases; those keep the geometry heuristic.
     var readerIsScrolling: Bool? = nil
 
-    /// Clamping distanceFromBottom to zero also covers offsets below the
-    /// entire document. That is an empty viewport, not a reached end.
     var viewportPastContent: Bool {
         #if os(macOS)
         viewportHeight > 0 && contentHeight > 0 && distanceFromTop >= contentHeight
@@ -312,35 +260,14 @@ extension TranscriptMetrics {
 @Observable
 final class TranscriptFollowState {
     private(set) var showJump = false
-    /// Paused by hand from the Following pill. Unlike an unpin from a scroll,
-    /// this survives arriving at the bottom on a streaming frame: only coming
-    /// back to the latest turn with a scroll of one's own, or pressing Follow
-    /// again, clears it. Observed (rare transitions only, never per-frame).
     private(set) var paused = false
-    /// The viewport moved recently. Observed, transitions only: the transcript
-    /// redraws twice per gesture (scroll start and 0.35s after it ends), and
-    /// readers use it to shed hit testing and geometry reporting mid-fling.
     private(set) var scrolling = false
     @ObservationIgnored var pinned = true
-    /// The ForEach has dropped the newest rows so the reader can look at
-    /// earlier ones. Geometry at the bottom of that slice is not the
-    /// conversation's end, and pinning it would pin a sentinel under old
-    /// messages. Written on the button that slides the slice, ignored so a
-    /// scroll frame cannot invalidate the transcript.
     @ObservationIgnored var sliceHidesNewest = false
     @ObservationIgnored var suppressed = false {
         didSet { if suppressed { set(jump: false) } }
     }
-    /// Our own scrolls are in flight until this date. An animated pin travels
-    /// through frames that look exactly like a reader leaving (far from the
-    /// end, offset moving), and without this the pin unpinned itself midway.
-    /// Written on scroll calls only, read on every scroll callback: ignored.
     @ObservationIgnored private var programmaticUntil: Date = .distantPast
-    /// A conversation that has just opened is still finding its real heights,
-    /// and every one of those frames says the end is far below. Taking that
-    /// as a reader who scrolled away is what left a long chat open in its
-    /// middle: the first estimate unpinned the view, and the settle that was
-    /// meant to correct it stopped because the view was no longer pinned.
     @ObservationIgnored private(set) var settling = false
     /// Whether the transcript has actually reached the latest turn.
     ///
@@ -350,19 +277,6 @@ final class TranscriptFollowState {
     /// which is the difference between watching that happen and arriving
     /// where the reading is.
     private(set) var arrived = false
-    /// Put the viewport back on the end. Installed by the transcript, which
-    /// is the only thing holding a scroll proxy.
-    ///
-    /// Called from the scroll callback rather than from a view update,
-    /// because the growth this answers is a lazy row finding its real height
-    /// and no view update is owed for that. Without it the pin was only ever
-    /// applied when a row arrived or a stream grew, and everything else that
-    /// changes a transcript's height (rows measuring themselves, a page the
-    /// opening backfill was still fetching, an image decoding) left the
-    /// viewport wherever it happened to be.
-    ///
-    /// Answers whether the walk was actually made. A refusal has to stop the
-    /// following rather than be retried on the next frame.
     @ObservationIgnored var repin: (() -> Bool)?
     @ObservationIgnored private let repinDelivery = TranscriptScrollDelivery()
     @ObservationIgnored private var lastContentHeight: CGFloat = 0
@@ -376,20 +290,8 @@ final class TranscriptFollowState {
     /// pinned back. That pin is a walk of the lazy stack, which is the
     /// hitch a person feels scrolling up from the latest line.
     @ObservationIgnored private var forcedWheel = false
-    /// Opening samples this on its timer because unchanged geometry emits no callback.
     @ObservationIgnored private(set) var layoutRevision: UInt64 = 0
-    /// Offset drift outside our own scrolls, accumulated across frames. Scroll
-    /// callbacks run per frame, so a slow reading scroll moves less than the
-    /// per-frame `moved` epsilon every frame and would otherwise read as
-    /// stationary forever. Our own pins reset this (they move the viewport a
-    /// lot and must never count as the reader leaving).
     @ObservationIgnored private var undrivenDrift: CGFloat = 0
-    /// Consecutive far frames with offset motion, and consecutive far frames
-    /// with the end receding. Estimate resolution moves the offset in single
-    /// large frames and pushes the end away for a frame or two; treating one
-    /// such frame as the reader leaving is what unpinned a fresh send and
-    /// parked the transcript mid-screen behind Jump to latest. Unpinning
-    /// takes sustained motion when content is resizing. Ignored.
     @ObservationIgnored private var farMovedFrames = 0
     @ObservationIgnored private var retreatingFrames = 0
     /// Repins spent since the end was last actually reached.
@@ -412,23 +314,13 @@ final class TranscriptFollowState {
     /// A conversation the reader can leave is better than one
     /// nobody can use.
     @ObservationIgnored private var repinsSpent = 0
-    /// A blank viewport gets one rescue even if ordinary growth corrections
-    /// exhausted their budget. It cannot replenish until content intersects.
     @ObservationIgnored private var pastContentRecoveryAttempted = false
     @ObservationIgnored private var viewportPastContent = false
-    /// When the last repin walk ran. Growth frames arrive faster than walks
-    /// pay off, so repins coalesce to ~6 a second (see the throttle below).
-    /// Reset wherever a new pursuit starts so Jump and send act at once.
     @ObservationIgnored private var lastRepinAt = Date.distantPast
-    /// A beat of quiet after the last moved frame before rows rejoin hit
-    /// testing. Long enough to cover scroll momentum, short enough that a
-    /// button is never dead when reached for.
     private static let scrollQuiet: TimeInterval = 0.35
 
     @ObservationIgnored private var scrollReset: DispatchWorkItem?
 
-    /// Mark scroll motion. Called on every scroll callback frame; only
-    /// transitions touch the observed flag, so one gesture costs two draws.
     private func trackScrolling(moved: Bool) {
         guard moved else { return }
         setScrolling(true)
@@ -446,10 +338,6 @@ final class TranscriptFollowState {
     deinit {
         scrollReset?.cancel()
     }
-    /// Whether this pane is the one in front. Set by the transcript, which is
-    /// the only reader: repins fire from scroll callbacks, and a hidden pane
-    /// is still laid out (sized) behind other destinations, so without this
-    /// they would drive a proxy nobody can see.
     @ObservationIgnored var active = true
 
     /// Stop every scroll-driven walk while the pane is behind another screen.
@@ -480,10 +368,7 @@ final class TranscriptFollowState {
     /// so spending forty of them on a transcript that is already there is
     /// most of what made opening a long chat a hang.
     @ObservationIgnored private(set) var atEnd = false
-    /// Within a couple of points of the end, not just inside the threshold.
     var exactlyAtEnd: Bool { atEnd && lastViewportHeight > 0 && lastDistanceFromBottom <= 2 }
-    /// Somebody scrolled away while the end was being chased. Read by the
-    /// chase, which stops rather than argue.
     @ObservationIgnored private(set) var abandoned = false
 
     /// Hold the end while the transcript settles, whatever the geometry of a
@@ -497,15 +382,6 @@ final class TranscriptFollowState {
         set(arrived: !holding)
     }
 
-    /// Hold the end without hiding anything.
-    ///
-    /// What `settle` does minus the wireframe. An opening conversation has
-    /// nothing worth looking at yet; a press of Jump to latest has the
-    /// conversation on screen already and only needs the end to be reached.
-    /// It needs the same insistence, though: one scroll to the end of a lazy
-    /// stack from far above it lands on estimated heights, builds rows on the
-    /// way that correct those estimates, and stops short. That is why the
-    /// button took several presses.
     func chase(_ active: Bool) {
         repinDelivery.cancel()
         settling = active
@@ -521,26 +397,14 @@ final class TranscriptFollowState {
             pinned = true
             set(jump: false)
         } else if !pinned && !atEnd {
-            // A settle that put somebody back on their reading place ends
-            // away from the end. Every frame while it held cleared the pill,
-            // and nothing raised it again until the reader scrolled.
             set(jump: true)
         }
     }
 
-    /// Mark that a scroll about to happen is ours, not the reader's.
-    ///
-    /// Called beside every programmatic `scrollTo` (pins, repins, jump
-    /// chases, approval jumps). The animation lands within a few frames;
-    /// anything inside the window that shrinks the gap to the end is the
-    /// arrival, not a departure.
     func markDriven(duration: TimeInterval = 0.4) {
         programmaticUntil = Date().addingTimeInterval(duration)
     }
 
-    /// Short window for instant (non-animated) pins. They land on the same
-    /// frame, so a 0.4s window only serves to wipe the slow-scroll drift
-    /// tab and lock the reader out of scrollback for the whole stream.
     func markDrivenInstant() {
         markDriven(duration: 0.08)
     }
@@ -554,9 +418,6 @@ final class TranscriptFollowState {
     /// believing it is how the conversation was revealed in its middle.
     @ObservationIgnored private(set) var steadyFrames = 0
 
-    /// A replacement native scroll view has not reported its geometry yet.
-    /// Do not let the old view's position suppress the first correction in
-    /// the new one, even when the old view had reached the end.
     func resetViewport() {
         repinDelivery.cancel()
         atEnd = false
@@ -577,9 +438,6 @@ final class TranscriptFollowState {
     }
 
     func note(_ metrics: TranscriptMetrics) {
-        // A hidden pane still receives geometry as the parent ZStack
-        // re-lays out. Acting on it is what redrew markdown behind opacity
-        // zero while the person was on another destination.
         guard active else { return }
         viewportPastContent = metrics.viewportPastContent
         if !viewportPastContent { pastContentRecoveryAttempted = false }
@@ -588,9 +446,6 @@ final class TranscriptFollowState {
         let moved = abs(metrics.distanceFromTop - lastOffset) > 0.5
         let resized = abs(metrics.viewportHeight - lastViewportHeight) > 0.5
         if grew || shrank || moved || resized { layoutRevision &+= 1 }
-        // A stale sample can arrive before the wheel's offset does. Hold
-        // the flag until the viewport actually moves, or that first idle
-        // sample is what schedules the pin back.
         let fromWheel = forcedWheel
         let wheelMoved = fromWheel
             && (moved || metrics.distanceFromBottom > lastDistanceFromBottom + 0.5)
@@ -598,18 +453,10 @@ final class TranscriptFollowState {
         readerIsScrolling = metrics.readerIsScrolling == true || fromWheel
         if readerIsScrolling { repinDelivery.cancel() }
         if wheelMoved { trackScrolling(moved: true) }
-        // Motion only: growth under a still viewport is a stream arriving,
-        // not a gesture, and rows stay interactive while it is followed.
         let readerMoved = moved && (fromWheel || metrics.readerIsScrolling != false)
         trackScrolling(moved: readerMoved)
-        // The wheel already dropped the pin. Say so as soon as the viewport
-        // actually leaves the end, including a nudge that is still inside
-        // the follow threshold. An idle phase would otherwise wait until
-        // the reader was a whole threshold away.
         if wheelMoved, !settling { set(jump: true) }
 
-        // Small growth or a shorter viewport stays inside the threshold and
-        // left the last row (the token count) hidden under the composer.
         let hadViewport = lastViewportHeight > 0
         lastViewportHeight = metrics.viewportHeight
         if (hadViewport && resized) || (grew && !moved), pinned, !settling, !readerIsScrolling,
@@ -625,8 +472,6 @@ final class TranscriptFollowState {
         }
 
         if sliceHidesNewest {
-            // The bottom of this slice is older messages. Treat it as far
-            // from the end so a follow pin cannot fire under them.
             atEnd = false
             lastContentHeight = metrics.contentHeight
             lastOffset = metrics.distanceFromTop
@@ -636,17 +481,6 @@ final class TranscriptFollowState {
         }
 
         if settling {
-            // Moving away from the end, on a frame where nothing grew, is a
-            // hand on the trackpad. Nothing here may out-argue that: the
-            // chase after Jump to latest would otherwise drag somebody back
-            // for the length of its budget.
-            //
-            // A finger on the glass moving away is the reader, however slowly.
-            // A gentle drag on a phone moves a few points a frame, and asking
-            // for eight a frame meant it never counted: the settle pulled the
-            // text back under the finger and sprang to the end on release.
-            // Without a finger, eight points in one frame is what tells a hand
-            // from a lazy row finding its height.
             let retreat = lastOffset - metrics.distanceFromTop
             let retreated = readerMoved && (pinned || Date() >= programmaticUntil)
                 && (readerIsScrolling
@@ -656,9 +490,6 @@ final class TranscriptFollowState {
             lastOffset = metrics.distanceFromTop
             lastDistanceFromBottom = metrics.distanceFromBottom
             if retreated {
-                // Let go of the end too, as a wheel does. Stopping only the
-                // chase left the pin on, and the settle ending put the reader
-                // straight back at the latest message.
                 abandoned = true
                 pinned = false
                 repinDelivery.cancel()
@@ -683,9 +514,6 @@ final class TranscriptFollowState {
         atEnd = metrics.contentHeight > 0 && !metrics.viewportPastContent
             && metrics.distanceFromBottom <= TranscriptFollow.threshold
         guard metrics.viewportHeight > 0, metrics.contentHeight > 0 else { return }
-        // Estimate resolution moves the offset in single large frames and
-        // pushes the end away for a frame or two. Count sustained motion
-        // only while far: one such frame is never a hand leaving.
         if metrics.distanceFromBottom > TranscriptFollow.threshold {
             if readerMoved { farMovedFrames += 1 } else { farMovedFrames = 0 }
             if metrics.distanceFromBottom > prevBottom + 2 {
@@ -697,23 +525,13 @@ final class TranscriptFollowState {
             farMovedFrames = 0
             retreatingFrames = 0
         }
-        // Content that grew where nobody scrolled is a turn arriving, and it
-        // must not unpin the view. Content that grew while the offset also
-        // moved is a lazy row finding its real height under a reader who is
-        // scrolling, and that frame still says where they are.
         lastContentHeight = metrics.contentHeight
         lastOffset = metrics.distanceFromTop
-        // Never correct a viewport while a person is moving it, including
-        // the idle geometry callbacks sent during a native scroll phase.
         if metrics.viewportPastContent && (readerMoved || metrics.readerIsScrolling == true) {
             repinDelivery.cancel()
             return
         }
         if driven {
-            // Instant pins land on the same frame. A slow trackpad scroll
-            // retreating inside that window is still the reader leaving:
-            // wiping its drift is what made scrollback impossible during a
-            // stream (every token pin reset the tab before it reached 6pt).
             let retreatingNow = metrics.distanceFromBottom > prevBottom + 2
             if readerMoved, retreatingNow {
                 undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
@@ -723,8 +541,6 @@ final class TranscriptFollowState {
         } else if readerMoved {
             undrivenDrift += abs(metrics.distanceFromTop - prevOffset)
         }
-        // On native scroll phases, an upward gesture can coincide with growth
-        // and can start well inside the normal bottom tolerance.
         if pinned, readerIsScrolling, metrics.distanceFromTop < prevOffset - 0.5,
            metrics.distanceFromBottom > max(2, prevBottom + 0.5) {
             stopFollowing()
@@ -733,21 +549,13 @@ final class TranscriptFollowState {
         let pastContent = metrics.viewportPastContent
         if metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent,
            (grew && !moved) || (metrics.readerIsScrolling == false && !fromWheel) || pastContent {
-            // Layout can move the offset or resize the viewport without
-            // input. Keep following within the existing scroll budget.
             if pinned, metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent {
-                // One walk per frame is the sluggishness: a streaming turn
-                // grows for hundreds of frames and each repin walks the lazy
-                // stack over every row in between. Coalesce to ~6 walks a
-                // second; the end still catches up every frame it matters.
                 if pastContent {
                     guard !pastContentRecoveryAttempted else { return }
                 } else {
                     guard repinsSpent < Self.repinBudget else { return }
                 }
                 let delay = max(0, 0.15 - Date().timeIntervalSince(lastRepinAt))
-                // A final layout frame inside the throttle must still land.
-                // Dropping it leaves a quiet, completed reply above the end.
                 repinDelivery.submit(after: delay) { [weak self] in
                     guard let self, self.active, self.pinned,
                           !self.atEnd, !self.sliceHidesNewest,
@@ -766,8 +574,6 @@ final class TranscriptFollowState {
             } else if !pinned,
                 metrics.distanceFromBottom > TranscriptFollow.threshold || pastContent
             {
-                // Drifted away while not following (paused, or a page that
-                // landed above): offer the way back.
                 set(jump: true)
             }
             return
@@ -793,11 +599,6 @@ final class TranscriptFollowState {
                 stopFollowing()
             }
         } else if metrics.distanceFromBottom <= 10 {
-            // Back on the latest turn with a scroll of one's own: follow
-            // again, clearing a manual pause. A stationary paused frame must
-            // not resume itself, or pausing at the bottom could never stick.
-            // Home also clears the drift tab: micro-scrolls from a while ago
-            // must not unpin a far frame later.
             undrivenDrift = 0
             let returnedByScrolling = readerMoved
                 && (metrics.distanceFromTop > prevOffset || (paused && metrics.distanceFromBottom <= 2))
@@ -811,9 +612,6 @@ final class TranscriptFollowState {
             }
         }
         if metrics.distanceFromBottom <= TranscriptFollow.threshold {
-            // The end is under the viewport, so whatever was spent getting
-            // here worked. This is the only thing that refills the budget,
-            // which is what tells a productive repin from a futile one.
             repinsSpent = 0
         }
     }
@@ -837,14 +635,6 @@ final class TranscriptFollowState {
         retreatingFrames = 0
     }
 
-    /// Stop following the end and offer the way back.
-    ///
-    /// For a transcript refusing a walk it cannot afford. A window grown by
-    /// paging back makes one scroll to the end a resolve of every row in
-    /// between, which is seconds of stopped application per attempt, so the
-    /// answer is the pill: pressing it reopens on the newest page and the
-    /// scroll is bounded again. A settle already owns the pin and is chasing
-    /// the end on purpose, so it keeps it.
     func stopFollowing() {
         guard !settling else { return }
         repinDelivery.cancel()
@@ -869,11 +659,6 @@ final class TranscriptFollowState {
         set(jump: false)
     }
 
-    /// Stop following by hand, from the Following pill.
-    ///
-    /// The button state is left alone: if the end drifts away the scroll
-    /// callback offers Jump to latest on its own, and if the reader is
-    /// already on it the pill flips to Follow so there is always a way back.
     func pause() {
         repinDelivery.cancel()
         paused = true
@@ -883,8 +668,6 @@ final class TranscriptFollowState {
         retreatingFrames = 0
     }
 
-    /// Observation does not compare before it notifies, so writing the same
-    /// value back would invalidate the transcript on every frame of a scroll.
     private func set(jump value: Bool) {
         guard showJump != value else { return }
         showJump = value
@@ -895,16 +678,8 @@ final class TranscriptFollowState {
         arrived = value
     }
 
-    /// How many repins may go by without the end being reached.
-    ///
-    /// Enough that an insertion settling over three or four frames is
-    /// followed properly, small enough that a stack which will not converge
-    /// costs a handful of walks rather than a minute and a half.
     private static let repinBudget = 6
 
-    /// Frames at the end, with the content size unchanged, before a
-    /// transcript counts as arrived. Three at a sixtieth each is imperceptible
-    /// and is the difference between an estimate and a measurement.
     private static let steadyToArrive = 3
 }
 
@@ -946,9 +721,6 @@ final class TranscriptRowMounts {
     func disappeared(_ row: Row) { mounted[ObjectIdentifier(row)] = nil }
     func contains(_ row: Row) -> Bool { mounted[ObjectIdentifier(row)] != nil }
 
-    /// Whether any mounted row reaches into a viewport of this height. A row
-    /// with no frame yet counts, so a system without geometry reports falls
-    /// back to "anything mounted".
     func showsRows(viewportHeight: CGFloat) -> Bool {
         mounted.values.contains { row in
             guard let frame = row.frame, viewportHeight > 0 else { return true }
@@ -958,8 +730,6 @@ final class TranscriptRowMounts {
 }
 
 extension View {
-    /// Report this row to `TranscriptRowMounts`. Geometry goes to a plain
-    /// object, so a scroll reports without redrawing anything.
     func transcriptRowMount(in mounts: TranscriptRowMounts, id: String, window: TranscriptWindow) -> some View {
         modifier(TranscriptRowMount(mounts: mounts, id: id, window: window))
     }
@@ -975,9 +745,6 @@ private struct TranscriptRowMount: ViewModifier {
         if #available(macOS 15.0, iOS 18.0, *) {
             content
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptFollow.contentSpaceName)).minY } action: { top in
-                    // Not gated on the mount: a row's first report arrives
-                    // before it is counted as mounted, and a row on screen
-                    // with no place recorded could never be the reading row.
                     window.noteContentTop(id, top)
                 }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptFollow.spaceName)) } action: { frame in
@@ -1009,29 +776,11 @@ struct TranscriptBottomSentinel: View {
 
     var body: some View {
         Color.clear
-            // Include the padding in the target's frame so a bottom pin
-            // agrees with the scroll view's end on the same layout.
             .frame(height: 1 + trailingPadding)
             .id(TranscriptFollow.bottomID)
     }
 }
 
-/// What a transcript shows while it is finding its end.
-///
-/// Shaped like a conversation rather than a spinner: turns alternating sides,
-/// a couple of tool rows between them, weighted to the bottom because that is
-/// where the reading starts. It is over in a few frames, and its job is that
-/// those frames look like the thing that is about to appear.
-/// Keeps the wireframe's opening latch in step with the conversation.
-///
-/// Raised the moment a conversation starts opening, dropped once its
-/// transcript has settled once. A selection change reads the model's current
-/// value rather than assuming an order, so it does not matter which of the
-/// three lands first on the frame a conversation changes.
-///
-/// Its own modifier because these are three observations on a view body the
-/// type checker already finds long, and because both chat screens need the
-/// same rule.
 struct OpeningCover: ViewModifier {
     var isOpening: Bool
     var ready: Bool
@@ -1053,7 +802,6 @@ struct OpeningCover: ViewModifier {
     }
 }
 
-/// Loading placeholder for a chat. Fills the pane, newest turn at the bottom.
 struct TranscriptSkeleton: View {
     private static let turns: [(mine: Bool, lines: Int)] = [
         (false, 3), (true, 1), (false, 5), (true, 2), (false, 2), (false, 4), (true, 1), (false, 3),
@@ -1124,16 +872,6 @@ struct TranscriptSkeleton: View {
     }
 }
 
-/// The follow control at the bottom of a transcript: three states, one seat.
-///
-/// - Scrolled away: **Jump to latest**.
-/// - Following a live turn: **Following**. Press to pause.
-/// - Paused while live: **Follow**. Press to resume.
-/// - Idle and pinned: nothing. A control nobody needs is clutter, not state.
-///
-/// All three share a compact themed capsule and a down arrow, so the
-/// control does not change language when the state does, and it sits on
-/// the transcript instead of covering it.
 struct TranscriptFollowPill: View {
     var showJump: Bool
     var busy: Bool
@@ -1161,7 +899,6 @@ struct TranscriptFollowPill: View {
     }
 }
 
-/// Reserve the local control's height so the last response line stays readable.
 extension View {
     @ViewBuilder
     func transcriptFollowBar<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
@@ -1177,9 +914,6 @@ extension View {
     }
 }
 
-/// Corrective scrolls must not re-enter the lazy layout that requested them.
-/// Keep only the latest correction and perform it after the current layout
-/// transaction. Geometry samples themselves still reach follow tracking.
 final class TranscriptScrollDelivery {
     private var pending: DispatchWorkItem?
     private var latest: (() -> Void)?
@@ -1211,19 +945,7 @@ final class TranscriptScrollDelivery {
     deinit { pending?.cancel() }
 }
 
-/// Report where the transcript is scrolled, by whichever route this system
-/// offers, and name the space its rows measure themselves in.
 private struct TranscriptScrollMetrics: ViewModifier {
-    // Keep phase changes out of view observation: scrolling must not redraw
-    // the transcript on every callback.
-    //
-    // The phase alone is not trusted to end a scroll. On the iPhone the
-    // transcript has a second phase observer, and the idle phase did not
-    // always reach this one: the flag stayed "interacting" at rest, so the
-    // follow logic cancelled its own corrections on every frame (Jump to
-    // latest stuck, shaking) and no earlier page was ever asked for. An
-    // offset that has not moved for `quiet` is a reader at rest, and one
-    // last report says so.
     @MainActor
     final class Interaction {
         var phaseScrolling = false
@@ -1237,8 +959,6 @@ private struct TranscriptScrollMetrics: ViewModifier {
             phaseScrolling && Date().timeIntervalSince(lastMovedAt) < Self.quiet
         }
 
-        /// Note where the viewport is, and arrange the report that ends the
-        /// scroll if nothing moves again.
         func noted(_ metrics: TranscriptMetrics, note: @escaping (TranscriptMetrics) -> Void) {
             if !(abs(metrics.distanceFromTop - lastOffset) <= 0.5) {
                 lastOffset = metrics.distanceFromTop
@@ -1281,8 +1001,6 @@ private struct TranscriptScrollMetrics: ViewModifier {
                     var metrics = TranscriptMetrics(context.geometry)
                     interaction.noted(metrics, note: note)
                     if interaction.phaseScrolling {
-                        // A gesture just began: it is moving even if this
-                        // frame's offset has not changed yet.
                         interaction.lastMovedAt = Date()
                         interaction.scheduleRest(note)
                     }
@@ -1295,12 +1013,6 @@ private struct TranscriptScrollMetrics: ViewModifier {
     }
 }
 
-/// The same answer on a system with no `onScrollGeometryChange`.
-///
-/// The two halves arrive as separate preferences and have to be held until
-/// both are known. They are held in a plain object rather than in `@State`,
-/// because a scroll offset is not something the transcript draws and writing
-/// it into view state redraws the whole conversation once per frame.
 private struct LegacyTranscriptScrollMetrics: ViewModifier {
     final class Held {
         var frame = CGRect.zero
@@ -1346,11 +1058,6 @@ private struct LegacyTranscriptScrollMetrics: ViewModifier {
 }
 
 extension View {
-    /// Measure the transcript content, for systems that need it measured.
-    ///
-    /// A geometry reader in the background of a scrolling stack runs on every
-    /// frame, so on a system that can simply be asked where it is this adds
-    /// nothing.
     @ViewBuilder
     func chatScrollContent() -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {
@@ -1367,7 +1074,6 @@ extension View {
         }
     }
 
-    /// Each chat gets a new scroll view, which would otherwise lay out at the top for a frame.
     @ViewBuilder
     func transcriptOpensAtEnd() -> some View {
         if #available(macOS 15.0, iOS 18.0, *) {
@@ -1394,7 +1100,6 @@ extension View {
         #endif
     }
 
-    /// Follow the transcript's scroll position.
     func chatScrollMetrics(_ note: @escaping (TranscriptMetrics) -> Void) -> some View {
         modifier(TranscriptScrollMetrics(note: note))
     }
@@ -1402,21 +1107,6 @@ extension View {
 }
 
 
-/// How a transcript keeps the reader's place while older pages arrive above
-/// them.
-///
-/// A conversation opens on its newest page, so everything before it is
-/// fetched as the reader moves towards the top. Content added above the
-/// viewport pushes what is on screen downwards, which is a jump on the one
-/// gesture this feature exists to make smooth. The answer is to note where a
-/// row near the top of the viewport is before the page arrives, and put it
-/// back exactly there afterwards.
-///
-/// Nothing on this object is observed and nothing on it is drawn. It is
-/// written on every frame of a scroll, and the decision it makes has to be
-/// made from the scroll callback itself: a transcript that must redraw before
-/// it can notice where it is will not notice in time, which is how the top of
-/// a conversation used to arrive with nothing loading.
 final class TranscriptWindow {
     var active = true {
         didSet {
@@ -1430,19 +1120,7 @@ final class TranscriptWindow {
     var viewportHeight: CGFloat = 0
     private var readerIsScrolling = false
     var isRestoringPage: Bool { held != nil }
-    /// How far the top of the loaded conversation is above the viewport.
-    /// Large at the bottom of a long chat, zero at the very beginning.
     var distanceFromTop: CGFloat = .greatestFiniteMagnitude
-    /// Where the rows are, in the viewport's own coordinates.
-    ///
-    /// Every row reports, and that is cheap for the reason the stack is lazy:
-    /// a row that is not on screen has no body, so it has no geometry reader
-    /// either. What arrives here is roughly what is visible, which is also
-    /// exactly the set the anchor has to come from. Watching the first two
-    /// dozen rows of the *window* instead looked cheaper and was worse: once
-    /// the reader was a screen below them those rows were not being built, so
-    /// this held whatever they last reported, and the anchor was computed
-    /// from where rows used to be.
     var rowFrames: [String: CGRect] = [:] {
         didSet {
             #if DEBUG
@@ -1454,64 +1132,21 @@ final class TranscriptWindow {
             correctFromReport()
         }
     }
-    /// A page has been asked for and the answer has not arrived. Claimed at
-    /// the moment of asking rather than when the request starts, so a scroll
-    /// across the boundary asks once instead of once per frame.
     var fetching = false
-    /// Readers currently mounted on this window. See the paging modifier's
-    /// `onDisappear`.
     var mounts = 0
-    /// Whether the conversation has anything before what is held. Kept in
-    /// step with the model, so resting at the beginning of a chat does not
-    /// start a request per frame only to have it answer that there is
-    /// nothing to fetch.
     var canAskEarlier = false
-    /// Consume rows already held before fetching another archive page.
     var hasHiddenEarlierRows = false
-    /// The built slice stops short of the newest rows: the reader slid back.
     var hasHiddenLaterRows = false
-    /// Slide the built slice one step towards the start, or towards the end.
-    /// Installed by the transcript, which owns the slice. Both are wrapped in
-    /// `slide`, so the reader's place is held across them like a page.
     var revealEarlier: (() -> Void)?
     var revealLater: (() -> Void)?
-    /// Pin the built slice to the row it starts on while a page lands, and
-    /// let it go again after (`false`). See `loadEarlier`.
     var holdSliceStart: ((Bool) -> Void)?
-    /// How far the end of the built slice is below the viewport.
     private var distanceFromBottom: CGFloat = .greatestFiniteMagnitude
-    /// When both edges are nearby, advance in the reader's direction.
     var readingEarlier: Bool?
-    /// One slide per settle: the next is decided on geometry that includes it.
     private var slideQuietUntil: Date = .distantPast
-    /// Whether the transcript is holding the latest turn: pinned to the end,
-    /// or still settling onto it after opening.
-    ///
-    /// Nothing is fetched and nothing is restored in that state, and that is
-    /// what stops a conversation opening in its middle. A half-measured lazy
-    /// stack reports an estimated content height, which says the top of what
-    /// is loaded is close, which is all `wantsEarlier` needs. The page then
-    /// lands with an anchor to put back, and putting it back is a scroll away
-    /// from the end, argued against by the settle scrolling towards it. The
-    /// reader was shown the middle of the conversation with Jump to latest
-    /// over it, and the window kept growing while the two sides argued, until
-    /// a scroll to the end cost the stack a walk over thousands of rows and
-    /// the application stopped.
-    ///
-    /// A reader at the end is not reading backwards, so there is nothing to
-    /// prefetch for them either. It turns off as soon as they leave the end,
-    /// which is screens before the boundary comes near.
     var followingEnd = false
-    /// Drop the follow pin. The transcript installs this so a wheel event
-    /// can release the end before that event is turned into a scroll.
     var releaseFollow: (() -> Void)?
-    /// Fetch the page before the oldest row held. Installed by the transcript,
-    /// which is the only thing that holds a scroll proxy.
     var requestEarlier: ((Bool) -> Void)?
-    /// Put a row back where it was. Installed beside `requestEarlier`.
     var restore: ((TranscriptAnchor) -> Void)?
-    /// Apply an offset correction to an already measured row when the
-    /// platform gives us access to the native scroll view.
     var restoreMeasured: ((CGFloat) -> Bool)?
     /// The row the reader is reading, and where it sits in the content.
     ///
@@ -1527,16 +1162,9 @@ final class TranscriptWindow {
     private var readingTop: CGFloat = 0
     private var contentTops: [String: CGFloat] = [:]
 
-    /// A drawn row's height and its place in the transcript, for whoever
-    /// lays out the rows that are not drawn. Installed by the transcript.
     var rowHeightNoted: ((String, CGFloat) -> Void)?
-    /// Make sure a row is laid out before scrolling to it. True when it
-    /// already is. Installed by a transcript that does not lay out every row.
     var prepareScroll: ((String) -> Bool)?
 
-    /// Rows above the reader changed size by `delta`, and whoever changed
-    /// them has already moved the view by as much. The reading row's place
-    /// moves with them: that is not a change to answer again.
     func rowsAboveResized(by delta: CGFloat) {
         guard readingRow != nil else { return }
         readingTop += delta
@@ -1553,9 +1181,6 @@ final class TranscriptWindow {
         // screen. Only the rest moved the reader. Correcting the whole of it
         // again threw the row a screen away on the first scroll up.
         if shift < 0 { shift = -min(-shift, distanceFromBottom) }
-        // Following the end, the end owns the viewport. A reader who has
-        // just started scrolling up owns it already, on the first frame,
-        // before the follow state has caught up.
         let leavingEnd = readerIsScrolling && readingEarlier == true
         guard abs(shift) > 0.5, active, held == nil, !followingEnd || leavingEnd,
               readingRowOnScreen, let restoreMeasured else { return }
@@ -1567,27 +1192,17 @@ final class TranscriptWindow {
         return frame.maxY > 0 && frame.minY < viewportHeight
     }
 
-    /// Follow the reader to the row now at the top of the screen.
     private func pickReadingRow() {
         guard let id = anchor?.id, id != readingRow, let top = contentTops[id] else { return }
         readingRow = id
         readingTop = top
     }
 
-    /// Cover the transcript with a still picture of what is on screen, and
-    /// take it away again. Installed beside `restoreMeasured`.
     var cover: (() -> Void)?
     var uncover: (() -> Void)?
     private var covered = false
     private var coverExpiry: DispatchWorkItem?
 
-    /// Keep the reader looking at the screen they had while a page lands.
-    ///
-    /// The rows a page brings above the reader are only estimates until
-    /// they are built, so putting the held row back can take a few passes,
-    /// and each one would be drawn. The page only lands while the reader is
-    /// at rest, so a still picture of that moment is exactly what they were
-    /// looking at. It comes off as soon as the row is back in place.
     func coverPageLanding() {
         guard let cover, !covered else { return }
         covered = true
@@ -1614,14 +1229,8 @@ final class TranscriptWindow {
         uncover?()
     }
 
-    /// The longest a page landing may keep the picture up.
     private static let coverLimit: TimeInterval = 0.9
 
-    /// Take the picture away once the transcript has stopped moving under
-    /// it. The held row being back in place is not the end of it: the rows
-    /// around it finish laying out for a few more frames, and taking the
-    /// picture away at once showed those frames, a screen away and back.
-    /// Every correction while covered starts the wait again.
     func uncoverWhenQuiet() {
         guard covered else { return }
         quietWork?.cancel()
@@ -1630,7 +1239,6 @@ final class TranscriptWindow {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.coverQuiet, execute: work)
     }
 
-    /// Something moved under the cover: wait again before taking it away.
     func coveredLayoutMoved() {
         guard covered, quietWork != nil else { return }
         uncoverWhenQuiet()
@@ -1642,39 +1250,18 @@ final class TranscriptWindow {
     var canRestore: (() -> Bool)?
     var canPage: (() -> Bool)?
     private let restoreDelivery = TranscriptScrollDelivery()
-    /// The row holding the reader's place across an insertion, and how many
-    /// more changes of content height it should survive.
-    ///
-    /// One correction is not enough. The rows a page brings are inserted with
-    /// estimated heights and measured over the next few frames, so a single
-    /// restore lands on the geometry of a stack that is still settling, and
-    /// what the reader sees is the correction being wrong by a little and
-    /// staying wrong. Each frame that changes the height re-applies it, which
-    /// costs nothing when the height is already right because the scroll is
-    /// then a no-op.
     private var held: TranscriptAnchor?
-    /// Whether the held row has reached its target since the layout changed.
     private var heldLanded = false {
         didSet { if heldLanded { uncoverWhenQuiet() } }
     }
-    /// The hold is for a page arriving, the one change that can grow a row
-    /// at its start.
     private var heldIsPage = false
-    /// The held row's frame when the hold was armed.
     private var armedFrame: CGRect?
-    /// The next row on screen when the hold was armed, for a held row the
-    /// page turned into something else.
     private var heldBackup: TranscriptAnchor?
-    /// The held row's frame when it was last corrected.
     private var correctedFrom: CGRect?
     private var heldUntil: Date = .distantPast
     private var holdExpiry: DispatchWorkItem?
     private var lastContentHeight: CGFloat = 0
 
-    /// Hold this row's place across the insertion that is about to happen.
-    ///
-    /// Capture it at publication so the hold uses the reader's current
-    /// position while the scroll view still contains the previous layout.
     func hold(_ anchor: TranscriptAnchor, label: String = "page") {
         #if DEBUG
         MainActor.assumeIsolated {
@@ -1695,7 +1282,6 @@ final class TranscriptWindow {
         scheduleExpiry()
     }
 
-    /// Give the viewport back to the reader or the follow state.
     func release() {
         #if DEBUG
         if held != nil { MainActor.assumeIsolated { TranscriptHoldTrace.shared.released() } }
@@ -1703,8 +1289,6 @@ final class TranscriptWindow {
         restoreDelivery.cancel()
         holdExpiry?.cancel()
         holdExpiry = nil
-        // A reader who is moving gets the transcript back at once. Otherwise
-        // the picture stays until the layout has finished moving.
         if readerIsScrolling { uncoverPage() } else { uncoverWhenQuiet() }
         held = nil
         heldUntil = .distantPast
@@ -1722,28 +1306,16 @@ final class TranscriptWindow {
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, heldUntil.timeIntervalSinceNow), execute: work)
     }
 
-    /// Ignore subpixel changes in the held row’s frame.
     private static let holdSlack: CGFloat = 0.5
 
     /// Allow the insertion and the lazy stack’s first estimates to settle.
     private static let holdSeconds: TimeInterval = 0.6
 
-    /// A held row that is still finding its height keeps the hold.
-    ///
-    /// A page that brings the start of a very long reply lands with that
-    /// text estimated, and the row grows for a while as it is measured. The
-    /// first correction is right for the estimate and wrong by the growth,
-    /// several thousand points on a phone. While the reader has not moved,
-    /// each correction extends the hold, within these bounds.
     private static let holdCeiling: TimeInterval = 3
     private static let correctionCeiling = 20
     private var heldSince = Date.distantPast
     private var heldCorrections = 0
 
-    /// Spend one correction. A held row that changed height keeps the hold
-    /// for a while after it; a row that only moved does not, so a hold can
-    /// never outlast the change it was armed for and pull against the
-    /// reader's next scroll.
     private func spendCorrection(resized: Bool) -> Bool {
         guard heldCorrections < Self.correctionCeiling,
               Date().timeIntervalSince(heldSince) < Self.holdCeiling else { return false }
@@ -1756,7 +1328,6 @@ final class TranscriptWindow {
         return true
     }
 
-    /// Whether the held row's height differs from what it last reported.
     private func heldResized(_ frame: CGRect) -> Bool {
         defer { heldHeight = frame.height }
         guard let heldHeight else { return false }
@@ -1775,52 +1346,29 @@ final class TranscriptWindow {
     /// loaded.
     static let reach: CGFloat = 2.5
 
-    /// How far from the top rows start reporting where they are, as a
-    /// multiple of the viewport. Ahead of `reach`, so a frame exists to
-    /// anchor on by the time a page is asked for, and with hysteresis so a
-    /// reader hovering at the boundary does not switch it on and off.
     static let measureFrom: CGFloat = 4
     static let measureUntil: CGFloat = 6
 
-    // Throttle anchor math: scroll callbacks fire every frame, and the anchor
-    // filter+suffix runs over up to 20 reported frames each time.
     private var lastAnchorCheck = Date.distantPast
     private var lastDistanceFromTopForAnchor: CGFloat = .greatestFiniteMagnitude
 
-    /// Whether rows should be reporting where they are.
-    ///
-    /// A geometry reader per visible row is not free, and for most of a long
-    /// conversation nothing is going to be anchored, so they are only
-    /// attached as the boundary comes near. Told to the transcript rather
-    /// than read from it, because this is decided in the scroll callback and
-    /// a view update is owed only when the answer changes.
     private(set) var nearTop = false
     var nearTopChanged: ((Bool) -> Void)?
 
     #if os(macOS)
-    /// Wheel input arrives before its row geometry. A pending correction
-    /// must yield before it can undo the reader's movement.
     func noteWheel(towardEarlier: Bool) {
         guard active else { return }
         readingEarlier = towardEarlier
         lastWheelAt = Date()
         lastMovedAt = lastWheelAt
         readerIsScrolling = true
-        // The reader owns the page again, except while a page that just
-        // landed is still being put back under its cover: a wheel that keeps
-        // going then must not drop the hold, or the page would push
-        // everything down by its height. The cover lasts a moment at most.
         if held != nil, heldLanded || !covered { release() }
-        // Upward only. A wheel toward the end must still be allowed to
-        // resume following once the viewport arrives there.
         if towardEarlier { releaseFollow?() }
         settleAfterQuiet()
     }
     #endif
 
     func note(_ metrics: TranscriptMetrics) {
-        // The offset says whether a reader is moving; the phase only says
-        // what they did last. See `settleAfterQuiet`.
         let now = Date()
         let wheelIsScrolling = now.timeIntervalSince(lastWheelAt) < Self.restAfter
         let offsetDelta = metrics.distanceFromTop - distanceFromTop
@@ -1839,40 +1387,16 @@ final class TranscriptWindow {
         if held == nil, !wheelIsScrolling, readerIsScrolling, !changed, abs(offsetDelta) > 0.5 {
             readingEarlier = offsetDelta < 0
         }
-        // A change of height is what the reading row answers, so it is not
-        // swapped on a frame that has one, unless it has left the screen:
-        // scrolling into rows that are only estimates changes the height
-        // nearly every frame, and a row that went by answers nothing.
         if !changed || !readingRowOnScreen { pickReadingRow() }
-        // The end owns the viewport while it is being followed. Anything held
-        // from before is dropped rather than applied against it.
         if followingEnd {
             release()
             return
         }
-        // A reader moving the page after the hold has landed owns it again.
-        // Before it lands, a gesture is no reason to let a page shove the
-        // conversation down by its whole height: that is the jump.
         if held != nil, (readerIsScrolling && heldLanded) || Date() > heldUntil { release() }
         if let held, changed {
-            // The hold ends by time (extended while corrections are still
-            // being made) or when the reader moves, not by a count of
-            // height changes: a long row being measured changes it often.
-            // The content height changed under a held row. The rows' reports
-            // for this layout may not have arrived yet, so the decision is
-            // made on the next turn, against what they say then. A row that
-            // reports nothing is one the insertion pushed out of the built
-            // range, which is the usual case for a page of long replies:
-            // `scrollTo` resolves it anyway. Leaving it alone was what let a
-            // page drop the reader at the top of the rows it brought.
             scheduleRestore(held)
-            // A frame spent putting the reader back is not a frame to judge
-            // the boundary from: the offset it reports is the one being
-            // corrected.
             return
         }
-        // Anchor evaluation is the only O(n) work here. Throttle it to every
-        // second frame or when the viewport actually moved.
         let moved = abs(metrics.distanceFromTop - lastDistanceFromTopForAnchor) > 8
         let shouldEvaluate = moved || now.timeIntervalSince(lastAnchorCheck) > 0.032
         if shouldEvaluate {
@@ -1883,14 +1407,6 @@ final class TranscriptWindow {
         }
     }
 
-    /// A scroll whose offset has stopped moving has stopped.
-    ///
-    /// The scroll phase is what says so, and on the iPhone its idle phase
-    /// does not always arrive: the transcript there has a second phase
-    /// observer, and other callbacks kept carrying the last "interacting"
-    /// while the reader rested at the top of the conversation, so no page
-    /// was ever asked for. An offset that has not moved for a moment is a
-    /// reader at rest, whatever the phase last said.
     private func settleAfterQuiet() {
         restWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -1917,19 +1433,10 @@ final class TranscriptWindow {
     private var lastWheelAt = Date.distantPast
     private static let restAfter: TimeInterval = 0.3
 
-    /// Correct the held row the moment the rows say where it went.
-    ///
-    /// The scroll callback alone was a frame late: it fires on the content
-    /// height change, and the restore it scheduled ran after the frame with
-    /// the inserted rows had been drawn, so the reader saw the conversation
-    /// leap a page and come back. The rows report on the layout that moved
-    /// them, and a `scrollTo` from there lands on the next pass.
     private func correctFromReport() {
         guard let held, !followingEnd, !(readerIsScrolling && heldLanded),
               Date() <= heldUntil, canRestore?() != false,
               let frame = rowFrames[held.id], frame != correctedFrom else { return }
-        // Still where it was when the hold was armed: the change being held
-        // across has not been laid out yet, so this proves nothing.
         guard frame != armedFrame || correctedFrom != nil else { return }
         let target = target(for: held)
         guard abs(target.drift(to: frame)) > Self.holdSlack else {
@@ -1943,10 +1450,6 @@ final class TranscriptWindow {
         }
         #endif
         guard spendCorrection(resized: heldResized(frame)) else { return }
-        // Every row's report runs this, and the held row keeps its old frame
-        // until the scroll just asked for has been laid out. Answering those
-        // reports again spent the whole budget before the first correction
-        // landed. Wait for the held row itself to move.
         correctedFrom = frame
         restoreDelivery.cancel()
         #if DEBUG
@@ -1955,44 +1458,21 @@ final class TranscriptWindow {
         coveredLayoutMoved()
         restore?(target)
         #if os(macOS)
-        // The proxy can settle on an estimate even after the row is built.
-        // Verify against the actual frame and correct the native offset.
         if restoreMeasured != nil { scheduleRestore(held, after: 0.05) }
         #endif
     }
 
-    /// Hold the reader's place across a change the transcript makes itself:
-    /// sliding the built slice, or a page arriving inside it.
-    /// Rows report through `onGeometryChange` on systems that have it, one
-    /// row at a time, from their mount (see `transcriptRowMount`). Those
-    /// reports run for every built row whether or not anything is held or
-    /// the reader is scrolling, so an anchor exists at the moment a page or a
-    /// slide lands, not only once the scroll has come to rest. Older systems
-    /// use the preference path, which only runs while rows are watched.
     static var rowsReportThemselves: Bool {
         if #available(macOS 15.0, iOS 18.0, *) { return true }
         return false
     }
 
-    /// Whether the last publication grew this row at its start. Installed by
-    /// the transcript, which holds the model.
     var extendedAtStart: ((String) -> Bool)?
-    /// The row that now holds a row the transcript no longer shows. Installed
-    /// beside `extendedAtStart`.
     var resolveRow: ((String) -> String?)?
 
-    /// Follow the held row into whatever holds it now.
-    ///
-    /// Ids carry across pages (`ChatRowContinuity`, `ChatFoldContinuity`),
-    /// but a page that completes a partly loaded turn can fold its rows
-    /// differently: two groups become one, a line of narration joins a
-    /// group. The held row then honestly no longer exists, and holding
-    /// nothing is the jump. The group it went into starts where it was.
     private func rehome() {
         guard let held, rowFrames[held.id] == nil, let resolveRow else { return }
         guard let other = resolveRow(held.id) else {
-            // Nothing holds it any more: a page turned the start of a reply
-            // into a plan or a question. Hold the row that was below it.
             if let backup = heldBackup, resolveRow(backup.id) == backup.id {
                 #if DEBUG
                 TranscriptHoldTrace.note("rehome \(held.id.prefix(20)) -> backup \(backup.id.prefix(20))")
@@ -2018,22 +1498,9 @@ final class TranscriptWindow {
         heldLanded = false
     }
 
-    /// Where the held row has to be now.
-    ///
-    /// Its top edge, unless the page grew the row itself at its start: a
-    /// page boundary inside a long reply brings that reply's earlier text.
-    /// Everything the reader was looking at then moved down inside the row
-    /// by what was prepended, and the row's top stayed where it was. Its
-    /// bottom edge is what did not move.
     func target(for held: TranscriptAnchor) -> TranscriptAnchor {
-        // Only a page can extend a row. A slide moves the window over rows
-        // that are already there, whatever an earlier page did to them.
         guard heldIsPage, extendedAtStart?(held.id) == true else { return held }
         guard let frame = rowFrames[held.id] else {
-            // Not built, so its new height is unknown. Bring its bottom edge
-            // to the bottom of the viewport: the row is then built, reports,
-            // and the next correction is exact. Holding its top instead put
-            // the reader at the start of the text the page just added.
             return TranscriptAnchor(id: held.id, top: viewportHeight - held.height, height: held.height)
         }
         guard abs(frame.height - held.height) > 0.5 else { return held }
@@ -2068,9 +1535,6 @@ final class TranscriptWindow {
         }
     }
 
-    /// How far the slice may slide without dropping a row the reader can
-    /// see: the rows above the first one on screen (`later`), or below the
-    /// last one (`earlier`), less a margin. `rows` are the slice's ids.
     func slideRoom(in rows: [String], later: Bool) -> Int {
         let visible = rowFrames.filter { $0.value.maxY > 0 && $0.value.minY < viewportHeight }.keys
         let indices = rows.enumerated().filter { visible.contains($0.element) }.map(\.offset)
@@ -2082,9 +1546,6 @@ final class TranscriptWindow {
     func holdPlace(_ label: String) {
         if let anchor {
             hold(anchor, label: label)
-            // A slide is a state change laid out on the next pass, and it
-            // need not change the content height that the scroll callback
-            // waits for. Check the place once it has been laid out.
             scheduleRestore(anchor, after: 0.05)
         } else {
             #if DEBUG
@@ -2094,8 +1555,6 @@ final class TranscriptWindow {
         }
     }
 
-    /// Bring the newer rows the slice dropped back in as the reader nears
-    /// its end, so reading forward never meets an edge.
     private func askLater() {
         guard active, readingEarlier != true, hasHiddenLaterRows, !followingEnd, held == nil, !readerIsScrolling, viewportHeight > 0,
               distanceFromBottom < viewportHeight * Self.reach,
@@ -2108,13 +1567,6 @@ final class TranscriptWindow {
         revealLater()
     }
 
-    /// Put the held row back in the same update that inserted the page.
-    ///
-    /// Left to the next layout, the page is drawn once with the offset
-    /// unchanged, which shows the reader the start of what it brought, and
-    /// the correction after it is a visible jump. A scroll asked for now is
-    /// laid out together with the new rows, so no frame shows the wrong
-    /// place. The usual checks still run once the rows report.
     func placeHeldPage() {
         guard active, heldIsPage, let held, !followingEnd, canRestore?() != false else { return }
         #if DEBUG
@@ -2135,8 +1587,6 @@ final class TranscriptWindow {
             guard let anchor = self.held else { return }
             let target = self.target(for: anchor)
             if let frame = self.rowFrames[anchor.id], abs(target.drift(to: frame)) <= Self.holdSlack {
-                // Unchanged since arming is not landed: the change may not be
-                // laid out yet. Nothing to correct either.
                 if frame != self.armedFrame || self.correctedFrom != nil {
                     self.heldLanded = true
                 }
@@ -2150,12 +1600,6 @@ final class TranscriptWindow {
             #endif
             self.coveredLayoutMoved()
             if let frame, self.restoreMeasured?(target.drift(to: frame)) == true { return }
-            // A page landed above a held row that is no longer built: with
-            // the offset unchanged, the rows it brought filled the screen and
-            // pushed the held one out of the built range. The content height
-            // cannot say by how much, since those rows are only estimates.
-            // Scroll to the row itself, at the place the reader had it: that
-            // builds it, and its report makes any last correction exact.
             self.restore?(target)
             if frame == nil {
                 self.scheduleRestore(anchor, after: 0.08)
@@ -2182,11 +1626,6 @@ final class TranscriptWindow {
         nearTopChanged?(value)
     }
 
-    /// Whether the page before the oldest row held should be asked for now.
-    ///
-    /// Near the top *and* holding a row that can be put back. Fetching
-    /// earlier than that buys lead time and spends it on a lurch, because the
-    /// page lands with nothing on screen to measure the correction against.
     var wantsEarlier: Bool {
         !followingEnd
             && viewportHeight > 0
@@ -2194,7 +1633,6 @@ final class TranscriptWindow {
             && anchor != nil
     }
 
-    /// Automatically reveal held rows before requesting more from the archive.
     func ask() {
         guard active, !fetching, readingEarlier != false, wantsEarlier,
               held == nil, !readerIsScrolling else { return }
@@ -2211,8 +1649,6 @@ final class TranscriptWindow {
         if canAskEarlier { requestArchivePage(manual: false) }
     }
 
-    /// The archive button is visible only when the rendered slice has no
-    /// hidden rows. It doesn't need an automatic paging geometry sample.
     func requestArchivePage(manual: Bool = true) {
         guard active, !fetching, let requestEarlier else {
             #if DEBUG
@@ -2224,37 +1660,17 @@ final class TranscriptWindow {
         requestEarlier(manual)
     }
 
-    /// Long enough for the slide to be laid out and its hold applied before
-    /// the next one is considered.
     private static let slideQuiet: TimeInterval = 0.3
 
-    /// The row holding the reader's place: the one covering the top edge of
-    /// the viewport (see `TranscriptAnchor.pick`). Nil when no row reports,
-    /// and `wantsEarlier` then waits rather than fetch a page it cannot
-    /// absorb.
     var anchor: TranscriptAnchor? {
         TranscriptAnchor.pick(rowFrames, viewportHeight: viewportHeight)
     }
 }
 
-/// What the top of a transcript says about what is before it.
-///
-/// Three states and no spinner that never resolves: there is more and it can
-/// be asked for, more is on its way, or this is where the conversation
-/// begins. The last of those only appears once somebody has actually read
-/// back to it, because announcing the start of a short chat is announcing
-/// that it is short.
 struct TranscriptEarlierHeader: View {
     let model: ChatModel
     let load: () -> Void
 
-    /// One height for all three states. A row at the top of the transcript
-    /// that changes size as a page arrives moves everything below it, which
-    /// is the jump the whole paging path exists to avoid.
-    ///
-    /// A floor rather than a fixed size, because the button inside it grows
-    /// with the reader's text size and a fixed frame would clip its own
-    /// label. What matters is that the three states agree, not the number.
     private static let height: CGFloat = 30
 
     var body: some View {
@@ -2291,8 +1707,6 @@ struct TranscriptEarlierHeader: View {
 struct TranscriptRowFrameKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        // One dict per frame after batching in the view layer, so this is a
-        // single merge rather than one per row. Keep last writer wins.
         let next = nextValue()
         if value.isEmpty {
             value = next
@@ -2328,13 +1742,6 @@ extension View {
         }
     }
 
-    /// Fetch the page before the oldest row held as the top comes near, and
-    /// put the reader back where they were once it lands.
-    ///
-    /// Nothing here animates, whatever Reduce Motion says. Sliding rows in
-    /// above the viewport is the movement this exists to remove, and the
-    /// correction that follows has to be the same frame as the insertion or
-    /// the reader watches the conversation slide and come back.
     func transcriptEarlierPages(
         _ model: ChatModel,
         window: TranscriptWindow,
@@ -2362,8 +1769,6 @@ extension View {
                     proxy.scrollTo(anchor.id, anchor: anchor.unitPoint(in: window.viewportHeight))
                 }
             }
-            // A row that is not laid out cannot be scrolled to. Lay it out,
-            // then scroll on the next turn, once it is there.
             if window.prepareScroll?(anchor.id) == false {
                 DispatchQueue.main.async { scroll() }
             } else {
@@ -2372,12 +1777,6 @@ extension View {
         }
         let extendedAtStart: (String) -> Bool = { [weak model] id in model?.rowExtendedAtStart(id) == true }
         let resolveRow: (String) -> String? = { [weak model] id in model?.transcriptRow(holding: id) }
-        // The proxy belongs to the scroll view on screen now. One kept from
-        // an earlier pass can belong to a scroll view that is gone, and
-        // scrolling through it does nothing at all, so every page then lands
-        // with the reader at the top of what it brought. Renew the closures
-        // that scroll on every pass. The window is a plain object, so this
-        // redraws nothing.
         if isActive {
             window.restore = restore
         }
@@ -2385,8 +1784,6 @@ extension View {
             guard !TranscriptWindow.rowsReportThemselves else { return }
             window.rowFrames = frames
         }
-        // The proxy belongs to this reader, so the closures that use it are
-        // installed here and renewed whenever the conversation changes.
         .onAppear {
             window.mounts += 1
             window.active = isActive
@@ -2404,10 +1801,6 @@ extension View {
             window.active = active
         }
         .onDisappear {
-            // A new conversation gets a new scroll view, and its reader can
-            // appear before the old one disappears. Only the last one to go
-            // may switch paging off, or the reader on screen is left with an
-            // inactive window that refuses every earlier page.
             window.mounts -= 1
             guard window.mounts <= 0 else { return }
             window.mounts = 0
@@ -2442,11 +1835,6 @@ extension View {
     }
 }
 
-/// Pull one older page and hold the reader's place across it.
-///
-/// The claim on `window.fetching` is made by whoever asked, and released
-/// here, so the two paths into this (the scroll and the button) cannot run
-/// side by side and write a spent cursor back.
 @MainActor
 func loadEarlier(_ model: ChatModel, window: TranscriptWindow, manual: Bool) async {
     let generation = model.selectionGeneration
@@ -2455,8 +1843,6 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow, manual: Bool) asy
         return
     }
     let before = model.displayItems.count
-    // A response can arrive after the reader starts another flick. Wait to
-    // change the scroll geometry until the native view is at rest again.
     let waitToPrepend: (() async -> Bool)? = window.canPage.map { canPage in
         {
             while !Task.isCancelled, window.active, model.selectionGeneration == generation {
@@ -2469,33 +1855,24 @@ func loadEarlier(_ model: ChatModel, window: TranscriptWindow, manual: Bool) asy
     var published = false
     let advanced = await model.loadEarlier(waitToPrepend: waitToPrepend) {
         published = true
-        // Take the anchor at publication, after the request and projection.
-        // Stream layout during the request has no page insertion to correct.
         if window.active, let anchor = window.anchor {
             window.hold(anchor)
             window.coverPageLanding()
         } else {
             window.release()
         }
-        // A slice glued to the end shows the newest rows. A page that takes
-        // the conversation past its length would make it drop its oldest,
-        // which are the rows the reader is looking at. Keep its start.
         if window.active { window.holdSliceStart?(true) }
     } afterPrepend: {
         window.placeHeldPage()
     }
     guard model.selectionGeneration == generation else { return }
     if published { window.holdSliceStart?(false) }
-    // Set this before another geometry callback can request a page. The
-    // view updates its exact slice state on the next render.
     if model.displayItems.count > max(before, TranscriptSlice.length) {
         window.hasHiddenEarlierRows = true
     }
     window.fetching = false
     window.canAskEarlier = model.hasEarlier
     if advanced, !published {
-        // The page can consume archive records without changing the display.
-        // With no layout update, ask again if the reader is still near the top.
         window.release()
         if manual, model.hasEarlier { window.requestArchivePage() } else { window.ask() }
     }

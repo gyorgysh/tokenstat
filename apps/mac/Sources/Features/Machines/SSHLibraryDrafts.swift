@@ -7,8 +7,6 @@ import Observation
     func retire()
 }
 
-/// Editors are retained with their library, above the phone's layout choice.
-/// Explicit completion or account retirement clears their private input.
 @MainActor final class SSHLibraryDraftStore {
     private var values: [SSHLibraryRoute: any SSHRetainedDraft] = [:]
     func draft<T: SSHRetainedDraft>(for route: SSHLibraryRoute, make: () -> T) -> T {

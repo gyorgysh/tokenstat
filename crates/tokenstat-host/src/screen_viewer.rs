@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Viewer-side ownership of a dedicated encrypted screen connection.
 
 use std::collections::HashMap;
@@ -42,8 +41,6 @@ struct OpenParams {
     capability: String,
     #[serde(default)]
     control: bool,
-    /// What the picture should be worth, from the fixed set the host knows.
-    /// Absent means the host decides from the route this connection takes.
     quality: Option<String>,
 }
 
@@ -89,10 +86,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 
 fn open(params: &str) -> Result<Value, String> {
     let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    // Fresh listen addresses are fetched on the shared dial path, so this
-    // stream uses the same direct-then-relay ladder as terminals and files.
-    // Hints stay in memory; the dialler persists the one that accepts TCP and
-    // proves the pinned Noise key.
+
     let answer = crate::remote::call_peer_result(
         &p.peer,
         "stream.open",
@@ -108,18 +102,13 @@ fn open(params: &str) -> Result<Value, String> {
         .get("token")
         .and_then(Value::as_str)
         .ok_or("screen stream returned no claim token")?;
-    // The host's own id for this session, which is what `screen.control.set`
-    // names. Optional, because a host built before that method existed does
-    // not send one and the viewer then falls back to reopening the stream.
+
     let host_session = answer
         .get("sessionID")
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    // Named, because this is the channel the relay meters and caps: a desktop
-    // at 1.5 Mbps is the one thing on this tunnel that costs real money, and a
-    // channel that does not say so is counted as "unknown" and capped by
-    // nothing.
+
     let (mut connection, transport) =
         crate::remote::dial_peer_for(&p.peer, tokenstat_remote::tunnel::ChannelPurpose::Screen)?;
     connection

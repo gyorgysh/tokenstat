@@ -131,8 +131,6 @@ pub fn fetch_with_force(force: bool) -> ProviderLimits {
         .get_or_init(|| Mutex::new(LimitsPacer::load()))
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // The credential fingerprint stays in memory; only retry deadlines and
-    // counters survive a restart, never credentials or their fingerprints.
     let owner = credential_owner(&token.access_token);
     let previous = pacer.retry.clone();
     let result = pacer.read(owner, force, now_ms(), || fetch_stored(&stored, &token));
@@ -183,9 +181,6 @@ fn fetch_stored(
         } else {
             token.access_token.clone()
         };
-        // Renewal writes this token back to Claude's credential store. Cache
-        // the reading under that same token, rather than the expired one that
-        // initiated the request, so the next automatic pass can reuse it.
         owner = credential_owner(&access_token);
 
         let response = client
@@ -344,8 +339,6 @@ impl LimitsPacer {
             self.retry = RetryState::default();
             self.cached = Some((fetched_owner, completed, reading.clone()));
         } else {
-            // A failed explicit refresh retires the successful in-memory
-            // shortcut too. Only a real later success may clear its warning.
             self.cached = None;
         }
         reading
@@ -438,7 +431,6 @@ fn stored_credentials() -> Option<Stored> {
             return Some(stored);
         }
         if let Some(mut stored) = plugin_only {
-            // So the caller can say "no login" rather than "not signed in".
             // The file fallback still runs: an older Claude Code put the
             // login there when the Keychain only held plugins.
             let path = credentials_file_path();
@@ -542,11 +534,6 @@ fn refresh(
     stored: &Stored,
     token: &OauthToken,
 ) -> Result<String, String> {
-    // One renewal at a time, process-wide. Two threads entering together
-    // would each spend the same refresh token; when the vendor rotates it,
-    // the loser's POST fails and can read as a signed-out login. The
-    // re-read below lets the loser adopt whatever the winner (or Claude
-    // Code itself) already wrote instead of spending a stale token.
     static RENEWAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = RENEWAL_LOCK
         .lock()
@@ -612,9 +599,6 @@ fn renewed_blob(raw: &str, fresh: &RefreshedToken) -> Result<String, String> {
         .ok_or("the stored credentials changed shape")?;
 
     oauth.insert("accessToken".into(), fresh.access_token.clone().into());
-    // Only when the vendor sent one. An absent field means the refresh token
-    // did not rotate, and replacing it with nothing would throw away the only
-    // thing that can renew this login again.
     if let Some(refresh) = fresh.refresh_token.as_ref().filter(|t| !t.is_empty()) {
         oauth.insert("refreshToken".into(), refresh.clone().into());
     }
@@ -890,8 +874,6 @@ mod tests {
 
     #[test]
     fn a_renewed_login_keeps_everything_else_claude_code_stored() {
-        // The blob belongs to another tool. Rewriting it from the fields this
-        // module knows about would silently take away the ones it does not.
         let raw = r#"{"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r",
             "expiresAt":1,"subscriptionType":"pro","rateLimitTier":"default","scopes":["a"]}}"#;
         let fresh = RefreshedToken {
@@ -912,8 +894,6 @@ mod tests {
 
     #[test]
     fn a_refresh_token_that_did_not_rotate_is_left_alone() {
-        // An absent field means the old one still works. Writing nothing over
-        // it would leave the login with no way to renew itself again.
         let raw = r#"{"claudeAiOauth":{"accessToken":"old","refreshToken":"keep-me"}}"#;
         let fresh = RefreshedToken {
             access_token: "new".into(),

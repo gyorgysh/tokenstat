@@ -4,7 +4,6 @@ import WebKit
 import UniformTypeIdentifiers
 import CryptoKit
 
-/// A chart is an offline document, with no access to a browser profile or host methods.
 struct ChatChartView: View {
     let source: String
     var pending = false
@@ -144,8 +143,6 @@ private struct ChartWebView: ChartRepresentable {
     private var themeBootstrap: String {
         let scheme = dark ? "dark" : "light"
         let background = "rgba(\(Int((panel.red * 255).rounded())),\(Int((panel.green * 255).rounded())),\(Int((panel.blue * 255).rounded())),\(panel.opacity))"
-        // The runtime waits for its font and its first render. Establish the
-        // app's appearance before HTML/CSS can paint a default light surface.
         return """
         (() => {
             const apply = () => {
@@ -172,7 +169,6 @@ private struct ChartWebView: ChartRepresentable {
         let locale: String
 
         static func sameSource(_ lhs: String, _ rhs: String) -> Bool {
-            // String equality folds Unicode equivalents; JSON payloads need exact bytes.
             let equal: Bool? = lhs.utf8.withContiguousStorageIfAvailable { left in
                 rhs.utf8.withContiguousStorageIfAvailable { right in
                     guard left.count == right.count else { return false }
@@ -278,8 +274,6 @@ private struct ChartWebView: ChartRepresentable {
         }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             guard !stopped, self.webView === webView else { return }
-            // A scheme change can race a navigation that already captured its
-            // document-start scripts. Reapply the latest owner at commit too.
             webView.evaluateJavaScript(owner.themeBootstrap, completionHandler: nil)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -444,8 +438,6 @@ private enum ChartPreviewCache {
     }
 }
 
-/// The browser's first native surface can paint before its document/runtime.
-/// Keep it behind an opaque native panel or the previous rendered preview.
 private final class ChartSurfaceView: ChartViewportContent {
     let browser: WKWebView
     private let preview = ChartPreviewImageView()
@@ -516,8 +508,6 @@ private final class ChartSurfaceView: ChartViewportContent {
 }
 
 #if DEBUG && os(macOS)
-/// Opt-in, bounded captures of this app's own chart views for local scroll QA.
-/// Does not use Screen Recording APIs, other windows, or default diagnostics.
 private enum ChartPaintDiagnostics {
     private static var count = 0
     private static var records = 0
@@ -553,7 +543,7 @@ private enum ChartPaintDiagnostics {
             try handle.seekToEnd(); try handle.write(contentsOf: data)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: log.path)
             records += 1
-        } catch { /* Diagnostic failures never affect a chart. */ }
+        } catch { }
     }
     static func capture(_ surface: ChartSurfaceView, image: NSImage? = nil, event: String) {
         guard count < 24, let target = directory(), !surface.bounds.isEmpty else { return }
@@ -585,13 +575,12 @@ private enum ChartPaintDiagnostics {
             try data.write(to: file, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             record(surface, event: event + "-frame", file: name)
-        } catch { /* Diagnostic failures never affect a chart. */ }
+        } catch { }
     }
 }
 #endif
 
 private enum ChartWords {
-    // L10n's catalog is fixed for the lifetime of the process.
     static let all: [String: String] = [
         "chart": L10n.text("common.chart.chart"), "data": L10n.text("common.chart.data"),
         "reset": L10n.text("common.chart.reset"), "expand": L10n.text("common.chart.expand"),

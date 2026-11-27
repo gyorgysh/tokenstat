@@ -52,7 +52,6 @@ class SshHostPlatformTest {
     fun validatedLabelRejectsEditedEndpoint() {
         assertNull(SshHostPlatform.validatedLabel(entry(), host(hostname = "other.com"), nowMs = 2_000L))
         assertNull(SshHostPlatform.validatedLabel(entry(), host(port = 2222), nowMs = 2_000L))
-        // Hostnames compare case-insensitively: DNS is not case-sensitive.
         assertEquals(
             "Ubuntu 24.04",
             SshHostPlatform.validatedLabel(entry(), host(hostname = "EXAMPLE.com"), nowMs = 2_000L),
@@ -68,8 +67,6 @@ class SshHostPlatformTest {
 
     @Test
     fun validatedLabelSurvivesFirstTrust() {
-        // Confirmed before the fingerprint was trusted: the setup check
-        // probes first, so a later trust must not orphan the label.
         assertEquals(
             "Ubuntu 24.04",
             SshHostPlatform.validatedLabel(entry(keys = emptyList()), host(), nowMs = 2_000L),

@@ -66,14 +66,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// Getting a repository onto a machine that has none. Ported from
-/// `ClientCloneRepository.swift`.
-///
-/// A folder has to exist before it can be registered, and on a fresh server
-/// nothing does. The clone runs in a real terminal rather than behind a
-/// spinner: one that asks for a passphrase or an unknown host key can be
-/// answered, and one that hangs looks like a terminal that stopped moving.
-/// Nothing is ever removed, including a clone that failed halfway.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CloneRepositoryScreen(
@@ -247,10 +239,6 @@ private fun CloneRunning(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalTsColors.current
-    // The machine registers the folder itself when git exits, so this asks
-    // it what happened rather than deciding from what scrolled past. Tied
-    // to the view's lifetime, with a timeout instead of sitting on
-    // "Cloning…" forever.
     LaunchedEffect(sessionId, statusAttempt) {
         onError(null)
         val deadline = System.currentTimeMillis() + 1_800_000
@@ -321,9 +309,6 @@ private fun CloneRunning(
     }
 }
 
-/// A folder on the peer to land a clone in, or to register as-is. Ported
-/// from the clone picker's shape in `ClientCloneRepository.swift`: browse,
-/// up, make a folder, land here.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FolderPickerScreen(
@@ -494,8 +479,6 @@ fun FolderPickerScreen(
     }
 }
 
-/// Register a folder that is already on the peer. Nothing is copied and
-/// nothing is changed.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterFolderScreen(

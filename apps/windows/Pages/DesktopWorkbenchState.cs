@@ -3,7 +3,6 @@ namespace Tokenstat.Pages;
 
 internal enum DesktopWorkbenchTool { Changes, Browser, Terminal, Inspector }
 
-/// <summary>Workspace tool selection is independent of the active conversation.</summary>
 internal sealed class DesktopWorkbenchState
 {
     private readonly List<DesktopWorkbenchTool> _tabs = new();

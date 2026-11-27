@@ -4,8 +4,6 @@
 
 import Foundation
 
-/// Host-wide scheduler defaults: how long a new job may run, and how many
-/// may run at once. This is not a folder setting.
 struct AutomationQueueDraft: Equatable, Sendable {
     static let hostCap: UInt32 = 32
 
@@ -86,7 +84,6 @@ struct AutomationQueueDraft: Equatable, Sendable {
         return budget == queue.defaultBudgetSeconds && count == queue.maxConcurrent
     }
 
-    /// One line for the library card. Uses the chip names when they match.
     static func summary(budgetSeconds: UInt64, maxConcurrent: UInt32) -> String {
         let budget: String
         if budgetSeconds == 0 {

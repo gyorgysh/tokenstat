@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use std::collections::VecDeque;
 use std::time::SystemTime;
@@ -63,8 +62,6 @@ impl Cache {
         muse: bool,
         mut visit: impl FnMut(Value) -> Result<(), String>,
     ) -> Result<Option<Value>, String> {
-        // Open before lookup so a missing, replaced or unreadable leaf cannot
-        // be hidden by a previously cached result.
         let Some(file) = open_transcript(path)? else {
             self.entries.retain(|entry| entry.path != path);
             return Ok(None);
@@ -124,8 +121,6 @@ impl Cache {
     }
 }
 
-/// The repair pass needs selectors, timestamps, counters and session identity,
-/// never a prompt, tool result or arbitrary provider fields.
 fn metadata_only(mut record: Value) -> Value {
     if !record.is_object() {
         return Value::Null;

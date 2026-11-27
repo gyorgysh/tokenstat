@@ -4,27 +4,11 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
-// The phone can put a folder on a machine that has none. The Mac could only
-// watch those folders arrive. This is the same two routes, reached from the
-// same "+" sheet: register a folder the machine already has, or clone a
-// repository onto it.
 #if os(macOS)
 import SwiftUI
 
-/// A folder on another machine, from this Mac.
-///
-/// Peer first, then the route, then the work. Registering asks the host to add
-/// a folder it already has. Cloning runs git on the host and polls what
-/// happened; there is no remote terminal surface on the Mac to watch it in,
-/// so this shows progress and the outcome rather than the scrolling output.
-/// The host registers the folder itself when git exits, and the sidebar picks
-/// it up through the ordinary remote refresh.
 struct RemoteWorkspaceSheet: View {
     @Bindable var model: WorkspacesModel
-    /// Account machines, for telling computers from companions. A peer the
-    /// account knows as a phone or tablet is not listed: nothing can be
-    /// registered or cloned onto it. A peer the account does not know stays
-    /// listed, like everywhere else that reads the directory.
     var machines: [Machine] = []
     var onBack: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -38,7 +22,6 @@ struct RemoteWorkspaceSheet: View {
         case register, clone
     }
 
-    /// Approved peers that can hold a folder: everything but the companions.
     private var hosts: [Peer]? {
         peers?.filter { !isCompanion($0) }
     }
@@ -224,10 +207,6 @@ struct RemoteWorkspaceSheet: View {
     }
 }
 
-/// Browse the machine's disk and register the folder showing.
-///
-/// The same roots as the phone picker, because the host enforces them: a
-/// folder browsing would not show cannot be registered either.
 private struct RemoteFolderRegisterView: View {
     @Bindable var model: WorkspacesModel
     let peer: Peer
@@ -271,9 +250,6 @@ private struct RemoteFolderRegisterView: View {
     }
 }
 
-/// Clone a repository onto the machine, then wait for the host to say what
-/// happened. The host registers the folder itself when git exits, so the
-/// outcome comes from `cloneStatus` rather than from any output this Mac saw.
 private struct RemoteCloneView: View {
     @Bindable var model: WorkspacesModel
     let peer: Peer
@@ -368,7 +344,6 @@ private struct RemoteCloneView: View {
         }
     }
 
-    /// The fix, under the headline. Raw git output never leads.
     private var failedDetail: String? {
         guard status?.state == "failed",
               let raw = status?.error, !raw.isEmpty
@@ -407,9 +382,6 @@ private struct RemoteCloneView: View {
             }
             try? await Task.sleep(for: .seconds(2))
         }
-        // Do not leave the UI on "Cloning…" forever: the poll is over, either
-        // by timeout or by the sheet going away (which cancels this task and
-        // skips this write).
         guard !Task.isCancelled else { return }
         if status?.state == "running" || status == nil {
             let path = status?.path ?? parent ?? ""
@@ -418,9 +390,6 @@ private struct RemoteCloneView: View {
     }
 }
 
-/// The machine's disk, one directory at a time. Selecting means the directory
-/// showing, not one of its rows: the clone needs somewhere to land and the
-/// register needs the folder itself.
 private struct RemoteFolderBrowser: View {
     let peer: Peer
     let selectTitle: String
@@ -433,8 +402,6 @@ private struct RemoteFolderBrowser: View {
     @State private var error: String?
     @State private var newName = ""
     @State private var naming = false
-    /// Guards against stale responses: rapid taps let an older `browse` finish
-    /// last and overwrite the listing for the directory showing.
     @State private var generation = 0
 
     var body: some View {
@@ -506,9 +473,6 @@ private struct RemoteFolderBrowser: View {
             Button(L10n.text("apple.remoteworkspacesheet.create.4759498a")) { Task { await create() } }
         }
         .task(id: path) {
-            // Seeding the initial path from the first answer restarts this
-            // task. The listing already belongs to that path, so the repeat
-            // is skipped rather than browsing the same directory twice.
             if let path, let listing, listing.path == path { return }
             await load(initial: path == nil)
         }

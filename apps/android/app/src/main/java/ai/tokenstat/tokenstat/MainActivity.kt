@@ -28,26 +28,15 @@ class MainActivity : ComponentActivity() {
         val launchedAt = SystemClock.uptimeMillis()
         super.onCreate(savedInstanceState)
         AppAppearance.load(this)
-        // Back to the app theme for the content. The manifest holds the
-        // launch theme so the system draws the animated bars before the
-        // first frame; without that wiring this is a harmless no-op.
         setTheme(R.style.Theme_Tokenstat)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             installLaunchSplash(launchedAt)
         }
         if (Build.VERSION.SDK_INT >= 35) {
-            // Android 15 already makes the bars transparent. The Activity
-            // helper in our AndroidX version still calls deprecated color setters.
             WindowCompat.setDecorFitsSystemWindows(window, false)
         } else {
             enableEdgeToEdge()
         }
-        // A notification tap carries the push reason plus the machine id and
-        // nothing else. Chat reasons wait in NotificationOpen until the
-        // workspaces screen can resolve them. Anything else is dropped here,
-        // and the app simply opens. Fresh launches only: the activity keeps
-        // its intent across recreation, so without this a rotation re-offers
-        // an already consumed tap.
         if (savedInstanceState == null) {
             NotificationOpen.offerFromIntent(intent)
             ai.tokenstat.tokenstat.ecosystem.QuickAccess.offer(intent)
@@ -55,11 +44,6 @@ class MainActivity : ComponentActivity() {
         setContent { TokenstatApp(model) }
     }
 
-    /// The animated cold-start splash: the bars rise staggered on the theme
-    /// paper (see `splash_bars_animated`), held for the same minimum as the
-    /// iOS `LaunchSplashView` and leaving with the door fade. Below Android
-    /// 12 there is no system splash to hold, and the app opens directly on
-    /// the loading mark like iOS.
     @RequiresApi(Build.VERSION_CODES.S)
     private fun installLaunchSplash(launchedAt: Long) {
         splashScreen.setOnExitAnimationListener { splashView ->
@@ -78,8 +62,6 @@ class MainActivity : ComponentActivity() {
                 .withEndAction { splashView.remove() }
                 .start()
         }
-        // Hold the first frame until the splash minimum elapses, so a hot
-        // start is not a one-frame flash like the iOS minimum splash.
         val content: View = findViewById(android.R.id.content)
         content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
@@ -87,8 +69,6 @@ class MainActivity : ComponentActivity() {
                     content.viewTreeObserver.removeOnPreDrawListener(this)
                     return true
                 }
-                // Returning false cancels this draw; schedule another pass
-                // so the gate re-checks instead of stalling the first frame.
                 content.postInvalidateOnAnimation()
                 return false
             }
@@ -98,13 +78,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Every return to a live app re-reads the account. That covers both
-        // a notification tap, which carries the push reason plus the machine
-        // id and nothing else, and the sign-in callback: nothing about the
-        // token travels through the redirect, the device-flow poll picks it
-        // up on its next turn, and this refresh covers the case where it
-        // already did while the browser was in front. The tap itself waits
-        // in NotificationOpen until the workspaces screen resolves it.
         NotificationOpen.offerFromIntent(intent)
         ai.tokenstat.tokenstat.ecosystem.QuickAccess.offer(intent)
         model.refresh()
@@ -112,20 +85,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Nobody is looking at a transcript now, so chat pushes notify
-        // again. Without this a backgrounded app would keep swallowing the
-        // finished-turn banner for whatever was last open.
         VisibleChat.hidden()
         model.chatDrafts.flush()
     }
 
     override fun onResume() {
         super.onResume()
-        // The tunnel nudge for coming back to the foreground, port of the
-        // `scenePhase` handler in `ClientRootView`. A fresh or suspended
-        // process holds no tunnel session, and without this the first dial
-        // fails with "tunnel session is not running". Signed in only, like
-        // there: nudging while logged out would only plant a tunnel error.
         if (model.state.value.signedIn) {
             lifecycleScope.launch { model.nudgeTunnelOnForeground() }
         }

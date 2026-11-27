@@ -11,14 +11,10 @@ import Observation
 import AppKit
 #endif
 
-/// Per-workspace settings, remembered on this machine.
-///
-/// Keyed by workspace id so the same folder keeps its choices across launches.
 enum WorkspacePreference {
     private static let bypassKey = "workspace.bypassPermissions"
     private static let localModelKey = "workspace.localModel"
     private static let orderKey = "workspace.order"
-    /// The centre pane's open tabs, per workspace.
     private static let tabsKey = "workspace.tabs"
 
     static func bypassPermissions(for workspaceID: String) -> Bool {
@@ -51,11 +47,6 @@ enum WorkspacePreference {
         UserDefaults.standard.set(ids, forKey: orderKey)
     }
 
-    /// The tabs a workspace was left with, as `WorkspaceSurface` ids.
-    ///
-    /// Furniture, so it lives here rather than in the daemon: which tab a
-    /// window is showing is that window's business and not something another
-    /// machine should learn on sync.
     static func tabs(for workspaceID: String) -> [String] {
         UserDefaults.standard.stringArray(forKey: "\(tabsKey).\(workspaceID)") ?? []
     }
@@ -71,15 +62,8 @@ enum WorkspacePreference {
 }
 
 extension Notification.Name {
-    /// A peer connection succeeded, so its folders can be fetched now instead
-    /// of waiting for the 60-second peer sweep.
     static let remotePeerDidConnect = Notification.Name("tokenstat.remotePeerDidConnect")
-    /// A peer's workspaces were explicitly disconnected, so its folders leave
-    /// the sidebar now instead of after the failure sweep notices.
     static let remotePeerDidDisconnect = Notification.Name("tokenstat.remotePeerDidDisconnect")
-    /// A previously connected peer stopped answering. UI should drop the
-    /// Connected state, but must **not** suppress re-dial the way Disconnect
-    /// does: a machine that sleeps and wakes should come back on the next sweep.
     static let remotePeerBecameUnreachable = Notification.Name("tokenstat.remotePeerBecameUnreachable")
 }
 
@@ -91,14 +75,8 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
-/// One thing the centre pane can show.
-///
-/// One value in front, one ordered strip behind it. A surface cannot be put
-/// in front without also being in the strip. Chips are for documents only.
 enum WorkspaceSurface: Hashable, Identifiable, Sendable {
-    /// The terminal stack. Which session is `TerminalsModel`'s business.
     case sessions
-    /// The launch grid, over the sessions rather than beside them.
     case launcher
     case files
     case file(String)
@@ -118,9 +96,6 @@ enum WorkspaceSurface: Hashable, Identifiable, Sendable {
         }
     }
 
-    /// Rebuild a surface from its `id`. Unknown text is not a surface, which
-    /// is how a tab written by a later version is skipped rather than crashed
-    /// on.
     init?(id: String) {
         switch id {
         case "sessions": self = .sessions
@@ -140,11 +115,6 @@ enum WorkspaceSurface: Hashable, Identifiable, Sendable {
         }
     }
 
-    /// Whether this surface carries a chip in the tab strip.
-    ///
-    /// Sessions and the launcher do not. The strip is where the sessions
-    /// already are, and the launcher is a mode over them rather than a
-    /// document beside them.
     var isTab: Bool {
         switch self {
         case .sessions, .launcher: return false
@@ -153,7 +123,6 @@ enum WorkspaceSurface: Hashable, Identifiable, Sendable {
     }
 }
 
-/// A browser tab kept with its workspace, not with the window.
 struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
     var url: String
@@ -162,10 +131,6 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     var title: String { L10n.text("apple.workspacesmodel.browser_0.d9e7db6c", "\(number)") }
 }
 
-/// The folders the user chose to work in.
-///
-/// Nothing here reads the usage archive. Workspaces are a separate idea: a
-/// folder you want a terminal open in, not a project an agent happened to touch.
 @Observable
 @MainActor
 final class WorkspacesModel {
@@ -192,26 +157,15 @@ final class WorkspacesModel {
                  isLoading: isLoading, error: directoryError)
     }
 
-    /// Which inspector tab is open.
-    ///
-    /// Here rather than in the view, because the view is rebuilt every time the
-    /// file watcher refreshes the folder list, which during a build is several
-    /// times a second. As view state the tab was reset on the next build and
-    /// the picker looked like it did nothing at all.
     var inspectorTab: InspectorTab = .files
-    /// Kept when the browser temporarily occupies the inspector pane.
     var chatInspectorShowsSettings = true
 
-    /// A file the Git tab should open in review, asked for from a chat's
-    /// list of what a turn changed. The generation makes a
-    /// second press on the same file count.
     struct ChangeFocus: Equatable {
         let folderID: String
         let path: String
         let generation: Int
     }
     private(set) var changeFocus: ChangeFocus?
-    /// A chat file opened in the full review, separate from inspector focus.
     private(set) var workingTreeReviewFocus: ChangeFocus?
     @ObservationIgnored private var changeFocusGeneration = 0
 
@@ -220,19 +174,10 @@ final class WorkspacesModel {
         changeFocus = ChangeFocus(folderID: folderID, path: path, generation: changeFocusGeneration)
     }
 
-    /// The Changes list took the request. Clearing it keeps a later return
-    /// to that list from reopening the same file again.
     func consumeChangeFocus(_ focus: ChangeFocus) {
         if changeFocus == focus { changeFocus = nil }
     }
 
-    /// Label for an inspector tab, with the count that is the reason to look at
-    /// it.
-    ///
-    /// On the model rather than in the view because the tabs are drawn in the
-    /// window toolbar, above the inspector column, while the panel they switch
-    /// lives here. Two places needing the same label is what puts a count on one
-    /// of them and not the other.
     func inspectorTabTitle(_ tab: InspectorTab) -> String {
         switch tab {
         case .changes:
@@ -246,75 +191,29 @@ final class WorkspacesModel {
         }
     }
 
-    /// Recent commits per workspace, keyed by workspace id.
-    ///
-    /// Loaded when the History tab first asks for one, not with the folder
-    /// list. A `git log` is a subprocess, the folder list runs on a file-change
-    /// timer, and most of the time nobody is looking at the history.
     private(set) var history: [String: [Commit]] = [:]
-    /// Why a history read failed, keyed by workspace id. One shared slot put
-    /// a failure for whichever folder was read last over whatever folder was
-    /// selected next.
     private(set) var historyErrors: [String: String] = [:]
 
-    /// Children of each expanded directory, keyed by `workspaceID:relativePath`.
-    ///
-    /// One directory per entry rather than a whole recursive walk: a monorepo
-    /// has hundreds of thousands of files and a tree is only ever open a few
-    /// levels deep.
     private(set) var tree: [String: [TreeEntry]] = [:]
     var expandedDirectories: Set<String> = []
 
-    /// Paths the user ticked for the next commit.
-    ///
-    /// Held per workspace, so switching folders and back does not silently
-    /// unstage a selection someone had already made.
     var stagedSelection: [String: Set<String>] = [:]
     var commitMessage: [String: String] = [:]
     var commitDescription: [String: String] = [:]
     var autoCommitBackend: [String: String] = [:]
     var autoCommitModel: [String: String] = [:]
-    /// Result of the last write, for the banner, keyed by workspace id so one
-    /// folder's banner cannot appear over another folder's panel.
     private(set) var gitOutcome: [String: GitOutcome] = [:]
-    /// What produced `gitOutcome`, keyed the same way, so the panel can lead
-    /// with a sentence rather than with git's plumbing. "To
-    /// github.com:owner/repo.git" is a true thing to print and not an answer
-    /// to "did it push".
     private(set) var gitOutcomeAction: [String: GitOutcomeAction] = [:]
     @ObservationIgnored private var gitOutcomeDismissTasks: [String: Task<Void, Never>] = [:]
     var isCommitting = false
 
-    /// What each workspace has open beside its terminals, in the order opened.
-    ///
-    /// The centre pane holds terminals and documents side by side, so opening
-    /// a diff does not close the session you were watching. A terminal is
-    /// where the work happens and must not be something you lose by looking at
-    /// a file.
     private(set) var tabs: [String: [WorkspaceSurface]] = [:]
-    /// What is actually on screen per workspace. Absent means `.sessions`.
     private(set) var front: [String: WorkspaceSurface] = [:]
-    /// Payload for `.browser` surfaces: the url, and the forwarded peer port
-    /// when the page lives on another machine.
     private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
-    /// What a folder is holding, keyed by the id this side uses.
-    ///
-    /// Remote folders are prefixed. Local folders use the host's own ids.
-    /// Chat has no global in-memory store the way tasks do, so local chat
-    /// badges also come from `workspace.summary`. The currently open
-    /// conversation list still counts itself, and wins when both are present.
     private(set) var summaries: [String: WorkspaceSummary] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
     private(set) var diffErrors: [String: String] = [:]
-    /// A file save can change text without changing its added/removed counts.
-    /// Mounted previews and reviews use this to re-read that same change set.
     private(set) var diffRefreshRevisions: [String: UInt64] = [:]
-    /// One document per open file, keyed the same way as the diffs.
-    ///
-    /// This replaced a pair of dictionaries holding the text and the dirty
-    /// paths. Once a file also carries syntax spans, a saved copy, changed-line
-    /// marks and an in-flight highlight, keeping them as parallel dictionaries
-    /// means five things keyed alike that fall out of step one at a time.
     private(set) var documents: [String: EditorDocument] = [:]
     var editorError: String?
 
@@ -322,30 +221,19 @@ final class WorkspacesModel {
         "\(workspaceID):\(path)"
     }
 
-    // MARK: - The centre pane
 
-    /// Loaded commits, keyed workspace and commit, for the `.commit` surface.
     private(set) var commits: [String: CommitDetail] = [:]
-    /// The commit whose read is in flight, per workspace.
     private(set) var loadingCommit: [String: String] = [:]
-    /// Why a commit failed to load, keyed the same way as `commits`.
     private(set) var commitErrors: [String: String] = [:]
 
-    /// This workspace's strip, in the order the tabs were opened.
     func tabs(in workspaceID: String) -> [WorkspaceSurface] { tabs[workspaceID] ?? [] }
 
-    /// What this workspace's centre pane is showing.
     func front(in workspaceID: String) -> WorkspaceSurface { front[workspaceID] ?? .sessions }
 
     func isFront(_ surface: WorkspaceSurface, in workspaceID: String) -> Bool {
         front(in: workspaceID) == surface
     }
 
-    /// Read back the tabs this workspace was left with.
-    ///
-    /// Chips only. Nothing is fetched here: a restored file, commit or page
-    /// loads when it is brought forward, so reopening the app does not read a
-    /// dozen files somebody may not look at.
     func restoreTabs(in workspaceID: String) {
         guard tabs[workspaceID] == nil else { return }
         tabs[workspaceID] = WorkspacePreference.tabs(for: workspaceID)
@@ -353,11 +241,6 @@ final class WorkspacesModel {
             .filter(\.isTab)
     }
 
-    /// Write the strip back, minus the browser.
-    ///
-    /// A page opened here is a local server a session started, and the port it
-    /// was on is not listening after a quit. Restoring that chip would restore
-    /// a failed load, so a browser tab is the one thing the strip forgets.
     private func persistTabs(in workspaceID: String) {
         let ids = tabs(in: workspaceID).compactMap { surface -> String? in
             if case .browser = surface { return nil }
@@ -366,11 +249,6 @@ final class WorkspacesModel {
         WorkspacePreference.setTabs(ids, for: workspaceID)
     }
 
-    /// Put a surface in front, adding it to the strip when it belongs there.
-    ///
-    /// The one way the pane changes. Every navigation goes through here, so a
-    /// surface cannot be shown without a chip to close it by, and no flag can
-    /// survive a navigation that put something else in front of it.
     func show(_ surface: WorkspaceSurface, in workspaceID: String) {
         if surface.isTab, !(tabs[workspaceID] ?? []).contains(surface) {
             tabs[workspaceID, default: []].append(surface)
@@ -379,10 +257,6 @@ final class WorkspacesModel {
         front[workspaceID] = surface
     }
 
-    /// Close a tab and drop what it was holding.
-    ///
-    /// What comes forward is the sessions surface rather than the neighbouring
-    /// tab: the terminal is what this pane is mainly for.
     func close(_ surface: WorkspaceSurface, in workspaceID: String) {
         tabs[workspaceID]?.removeAll { $0 == surface }
         persistTabs(in: workspaceID)
@@ -407,7 +281,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// The paths this workspace has open, in strip order.
     func openFiles(in workspaceID: String) -> [String] {
         tabs(in: workspaceID).compactMap {
             if case let .file(path) = $0 { return path }
@@ -415,7 +288,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// What this folder is holding, if a summary has landed.
     func summary(for workspaceID: String) -> WorkspaceSummary? {
         summaries[workspaceID]
     }
@@ -440,7 +312,6 @@ final class WorkspacesModel {
         historyErrors[workspaceID]
     }
 
-    /// Read a commit and show it. The tab appears at once and fills in.
     func showCommit(_ id: String, in workspaceID: String) async {
         show(.commit(id), in: workspaceID)
         guard commit(id, in: workspaceID) == nil else { return }
@@ -470,7 +341,6 @@ final class WorkspacesModel {
         show(.changes, in: workspaceID)
     }
 
-    /// A side review shares focus and diff snapshots without changing documents.
     func focusWorkingTree(in workspaceID: String, path: String?) {
         if let path {
             changeFocusGeneration += 1
@@ -485,17 +355,11 @@ final class WorkspacesModel {
         close(.changes, in: workspaceID)
     }
 
-    /// Show a file in the centre pane, opening it if it is not already there.
     func openFile(_ path: String, in workspaceID: String) async {
         show(.file(path), in: workspaceID)
         await loadText(path, in: workspaceID)
     }
 
-    /// A close that would lose unsaved work, waiting on the user's answer.
-    ///
-    /// The alternative was for `closeFile` to discard the buffer, which it did.
-    /// Closing a tab is one click away from clicking the tab, and no editor
-    /// gets to throw away typing on a mis-click.
     struct PendingClose: Identifiable {
         let workspaceID: String
         let path: String
@@ -504,7 +368,6 @@ final class WorkspacesModel {
 
     var pendingClose: PendingClose?
 
-    /// Close a file, asking first when it has unsaved changes.
     func requestClose(_ path: String, in workspaceID: String) {
         if isEditorDirty(path, in: workspaceID) {
             pendingClose = PendingClose(workspaceID: workspaceID, path: path)
@@ -517,8 +380,6 @@ final class WorkspacesModel {
         guard let pending = pendingClose else { return }
         pendingClose = nil
         await saveText(pending.path, in: pending.workspaceID)
-        // A failed write leaves the document dirty and the error on screen, and
-        // closing then would lose exactly what the user asked to keep.
         guard !isEditorDirty(pending.path, in: pending.workspaceID) else { return }
         closeFile(pending.path, in: pending.workspaceID)
     }
@@ -533,7 +394,6 @@ final class WorkspacesModel {
         close(.file(path), in: workspaceID)
     }
 
-    /// Put the terminal back in front without closing any open tab.
     func showTerminal(in workspaceID: String) {
         show(.sessions, in: workspaceID)
     }
@@ -542,7 +402,6 @@ final class WorkspacesModel {
         browserTabs[workspaceID] ?? []
     }
 
-    /// Open a new browser tab, or select an existing one when an id is given.
     @discardableResult
     func showBrowser(in workspaceID: String, id: String? = nil) -> WorkspaceBrowserTab {
         if let id, let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) {
@@ -564,7 +423,6 @@ final class WorkspacesModel {
         close(.browser(tab.id), in: workspaceID)
     }
 
-    /// Drop a browser tab's payload, and the port forward it was holding open.
     private func forgetBrowser(_ id: String, in workspaceID: String) {
         browserTabs[workspaceID]?.removeAll { $0.id == id }
     }
@@ -575,13 +433,6 @@ final class WorkspacesModel {
         browserTabs[workspaceID]?[index].waitsForService = waitsForService
     }
 
-    /// After a launch that starts a local web UI, wait for the port then open
-    /// it in the in-app browser. The session stays running as the server.
-    ///
-    /// The wait is the point: `npx` may still be fetching the package, and
-    /// opening a dead tab then is a failed load the user has to reload by
-    /// hand. Time out and open anyway, so a slow first run is not a stuck
-    /// terminal with no page.
     func openHarnessPage(_ url: String, in folder: WorkspaceFolder) async {
         guard let target = BrowserTarget(url) else { return }
         let owner = WorkViewedChange.owner(folderID: folder.id)
@@ -594,10 +445,6 @@ final class WorkspacesModel {
         setBrowserURL(target.url, in: folder.id, tabID: tab.id, waitsForService: remote)
     }
 
-    /// True when something on this machine's loopback answered.
-    ///
-    /// Any HTTP status counts, including 404. The question is whether the
-    /// process bound the port, not whether `/` is the document it serves.
     private nonisolated static func waitForLoopback(port: Int, timeout: TimeInterval = 45) async -> Bool {
         guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return false }
         let deadline = Date().addingTimeInterval(timeout)
@@ -615,9 +462,6 @@ final class WorkspacesModel {
         return false
     }
 
-    /// Open a browser tab pointed at a service on a remote machine's own
-    /// localhost. The daemon binds a loopback port here and bridges it over
-    /// the authenticated stream, so the tab is an ordinary local URL.
     func openRemotePort(_ port: Int, in folder: WorkspaceFolder) async {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "remote", let target = BrowserTarget(String(port)) else {
@@ -637,24 +481,15 @@ final class WorkspacesModel {
         close(.files, in: workspaceID)
     }
 
-    /// Leave the launch surface, if it is what is up.
     func exitLauncher(in workspaceID: String) {
         guard isShowingLauncher(in: workspaceID) else { return }
         show(.sessions, in: workspaceID)
     }
 
-    /// Put the launch grid in front. Sessions stay mounted underneath.
-    ///
-    /// The Launch tab calls this. It does not toggle: clicking Launch while
-    /// already there is a no-op, the same way clicking the selected session
-    /// does not hide it.
     func showLauncher(in workspaceID: String) {
         show(.launcher, in: workspaceID)
     }
 
-    /// Second click on a folder: swap between the running surface and the
-    /// launcher, so a new agent can be started without hiding the sessions
-    /// that are already there.
     func toggleLauncher(in workspaceID: String) {
         if isShowingLauncher(in: workspaceID) {
             showTerminal(in: workspaceID)
@@ -691,19 +526,12 @@ final class WorkspacesModel {
         documents.values.contains { $0.workspaceID == workspaceID && $0.isDirty }
     }
 
-    /// Read a file and open a document for it.
-    ///
-    /// An already open document is left alone unless it is clean. Re-reading a
-    /// file someone has unsaved edits in, because they clicked its tab again,
-    /// would throw their work away without asking.
     func loadText(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
         if let existing = documents[key], existing.isDirty { return }
         do {
             let file = try await Bridge.workspaceRead(id: workspaceID, path: path)
             if let existing = documents[key] {
-                // The read was in flight while edits were typed. Adopting
-                // then would overwrite them, so the buffer stays alone.
                 guard !existing.isDirty else { return }
                 existing.adopt(saved: file.content)
             } else {
@@ -720,8 +548,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Save only from the editor's own command. File writes never run from a
-    /// watcher or a refresh path.
     func saveText(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
         guard let document = documents[key], document.isDirty else { return }
@@ -734,8 +560,6 @@ final class WorkspacesModel {
                 editorError = outcome.message
                 return
             }
-            // Acknowledge what was sent, not what the buffer holds now: edits
-            // typed while the write was in flight must stay dirty.
             document.markSaved(content: sent)
             editorError = nil
             await loadDiff(path, in: workspaceID)
@@ -744,9 +568,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Write every dirty buffer in a workspace. False when one failed, so an
-    /// action that invalidates the buffers can stop instead of discarding
-    /// work the user asked to keep.
     @discardableResult
     func saveAllDirty(in workspaceID: String) async -> Bool {
         let dirty = documents.values.filter { $0.workspaceID == workspaceID && $0.isDirty }
@@ -758,11 +579,6 @@ final class WorkspacesModel {
         return savedAll
     }
 
-    /// Throw away a workspace's unsaved edits, then read the files back.
-    ///
-    /// Only for a user who explicitly chose to discard. Reading back is what
-    /// stops a later save from writing the old branch's text over the file
-    /// the new branch just put on disk.
     func discardUnsavedBuffers(in workspaceID: String) async {
         let dirty = documents.values.filter { $0.workspaceID == workspaceID && $0.isDirty }
         for document in dirty {
@@ -775,12 +591,7 @@ final class WorkspacesModel {
     private var nextDiffLoad: UInt64 = 0
     private var pendingDiffLoads: [String: UInt64] = [:]
     @ObservationIgnored private var diffPreviewUsers: [String: Int] = [:]
-    /// The refresh revision each held diff was read at.
     @ObservationIgnored private var diffReadRevisions: [String: UInt64] = [:]
-    /// Released previews still held, oldest first. The Changes list is lazy,
-    /// so a preview is released whenever it scrolls off screen, and scrolling
-    /// back must not ask git again for a file that did not change. The cap
-    /// still bounds what "Expand all" over a large change set keeps.
     @ObservationIgnored private var parkedPreviews: [(key: String, workspaceID: String, path: String)] = []
     private static let parkedPreviewLimit = 12
 
@@ -794,8 +605,6 @@ final class WorkspacesModel {
         diffErrors[Self.treeKey(workspaceID, path)]
     }
 
-    /// Inspector previews are temporary. Closing one must release its large
-    /// parsed source unless an open file document still needs it.
     func releaseDiffPreview(_ path: String, in workspaceID: String) {
         let key = Self.treeKey(workspaceID, path)
         let users = max(0, diffPreviewUsers[key, default: 0] - 1)
@@ -814,8 +623,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// A preview coming back on screen keeps the diff it already holds when
-    /// the working tree has not been refreshed since it was read.
     func loadPreviewDiff(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
         if diffs[key] != nil, diffReadRevisions[key] == (diffRefreshRevisions[workspaceID] ?? 0) { return }
@@ -827,8 +634,6 @@ final class WorkspacesModel {
         let key = Self.treeKey(workspaceID, path)
         nextDiffLoad &+= 1
         let request = nextDiffLoad
-        // Taken before the read, so a refresh that lands during it leaves
-        // this diff marked as older than the tree.
         let revision = diffRefreshRevisions[workspaceID] ?? 0
         pendingDiffLoads[key] = request
         defer {
@@ -837,8 +642,6 @@ final class WorkspacesModel {
         do {
             let diff = try await Bridge.workspaceDiff(id: workspaceID, path: path)
             guard !Task.isCancelled, pendingDiffLoads[key] == request else { return false }
-            // A watcher for another file may re-read this one unchanged.
-            // Keep its render identity and reading place in that case.
             if diffs[key] != diff { diffs[key] = diff }
             diffReadRevisions[key] = revision
             diffErrors[key] = nil
@@ -853,8 +656,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Re-read the diffs of files that are open. Called after the working tree
-    /// changed, so a diff on screen is never stale.
     func refreshOpenDiffs(in only: Set<String>? = nil) async {
         for workspaceID in tabs.keys where only?.contains(workspaceID) ?? true {
             for path in openFiles(in: workspaceID)
@@ -864,12 +665,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Pick up changes an agent made to a file that is open here.
-    ///
-    /// This is the ordinary case rather than an edge one: the whole point of
-    /// the app is that a session is editing the same repository. A document
-    /// with unsaved changes is left alone, because `loadText` refuses to
-    /// overwrite one, and the two edits are a conflict only a person can settle.
     func refreshOpenDocuments(in only: Set<String>? = nil) async {
         for document in documents.values
         where !document.isDirty && (only?.contains(document.workspaceID) ?? true) {
@@ -887,32 +682,17 @@ final class WorkspacesModel {
     }
 
     private var localFolders: [WorkspaceFolder] = []
-    /// Remote folders by peer key, so the list can be refreshed without
-    /// re-dialling every peer on every file change.
     private var remoteFolders: [String: [WorkspaceFolder]] = [:]
-    /// When each peer may be dialled again, whether the last dial worked or
-    /// not. A single failure keeps the last known folders (the peer may just
-    /// be reconnecting), and a live one is not re-dialled at the rate files
-    /// change; after enough consecutive failures the folders leave the list.
     private var remotePeerNextDial: [String: Date] = [:]
-    /// Consecutive dial failures per peer. One failure is a reconnect and the
-    /// last-known folders stay; a machine that keeps failing is gone, and its
-    /// folders must not linger in the sidebar pretending to be reachable.
     private var remotePeerFailures: [String: Int] = [:]
-    /// Live remote workspace sessions, including hosts with an empty folder
-    /// list. Devices reads this when it opens after the startup sweep.
     var connectedRemotePeerKeys: Set<String> {
         Set(remoteFolders.keys.filter {
             !suppressedPeers.contains($0) && (remotePeerFailures[$0] ?? 0) == 0
         })
     }
-    /// The peer missed a refresh, but its saved folders remain visible until
-    /// the next failed attempt. Keep that state explicit in the workbench.
     func isRemoteStale(_ peer: String) -> Bool {
         remoteFolders[peer] != nil && (remotePeerFailures[peer] ?? 0) > 0
     }
-    /// Peers that have answered a workspace list at least once this session.
-    /// The ones that never do are dialled far less often. See `loadRemote`.
     private var remotePeerEverAnswered: Set<String> = []
     private struct RemoteFetch: Sendable {
         let peer: Peer
@@ -935,24 +715,12 @@ final class WorkspacesModel {
             return RemoteFetch(peer: peer, folders: nil, summaries: nil, failure: error.localizedDescription)
         }
     }
-    /// A different account must never inherit an in-memory Disconnect or a
-    /// folder snapshot, even when both accounts happen to list the same peer.
     private var remoteOwnerScope: WorkReference.Scope?
-    /// Peers the user explicitly disconnected. Their folders stay out of the
-    /// sidebar until Connect is chosen again; without this the peer sweep
-    /// would re-dial an approved, reachable machine on its next pass and the
-    /// Disconnect would last one refresh.
     private var suppressedPeers: Set<String> = []
-    /// A quick off/on can restore the same Boolean while an earlier peer
-    /// request is still in flight. Keep the choice revision separately so
-    /// that older answer cannot publish under the new choice.
     private static var autoConnectRevisions: [String: UInt64] = [:]
     private static func autoConnectRevision(for peerKey: String) -> UInt64 {
         autoConnectRevisions[peerKey] ?? 0
     }
-    /// Per-peer auto-connect, on by default. The same preference the phone
-    /// keeps: an explicit Connect turns it back on, the toggle in the folder
-    /// header turns it off, and the peer sweep honours it.
     static func autoConnectKey(for peerKey: String) -> String? {
         guard let scope = WorkSessionContext.shared.scope else { return nil }
         let owner = [scope.kind.rawValue, scope.origin, scope.identity]
@@ -978,10 +746,6 @@ final class WorkspacesModel {
             UserDefaults.standard.removeObject(forKey: legacy)
         }
     }
-    /// A previous workspace answer is a stronger launch hint than a pairing.
-    /// Phones can be approved peers too, but cannot serve workspaces. Keep the
-    /// hint scoped to the signed-in account so one account never dials another
-    /// account's remembered machine.
     private static func knownWorkspaceHostsKey() -> String? {
         guard let scope = WorkSessionContext.shared.scope else { return nil }
         let owner = [scope.kind.rawValue, scope.origin, scope.identity]
@@ -998,53 +762,28 @@ final class WorkspacesModel {
         guard known.insert(peerKey).inserted else { return }
         UserDefaults.standard.set(known.sorted(), forKey: key)
     }
-    /// Hosts we have already asked to open their work this session, so a
-    /// refusal is not re-asked on every peer sweep.
     private var askedWorkspace: Set<String> = []
 
-    /// Everything: this machine's folders and every reachable peer's.
-    ///
-    /// The full version, for opening the screen and for an explicit refresh.
-    /// The file watcher does **not** call this, see `refresh()`.
     func load() async {
         await loadLocal()
         await loadRemote()
     }
 
-    /// This machine's registered folders, with their git state.
-    ///
-    /// One host call. Cheap enough to run whenever files change, which is what
-    /// separates it from `loadRemote`. False when the host did not answer, so
-    /// launch can ask again rather than leave the sidebar empty.
     @discardableResult
     func loadLocal() async -> Bool {
         let ecosystemLease = EcosystemPublisher.lease
         let scope = WorkSessionContext.shared.scope
-        // Only a load that has nothing to show yet, or one retrying an error,
-        // is "loading". The file watcher reloads on every quiet spell while an
-        // agent or a build writes files, and flipping this flag each time
-        // redrew the whole window twice a second: an open menu closed under
-        // the pointer and a text selection was dropped mid-drag.
         let announces = !hasLoadedDirectory || directoryError != nil
         if announces { isLoading = true }
         defer { if announces { isLoading = false } }
         do {
             let loaded = try await Bridge.workspaces()
-            // A different session owns the sidebar now. Say so, so launch
-            // asks again for the one on screen.
             guard WorkSessionContext.shared.scope == scope else { return false }
-            // The lease guards the system publication only. It changes when
-            // the account is verified, which at launch lands while this call
-            // is in flight, and gating the sidebar on it threw the whole
-            // answer away: the app opened with no projects until something
-            // else reloaded them.
             if EcosystemPublisher.lease == ecosystemLease {
                 EcosystemPublisher.publish(projects: loaded.filter(\.exists).map {
                     EcosystemProject(id: $0.id, name: $0.name, host: "This Mac")
                 }, lease: ecosystemLease, replacing: .local)
             }
-            // Observation reports every assignment, equal or not, so an
-            // unchanged answer must not be written back.
             if localFolders != loaded {
                 localFolders = loaded
                 publishFolders()
@@ -1071,23 +810,8 @@ final class WorkspacesModel {
         }
     }
 
-    /// In-flight sweeps are numbered. The peer tick, an explicit reconnect and
-    /// `load()` can all start one, and a sweep that started earlier must not
-    /// publish its answer over one that started later.
     private var nextRemoteLoad: UInt64 = 0
 
-    /// Folders on other machines, read through the local daemon.
-    ///
-    /// Deliberately not part of the file-watcher path. Every peer here is a TCP
-    /// dial with a connect timeout and a handshake, and this used to run inside
-    /// `load()` on every debounced file change: an agent writing files in a
-    /// terminal had the app dialling every paired machine roughly twice a
-    /// second. A peer's folder list does not change that fast, and a machine
-    /// being asleep is not news worth re-learning at that rate.
-    ///
-    /// A peer that is offline does not make local folders disappear: its
-    /// failure is remembered rather than raised, and its last known folders
-    /// stay listed.
     func loadRemote() async {
         let scope = WorkSessionContext.shared.scope
         if remoteOwnerScope != scope {
@@ -1106,10 +830,6 @@ final class WorkspacesModel {
         nextRemoteLoad &+= 1
         let generation = nextRemoteLoad
         do {
-            // A peer without an address is dialled through the tunnel, which is
-            // how same-account machines behind NAT are reached. The sweep must
-            // include those peers when this machine's tunnel is on, or a
-            // successfully connected machine never appears in the sidebar.
             let tunnelOn = (try? await Bridge.remoteStatus())?.tunnel == true
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
@@ -1117,9 +837,6 @@ final class WorkspacesModel {
             guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                   WorkSessionContext.shared.scope == scope else { return }
             Self.migrateLegacyAutoConnect(peers: peers)
-            // Stage into locals across the per-peer awaits below. Mutating the
-            // shared dictionaries before each dial lets an older sweep resume
-            // after a newer one and publish stale folders over live ones.
             var stagedFolders = remoteFolders
             var stagedFailures = remotePeerFailures
             var stagedNextDial = remotePeerNextDial
@@ -1132,9 +849,6 @@ final class WorkspacesModel {
                 stagedFailures.removeValue(forKey: key)
                 stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
             }
-            // Suppressed means no folders, enforced every sweep. A dial that
-            // was already in flight when Disconnect landed can still come
-            // back after, and without this its answer would linger.
             for key in suppressedPeers {
                 if stagedFolders.removeValue(forKey: key) != nil {
                     stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
@@ -1146,9 +860,6 @@ final class WorkspacesModel {
                     && Self.isAutoConnectEnabled(for: peer.key)
                     && (stagedNextDial[peer.key].map { Date() >= $0 } ?? true)
             }.sorted { lhs, rhs in
-                // A recently seen host should not sit behind a queue of old
-                // phone pairings, each waiting for a network timeout. Once a
-                // host has answered, put it first on the next cold launch.
                 let lhsKnown = knownHosts.contains(lhs.key) || stagedEverAnswered.contains(lhs.key)
                 let rhsKnown = knownHosts.contains(rhs.key) || stagedEverAnswered.contains(rhs.key)
                 if lhsKnown != rhsKnown { return lhsKnown }
@@ -1173,11 +884,6 @@ final class WorkspacesModel {
                         break
                     }
                     fetched[result.peer.key] = result
-                    // Publish a healthy peer as soon as it answers. Waiting
-                    // for every outstanding dial made one sleeping machine
-                    // hold back folders that were already on this Mac. Keep
-                    // the staged copy in step so a later sweep starts from
-                    // the same snapshot and the final pass cannot undo it.
                     if let listed = result.folders,
                        !suppressedPeers.contains(result.peer.key),
                        Self.isAutoConnectEnabled(for: result.peer.key),
@@ -1192,9 +898,6 @@ final class WorkspacesModel {
                         stagedFailures[key] = 0
                         stagedEverAnswered.insert(key)
                         Self.rememberWorkspaceHost(key)
-                        // A different peer may have been disconnected while
-                        // this one was answering. Never restore its old row
-                        // from the staged snapshot during an early publish.
                         for stopped in suppressedPeers {
                             if stagedFolders.removeValue(forKey: stopped) != nil {
                                 stagedSummaries = stagedSummaries.filter {
@@ -1232,9 +935,6 @@ final class WorkspacesModel {
                 if suppressedPeers.contains(peer.key) {
                     continue
                 }
-                // Auto-connect off means the sweep leaves this peer alone.
-                // An explicit Connect goes through `reconnect`, which turns
-                // it back on before the fetch below runs.
                 if !Self.isAutoConnectEnabled(for: peer.key) {
                     continue
                 }
@@ -1248,22 +948,12 @@ final class WorkspacesModel {
                     }
                     guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                           WorkSessionContext.shared.scope == scope else { return }
-                    // Disconnect lands while a dial is in flight. Taking the
-                    // answer anyway restored the folders and re-posted
-                    // didConnect, which unsuppressed the peer: Disconnect
-                    // lasted until the dial came back.
                     guard !suppressedPeers.contains(peer.key) else { continue }
-                    // Newly answering or recovering from an offline mark,
-                    // not routinely re-fetched. Posting on every success
-                    // re-ran `reconnect` from RootView and undid Disconnect.
                     let newlySeen = stagedFolders[peer.key] == nil || (stagedFailures[peer.key] ?? 0) > 0
                     EcosystemPublisher.publish(projects: fetched.filter(\.exists).map {
                         EcosystemProject(id: $0.id, name: $0.name, host: $0.machineLabel ?? "Computer")
                     }, lease: ecosystemLease, replacing: .peer(peer.key))
                     stagedFolders[peer.key] = fetched
-                    // One call for every badge on every folder that machine
-                    // has. Best effort: a host too old to answer leaves the
-                    // badges off, which is what they were before this existed.
                     if let counts = result.summaries {
                         guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                               WorkSessionContext.shared.scope == scope else { return }
@@ -1285,18 +975,11 @@ final class WorkspacesModel {
                           WorkSessionContext.shared.scope == scope else { return }
                     let text = error.localizedDescription
                     if Self.isWorkspaceRefusal(text) {
-                        // Reached a host that has not let this device in. The
-                        // phone asks on Connect. The Mac sidebar used to
-                        // swallow this as a dial failure, so the other Mac
-                        // never saw a request.
                         if askedWorkspace.insert(peer.key).inserted {
                             _ = try? await Bridge.askWorkspaceAccess(peer: peer.key)
                         }
                         guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                               WorkSessionContext.shared.scope == scope else { return }
-                        // A previous grant may have been revoked. Remove its
-                        // cached work now rather than leaving clickable rows
-                        // from a host that just refused this device.
                         if stagedFolders.removeValue(forKey: peer.key) != nil {
                             stagedSummaries = stagedSummaries.filter {
                                 !$0.key.hasPrefix("remote:\(peer.key):")
@@ -1305,9 +988,6 @@ final class WorkspacesModel {
                                 replacing: .peer(peer.key))
                             unreachableKeys.append(peer.key)
                         }
-                        // Counted like any other refusal, so a machine whose
-                        // owner said no is asked every ten minutes rather than
-                        // twice a minute for the rest of the session.
                         let refusals = (stagedFailures[peer.key] ?? 0) + 1
                         stagedFailures[peer.key] = refusals
                         let neverOpened = !stagedEverAnswered.contains(peer.key)
@@ -1321,18 +1001,10 @@ final class WorkspacesModel {
                     let failures = (stagedFailures[peer.key] ?? 0) + 1
                     stagedFailures[peer.key] = failures
                     if failures == 1 && stagedFolders[peer.key] != nil {
-                        // Keep the folders visible with an offline label,
-                        // but stop offering their shortcuts as live work.
                         EcosystemPublisher.publish(projects: [], lease: ecosystemLease,
                             replacing: .peer(peer.key))
                         unreachableKeys.append(peer.key)
                     }
-                    // A machine that answered before is worth asking again
-                    // soon: it is probably asleep and will be back. One that
-                    // has never answered at all is usually a phone or a tablet,
-                    // which cannot host a folder in the first place, and asking
-                    // it every thirty seconds for the rest of the session is
-                    // three pointless tunnel dials a minute, forever.
                     let neverAnswered = !stagedEverAnswered.contains(peer.key)
                     let wait = neverAnswered
                         && (failures >= Self.failuresBeforeBackingOff || Self.isLongUnseen(peer))
@@ -1341,10 +1013,6 @@ final class WorkspacesModel {
                     stagedNextDial[peer.key] = Date().addingTimeInterval(wait)
                     if failures >= Self.maxPeerFailures {
                         let hadFolders = stagedFolders.removeValue(forKey: peer.key) != nil
-                        // Clear the Devices "Connected" mark without suppressing
-                        // re-dial. Using the Disconnect path here would hide a
-                        // machine that only went to sleep until the user pressed
-                        // Connect again.
                         if hadFolders {
                             unreachableKeys.append(peer.key)
                         }
@@ -1353,9 +1021,6 @@ final class WorkspacesModel {
             }
             guard generation == nextRemoteLoad, EcosystemPublisher.lease == ecosystemLease,
                   WorkSessionContext.shared.scope == scope else { return }
-            // Re-validate before publishing: an older sweep resuming after a
-            // newer one must not delete folders the newer sweep just went live
-            // with, so suppressed keys are enforced again on the staged copy.
             for key in suppressedPeers {
                 if stagedFolders.removeValue(forKey: key) != nil {
                     stagedSummaries = stagedSummaries.filter { !$0.key.hasPrefix("remote:\(key):") }
@@ -1374,19 +1039,9 @@ final class WorkspacesModel {
                 )
             }
         } catch {
-            // Not surfaced. The peer list failing is not a reason to put an
-            // error over a screen full of working local folders.
         }
     }
 
-    /// A host answered, and the answer was no. Connection failures and a
-    /// phone that cannot host a folder are different, and must not raise a
-    /// permission request.
-    ///
-    /// Not private: the sidebar sweep and the Devices Connect button both
-    /// have to recognise this answer, and the wording lives with the host.
-    /// Two copies of these three strings is one call site that quietly stops
-    /// asking the next time the host rephrases itself.
     static func isWorkspaceRefusal(_ message: String) -> Bool {
         let lower = message.lowercased()
         return lower.contains("has not let this device")
@@ -1394,12 +1049,6 @@ final class WorkspacesModel {
             || lower.contains("open its work")
     }
 
-    /// Keep peer folders current while the app is open.
-    ///
-    /// A slow loop of its own, because the thing that used to keep them current
-    /// was the file watcher, and that made a save on this machine dial every
-    /// other machine. Runs from the root view's `.task`, so it stops when the
-    /// window does.
     func watchPeers() async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(Self.peerRefreshSeconds))
@@ -1408,36 +1057,18 @@ final class WorkspacesModel {
         }
     }
 
-    /// How long a peer that answered is left alone before being asked again.
     private static let peerRefreshSeconds: TimeInterval = 60
-    /// How long a peer that did not answer is left alone. Shorter, because a
-    /// machine waking up should show up reasonably soon.
     private static let peerRetrySeconds: TimeInterval = 30
-    /// How long a peer that has never answered is left alone, once it has
-    /// missed enough times to have made the point. An approved peer is not
-    /// necessarily a machine that can host: an iPhone and an iPad are paired
-    /// like anything else and have no workspaces to list, because the mobile
-    /// build has no host in it at all.
     private static let peerColdRetrySeconds: TimeInterval = 600
-    /// Misses before a peer that has never answered moves to the slow rate.
     private static let failuresBeforeBackingOff = 3
-    /// A peer this machine has not heard from in this long starts on the slow
-    /// rate after one miss. Pairings outlive the devices behind them, and a
-    /// list of old installs was dialled three times each on every launch.
     private static let longUnseenSeconds: TimeInterval = 7 * 86_400
 
     private static func isLongUnseen(_ peer: Peer) -> Bool {
         guard let seen = ISO8601DateFormatter().date(from: peer.lastSeen) else { return false }
         return Date().timeIntervalSince(seen) > longUnseenSeconds
     }
-    /// Consecutive failures before a peer's folders leave the sidebar.
     private static let maxPeerFailures = 2
 
-    /// Move a sidebar folder so it sits before `targetID`, or at the end.
-    ///
-    /// Order is a local overlay. The host list has no rank, and remotes from
-    /// other machines cannot be reordered there, so the merged sidebar keeps
-    /// its own sequence on this Mac.
     func moveWorkspace(_ id: String, before targetID: String?) {
         guard folders.count > 1, folders.contains(where: { $0.id == id }) else { return }
         if id == targetID { return }
@@ -1452,7 +1083,6 @@ final class WorkspacesModel {
         folders = Self.applyOrder(folders, ids)
     }
 
-    /// Remembered ids first, then anything new in the order it arrived.
     static func applyOrder(_ folders: [WorkspaceFolder], _ order: [String]) -> [WorkspaceFolder] {
         guard !order.isEmpty else { return folders }
         var leftover = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
@@ -1469,10 +1099,6 @@ final class WorkspacesModel {
         return ranked
     }
 
-    /// Drop one peer's workspaces from the sidebar immediately, on an explicit
-    /// Disconnect. Without this the folders stay until the sweep has failed
-    /// twice, which is seconds to a minute of the machine still looking
-    /// reachable after somebody asked to disconnect.
     func disconnect(peer key: String) {
         Self.setAutoConnect(false, for: key)
         suppressedPeers.insert(key)
@@ -1480,37 +1106,22 @@ final class WorkspacesModel {
         remotePeerNextDial.removeValue(forKey: key)
         remotePeerFailures.removeValue(forKey: key)
         publishFolders()
-        // Do not re-post `remotePeerDidDisconnect` here. Callers (Machines, or
-        // RootView reacting to that notification) already own the broadcast;
-        // posting again re-entered this method and made Disconnect look like a
-        // no-op when the second pass found nothing left to drop.
     }
 
-    /// An explicit Connect undoes a Disconnect: the peer's folders are
-    /// allowed back and fetched immediately rather than after the next sweep.
-    /// It also turns auto-connect back on, so the next sweep keeps what this
-    /// fetch brings back instead of leaving it stale.
     func reconnect(peer key: String) {
         suppressedPeers.remove(key)
         Self.setAutoConnect(true, for: key)
         askedWorkspace.remove(key)
-        // Clear the backoff too. Somebody pressing Connect is asking now, and
-        // a peer that had been dialled down to the slow rate would otherwise
-        // sit out most of the next ten minutes before being tried.
         remotePeerNextDial.removeValue(forKey: key)
         remotePeerFailures.removeValue(forKey: key)
         Task { await loadRemote() }
     }
 
-    /// A folder was registered or cloned on this peer. Fetch now rather than
-    /// on the next minute sweep, so the sidebar shows what was just made.
     func refreshRemotePeer(_ key: String) {
         remotePeerNextDial.removeValue(forKey: key)
         Task { await loadRemote() }
     }
 
-    /// Publish a confirmed registration immediately; the normal peer sweep
-    /// may still be in its quiet interval when a new worktree is created.
     func acceptRegisteredRemoteProject(_ folder: WorkspaceFolder, peer: String, label: String?) {
         var remote = folder
         remote.id = "remote:\(peer):\(folder.id)"
@@ -1524,17 +1135,11 @@ final class WorkspacesModel {
         refreshRemotePeer(peer)
     }
 
-    /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
         let merged = localFolders + remoteFolders.values.flatMap { $0 }
         let ordered = Self.applyOrder(merged, WorkspacePreference.order())
         if ordered != folders { folders = ordered }
-        // Chips a folder was left with, put back the first time it is listed.
-        // Cheap: `restoreTabs` reads a string array and returns at once for a
-        // folder it has already restored.
         for folder in folders { restoreTabs(in: folder.id) }
-        // A folder removed elsewhere should not leave the detail pane
-        // describing something that is no longer in the list.
         if let id = selectedID, !folders.contains(where: { $0.id == id }) {
             selectedID = folders.first?.id
         }
@@ -1545,11 +1150,6 @@ final class WorkspacesModel {
     }
 
     #if os(macOS)
-    /// Point the file watcher at the current folders.
-    ///
-    /// Creates the watcher once and re-points it after that, so a refresh does
-    /// not tear the stream down. Watching nothing is a valid state: no folders
-    /// registered, or all of them missing.
     private func syncWatcher() {
         if let watcher {
             watcher.watch(folders.filter { !$0.isRemote }.map(\.path))
@@ -1560,15 +1160,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Refresh after files changed, once they quiet down.
-    ///
-    /// A save lands as a burst of events, and a build writes continuously, so
-    /// the refresh runs when the stream settles rather than once per event.
-    /// Without the debounce a `cargo build` would turn into a git status a
-    /// second.
-    ///
-    /// `roots` names the watched folders that changed. Nil means the events
-    /// could not be placed and every local folder is read again.
     func scheduleRefresh(roots: Set<String>? = nil) {
         if let roots {
             pendingRefreshRoots.formUnion(roots)
@@ -1594,12 +1185,6 @@ final class WorkspacesModel {
     private var pendingRefreshRoots: Set<String> = []
     private var pendingRefreshAll = false
 
-    /// Re-read only the folders that changed.
-    ///
-    /// A save in one project used to run `git status` in every project, and
-    /// in a large repository that is seconds of host time per save. One
-    /// folder's status is one call. Past a handful of folders the full list
-    /// is the cheaper round trip, so that is what runs.
     func refresh(roots: Set<String>) async {
         let ids = localFolders.filter { roots.contains($0.path) }.map(\.id)
         guard !ids.isEmpty, ids.count <= 3 else {
@@ -1622,35 +1207,19 @@ final class WorkspacesModel {
     }
     #endif
 
-    /// Re-read git for the folders already registered.
-    ///
-    /// The file watcher's path, so it is local only. Peers are on their own
-    /// slower schedule in `loadRemote`, because dialling every paired machine
-    /// is not something a file save should cause.
     func refresh() async {
         await loadLocal()
         for folder in localFolders { diffRefreshRevisions[folder.id, default: 0] &+= 1 }
-        // Only histories somebody has already opened. Loading one nobody asked
-        // for would put a `git log` behind every file save.
         for id in history.keys {
             await loadHistory(for: id)
         }
-        // A diff on screen must not go stale while the file changes underneath,
-        // and neither must the file itself: an agent running in the terminal
-        // beside this pane edits the same repository.
         await refreshOpenDiffs()
         await refreshOpenDocuments()
     }
 
-    /// In-flight reads are numbered per workspace: a refresh and a commit can
-    /// both ask, and an older answer must not land after a newer one.
     private var historyLoads: [String: UInt64] = [:]
     private var nextHistoryLoad: UInt64 = 0
 
-    /// Read the recent commits for a workspace.
-    ///
-    /// Keeps whatever was already loaded when the read fails, so a transient
-    /// error empties the panel's error line rather than the panel.
     func loadHistory(for id: String) async {
         nextHistoryLoad &+= 1
         let request = nextHistoryLoad
@@ -1669,7 +1238,6 @@ final class WorkspacesModel {
         }
     }
 
-    // MARK: - File tree
 
     func children(of path: String, in workspaceID: String) -> [TreeEntry]? {
         tree[Self.treeKey(workspaceID, path)]
@@ -1679,7 +1247,6 @@ final class WorkspacesModel {
         expandedDirectories.contains(Self.treeKey(workspaceID, path))
     }
 
-    /// Open or close a directory, reading it the first time it is opened.
     func toggleDirectory(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
         if expandedDirectories.contains(key) {
@@ -1703,8 +1270,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Re-read every directory currently open. Called after a commit, when what
-    /// is on disk has changed under the tree.
     func refreshTree() async {
         for key in tree.keys {
             guard let separator = key.firstIndex(of: ":") else { continue }
@@ -1714,7 +1279,6 @@ final class WorkspacesModel {
         }
     }
 
-    // MARK: - Staging and committing
 
     func isStaged(_ path: String, in workspaceID: String) -> Bool {
         stagedSelection[workspaceID]?.contains(path) ?? false
@@ -1732,8 +1296,6 @@ final class WorkspacesModel {
             : []
     }
 
-    /// Prepare an immutable review. The shared composer submits the reviewed
-    /// snapshot, so unrelated staging never enters this selection.
     func prepareCommit(_ folder: WorkspaceFolder) async -> GitCommitSession? {
         guard !isCommitting else { return nil }
         isCommitting = true
@@ -1772,8 +1334,6 @@ final class WorkspacesModel {
         await loadHistory(for: folder.id)
     }
 
-    /// After a pull sheet fetched or pulled. The sheet says what happened,
-    /// so no banner here: only the folder's numbers and history move.
     func pullRefreshed(_ folder: WorkspaceFolder) async {
         await refresh()
         await loadHistory(for: folder.id)
@@ -1805,8 +1365,6 @@ final class WorkspacesModel {
     /// gives a new user no idea what they are being asked to pick or why.
     var isAddSheetPresented = false
 
-    /// Open the onboarding sheet. Every "Add project" affordance funnels
-    /// through here so the explanation is never skipped.
     func requestAdd() {
         isAddSheetPresented = true
     }
@@ -1849,8 +1407,6 @@ final class WorkspacesModel {
         await add(panel.urls)
     }
 
-    /// Register folders the person has already picked, by the panel or by
-    /// dropping them on the app.
     @discardableResult
     func add(_ urls: [URL]) async -> String? {
         var lastAdded: String?
@@ -1868,13 +1424,6 @@ final class WorkspacesModel {
     }
     #endif
 
-    /// Forget a folder. The folder itself is never touched.
-    ///
-    /// Removal would drop the open buffers with the folder, so unsaved files
-    /// block it. The prompt is the same close prompt the tab strip uses, and
-    /// the removal is not resumed after an answer: that flow ends in a close,
-    /// and a second Remove press is an explicit act rather than something the
-    /// app guessed at.
     func remove(_ folder: WorkspaceFolder) async {
         if let dirty = documents.values.first(where: {
             $0.workspaceID == folder.id && $0.isDirty
@@ -1883,11 +1432,6 @@ final class WorkspacesModel {
             return
         }
         do {
-            // A remote folder is registered on the machine that owns it, so
-            // the prefixed id this side uses means nothing to the local
-            // daemon. Ask the owner to forget it under its own id instead;
-            // sending the prefixed id locally is what made Remove silently
-            // fail on remote folders.
             if folder.isRemote, let peer = folder.machineID {
                 let prefix = "remote:\(peer):"
                 let raw: String = folder.id.hasPrefix(prefix)
@@ -1898,8 +1442,6 @@ final class WorkspacesModel {
                     }()
                 struct RemovedAck: Codable, Sendable { var removed: Bool? }
                 if raw == folder.id {
-                    // Parse failed: the owner would fail too. Drop locally
-                    // rather than sending a guaranteed-failing id.
                     if selectedID == folder.id { selectedID = nil }
                     forgetTabs(in: folder.id)
                     remoteFolders[peer]?.removeAll(where: { $0.id == folder.id })
@@ -1909,7 +1451,6 @@ final class WorkspacesModel {
                 _ = try await Bridge.onPeer(peer, "workspace.remove", ["id": raw], as: RemovedAck.self)
                 if selectedID == folder.id { selectedID = nil }
                 forgetTabs(in: folder.id)
-                // Optimistic drop so the row does not linger until refresh.
                 remoteFolders[peer]?.removeAll(where: { $0.id == folder.id })
                 publishFolders()
                 refreshRemotePeer(peer)
@@ -1924,9 +1465,6 @@ final class WorkspacesModel {
         }
     }
 
-    /// Drop everything a folder had open. Called when it leaves the sidebar,
-    /// so a folder added back does not arrive carrying last month's tabs, and
-    /// the other folders' tabs are untouched.
     func forgetTabs(in workspaceID: String) {
         for tab in tabs(in: workspaceID) { close(tab, in: workspaceID) }
         tabs[workspaceID] = nil
@@ -1945,17 +1483,12 @@ final class WorkspacesModel {
     }
 
     #if os(macOS)
-    /// Reveal in Finder. A hand-off, not a replacement: tokenstat is not a
-    /// file manager.
     func revealInFinder(_ folder: WorkspaceFolder) {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
     }
     #endif
 }
 
-/// Changed files grouped by the directory they sit in, as the reference layout
-/// shows them. Directories in the order their first file appears, so the
-/// busiest part of a change set stays at the top.
 func groupByDirectory(_ files: [FileChange]) -> [(directory: String, files: [FileChange])] {
     var order: [String] = []
     var groups: [String: [FileChange]] = [:]

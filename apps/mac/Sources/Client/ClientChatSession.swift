@@ -4,9 +4,6 @@ import Foundation
 import Observation
 
 #if !os(macOS)
-/// One repository's visible arrangement survives a Duo fold or the system
-/// rebuilding a navigation column. It is account/session owned, never saved
-/// to disk or carried to another host.
 @MainActor @Observable
 final class ClientChatPresentationState {
     var sidebarVisible = true
@@ -15,16 +12,11 @@ final class ClientChatPresentationState {
     var companion: String?
     var focus = "split"
     var chatFraction: CGFloat = 0.5
-    /// A compact reader owns the browser sheet only while it is the active
-    /// layout. The wide successor clears this before drawing its inline pane.
     var browserSheetVisible = false
     var chromeCollapsed = false
 }
 #endif
 
-/// Chat ownership belongs to the signed-in scene, above its changing layout.
-/// A folder list and a standalone recent-chat reader have separate owners:
-/// opening a notification must not select a different chat underneath it.
 @MainActor
 @Observable
 final class ClientChatSession {
@@ -34,8 +26,6 @@ final class ClientChatSession {
     var retainedThread: ChatConversation?
     #if !os(macOS)
     var presentation = ClientChatPresentationState()
-    /// The browser follows the retained reader through a phone/Duo layout
-    /// handoff. Its bridge belongs to the session, not a transient view.
     var browserSession: ProjectBrowserSession?
     #endif
 
@@ -72,7 +62,6 @@ final class ClientChatSession {
             && model.stagingAttachments == 0 && model.pendingQueue.isEmpty
     }
 
-    /// A cancelled layout waiter leaves the shared read alive for its successor.
     func load(workspaceID: String, peer: String, refresh: Bool = false) async {
         guard refresh || !reusable || model.error != nil || model.peer != peer
             || !model.isReady(for: workspaceID) else { return }
@@ -98,8 +87,6 @@ final class ClientChatSession {
         }
     }
 
-    /// Opening belongs to this retained reader. A replacement presentation
-    /// waits for the same selection instead of cancelling and starting it over.
     func select(_ chat: ChatConversation) async {
         guard !Task.isCancelled else { return }
         if let selecting, selecting.chatID == chat.id, selecting.model === model {
@@ -140,7 +127,6 @@ final class ClientChatSessions {
         }
     }
 
-    // Reading the cache from a view must not invalidate that same view.
     @ObservationIgnored private var sessions: [Key: ClientChatSession] = [:]
     @ObservationIgnored private var recency: [Key] = []
     private let limit: Int
@@ -154,7 +140,6 @@ final class ClientChatSessions {
         recency.append(key)
         if let retaining { sessions[key] = retaining }
         if let session = sessions[key] { return session }
-        // Bound inactive readers; active work and unsent writing remain owned.
         for candidate in recency.dropLast() where sessions.count >= limit {
             guard let old = sessions[candidate], old.canDiscard else { continue }
             old.deactivate()
@@ -172,7 +157,6 @@ final class ClientChatSessions {
         recency.removeAll()
     }
 
-    /// Adds a chat made elsewhere to every open list for its project.
     func created(_ chat: ChatConversation, peer: String, workspace: String, by creator: ClientChatSession) {
         for (key, session) in sessions where key.peer == peer && key.workspace == workspace && session !== creator {
             session.invalidate()

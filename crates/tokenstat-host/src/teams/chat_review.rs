@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! A durable selection of private chats, reviewed and published one at a time.
-//! Saving or opening a selection grants no sharing consent. Every publication
-//! uses a fresh preview and the item's original, host-persisted request ID.
-
 use super::{
     chats,
     publications::{ChatTarget, Folder, Owner, Phase, Store},

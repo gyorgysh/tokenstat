@@ -105,7 +105,6 @@ class ChatFileTransferTest {
                             "protocol" -> buildJsonObject { put("protocolVersion", 33) }
                             "chat.attachment" -> buildJsonObject {
                                 put("data", Base64.encodeToString(byteArrayOf(1, 2, 3), Base64.NO_WRAP))
-                                // A valid JSON name that the filesystem cannot create.
                                 put("attachment", buildJsonObject { put("name", "x".repeat(300)) })
                             }
                             else -> error("Unexpected legacy request: $method")

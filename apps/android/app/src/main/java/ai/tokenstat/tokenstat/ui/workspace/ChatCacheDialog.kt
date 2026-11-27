@@ -19,13 +19,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 
-/// One question about reading a whole conversation again.
 internal sealed interface ChatCacheQuestion {
     val tokens: Long
 
-    /// Sending after the prompt cache expired. `canStartNew` is false when
-    /// the message carries files uploaded into this chat, or the host is too
-    /// old to start a continuing chat.
     data class Idle(val idleMs: Long, override val tokens: Long, val canStartNew: Boolean) : ChatCacheQuestion
 
     data class ModelSwitch(val from: String?, val to: String, override val tokens: Long) : ChatCacheQuestion
@@ -33,7 +29,6 @@ internal sealed interface ChatCacheQuestion {
 
 internal enum class ChatCacheAnswer { PROCEED, START_NEW, CANCEL }
 
-/// "Don't ask again", kept per question on this device.
 internal object ChatCacheSuppression {
     private fun prefs(context: Context) = context.getSharedPreferences("chat-cache-warnings", Context.MODE_PRIVATE)
     private fun key(question: ChatCacheQuestion) = if (question is ChatCacheQuestion.Idle) "idle" else "model"

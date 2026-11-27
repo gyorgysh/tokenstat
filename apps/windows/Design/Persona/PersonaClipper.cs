@@ -9,11 +9,6 @@ namespace Tokenstat.Design.Persona;
 
 internal readonly record struct PersonaClip(Geometry Body, Geometry? Mask = null);
 
-/// <summary>
-/// One body clip is shared by all facial marks in a frame. Build after the
-/// face transform is applied, so a tongue's mouth mask follows yaw and roll.
-/// Keep native geometry alive until every visual has moved to the next frame.
-/// </summary>
 internal sealed class PersonaClipper
 {
     private Frame? _frame;

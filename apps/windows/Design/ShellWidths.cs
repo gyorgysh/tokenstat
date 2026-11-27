@@ -3,7 +3,6 @@ using System.Text.Json;
 
 namespace Tokenstat.Design;
 
-/// <summary>Only panel sizes are stored. A drag writes once, when it finishes.</summary>
 internal sealed class ShellWidths
 {
     public const double Rail = 64;

@@ -16,13 +16,6 @@ using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Where the tokens went. Mirrors the desktop Mac Insights: a period picker
-/// and the screen's own actions in the toolbar, a tab strip for the
-/// breakdowns, an overview with metric tiles and a daily chart, and the
-/// inspector beside it with the period figures, the selected row, and the
-/// archive. Local only, like the Mac: there is no account scope here.
-/// </summary>
 internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, IScopeAware
 {
     private readonly ContentControl _tabSlot = new()
@@ -71,12 +64,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         _ = LoadAsync();
     }
     private string _period = "all";
-    /// <summary>
-    /// A single day, pinned from Home's heatmap. Overrides the period rather
-    /// than being another period, like the Mac focused day: it is not a
-    /// length of time chosen from a control, and clearing it goes back to
-    /// whatever the period was.
-    /// </summary>
     private string? _focusDay;
     private string _tab = "overview";
     private AgentProfiles? _agentProfiles;
@@ -118,9 +105,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             ("all", L10n.Text("windows.insightspage.all.a52ace42"), null),
         };
 
-    /// <param name="focusDay">One day to pin from a deep link, in archive
-    /// YYYY-MM-DD text. Every figure on the screen is about that day until
-    /// the period picker or Clear dismisses it.</param>
     public InsightsPage(string? focusDay = null)
     {
         if (!string.IsNullOrEmpty(focusDay))
@@ -164,17 +148,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         Unloaded += (_, _) => { AppServices.AccountChanged -= AccountChanged; _scopeGeneration++; };
     }
 
-    /// <summary>
-    /// The shell reads this once, at navigation, and keeps the element.
-    /// Selection and reloads replace its children, so the column stays live
-    /// without the shell ever asking again.
-    /// </summary>
     public UIElement? Inspector => _inspectorRoot;
 
-    /// <summary>
-    /// Pin one day from Home's heatmap, like the Mac focused day. Safe
-    /// before first load: the day is set first and the load reads it.
-    /// </summary>
     public Task FocusDayAsync(string day)
     {
         if (string.IsNullOrEmpty(day))
@@ -221,13 +196,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
 
     public event Action? ToolbarChanged;
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
-    /// <summary>
-    /// The screen's own actions: the period picker with scan and fetch, like
-    /// the desktop Mac bar.
-    /// </summary>
     public IList<UIElement> ToolbarActions()
     {
         if (_scope == DeviceScope.AllDevices)
@@ -450,9 +420,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         var query = PeriodQuery();
         try
         {
-            // One coherent snapshot first, which is what the Mac reads. An
-            // older host that does not know it falls back to one report call
-            // per breakdown.
             try
             {
                 _snapshot = await AppServices.Host.CallAsync(
@@ -481,8 +448,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             _status.Text = "";
             _showingLoadingStatus = false;
         }
-        // A selection from before the reload may no longer exist, and a stale
-        // row would sit in the inspector describing nothing.
         if (_selectedKey is not null)
         {
             bool stillThere = false;
@@ -501,12 +466,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
     }
 
-    /// <summary>
-    /// The pre-snapshot read: the same aggregates, one call each, packed into
-    /// the snapshot shape so rendering stays uniform. No active block and no
-    /// per-project harness split down here, those calls are newer than the
-    /// hosts this path serves.
-    /// </summary>
     private async Task<JsonNode> LoadLocalFallbackAsync(JsonObject query)
     {
         var snapshot = new JsonObject();
@@ -561,16 +520,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return snapshot;
     }
 
-    /// <summary>
-    /// The period as an archive query. The archive stores local dates as plain
-    /// text, so the filter is built the same way rather than as an instant. A
-    /// fresh object per call: a node keeps its parent.
-    /// </summary>
     private JsonObject PeriodQuery()
     {
-        // A pinned day is a range whose ends are the same string: the
-        // archive stores local dates as plain text. It overrides the
-        // period, like the Mac focused day.
         if (!string.IsNullOrEmpty(_focusDay))
         {
             return new JsonObject
@@ -736,11 +687,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             chart, L10n.Text("windows.insightspage.tokens_including_reported_cache_usage.a3e0a451"));
     }
 
-    /// <summary>
-    /// One synced row as its own card: the name, compact tokens and events,
-    /// the list-rate value, and the share of the largest shown row. Harness
-    /// rows carry the tool's mark, like the phone.
-    /// </summary>
     private UIElement AccountRowCard(JsonNode? row, long peak)
     {
         var key = Format.Text(row, "key");
@@ -828,10 +774,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         };
     }
 
-    /// <summary>
-    /// A synced row's key as a person reads it. A harness id is a slug, and a
-    /// day is an ISO date nobody says out loud. Same rule as the phone.
-    /// </summary>
     private string AccountTitle(string key)
     {
         if (_accountCut == "source")
@@ -887,9 +829,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         {
             return;
         }
-        // A day arrived from Home's heatmap. It has to be visible and
-        // dismissable, or every figure on the screen is quietly about one
-        // day and the period control says otherwise.
         if (!string.IsNullOrEmpty(_focusDay))
         {
             _root.Children.Add(FocusChip());
@@ -1081,11 +1020,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
             L10n.Text("windows.insightspage.daily_tokens_cache_included.57801e52"));
     }
 
-    /// <summary>
-    /// Daily bars drawn from rectangles: one star column per day, the bar
-    /// anchored to the bottom. The hover summary the Mac draws over the chart
-    /// is a tooltip here, which is the closer control on this platform.
-    /// </summary>
     private UIElement DailyChart(JsonArray rows, bool showsValue, bool showsToggle)
     {
         var stack = new StackPanel { Spacing = Theme.SpaceM };
@@ -1406,12 +1340,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         RefreshInspector();
     }
 
-    /// <summary>
-    /// The full breakdown for a tab. No sort controls: the archive already
-    /// returns rows largest first. Paged past fifty rows, because an archive
-    /// holds every session that ever ran and laying out thousands of rows at
-    /// once hangs the window.
-    /// </summary>
     private UIElement BreakdownTable(
         string title, JsonArray rows, bool showsValue, bool monospaced, bool isHarness)
     {
@@ -1948,11 +1876,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return outRows;
     }
 
-    /// <summary>
-    /// A row's session count, or null when the payload carries none. The table
-    /// shows a missing mark there instead of a zero that would claim an empty
-    /// result rather than no data.
-    /// </summary>
     private static string? SessionsCount(JsonNode? row)
     {
         var raw = row?["sessions"];
@@ -1980,15 +1903,8 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         }
     }
 
-    /// <summary>
-    /// One row's list-rate value, with the Mac Money markers: a plus suffix
-    /// when a model could not be priced (the figure is a floor), a tilde
-    /// prefix when it was estimated. Never a charge.
-    /// </summary>
     private static string Money(JsonNode? row)
     {
-        // Ran on a local server: nothing to value, and $0.00 would read like
-        // a free tier of a cloud model.
         if (Format.Flag(row, "local") && Format.Long(row, "valueMicros") == 0) return L10n.Text("common.value.local");
         string amount = Format.ListRate(Format.Long(row, "valueMicros"));
         if (row?["unpricedModels"] is JsonArray unpriced && unpriced.Count > 0)
@@ -2002,10 +1918,6 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
         return amount;
     }
 
-    /// <summary>
-    /// Fold rows into one value, carrying the qualifiers up. A total built
-    /// from an incomplete row is itself incomplete.
-    /// </summary>
     private static string MoneyTotal(JsonArray rows)
     {
         long micros = 0;

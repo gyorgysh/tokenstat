@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Session-only opt-in. Canceled transports keep their slots until completion;
-/// replacing a query cannot accumulate more than two in-flight host requests.
 @MainActor
 final class WorkSearchLiveScheduler {
     typealias Fetch = @MainActor (String, String, Set<WorkReference.Kind>, String?) async throws -> WorkSearchLive.Page
@@ -34,8 +32,6 @@ final class WorkSearchLiveScheduler {
         self.debounce = debounce
     }
 
-    /// Called only by the explicit selected-machines action. Empty selection
-    /// withdraws opt-in and cancels the current generation.
     func select(_ hosts: Set<String>) {
         selected = hosts
         update(query: query, kinds: kinds)
@@ -62,8 +58,6 @@ final class WorkSearchLiveScheduler {
         }
     }
 
-    /// Continuations share the same queue and slots as first pages. A repeated
-    /// tap cannot enqueue the same host while its page is queued or running.
     @discardableResult
     func more(_ hosts: Set<String>) -> Set<String> {
         guard !closed, ownsSession() else { return [] }

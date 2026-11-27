@@ -2,7 +2,6 @@
 #if os(macOS)
 import Foundation
 
-/// A visible inspector and agent-follow observer share one discovery flight.
 actor SimulatorInventory {
     struct Snapshot: Sendable {
         let devices: [SimulatorDevice]
@@ -43,8 +42,6 @@ actor SimulatorInventory {
         if !force, Date().timeIntervalSince(readAt) < 2 { return cached }
         if let flight {
             if !force { return await flight.value }
-            // An explicit attach may name a device created after this flight
-            // began. Wait for it, then take a fresh snapshot for that request.
             _ = await flight.value
             try Task.checkCancellation()
             return try await inspect(force: true)
@@ -54,9 +51,6 @@ actor SimulatorInventory {
             async let appleFlight = Self.discover(apple)
             async let androidFlight = Self.discover(android)
             let (appleResult, androidResult) = await (appleFlight, androidFlight)
-            // A tool failure says nothing about whether its devices stopped.
-            // Preserve that platform's last successful inventory so refresh
-            // cannot detach a live screen or mistake recovery for a new boot.
             if case .success(let devices) = appleResult { lastApple = devices }
             if case .success(let devices) = androidResult { lastAndroid = devices }
             let devices = lastApple + lastAndroid

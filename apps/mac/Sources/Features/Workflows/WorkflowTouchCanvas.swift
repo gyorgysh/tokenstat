@@ -2,13 +2,6 @@
 
 import SwiftUI
 
-/// Wide-iPad touch canvas for the workflow editor. The phone keeps the
-/// step list; this canvas is the pointer-and-finger counterpart with the
-/// same document, validation and inspector.
-///
-/// Add, select, move, connect, pan, zoom and fit all work by touch. The
-/// list stays available beside it as the accessible alternate, and every
-/// selection still edits in the inspector.
 struct WorkflowTouchCanvas: View {
     @Bindable var session: WorkflowEditorSession
     @Binding var stepPath: [String]
@@ -186,8 +179,6 @@ struct WorkflowTouchCanvas: View {
                     .onTapGesture { completeArmed(to: node.id) }
             }
             .overlay(alignment: .bottom) {
-                // Spacing matches `outPort`: Then/On error sit ±22 from
-                // center, loop Body/After/On error at -36/0/+36.
                 HStack(spacing: node.kind == .loop ? 22 : 30) {
                     TouchPortDot(tint: portTint(.ok), label: touchPortLabel(node: node, when: .ok))
                         .highPriorityGesture(linkGesture(from: node, when: .ok))
@@ -450,8 +441,6 @@ struct WorkflowTouchCanvas: View {
     }
 
     private func fitIfNeeded() {
-        // Fit once, when the graph and the canvas both have content. A
-        // refit on every added step would steal a deliberate zoom or pan.
         guard !hasFitted, !nodes.isEmpty, canvasSize.width > 1, canvasSize.height > 1 else { return }
         hasFitted = true
         fit()
@@ -480,9 +469,6 @@ private struct TouchLinkDrag {
     var when: WorkflowEdgeWhen
 }
 
-/// Finger-sized port target. The visible dot stays small so the graph keeps
-/// its hierarchy; layout stays 14 points while the tappable shape is a
-/// full 44-point square around it.
 private struct TouchPortDot: View {
     var tint: Color
     var label: String
@@ -507,7 +493,6 @@ private struct TouchGrid: View {
         Canvas { ctx, size in
             let xs = WorkflowCanvasCoordinates.gridAxis(pan: pan.width, extent: size.width, zoom: zoom)
             let ys = WorkflowCanvasCoordinates.gridAxis(pan: pan.height, extent: size.height, zoom: zoom)
-            // Decorative dots stay bounded even on unusually large canvases.
             var drawn = 0
             for x in xs {
                 for y in ys {
@@ -522,8 +507,6 @@ private struct TouchGrid: View {
     }
 }
 
-/// Card on the touch canvas. Mark, kind, title and subtitle mirror the Mac
-/// card at the same 228×120 size so positions round-trip between devices.
 private struct WorkflowTouchNodeCard: View {
     let node: WorkflowNode
     var selected: Bool
@@ -562,9 +545,6 @@ private struct WorkflowTouchNodeCard: View {
     }
 }
 
-/// When a canvas edge is selected the inspector edits that connection.
-/// The role names match the step list: If uses Then/Else, Loop uses
-/// Body/After last pass, everything else uses Then/On error/Always.
 struct WorkflowConnectionInspector: View {
     @Bindable var session: WorkflowEditorSession
     @Binding var stepPath: [String]
@@ -618,15 +598,11 @@ struct WorkflowConnectionInspector: View {
     }
 }
 
-/// Wide editor surface: the touch canvas or the step list. Phone keeps
-/// the list; wide iPad defaults to the canvas with the list as the
-/// accessible alternate.
 enum WorkflowCanvasMode: String, CaseIterable, Hashable {
     case canvas = "Canvas"
     case list = "List"
 }
 
-/// Two-column kind palette. MCP is reserved on the host and never offered.
 private struct TouchAddSheet: View {
     @Bindable var session: WorkflowEditorSession
     @Binding var stepPath: [String]

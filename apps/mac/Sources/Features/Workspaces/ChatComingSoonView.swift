@@ -6,16 +6,7 @@
 
 import SwiftUI
 
-/// The Chat section, before there is a Chat.
-///
-/// A section with nothing behind it, on purpose. The place people would look
-/// for it is worth marking before the feature exists, and an honest empty
-/// screen is a better answer than a row that is not there yet. No button:
-/// a Notify me that does nothing would be worse than nothing.
 struct ChatComingSoonView: View {
-    /// The folder this was opened from, when there is one to name. It makes
-    /// the sentence about the work in front of somebody rather than about a
-    /// feature in general.
     var folderName: String?
 
     var body: some View {

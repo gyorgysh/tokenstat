@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Project membership normally authorizes a member's devices. Publishers can
-/// explicitly select strict management to maintain individual device grants.
 struct TeamAgentGrants: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext

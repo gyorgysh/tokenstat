@@ -13,14 +13,6 @@ using Windows.System;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Small things worth keeping, and nothing else. Matches the Mac NotesView:
-/// a quick-note composer that stays ready, scope chips on the global list,
-/// search and newest-or-title sort, cards or a list, an archive, and a detail
-/// inspector where the full text can be read and copied. A note is a todo
-/// card whose kind is note, so every action here is a todo method that
-/// already existed. Pass a workspace id to scope the screen to that folder.
-/// </summary>
 internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _workspaceId;
@@ -109,10 +101,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this screen belongs to, or null on the global list, where
-    /// the scope chips in content say which folder each note is in.
-    /// </summary>
     public UIElement? ToolbarScope
     {
         get
@@ -126,10 +114,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The inspector column content. Selection and reloads replace its
-    /// children, so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => null;
 
     public IList<UIElement> ToolbarActions()
@@ -178,13 +162,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// One todo method against this screen's folder, local or remote. A
-    /// remote folder travels as remote.call with the peer's own folder id,
-    /// the way the folder page already routes its task list. Params are
-    /// copied, never mutated, so a retry cannot forward an already rewritten
-    /// id. The global list has no folder and always stays local.
-    /// </summary>
     private Task<JsonNode> CallTodoAsync(string method, JsonNode? parameters = null)
     {
         if (_workspaceId is null
@@ -228,9 +205,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
             if (_workspaceId is not null
                 && RemoteWorkspaces.TrySplit(_workspaceId, out _, out var inner))
             {
-                // Cards from the peer carry its own folder id. Namespace them
-                // to this page's folder id so the scope filter below keeps
-                // matching, and list the folder itself so its name resolves.
                 foreach (var card in _cards)
                 {
                     if (card is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
@@ -238,9 +212,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _workspaceId;
                     }
                 }
-                // Folder choices must belong to the same host as the cards.
-                // Keep this page's selected folder in the shell namespace;
-                // other choices already carry the owning peer's native ids.
                 _folders = _folders.Select(folder =>
                     (Id: folder.Id == inner ? _workspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_workspaceId) is RemoteFolder cached
@@ -449,9 +420,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
         return moment.LocalDateTime.ToString("d");
     }
 
-    /// <summary>
-    /// Opened from the toolbar. Closing it retains the draft for next time.
-    /// </summary>
     private void RenderComposer()
     {
         _draftRow?.Children.Clear();
@@ -1060,7 +1028,6 @@ internal sealed class NotesPage : Page, IInspectorContent, IToolbarItems
                 saved["notes"] = value.Notes;
             }
         });
-        // Keep the mounted editor and its selection intact during autosave.
         RenderList();
     }
 

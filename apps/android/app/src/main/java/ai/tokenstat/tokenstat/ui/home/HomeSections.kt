@@ -97,11 +97,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
 
-/// Device-local Home furniture: the continue shelf, the pin shelf, and the
-/// card arrangement. Ports `ClientRecentPlaces`, `PinnedWorkStore`, and
-/// `HomeLayout`, backed by SharedPreferences the way the Apple client uses
-/// UserDefaults. Pins and the work itself belong to the account; the order of
-/// the cards does not, so the layout is keyed to this device only.
 
 @Serializable
 private data class StoredPlace(
@@ -164,8 +159,6 @@ class HomeStores(context: Context) {
         context.getSharedPreferences("tokenstat.home.v1", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
-    /// Bumped on every mutation so readers recompose. The stores decode on
-    /// every access, so rows must read once per pass, never twice in a loop.
     val revision: MutableState<Int> = mutableIntStateOf(0)
 
     private fun scopeOf(handle: String): String = handle.trim()
@@ -231,9 +224,6 @@ class HomeStores(context: Context) {
         }, scope)
     }
 
-    /// True when the pin landed. False when the shelf is full and this is
-    /// new: the row says the shelf holds eight, rather than the oldest pin
-    /// silently going.
     fun togglePin(
         handle: String,
         peer: String,
@@ -318,8 +308,6 @@ class HomeStores(context: Context) {
         val hidden = prefs.getString("home.sectionHidden.v1", null)
             ?.let { runCatching { json.decodeFromString<List<String>>(it) }.getOrNull() }
             .orEmpty().mapNotNull(HomeSection::of).toSet()
-        // A missing order key means nobody arranged this device: balanced,
-        // and the editor should say so.
         if (rawOrder == null) return HomePreset.BALANCED.order to HomePreset.BALANCED.hidden
         return normalizeHomeLayout(stored, hidden)
     }
@@ -340,8 +328,6 @@ class HomeStores(context: Context) {
     }
 }
 
-/// Presence words for a machine behind a continue or pinned row. The
-/// destination owns reachability; a machine that is asleep says so there.
 fun machineRowState(linked: Boolean, offline: Boolean, online: Boolean?): String =
     when {
         !linked -> L10n.text("android.homesections.no_longer_linked.e409e8a7")
@@ -351,7 +337,6 @@ fun machineRowState(linked: Boolean, offline: Boolean, online: Boolean?): String
         else -> L10n.text("android.homesections.status_unknown.e412d872")
     }
 
-/// One recent project and conversation; empty collapses to nothing.
 @Composable
 fun ContinueSection(
     places: List<RecentPlaces.Place>,
@@ -511,10 +496,6 @@ data class HomeMachine(
     val platform: String? = null,
 )
 
-/// Which of your computers is awake right now. Account plane only, so this
-/// draws with every laptop shut. Asleep ones stay off this screen: the list
-/// is a jumping-off point, not an inventory, and Devices already inventories
-/// everything.
 @Composable
 fun MachinesSection(
     machines: List<HomeMachine>,
@@ -545,8 +526,6 @@ fun MachinesSection(
                 Icon(Icons.Default.ChevronRight, null, tint = colors.accent, modifier = Modifier.size(12.dp))
             }
         }
-        // One card with ruled dividers, like the Apple home. The rows are one
-        // list with seams, not separate computers in separate panels.
         Column(
             Modifier
                 .fillMaxWidth()
@@ -601,16 +580,12 @@ fun MachinesSection(
     }
 }
 
-/// Awake, Asleep, or unknown, the same three words the Apple home reads.
 fun machineState(online: Boolean?): String = when (online) {
     true -> L10n.text("android.homesections.awake.9123b5f4")
     false -> L10n.text("android.homesections.asleep.60135e8f")
     else -> L10n.text("android.homesections.status_unknown.e412d872")
 }
 
-/// The shelf: up to eight folders and conversations, newest first. Rows open
-/// through the same destination Continue uses, so a pin to work on a sleeping
-/// machine says so there rather than here.
 @Composable
 fun PinnedSection(
     pins: List<PinnedWork.Pin>,
@@ -667,17 +642,9 @@ fun PinnedSection(
     }
 }
 
-/// What happened to the account read, when something did. A failed load
-/// replaces the wireframe with the reason: a skeleton that never resolves is
-/// a lie told slowly. Offline gets its own words: with no network there is
-/// nothing to fetch and nothing anybody can do about it.
 @Composable
 fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     val colors = LocalTsColors.current
-    // Could not look, which is not the same as nothing to show. Offline
-    // gets its own words and no button: every screen here is account plane,
-    // so with no network there is nothing to fetch and a Try again that
-    // cannot work is worse than no button at all.
     if (offline) {
         EmptyState(
             kind = EmptyKind.Unreachable,
@@ -722,8 +689,6 @@ fun HomeStatusBlock(error: String?, offline: Boolean, onRetry: () -> Unit) {
     )
 }
 
-/// Every card switched off. Not an error, and not empty space with nothing
-/// to press: the way back is right here.
 @Composable
 fun ClearHomeCard() {
     TsCard {
@@ -736,14 +701,8 @@ fun ClearHomeCard() {
     }
 }
 
-/// The phone's first run: signed in already, counting nothing yet.
-/// Where a step sits in a rail somebody is walking. Three states and no
-/// fourth: behind you, in front of you, or the one to do now.
 enum class GettingStartedState { DONE, NOW, NEXT }
 
-/// One step, and what it offers. The action is part of the step rather than
-/// something drawn under the rail, because if there is something to do, the
-/// button doing it belongs on the line that asks for it.
 data class GettingStartedStep(
     val number: Int,
     val title: String,
@@ -753,10 +712,6 @@ data class GettingStartedStep(
     val action: (() -> Unit)? = null,
 )
 
-/// The numbered rail a new account walks: one line, one live step, the rest
-/// ahead or struck behind. Ported from `GettingStartedRail.swift`. The
-/// connector is drawn on the step and not between two of them, so a step can
-/// be any height and the line still reaches the next disc.
 @Composable
 fun GettingStartedRail(steps: List<GettingStartedStep>) {
     Column {
@@ -775,9 +730,6 @@ private fun GettingStartedRow(step: GettingStartedStep, isLast: Boolean) {
             Modifier.width(30.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // The live step gets a halo. It is the one thing on the card
-            // that should catch the eye first, and a ring costs nothing
-            // next to making the disc itself louder than the title.
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 if (step.state == GettingStartedState.NOW && !reduceMotion) {
                     val pulse by rememberInfiniteTransition(label = "railPulse").animateFloat(
@@ -826,10 +778,6 @@ private fun GettingStartedRow(step: GettingStartedStep, isLast: Boolean) {
                 }
             }
             if (!isLast) {
-                // Below the disc rather than beside it, so the line starts
-                // where the circle ends whatever the row above is doing. A
-                // finished stretch reads finished; the rest fades out so it
-                // does not end in a hard stop.
                 val top = if (step.state == GettingStartedState.DONE) {
                     colors.accent.copy(alpha = 0.5f)
                 } else {
@@ -879,9 +827,6 @@ private fun GettingStartedRow(step: GettingStartedStep, isLast: Boolean) {
     }
 }
 
-/// The grid that is not there yet, drawn where it will be. Cells light in a
-/// wave across the weeks and fade, which is roughly what a real first sync
-/// looks like arriving. Ported from `GettingStartedGhostGrid`.
 @Composable
 fun GettingStartedGhostGrid(weeks: Int = 16, centered: Boolean = true) {
     val colors = LocalTsColors.current
@@ -919,8 +864,6 @@ fun GettingStartedGhostGrid(weeks: Int = 16, centered: Boolean = true) {
     }
 }
 
-/// A soft band over a floor of empty cells. The per-cell jitter keeps it from
-/// reading as a scanning bar: a real week is not one brightness.
 private fun ghostLevel(row: Int, week: Int, weeks: Int, phase: Float, reduceMotion: Boolean): Float {
     val floor = 0.08f
     if (reduceMotion) return floor
@@ -932,10 +875,6 @@ private fun ghostLevel(row: Int, week: Int, weeks: Int, phase: Float, reduceMoti
     return floor + band * (0.25f + jitter)
 }
 
-/// What to do next, on a phone whose account has nothing on it yet. Ported
-/// from `ClientGettingStarted.swift`: the rail opens already part finished
-/// instead of opening as a list of chores, and step three has no instruction
-/// because it is the picture of what arrives once step two is done.
 @Composable
 fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
     val colors = LocalTsColors.current
@@ -992,9 +931,6 @@ fun GettingStartedCard(phoneName: String?, onSetup: () -> Unit) {
     }
 }
 
-/// Arrange Home: pick a starting layout, move the cards, switch off the ones
-/// never read. A working copy, so Done applies the whole arrangement at once
-/// and Cancel really is a cancel.
 @Composable
 fun HomeEditor(
     order: List<HomeSection>,
@@ -1169,8 +1105,6 @@ fun HomeEditor(
     }
 }
 
-/// One glyph per Home card, the Material reading of `HomeSection.symbol`.
-/// The editor rows and the preview strip share them.
 fun homeSectionGlyph(section: HomeSection): ImageVector = when (section) {
     HomeSection.CONTINUE -> ActionIcon.History.vector
     HomeSection.PINNED -> ActionIcon.Pinned.vector
@@ -1180,10 +1114,6 @@ fun homeSectionGlyph(section: HomeSection): ImageVector = when (section) {
     HomeSection.LIMITS -> Icons.Default.Speed
 }
 
-/// Home at a glance: one bar per visible card, in order. Port of
-/// `HomeLayoutPreview`. Not a rendering of the real cards: a miniature that
-/// pretended to be the screen would be wrong the moment any of them had
-/// nothing to say.
 @Composable
 fun HomeLayoutPreview(sections: List<HomeSection>) {
     val colors = LocalTsColors.current

@@ -12,35 +12,24 @@ enum LocalModelSelection {
         "\(provider):\(model)"
     }
 
-    /// The provider and model a stored key names, or nil when nothing is set.
     static func parse(_ key: String?) -> (provider: String, model: String)? {
         LocalModelLaunch.parse(key)
     }
 
-    /// The selection stored for a workspace, ready to hand to a spawn.
     @MainActor
     static func stored(for workspaceID: String, in workspaces: WorkspacesModel? = nil) -> (provider: String, model: String)? {
         parse(workspaces?.localModel(for: workspaceID) ?? WorkspacePreference.localModel(for: workspaceID))
     }
 }
 
-/// The local model menu, sized for a chrome row.
-///
-/// Loads its own list. A provider that is not running still appears, disabled
-/// and saying so, because "LM Studio: not running" answers the question the
-/// user actually has, and an empty menu does not.
 struct LocalModelControl: View {
     let folder: WorkspaceFolder
-    /// The machine to probe. A remote folder's models come from the machine
-    /// that owns it, never from the Mac drawing this row.
     let peer: String?
     @Bindable var workspaces: WorkspacesModel
 
     @State private var providers: [LocalProvider] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    /// Bumped on every load. A slower answer for a previous folder or peer
-    /// must not overwrite the list for the one on screen now.
     @State private var loadGeneration = 0
 
     private var selectedKey: String {
@@ -65,9 +54,6 @@ struct LocalModelControl: View {
         if let match = choices.first(where: { $0.key == selectedKey }) {
             return match.label
         }
-        // The list has not loaded yet, but a choice is already stored.
-        // Show the model id rather than the default, so a folder-list
-        // refresh does not flash "Each tool's default" over a real pick.
         if let parsed = LocalModelSelection.parse(selectedKey) {
             return parsed.model
         }
@@ -131,10 +117,6 @@ struct LocalModelControl: View {
         .task(id: "\(folder.id)|\(peer ?? "local")") { await load() }
     }
 
-    /// Providers that cannot be picked: not running, empty, or disabled here.
-    ///
-    /// Listed in the menu so a short picker says why, instead of looking like
-    /// nothing is installed.
     private var statusRows: [String] {
         providers.compactMap { provider in
             if !provider.available {
@@ -194,19 +176,12 @@ struct LocalModelControl: View {
             errorMessage = nil
         } catch {
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            // Kept and shown. Swallowing this is what made a decoding failure
-            // read as "no local models discovered" while both servers were up.
             providers = []
             errorMessage = error.localizedDescription
         }
     }
 }
 
-/// The bypass switch, as a chrome control with a visible on state.
-///
-/// An icon rather than a checkbox and two lines of prose: what it turns off is
-/// worth a marker that stays on screen for the whole session, and the
-/// explanation reads the same in a tooltip.
 struct BypassPermissionsControl: View {
     let folder: WorkspaceFolder
     @Bindable var workspaces: WorkspacesModel
@@ -237,8 +212,6 @@ struct BypassPermissionsControl: View {
 }
 
 
-/// The agent profile menu, sized for a chrome row. Hidden until there is a
-/// profile other than this machine's to choose.
 struct AgentProfileLaunchControl: View {
     let folder: WorkspaceFolder
     let peer: String?

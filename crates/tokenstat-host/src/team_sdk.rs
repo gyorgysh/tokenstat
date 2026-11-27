@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! A guardian-owned MCP service for the accepted Ask snapshot and an optional
 //! pinned lane. It never opens the personal Engine, host socket or management
 //! dispatcher. File effects stop and drain before landing or fence release.
@@ -21,11 +20,9 @@ use zeroize::Zeroize;
 mod files;
 
 const REQUEST: usize = 512 * 1024;
-// MCP text plus structuredContent can encode the same frozen JSON twice;
-// escaping the text copy needs additional headroom. The source stays bounded.
+
 const CONTEXT: usize = 4 * 1024 * 1024;
-// Legacy inline fixtures keep their original bound. Production snapshots
-// page their frozen authenticated archive without expanding it at startup.
+
 #[cfg(test)]
 const SNAPSHOT: usize = 32 * 1024 * 1024;
 const PAGE: usize = 256 * 1024;
@@ -53,7 +50,6 @@ struct Budget {
 }
 impl Budget {
     fn capture(authority: &HostRunAuthority) -> io::Result<Self> {
-        // Sample before remaining(), so scheduling cannot enlarge the copy.
         let start = Stamp::now().ok_or_else(unavailable)?;
         let remaining = authority.remaining().map_err(|_| unavailable())?;
         Ok(Self {
@@ -90,8 +86,6 @@ impl Drop for Shared {
 }
 impl Shared {
     fn live(&self) -> io::Result<()> {
-        // Account/publication checks may read local storage. Never hold the
-        // gate across them: Stop and expiry must be able to retire it.
         let current = (self.current)();
         if !current {
             self.retire();
@@ -133,8 +127,7 @@ impl Shared {
         let Ok(bytes) = tokenstat_identity::public_key_from_hex(token) else {
             return false;
         };
-        // Fixed work for a correctly shaped token. Never compare its first
-        // differing byte or include a supplied token in diagnostics.
+
         bytes
             .iter()
             .zip(&self.token)
@@ -301,7 +294,6 @@ impl Service {
         self.shared.retire();
         self.pause_files();
         if let Some(lane) = &self.shared.lane {
-            // Also release directory handles before Windows worktree cleanup.
             drop(
                 lane.lock()
                     .unwrap_or_else(|error| error.into_inner())
@@ -314,8 +306,6 @@ impl Service {
             self.shared.generation.fetch_add(1, Ordering::AcqRel);
         }
         if let Some(lane) = &self.shared.lane {
-            // A guardian worker is outside the owned backend process group.
-            // Drain it before committing/landing or releasing its writer fence.
             drop(lane.lock().unwrap_or_else(|error| error.into_inner()));
         }
     }
@@ -379,8 +369,7 @@ fn read_frame(
         if n == 0 || bytes.len() + n > limit {
             return Err(unavailable());
         }
-        // Scan only newly received bytes; rescanning the accumulated context
-        // would make large frozen replies quadratic in their length.
+
         if chunk[..n].contains(&b'\n') {
             if chunk[n - 1] != b'\n' || chunk[..n - 1].contains(&b'\n') {
                 return Err(unavailable());
@@ -446,8 +435,7 @@ fn serve(mut stream: TcpStream, shared: &Shared) -> io::Result<()> {
     shared.live()?;
     let response = handle(shared, envelope.request, envelope.generation);
     let bytes = encode_frame(&response, RESPONSE)?;
-    // Check the exact local publication again after serialization and before
-    // the first response byte. Subsequent chunks use cheap clock/Stop checks.
+
     shared.live()?;
     if envelope.generation != shared.generation.load(Ordering::Acquire) {
         return Err(unavailable());
@@ -542,8 +530,7 @@ fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
         return page_frozen_context(context, args);
     }
     let cursor = context_cursor(args)?;
-    // The accepted context never changes. Measuring the full snapshot for
-    // every page needlessly copies megabytes while a caller waits.
+
     if cursor == 0
         && shared.context_bytes <= CONTEXT
         && !args
@@ -560,8 +547,7 @@ fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
     if cursor > events.len() {
         return Err("That context page is unavailable.");
     }
-    // Measure each event once. Rendering the growing page on every event would
-    // copy the whole page again, which gets expensive near the 32 MiB cap.
+
     let mut bytes = serde_json::to_vec(&context_page(&shared.context, &[], events.len(), None))
         .map_err(|_| "The run is unavailable.")?
         .len();
@@ -570,7 +556,7 @@ fn page_context(shared: &Shared, args: &Value) -> Result<Value, &'static str> {
     while next < events.len() {
         let event = serde_json::to_vec(&events[next]).map_err(|_| "The run is unavailable.")?;
         let separator = usize::from(!chosen.is_empty());
-        // Leave room for the nextCursor string, which is absent from the base.
+
         if bytes + separator + event.len() + 32 > PAGE {
             if chosen.is_empty() {
                 return Err("This context page is too large.");
@@ -714,7 +700,6 @@ fn handle(shared: &Shared, request: Value, generation: u64) -> Value {
     }
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
     if request.get("id").is_none() {
-        // Notifications cannot open alternate methods or carry effects.
         return Value::Null;
     }
     if id.is_null() {
@@ -730,9 +715,7 @@ fn handle(shared: &Shared, request: Value, generation: u64) -> Value {
             if shared.lane.is_some() {
                 available.extend(files::tools());
             }
-            // Antigravity otherwise defers MCP tools behind a native discovery
-            // tool. Team runs deny native tools, so offer the scoped roster
-            // directly. Other MCP clients ignore vendor metadata.
+
             for tool in &mut available {
                 tool["_meta"] = json!({"antigravity/alwaysLoad":true});
             }

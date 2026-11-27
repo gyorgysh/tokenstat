@@ -6,11 +6,6 @@
 
 import Foundation
 
-/// "now", "5m", "3h", "2d", "6w": an age a sidebar row or a table cell can
-/// afford.
-///
-/// Fixed English units rather than a formatter's, because the point is the
-/// width: a column of "2 days ago" is a column of the same two words.
 enum CompactAge {
     static func text(ms: Int64, now: Date = Date()) -> String {
         guard ms > 0 else { return "" }
@@ -29,7 +24,6 @@ enum CompactAge {
         }
     }
 
-    /// The same, as "2d ago", or "just now" for the first minute.
     static func ago(_ date: Date, now: Date = Date()) -> String {
         let short = text(date, now: now)
         return short == "now" ? L10n.text("apple.compactage.just_now.7ddb44d8") : L10n.text("apple.compactage.0_ago.cace2682", "\(short)")

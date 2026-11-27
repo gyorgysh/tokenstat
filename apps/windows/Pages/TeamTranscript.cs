@@ -8,7 +8,6 @@ internal sealed record TeamAuthor(string Kind, string Name = "", string Backend 
 internal enum TeamBlockKind { User, Text, Thinking, Tool, Edit, File, Notice, Error }
 internal sealed record TeamBlock(string Id, TeamBlockKind Kind, TeamAuthor? Author, string Text = "", string Title = "", JsonObject? File = null, bool? Ok = null);
 
-/// Shared host projections only; no personal conversation or workspace actions.
 internal static class TeamTranscript
 {
     private static string? Field(JsonNode? row, string key) => row?[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

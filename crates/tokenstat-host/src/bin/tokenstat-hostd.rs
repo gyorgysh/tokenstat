@@ -4,16 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! The tokenstat host daemon.
-//!
-//! Serves the same dispatch the in-process bridge does, over a unix socket
-//! (macOS, Linux) or a named pipe (Windows), so a client that is not in this
-//! process can ask the same questions.
-//!
-//! Runs in the foreground and logs to stderr. Lifetime belongs to launchd or
-//! the Windows scheduled task, not to this binary: a daemon that forks itself
-//! is one the supervisor cannot see, restart, or stop.
 
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
@@ -41,8 +32,7 @@ fn main() -> ExitCode {
     if let Some(code) = tokenstat_sync::quiet_keychain::serve_if_requested() {
         return ExitCode::from(code);
     }
-    // Claude Code runs this as its status line once the live feed is on. It
-    // reads one payload and exits, before anything a daemon would start.
+
     if std::env::args().nth(1).as_deref() == Some("statusline") {
         return ExitCode::from(tokenstat_host::claude_usage::run_status_line());
     }
@@ -87,30 +77,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// Put a home directory in the environment when the supervisor left none.
-///
-/// A systemd **system** service is started with PATH, USER and the journal
-/// variables and nothing else. Every child this daemon spawns inherits that,
-/// so a vendor's installer script (`sh` under `set -u`) died on
-/// `HOME: parameter not set`, `git` and `ssh` could not find their config,
-/// and an agent CLI had nowhere to write its session log. The daemon itself
-/// resolves home from the password database either way, which is why the
-/// archive landed in the right place while everything it started did not.
-///
-/// One write, at the top of `main`, before a thread or a child exists: that
-/// is the only window where setting a process-wide variable is sound, and
-/// doing it here means no spawn site has to remember. A HOME that is already
-/// set is never touched, because a value somebody chose is a decision.
-///
-/// Unix only. Windows names the home directory `USERPROFILE`, the scheduled
-/// task is per-user and always carries it, and writing a `HOME` beside it
-/// would change what git and ssh pick on a machine with no problem to fix.
-///
-/// The service unit is deliberately left alone. `Environment=HOME=%h` would
-/// only help a machine installed after this change, and a percent specifier
-/// resolved by the wrong systemd would write a home that is confidently
-/// wrong. The password database is exact, and it also fixes the hosts that
-/// are already out there.
 fn adopt_home() {
     if cfg!(windows) {
         return;
@@ -121,14 +87,11 @@ fn adopt_home() {
     let Some(home) = tokenstat_paths::home_dir() else {
         return;
     };
-    // SAFETY: single-threaded. This is the first statement of `main`, so no
-    // other thread can be reading the environment concurrently.
+
     unsafe { std::env::set_var("HOME", home) };
 }
 
 fn run() -> Result<(), String> {
-    // The daemon holds a connection per peer, a stream per screen session and
-    // a socket per SSH session at once. See `open_files`.
     tokenstat_host::open_files::raise_open_file_limit();
 
     let mut args = std::env::args().skip(1);
@@ -203,61 +166,35 @@ fn run() -> Result<(), String> {
         None => server::default_socket_path()?,
     };
 
-    // Before anything else, and before the archive is opened: one machine
-    // identity, one daemon. Two hosts sharing a key expire each other's tunnel
-    // credential on every renewal and knock each other off the relay, which
-    // reads as an unreachable machine and names no cause anywhere. See
-    // `ownership`.
     let role = ownership::ensure_may_serve(&path)?;
     if role == ownership::Role::Secondary {
         watch_for_the_installed_host();
     }
 
-    // The login environment resolve is the one piece of a first spawn that can
-    // take seconds (a loaded shell profile). Start it now, on a thread, so the
-    // archive open and socket bind below overlap with it and the resolve is
-    // finished by the time anybody can ask for a terminal.
     tokenstat_pty::warm_login_env();
-    // The first Shell click should not pay a login-shell startup either, so a
-    // fully-started shell is warmed beside the environment and handed over on
-    // request.
+
     tokenstat_pty::warm_shell_pool();
-    // And the agent CLIs' model lists, for the same reason. A client asks for
-    // them as its first screen paints, and until a probe has answered every
-    // backend falls back to a curated list, or to nothing for the ones that
-    // have no curated list. That is how a fresh daemon served a Codex chat
-    // with no model picker: the answer was correct at the moment it was given
-    // and stale a second later, and the app keeps the list it was handed.
+
     tokenstat_host::agent_models::refresh();
 
-    // Open the archive before binding. Failing after the socket exists would
-    // leave clients connecting to something that answers every request with an
-    // error, which is harder to diagnose than a daemon that refused to start.
     let session = Session::open_default()?;
     let listener = server::bind(&path)?;
     eprintln!("tokenstat-hostd listening on {}", path.display());
 
-    // No version subprocess runs on the socket-readiness path. Warm the
-    // existing capability cache on one worker while the app paints instead
-    // of making its first model/composer request pay for both CLI probes.
     tokenstat_host::chat_live::warm_capabilities();
-    // Teammates' landings reach this computer as one line on the relay.
+
     tokenstat_host::install_team_sync();
 
     server::serve(listener, session)
 }
 
-/// Normalize only native MCP identities, never a tool basename. Cursor has
-/// two mandatory fail-closed hooks: its generic pre hook identifies MCP calls
-/// but omits their server, and beforeMCPExecution proves the exact server.
 fn team_tool_request(flavor: &str, phase: &str, input: &Value) -> Option<String> {
     let (name, _, _) = hook_tool(flavor, input);
     let tool = match (flavor, phase) {
         ("claude" | "codex", "pre") => name.strip_prefix("mcp__tokenstat_team__"),
         ("grok", "pre") => {
             let args = input.get("tool_input").or_else(|| input.get("toolInput"))?;
-            // Native use_tool has file-based argument forms which would read
-            // outside the lane. Only its complete inline MCP form is valid.
+
             if args["tool_name"] != name
                 || !args["tool_input"].is_object()
                 || !args
@@ -277,27 +214,12 @@ fn team_tool_request(flavor: &str, phase: &str, input: &Value) -> Option<String>
     (!tool.is_empty()).then(|| format!("mcp__tokenstat_team__{tool}"))
 }
 
-/// What one `PreToolUse` hook decided, and why.
-///
-/// A three-state answer rather than a `Result`, because "the host is
-/// unreachable" and "the person pressed Deny" have to reach the model as the
-/// same kind of thing: a refusal it must not retry. The old code returned
-/// `Err` for both and let `main` exit non-zero, which every one of these CLIs
-/// reads as a non-blocking error and carries on past. **Measured on Claude
-/// Code 2.1.251: a hook exiting 1 does not block the tool.** So this type
-/// exists to force a decision document on stdout, always, exit 0.
 #[derive(Debug)]
 enum Decision {
     Allow,
     Deny(String),
 }
 
-/// Called by an agent's lifecycle hook.
-///
-/// The host daemon is authoritative. A missing credential, malformed payload,
-/// socket failure, malformed reply, or nobody answering in time all deny.
-/// Never turn one of those into an allow, and never signal one by exiting
-/// non-zero: an exit code is not a denial to any of these CLIs.
 fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
     if phase != "pre" && phase != "post" {
         return Err("hook phase must be pre or post".into());
@@ -306,11 +228,6 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
         return run_muse_post_hook();
     }
     if phase == "post" {
-        // A post hook records an outcome. It cannot block anything, so a
-        // failure here is silence rather than a refusal of work already done.
-        // A note the person parked rides beside that result, and only on a
-        // backend that reads extra context there. Printing nothing leaves
-        // the tool output exactly as the agent wrote it.
         let note = run_post_hook(flavor).ok().flatten();
         if let Some(note) = note {
             let document = post_note_document(flavor, &note);
@@ -331,16 +248,8 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Spell one decision the way this backend understands it.
-///
-/// Each of these is the CLI's own documented contract, and each was checked
-/// against that CLI rather than assumed. The shapes differ; the exit code does
-/// not, and is always success, because a non-zero exit is what silently let
-/// every denial through before.
 fn decision_document(flavor: &str, decision: &Decision) -> String {
     match (flavor, decision) {
-        // Claude Code: `permissionDecision` on stdout blocks and is reported
-        // back in `permission_denials`. Verified: the tool did not run.
         ("claude", Decision::Allow) => "{}".into(),
         ("claude", Decision::Deny(reason)) => json!({
             "hookSpecificOutput": {
@@ -350,10 +259,7 @@ fn decision_document(flavor: &str, decision: &Decision) -> String {
             }
         })
         .to_string(),
-        // Cursor has its own shape: `permission`, with the reason in both
-        // `user_message` and `agent_message`, since Cursor routes one to the
-        // person and the other to the model. Verified on the 2026.10 CLI: a
-        // deny left the file unwritten even with `--force`.
+
         ("cursor", Decision::Allow) => json!({"permission": "allow"}).to_string(),
         ("cursor", Decision::Deny(reason)) => json!({
             "permission": "deny",
@@ -361,9 +267,7 @@ fn decision_document(flavor: &str, decision: &Decision) -> String {
             "agent_message": reason,
         })
         .to_string(),
-        // Grok, agy and codex read the Claude-compatible top-level form.
-        // `permissionDecision` rides along too: grok documents it as the
-        // canonical spelling and prefers it when both are present.
+
         (_, Decision::Allow) => json!({"decision": "allow"}).to_string(),
         (flavor, Decision::Deny(reason)) => json!({
             "decision": deny_word(flavor),
@@ -378,25 +282,10 @@ fn decision_document(flavor: &str, decision: &Decision) -> String {
     }
 }
 
-/// The word this backend actually acts on.
-///
-/// Codex accepts `deny` without complaint and **runs the tool anyway**;
-/// only `block` stops it. Measured twice on the same binary, same payload,
-/// one word apart: `block` produced "blocked by the PreToolUse hook", `deny`
-/// produced "Yes, it ran successfully". A refusal that is silently spelled
-/// wrong is worse than no gate, because the person was asked and told their
-/// answer was taken. Grok documents `block` as a legacy alias and agy is
-/// verified on `deny`, so only codex is moved.
 fn deny_word(flavor: &str) -> &'static str {
     if flavor == "codex" { "block" } else { "deny" }
 }
 
-/// Extra context for a step that already ran. This is not a refusal.
-///
-/// `decision: block` would replace the tool output, so it is never set.
-/// Claude and Codex read context inside `hookSpecificOutput`. Codex rejects
-/// unknown top-level fields, so repeating it there discards the entire note.
-/// Muse gets its own document for a model step. Other backends get nothing.
 fn post_note_document(flavor: &str, note: &str) -> String {
     let context = format!(
         "The person added a note while this step was running. Apply it now, then continue: {note}"
@@ -416,14 +305,12 @@ fn post_note_document(flavor: &str, note: &str) -> String {
             }
         })
         .to_string(),
-        // Cursor reads `additional_context` from both post events and adds it
-        // to what the model sees next.
+
         "cursor" => json!({ "additional_context": context }).to_string(),
         _ => String::new(),
     }
 }
 
-/// Print one muse document and always succeed. A model step has no tool to report.
 fn run_muse_post_hook() -> Result<(), String> {
     let document = match hook_context() {
         Ok((token, socket, input)) if !muse_skips_note(&input) => {
@@ -498,11 +385,6 @@ fn run_post_hook(flavor: &str) -> Result<Option<String>, String> {
     hook_report(flavor, &token, &socket, &input)
 }
 
-/// The turn credential, the socket, and the tool payload.
-///
-/// The credential comes from a 0600 file rather than argv, because `ps` shows
-/// argv to every process on this machine and this one authorises writing into
-/// somebody's conversation.
 fn hook_context() -> Result<(String, String, Value), String> {
     let token_file = std::env::var("TOKENSTAT_CHAT_TURN_FILE")
         .map_err(|_| "tokenstat cannot approve this: no turn credential")?;
@@ -523,10 +405,6 @@ fn hook_context() -> Result<(String, String, Value), String> {
     Ok((token, socket, input))
 }
 
-/// Ask the daemon about one tool call and wait, within a deadline.
-///
-/// Split from stdin and the environment so a missing host can be tested
-/// without parking on stdin.
 fn hook_request(
     flavor: &str,
     token: &str,
@@ -548,9 +426,7 @@ fn hook_request(
     if answer.pointer("/result/decision").and_then(Value::as_str) == Some("allow") {
         return Ok(Decision::Allow);
     }
-    // Bounded, and shorter than the timeout the CLI was given. A hook still
-    // running when that expires is killed, and a killed hook lets the tool
-    // through. Deciding first is what keeps silence fail-closed.
+
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(gate_deadline());
     while std::time::Instant::now() < deadline {
         let poll = json!({
@@ -587,10 +463,6 @@ fn gate_deadline() -> u64 {
         .unwrap_or(tokenstat_host::chat_gate::GATE_DEADLINE_SECONDS)
 }
 
-/// Record what a tool call actually did, once it has run.
-///
-/// The optional note is the person's own words for this step. Empty means
-/// there was nothing to add, and the tool output stays as the agent wrote it.
 fn hook_report(
     flavor: &str,
     token: &str,
@@ -641,10 +513,6 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
         .get("success")
         .or_else(|| input.get("ok"))
         .and_then(Value::as_bool)
-        // Cursor reports a refused or failed call as its own event, with an
-        // `error_message` rather than an `error`.
-        // A field sent as `null` is absent, so `"error_message": null` on a
-        // success neither fails the call nor hides the output after it.
         .unwrap_or_else(|| {
             present("error").is_none()
                 && present("error_message").is_none()
@@ -691,17 +559,7 @@ fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
     (verb, preview, shell_prefix)
 }
 
-/// One line a person can judge without reading JSON.
-///
-/// A permission card is a decision, and a decision needs the thing being
-/// decided, not the payload it arrived in. `Bash {"command":"rm -rf
-/// build","description":"Clean"}` is a wall; `rm -rf build` is a question.
-/// Falls back to compact JSON only when no field is recognisably the subject.
 fn tool_preview(input: &Value) -> String {
-    // Compared without case or separators, because the same field is
-    // `command` to Claude Code, `CommandLine` to agy and `command_line`
-    // elsewhere, and a card that falls back to raw JSON because of a capital
-    // letter is a card nobody can act on.
     const SUBJECTS: &[&str] = &[
         "command",
         "commandline",
@@ -730,9 +588,6 @@ fn tool_preview(input: &Value) -> String {
     }
 }
 
-/// Remember only simple argv-shaped commands. Shell operators, substitutions
-/// and redirections can hide another action after an innocuous prefix, so such
-/// requests must always come back through the approval queue.
 fn safe_shell_prefix(command: &str) -> Option<String> {
     const SHELL_SYNTAX: &[char] = &[';', '&', '|', '\n', '\r', '`', '>', '<'];
     if command.contains(SHELL_SYNTAX) || command.contains("$(") {
@@ -785,19 +640,6 @@ fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
         .map_err(|_| "tokenstat cannot approve this: the host replied with nonsense".into())
 }
 
-/// A second daemon that started while nothing else was running still has to
-/// give the machine back when the installed host arrives.
-///
-/// The startup check only covers one order of events. Reboot, a `launchctl
-/// kickstart`, a scheduled-task start, or simply opening the app is enough
-/// to bring the installed host up behind a development one, and from that
-/// moment the two are fighting over the same tunnel credential again.
-///
-/// Exiting rather than standing down in place. This process is by definition
-/// the one nobody installed: nothing restarts it, the terminals it owns are a
-/// test session's, and leaving it half alive would mean two daemons answering
-/// two sockets with one archive between them. A loud exit is easier to
-/// understand than a daemon that quietly stopped doing half its job.
 fn watch_for_the_installed_host() {
     let Ok(identity) = tokenstat_identity::MachineIdentity::load_or_create() else {
         return;
@@ -903,8 +745,7 @@ mod tests {
             Some("mcp__tokenstat_team__team_context")
         );
         assert!(team_tool_request("cursor", "pre", &json!({"tool_name":"Read"})).is_none());
-        // Cursor's generic hook only defers MCP-shaped calls to the mandatory
-        // beforeMCPExecution hook, which supplies the authoritative server.
+
         assert!(
             team_tool_request("cursor", "pre", &json!({"tool_name":"MCP:team_file_read"}))
                 .is_some()
@@ -941,8 +782,6 @@ mod tests {
         assert_eq!(prefix.as_deref(), Some("git status"));
     }
 
-    /// A person judges a permission card in a second or two. Whatever names
-    /// the subject of the call has to be what they read.
     #[test]
     fn a_preview_names_the_subject_of_the_call() {
         assert_eq!(
@@ -957,8 +796,7 @@ mod tests {
             tool_preview(&json!({"url": "https://example.com"})),
             "https://example.com"
         );
-        // Nothing recognisable is still better shown than hidden.
-        // agy spells the same field `CommandLine`.
+
         assert_eq!(
             tool_preview(&json!({"CommandLine": "echo hi", "Cwd": "/tmp"})),
             "echo hi"
@@ -1005,8 +843,7 @@ mod tests {
                 );
             }
         }
-        // Clipping the permission preview must not hide shell syntax from
-        // the separate remembered-command check.
+
         let command = format!("git status {} && rm -rf build", "x".repeat(1000));
         assert_eq!(
             hook_tool("claude", &json!({"tool_input": {"command": command}})).2,
@@ -1141,11 +978,6 @@ mod tests {
         );
     }
 
-    /// The defect that made every denial useless.
-    ///
-    /// A hook that exits non-zero does not block Claude Code: measured, the
-    /// tool ran anyway. So a refusal has to be a document on stdout, and this
-    /// asserts the shape each CLI actually reads.
     #[test]
     fn a_refusal_is_a_document_each_backend_understands() {
         let claude: Value =
@@ -1169,18 +1001,12 @@ mod tests {
             assert_eq!(allowed["decision"], "allow", "{flavor}");
         }
 
-        // Codex is the one that needs the other word, and getting it wrong
-        // does not error, it just runs the tool.
         assert_eq!(deny_word("codex"), "block");
         assert_eq!(deny_word("grok"), "deny");
 
-        // Claude wants silence for an allow: any decision key it did not ask
-        // for is a chance to be misread.
         let allowed = decision_document("claude", &Decision::Allow);
         assert_eq!(allowed, "{}");
 
-        // Cursor reads `permission`, and the reason rides in both message
-        // fields so the model sees it whichever one it reads.
         let cursor: Value =
             serde_json::from_str(&decision_document("cursor", &Decision::Deny("no".into())))
                 .unwrap();
@@ -1232,9 +1058,6 @@ mod tests {
         assert!(ok);
     }
 
-    /// A mid-turn note is extra context beside a step that already ran. It must
-    /// not replace that step. Muse prints its own document. A backend that
-    /// cannot read one prints nothing.
     #[test]
     fn steer_post_note_is_context_not_a_block() {
         let note = "say \"hi\"";
@@ -1250,8 +1073,7 @@ mod tests {
 
         let codex: Value = serde_json::from_str(&post_note_document("codex", note)).unwrap();
         assert!(codex.get("decision").is_none());
-        // Codex's strict PostToolUse schema rejects a top-level context,
-        // even when a valid wrapped context is present beside it.
+
         assert!(codex.get("additionalContext").is_none());
         assert_eq!(codex["hookSpecificOutput"]["hookEventName"], "PostToolUse");
         assert_eq!(

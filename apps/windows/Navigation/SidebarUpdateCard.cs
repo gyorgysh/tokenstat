@@ -16,20 +16,8 @@ using Windows.UI;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>
-/// The updater's stages as a card above the account row. Mirrors the Mac
-/// UpdateCard: progress while checking or installing, a restart offer once
-/// the new build is in place, a warning with Retry when it failed, and a
-/// short "Up to date" after a check somebody asked for. Nothing otherwise,
-/// so a quiet sidebar stays quiet.
-/// </summary>
 internal static class SidebarUpdateCard
 {
-    /// <summary>
-    /// The card for the model's current state, or null when there is nothing
-    /// to say. A quiet check that answers within <paramref name="showChecking"/>
-    /// is never drawn, so the sidebar does not flicker on every launch.
-    /// </summary>
     public static UIElement? For(AppUpdateModel update, bool showChecking)
     {
         if (update.IsChecking)
@@ -148,8 +136,6 @@ internal static class SidebarUpdateCard
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var retry = Buttons.Primary(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => await update.RetryAsync(), small: true);
         retry.IsEnabled = !update.IsRateLimited && !update.IsRetrying;
-        // GitHub's wait ends on its own, with no model change to redraw the
-        // card, so the button wakes itself when the time comes.
         if (!update.IsRetrying && update.RetryAfter is DateTimeOffset until && until > DateTimeOffset.Now
             && Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() is { } queue)
         {

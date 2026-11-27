@@ -4,13 +4,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Arrange Home: pick a starting layout, move the cards, switch off the ones
-/// this person never reads.
-///
-/// A working copy, so Done applies the whole arrangement at once and Cancel
-/// really is a cancel. Home changing card by card behind an open sheet would
-/// be a preview nobody asked for, which is why there is a small one here
-/// instead.
 struct ClientHomeEditor: View {
     @Bindable var layout: HomeLayout
     var emptyReason: (HomeSection) -> String?
@@ -96,8 +89,6 @@ struct ClientHomeEditor: View {
                 }
             }
             .environment(\.editMode, .constant(.active))
-            // The platform's grouped grey is not our dark. Rows paint
-            // themselves; the list is only the scroll behind them.
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .navigationTitle(L10n.text("apple.clienthomeeditor.customize_home.642cec6e"))

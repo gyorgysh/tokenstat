@@ -7,11 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A file's diff and its full content from the machine that owns the folder.
-///
-/// The diff view, Review all and the edit sheet all read through this, so a
-/// fixture can serve canned files and every surface agrees. Production talks
-/// to the host.
 protocol ClientFileContentService: Sendable {
     func diff(peer: String, workspace: String, path: String) async throws -> FileDiff
     func read(peer: String, workspace: String, path: String) async throws -> String

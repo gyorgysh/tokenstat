@@ -56,9 +56,6 @@ struct TokenUsage {
 }
 
 impl TokenUsage {
-    /// A missing field is unknown, not zero. Every check below treats it as
-    /// zero for arithmetic but the event keeps the `None`, so a partial row
-    /// still reads as a lower bound through [`Counters::has_unknown`].
     fn is_empty(&self) -> bool {
         self.input_tokens.unwrap_or(0) == 0
             && self.output_tokens.unwrap_or(0) == 0
@@ -182,8 +179,6 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             .and_then(|m| m.model.clone())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
-        // Thread id only. Summary/title are conversation text and must not
-        // cross the parser boundary into the archive (or sync proj hashing).
         let project = id.clone();
         let ts_ms = parse_rfc3339(thread.updated_at.as_deref().or(Some(updated_at.as_str())));
 
@@ -310,14 +305,8 @@ fn event_from_usage(
     }
 }
 
-/// Cap on the decompressed size of one thread blob.
-///
-/// Blobs come from a local database, but a small compressed row can expand to
-/// gigabytes and `zstd::decode_all` would allocate all of it. The decoder is
-/// wrapped in a read limit instead. 64 MiB is far above any real thread.
 const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Decode a whole zstd blob, refusing output past [`MAX_DECOMPRESSED_BYTES`].
 fn decode_zstd_bounded(data: &[u8]) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let mut out = Vec::new();
@@ -362,10 +351,6 @@ mod tests {
     use rusqlite::Connection;
 
     fn tempfile_dir() -> PathBuf {
-        // A counter as well as the clock. Tests run in parallel and two of them
-        // read the same nanosecond often enough to matter: the second one then
-        // opened the first one's database and failed on "table threads already
-        // exists", which looks like a parser bug and is not one.
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-zed-{}-{}-{}",

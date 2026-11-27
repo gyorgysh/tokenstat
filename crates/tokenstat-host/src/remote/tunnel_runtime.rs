@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Account ownership and non-reusable lifetimes for the shared relay socket.
-
 use super::TunnelState;
 use std::sync::Arc;
 use tokenstat_identity::PublicKey;
@@ -13,8 +10,6 @@ pub(super) struct Scope {
     pub endpoint: String,
 }
 
-// A lifetime cannot be reconstructed from an account ID, key, or JSON input.
-// Stopping and starting the same account still creates a different lifetime.
 #[derive(Clone)]
 pub(super) struct Attempt {
     pub scope: Scope,

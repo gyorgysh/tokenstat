@@ -12,20 +12,12 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The device sign-in flow, shared by every page that offers it. Starts
-/// <c>account.deviceStart</c>, opens the approval page, shows the code the
-/// page must show back, and polls <c>account.devicePoll</c> until it confirms.
-/// Copy follows the Mac sign-in card: the code, the check, and the wait.
-/// </summary>
 internal static class SignInFlow
 {
     private static bool _running;
 
     public static async Task RunAsync(Page owner, StackPanel slot, Func<Task> onSignedIn)
     {
-        // The host owns one device flow. Reserve it before the first await,
-        // including while deviceStart is still waiting on the network.
         if (_running)
         {
             return;
@@ -58,7 +50,7 @@ internal static class SignInFlow
                     slot.Children.Remove(card);
                 }
                 try { await AppServices.Host.CallAsync("account.cancelLogin"); }
-                catch { /* leaving the page must not throw */ }
+                catch { }
             }
             slot.Visibility = slot.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             _running = false;
@@ -106,10 +98,6 @@ internal static class SignInFlow
             notice.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
         }
         Border? card = null;
-        // Same order as the Mac approval wait: the spinner and the
-        // instruction, the code, then the way back to the page and out.
-        // The card can outlive the browser window, and without this state
-        // the screen would look exactly as it did before the tap.
         var body = new StackPanel { Spacing = Theme.SpaceM };
         var waiting = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
         var progress = new ProgressRing { Width = 18, Height = 18, IsActive = true };
@@ -224,11 +212,10 @@ internal static class SignInFlow
                 Note(L10n.Text("windows.signinflow.the_sign_in_code_expired_before_it_was_con.84ac1b4b"));
             }
             try { await AppServices.Host.CallAsync("account.cancelLogin"); }
-            catch { /* the wait is over either way */ }
+            catch { }
         }
         catch (OperationCanceledException)
         {
-            // The wrapper cancels the host flow before accepting another.
         }
         finally
         {
@@ -252,7 +239,6 @@ internal static class SignInFlow
         }
         catch
         {
-            // The card shows the address, so the user can get there by hand.
         }
     }
 }

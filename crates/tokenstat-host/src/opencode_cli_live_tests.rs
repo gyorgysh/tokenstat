@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Opt-in acceptance tests against actual CLIs. They use temporary projects,
-//! the production chat argv, PTY transport, parser and native resume lookup.
-//! Each case runs in its own process so PATH and CLI caches cannot leak.
-
 use super::*;
 use crate::automations::{ChatLaunch, chat_agent_command, interactive_agent_command};
 use crate::transcript::{Event, Parser};
@@ -175,8 +171,7 @@ fn actual_case() {
     fs::create_dir(&bin).unwrap();
     let selected = bin.join("selected-cli");
     fs::write(&selected, format!("{}\n", case.binary.display())).unwrap();
-    // Enforce isolation at the final exec too: a login-shell profile may
-    // otherwise replace XDG variables after the child test sets them.
+
     let isolation: String = [
         ("XDG_DATA_HOME", "data"),
         ("XDG_CACHE_HOME", "cache"),
@@ -196,8 +191,8 @@ fn actual_case() {
         fs::write(
             &shim,
             format!(
-                // Execute the actual path so vendor scripts resolving their
-                // sibling binary through $0 keep their original directory.
+
+
                 "#!/bin/sh\n{isolation}IFS= read -r tokenstat_cli < {} || exit 1\nexec \"$tokenstat_cli\" \"$@\"\n",
                 crate::chat_gate::shell_quote(&selected.display().to_string())
             ),
@@ -212,15 +207,12 @@ fn actual_case() {
         bin.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    // Preserve public model metadata, which older CLIs may no longer be
-    // able to download. This cache contains no credentials or session data.
+
     let public_catalog = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| tokenstat_paths::home_dir().map(|home| home.join(".cache")))
         .map(|cache| cache.join("opencode/models.json"));
-    // This exact child test is the only test in its fresh process, before
-    // any environment readers or CLI/PTY background threads have started.
-    // Native CLI data and migrations stay away from the user's database.
+
     unsafe {
         std::env::set_var("PATH", path);
         for (name, suffix) in [
@@ -498,8 +490,6 @@ fn interactive_reply(case: &Case, folder: &Path, argv: &[String]) {
         }
         std::thread::sleep(Duration::from_millis(30));
     }
-    // The interactive interface stays open after replying. Dropping this
-    // exact PTY retires it and its private server without touching a service.
 }
 
 fn local_model(case: &Case, folder: &Path) {

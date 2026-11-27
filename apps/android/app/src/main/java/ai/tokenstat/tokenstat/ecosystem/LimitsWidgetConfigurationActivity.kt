@@ -12,7 +12,6 @@ import android.widget.*
 import androidx.core.content.edit
 import ai.tokenstat.tokenstat.R
 
-/** System widget setup only; does not add another screen to the app navigation. */
 class LimitsWidgetConfigurationActivity : Activity() {
     private var saveConfigurationState: (() -> Bundle)? = null
     override fun onSaveInstanceState(outState: Bundle) {
@@ -90,7 +89,6 @@ class LimitsWidgetConfigurationActivity : Activity() {
         save.setOnClickListener {
             val selected = boxes.filter { it.second.isChecked }.map { it.first }.toSet()
             if (!all.isChecked && selected.isEmpty()) { Toast.makeText(this, R.string.widget_select_provider, Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            // Revalidate both widget ownership and account before persisting a stale setup screen.
             if (runCatching { manager.getAppWidgetInfo(id)?.provider }.getOrNull() != ComponentName(this, LimitsWidgetProvider::class.java)
                 || UsageWidgetStore.read(this)?.owner != snapshot?.owner) { finish(); return@setOnClickListener }
             preferences.edit {

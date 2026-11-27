@@ -62,8 +62,6 @@ internal sealed partial class TeamsPage
                     var page = TeamDirectoryPage.Read(await client.Request("repositories.list", new() { ["organization"] = Text(organization, "id"), ["page"] = Page100(offset) }), "repositories", offset);
                     if (!IsLoaded || _view != view) return;
                     Require(page.Rows.All(repo => Text(repo, "organizationId") == Text(organization, "id")));
-                    // A project nobody shares any more is not shared with anyone, unless
-                    // this computer's own sharing is newer than the count.
                     foreach (var repo in page.Rows.Where(repo => Text(repo, "role") is "viewer" or "contributor" or "maintainer"
                         && (Shared(repo) || localProjects.Contains(Text(repo, "organizationId") + "/" + Text(repo, "id"))))) if (seen.Add(Text(repo, "id")))
                     {
@@ -168,7 +166,6 @@ internal sealed partial class TeamsPage
     private void DrawFolderShare(TeamDirectoryClient client, TeamFolderShareModel model, string? error = null)
     {
         var fields = TeamCard(Text(model.Workspace, "name"), L10n.Text("common.teams.project_sharing_review"));
-        // TeamEditor performs the redraw below; bind controls to that view.
         var nextView = _view + 1;
         var picker = FolderTeamPicker(client, model.Workspace, Text(model.Organization, "id"), model.Locked, nextView);
         fields.Children.Add(picker);

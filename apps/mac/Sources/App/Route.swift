@@ -7,34 +7,12 @@
 import SwiftUI
 
 enum Route: Hashable {
-    /// Machine-wide. The weekly question, and the screens that have no folder.
     case global(GlobalSection)
-    /// One folder, one of its sections. The daily question.
     case workspace(id: String, section: WorkspaceSection)
-    /// Every registered folder on every machine, as cards. The first row
-    /// under the Workspaces heading, above the folders, where a growing list
-    /// stays findable. See `docs/plan-remote-expansion-1.0.md` workstream F.
     case workspacesOverview
-    /// The SSH library, one of its sections.
-    ///
-    /// Its own case rather than a `GlobalSection`, because a global section is
-    /// one screen and this is four screens plus a folder tree. Keeping it here
-    /// also means every `switch route` in the shell has to answer for it, which
-    /// is how the columns stay honest.
     case ssh(SSHSection)
-    /// Every live session on one saved server, with its tabs and its split.
-    ///
-    /// A route rather than a presented cover, which is what it used to be. A
-    /// cover meant one session at a time and closing it killed the shell. The
-    /// sessions belong to the host process and outlive any screen, so the
-    /// screen showing them has to be somewhere you can leave and come back to.
-    ///
-    /// Its own case and not an `SSHSection`, because a section is a list with
-    /// an editor beside it and this is a terminal. Folding it in made six
-    /// switches in the library answer for a case they can never be handed.
     case sshTerminals(host: String)
 
-    /// The screen, for the disk log. Sections only, never a folder or host.
     var diagnosticName: String {
         switch self {
         case let .global(section): "\(section)"
@@ -72,11 +50,8 @@ enum Route: Hashable {
         return nil
     }
 
-    /// Both halves of the SSH world. The sidebar group stays open for either.
     var isSSH: Bool { sshSection != nil || sshTerminalHostID != nil }
 
-    /// True when this route is that global screen. Reads better at the call
-    /// site than unwrapping the optional, and there are a lot of call sites.
     func isGlobal(_ section: GlobalSection) -> Bool { globalSection == section }
 
     var hasInspector: Bool {
@@ -98,17 +73,10 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     case notes
     case workflows
     case automations
-    /// Reached from the footer, not from a row.
     case account
 
     var id: String { rawValue }
 
-    /// The rows in the sidebar's top group, in order.
-    ///
-    /// Home, Insights and Devices are the whole machine and stand alone at the
-    /// top. Tasks, Workflows and Automations are the all-folders view of things
-    /// that are usually asked about one folder at a time, so they sit under a
-    /// GLOBAL heading rather than pretending to be the only view of themselves.
     static var standalone: [GlobalSection] { [.home, .insights, .machines] }
     static var everywhere: [GlobalSection] { [.todo, .notes, .workflows, .automations] }
 
@@ -143,22 +111,10 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// The sections inside one workspace.
-///
-/// Fixed set, fixed order, shown for every folder whether or not they have
-/// anything in them. A list that hides its empty rows moves under the cursor,
-/// and a sidebar is worth having because it does not move.
 enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case sessions
-    /// Talking to the agents in this folder, rather than driving them through
-    /// a terminal. Nothing behind it yet, and it is here rather than waiting
-    /// for the feature because a place people can see is a place they can ask
-    /// about.
     case chat
     case changes
-    /// Previous commits. On Mac this lives in the inspector. On iPhone and
-    /// iPad there is no inspector column, so it is a folder section like
-    /// Changes.
     case history
     case pulls
     case todo
@@ -203,19 +159,12 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// The sections of the SSH library.
-///
-/// Fixed set, fixed order, the same shape a workspace has. Hosts carries an
-/// optional folder because the sidebar nests folders under it and a folder row
-/// is that same screen filtered, not a screen of its own.
 enum SSHSection: Hashable, Identifiable {
     case hosts(folder: String?)
     case keys
     case snippets
     case knownHosts
 
-    /// The four rows, in order. `hosts` unfiltered, because the folders under
-    /// it are drawn from the model rather than from this list.
     static var rows: [SSHSection] { [.hosts(folder: nil), .keys, .snippets, .knownHosts] }
 
     var id: String {
@@ -227,8 +176,6 @@ enum SSHSection: Hashable, Identifiable {
         }
     }
 
-    /// The row this section lights up. A folder is inside Hosts, so it lights
-    /// Hosts as well as its own row.
     var row: SSHSection {
         if case .hosts = self { return .hosts(folder: nil) }
         return self
@@ -257,7 +204,6 @@ enum SSHSection: Hashable, Identifiable {
         }
     }
 
-    /// The word an Add button uses. Singular, because it adds one.
     var addLabel: String {
         switch self {
         case .hosts: return L10n.text("apple.route.add_host.7da3f6f4")
@@ -268,21 +214,10 @@ enum SSHSection: Hashable, Identifiable {
     }
 }
 
-/// What a screen inside the app can ask the shell for.
-///
-/// Deliberately smaller than `Route`: a sheet three levels down knows it wants
-/// Devices, or wants the workspace surface, and has no business deciding which
-/// folder is selected or which section of it is in front.
 enum NavigationRequest: Hashable {
     case global(GlobalSection)
-    /// The SSH library, wherever it was last left. A card on Devices asks for
-    /// "servers", not for "Keys": which section is the shell's business.
     case ssh
-    /// The workspace surface, whichever folder is current.
     case workspaces
-    /// The all-folders overview, wherever it was last left.
     case workspacesOverview
-    /// That folder's launch grid. A setup hint uses this when the next
-    /// step is to unhide an agent, not to reopen last week's Tasks board.
     case launcher
 }

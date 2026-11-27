@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>The host's endpoint registry has no account namespace. Retire an
-/// earlier account under the same gate before opening the next account's lease.</summary>
 internal sealed class BrowserBridgePool(
     Func<long> currentGeneration,
     Func<string, string, int, Task<string>> listen,
@@ -47,8 +45,6 @@ internal sealed class BrowserBridgePool(
             try { url = await listen(peer, host, port); }
             catch
             {
-                // A lost answer can leave a host registration behind. Keep
-                // uncertain cleanup in the pool so no later account reuses it.
                 var uncertain = new Held(generation, "") { Count = 0 };
                 _held[endpoint] = uncertain;
                 PublishListeners();
@@ -99,7 +95,7 @@ internal sealed class BrowserBridgePool(
         {
             if (entry.Generation == currentGeneration() && entry.Count > 0) continue;
             try { await RetireAsync(endpoint, entry); }
-            catch when (!strict) { /* A subsequent Open retries retirement before reuse. */ }
+            catch when (!strict) { }
         }
     }
 

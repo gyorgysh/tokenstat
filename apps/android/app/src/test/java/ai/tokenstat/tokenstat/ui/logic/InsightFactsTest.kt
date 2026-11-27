@@ -4,8 +4,6 @@ package ai.tokenstat.tokenstat.ui.logic
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/// The fact panels must agree with `ClientInsightFacts.panels`: the same
-/// three figures in the same order, each with its own house mark.
 class InsightFactsTest {
     @Test
     fun panelsCarryValuesAndMarks() {

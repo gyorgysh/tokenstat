@@ -21,12 +21,6 @@ internal sealed record NewChatRepository(string Id, string Name, string Machine,
     public override string ToString() => Name + " · " + Machine;
 }
 
-/// <summary>
-/// An unsent, account-owned draft. Choosing or adding a folder never creates a
-/// conversation. Laid out as the Mac's ChatStartPage: a short introduction,
-/// then one card holding the repository choice above the ordinary composer,
-/// whose agent field is the same control a running chat uses.
-/// </summary>
 internal sealed partial class NewChatPage : Page
 {
     private readonly long _account = AppServices.AccountGeneration;
@@ -37,7 +31,6 @@ internal sealed partial class NewChatPage : Page
 
     private IReadOnlyList<NewChatRepository> _list = [];
     private NewChatRepository? _selected;
-    /// <summary>The draft's agent choice, shaped like a chat so the shared agent field can read it.</summary>
     private JsonObject _setup = new();
     private JsonNode[] _available = [];
 
@@ -110,7 +103,6 @@ internal sealed partial class NewChatPage : Page
         _repositoryButton.MaxWidth = 360;
         AutomationProperties.SetAutomationId(_repositoryButton, "newChat.repository");
         var repositoryMenu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
-        // Read the list each time it opens: folders can load after this page.
         repositoryMenu.Opening += (_, _) => FillRepositoryMenu(repositoryMenu);
         _repositoryButton.Flyout = repositoryMenu;
         _retry = ActionIconGlyph.Button(L10n.Text("common.retry"), ActionIcon.Refresh, async (_, _) => { _catalogRepository = null; await LoadAgentsAsync(); });
@@ -274,17 +266,12 @@ internal sealed partial class NewChatPage : Page
         if (select is not null) _requestedRepository = select;
         var prior = _selected?.Id;
         _list = _repositories();
-        // An explicit request, then the current choice. With exactly one
-        // repository there is nothing to choose, so the page chooses it.
         var chosen = _list.FirstOrDefault(repository => repository.Id == _requestedRepository)
             ?? _list.FirstOrDefault(repository => repository.Id == prior)
             ?? (_list.Count == 1 ? _list[0] : null);
         var requestedThisPass = _requestedRepository is not null && chosen?.Id == _requestedRepository;
         if (requestedThisPass) _requestedRepository = null;
         _selected = chosen;
-        // Filling the list is not a choice. An explicit open, or a folder the
-        // person already selected, may adopt. An automatic first folder must
-        // leave the unbound draft on screen.
         BindRepository(chosen?.Id, adoptUnbound: requestedThisPass || _drafts.Repository is not null);
         RenderRepository(); RefreshActions();
         _ = LoadAgentsAsync();
@@ -437,7 +424,7 @@ internal sealed partial class NewChatPage : Page
             var workspace = RemoteWorkspaces.TrySplit(repository.Id, out _, out var inner) ? inner : repository.Id;
             _profileLock = profiles?.Lock(workspace);
         }
-        catch { /* The list stays as it was read. */ }
+        catch { }
     }
 
     private async Task LoadAgentsAsync()
@@ -480,7 +467,6 @@ internal sealed partial class NewChatPage : Page
         } catch (Exception error) {
             _restoringDraft = false;
             if (revision == _catalogRevision && _account == AppServices.AccountGeneration) {
-                // A failed catalog is unavailable, not evidence nothing is installed.
                 _catalogFailed = true; Notice(error.Message); _retry.Visibility = Visibility.Visible; RefreshActions();
             }
         }

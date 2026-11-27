@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Bounded wire frames for end-to-end encrypted screen sessions.
-//!
-//! The remote transport already encrypts and authenticates each message. This
-//! module only defines the bytes inside that tunnel and the queueing rule at a
-//! slow viewer: stale encoded pictures are discarded, never accumulated.
 
 use std::collections::VecDeque;
 
@@ -122,8 +117,7 @@ impl Frame {
             independent: bytes[6] & 1 == 1,
             payload: bytes[HEADER_LEN..].to_vec(),
         };
-        // Reuse the encoder's semantic and size validation without retaining
-        // its allocation.
+
         frame.encode()?;
         Ok(frame)
     }

@@ -35,16 +35,8 @@ final class AgentProfileCatalog {
     }
 }
 
-/// The agent profile the next terminal launch in a folder signs in with.
-///
-/// Remembered per folder on this device. Until somebody picks one, a launch
-/// uses the profile set as the default for new chats, so a terminal and a
-/// chat started in the same folder use the same login. A repository locked
-/// to a profile always launches on it, and the host refuses anything else.
 @MainActor
 enum LaunchAgentProfile {
-    /// The last list read for each folder, and the host's id for that
-    /// folder, so a launch knows the default and the lock without waiting.
     private static var catalogs: [String: (profiles: AgentProfiles, workspaceID: String)] = [:]
 
     private static func key(_ folderID: String) -> String { "launch.agentProfile.\(folderID)" }
@@ -64,14 +56,10 @@ enum LaunchAgentProfile {
         else { UserDefaults.standard.removeObject(forKey: key(folderID)) }
     }
 
-    /// What this launch should ask the host for. Nil leaves the choice to the
-    /// host: a locked repository's own profile, or this machine's logins.
     static func stored(for folderID: String) -> String? {
         guard let entry = catalogs[folderID] else { return nil }
         if entry.profiles.workspaceLocks?[entry.workspaceID] != nil { return nil }
         let id = chosen(for: folderID) ?? entry.profiles.default
-        // A profile deleted since it was picked falls back to the machine
-        // rather than failing every launch from this folder.
         guard id != AgentProfiles.system, entry.profiles.profile(id) != nil else { return nil }
         return id
     }

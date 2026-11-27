@@ -29,24 +29,13 @@ import SwiftTerm
 enum TerminalMouseForwarder {
     private static var monitor: Any?
 
-    /// The terminal a captured press belongs to.
-    ///
-    /// Weak, because this is a static that outlives any one session: a strong
-    /// reference here would keep a closed terminal's view alive.
     private final class Capture {
         weak var view: TerminalDropView?
         init(_ view: TerminalDropView) { self.view = view }
     }
 
-    /// Buttons whose press this monitor swallowed, and where each one went.
-    ///
-    /// The whole gesture belongs to the view that took the press. Deciding a
-    /// release by where the pointer is *now* loses it whenever somebody drags
-    /// out of the terminal before letting go, which is how anybody selects to
-    /// the edge, and the program is left with a button still held down.
     private static var captured: [Int: Capture] = [:]
 
-    /// Install the monitor. Safe to call more than once.
     static func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [
@@ -93,8 +82,6 @@ enum TerminalMouseForwarder {
         }
     }
 
-    /// The terminal under the pointer, if a program there is listening for
-    /// mouse events and the click is the window's to give away.
     private static func reportsMouse(_ event: NSEvent) -> TerminalDropView? {
         guard let window = event.window,
               // A sheet, an alert or a modal has the clicks. Let AppKit answer
@@ -104,9 +91,6 @@ enum TerminalMouseForwarder {
               window.isKeyWindow,
               let view = TerminalView.inputSurface(containing: window.contentView?.hitTest(event.locationInWindow)) as? TerminalDropView,
               let terminal = view.terminalInputStateSnapshot(),
-              // Guest mouse mode is the authority. SwiftTerm's
-              // allowMouseReporting stays false while mode is off so a drag
-              // selection survives feed, and must not gate SGR once mode is on.
               terminal.mouseMode != .off,
               terminal.isAlternateBuffer,
               view.session != nil
@@ -156,20 +140,16 @@ enum TerminalMouseForwarder {
                 release: isUp
             )
         )
-        // Make this view first responder, or a field that already has the
-        // keyboard keeps it.
         view.window?.makeFirstResponder(view)
     }
 }
 
-/// SGR mouse bytes, the encoding every modern TUI actually reads.
 enum TerminalMouse {
     static func sgr(button: Int, col: Int, row: Int, release: Bool) -> [UInt8] {
         let suffix = release ? "m" : "M"
         return Array("\u{1b}[<\(button);\(col);\(row)\(suffix)".utf8)
     }
 
-    /// xterm Cb extras: shift +4, meta/option +8, control +16.
     static func sgrButton(base: Int, event: NSEvent) -> Int {
         var button = base
         if event.modifierFlags.contains(.shift) { button += 4 }
@@ -187,9 +167,6 @@ enum TerminalMouse {
         }
     }
 
-    /// The cell under the pointer. Derived from the view's bounds and the
-    /// grid rather than from SwiftTerm's cell metrics, which it keeps to
-    /// itself.
     static func gridPosition(
         of event: NSEvent,
         in view: TerminalView,

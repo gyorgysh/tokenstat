@@ -6,17 +6,6 @@
 
 import SwiftUI
 
-/// Which release a machine is on, and the one button that moves it.
-///
-/// Peer set: that computer. `local` set: this one. A server has no application
-/// to update and nobody sitting at it, so this is the only place its release
-/// can be moved from, which is why it is a card on the machine rather than a
-/// line in a settings screen.
-///
-/// One check, not a poll. The readings bar beside this samples every couple of
-/// seconds because power and load change that fast; a published release does
-/// not, and asking GitHub on a timer for a number that changes weekly would be
-/// somebody else's bandwidth spent on nothing.
 struct HostUpdateCard: View {
     var peer: String? = nil
     var local: Bool = false
@@ -28,7 +17,6 @@ struct HostUpdateCard: View {
     @State private var retry = 0
     @State private var generation: UInt64 = 0
 
-    /// What this card is doing, rather than several booleans that can disagree.
     private enum Phase: Equatable {
         case checking
         case ready
@@ -130,17 +118,12 @@ struct HostUpdateCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 versionLine(state)
                 if state.restartPending {
-                    // Installed but not in use. Saying "up to date" here would
-                    // name a version the running process does not have.
                     note(pendingSentence(state), tone: .waiting)
                 } else if state.newer {
                     note(L10n.text("apple.hostupdatecard.version_0_is_available.874abce6", "\(state.latest)"), tone: .available)
                 } else {
                     note(L10n.text("apple.hostupdatecard.up_to_date.50620fd9"), tone: .plain)
                 }
-                // Additive, not instead of the line above: an
-                // application-managed helper that is current should still say
-                // so, and one that is behind should say both things.
                 if state.appManaged {
                     note(
                         local
@@ -186,7 +169,6 @@ struct HostUpdateCard: View {
         }
     }
 
-    /// Two versions on one line, because the pair is the fact.
     private func versionLine(_ state: HostUpdateState) -> some View {
         HStack(spacing: 6) {
             Text(state.restartPending ? L10n.text("apple.hostupdatecard.running_0.015ef2e2", "\(state.hostVersion)") : state.hostVersion)
@@ -215,17 +197,12 @@ struct HostUpdateCard: View {
     private var actions: some View {
         if let state, phase != .installing, phase != .checking {
             HStack(spacing: Theme.Space.s) {
-                // `state` is the answer from before an install, so after one it
-                // still names a newer version. Offering Install again there
-                // would be offering work that is already done.
                 if phase == .done {
                     if applied?.restartPending == true, state.canRestart {
                         Button(L10n.text("apple.hostupdatecard.restart.6b983a81"), .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
                     }
                 } else if state.restartPending {
-                    // The only thing left is the restart, and it ends whatever
-                    // that machine is running, so it is never automatic here.
                     if state.canRestart {
                         Button(L10n.text("apple.hostupdatecard.restart.6b983a81"), .refresh) { Task { await apply(restartNow: true) } }
                             .buttonStyle(AccentButtonStyle())
@@ -247,14 +224,10 @@ struct HostUpdateCard: View {
         local ? L10n.text("apple.hostupdatecard.download.d6eafe82") : L10n.text("apple.hostupdatecard.fetch.cd7d61bf")
     }
 
-    /// Where a restart has to happen, in the words that fit the machine being
-    /// looked at.
     private var restartElsewhere: String {
         local ? L10n.text("apple.hostupdatecard.restart_the_helper_to_use_it.8ead99bc") : L10n.text("apple.hostupdatecard.restart_it_there_to_use_it.40a2d6df")
     }
 
-    /// How this card colours a sentence. Three tones, so a waiting state does
-    /// not read as a failure and an available one does not read as done.
     private enum Tone {
         case plain
         case available
@@ -297,8 +270,6 @@ struct HostUpdateCard: View {
             : L10n.text("apple.hostupdatecard.installed_0_it_restarts_shortly.b1c4d920", "\(version)")
     }
 
-    /// Counted rather than "some work": a person deciding whether to end their
-    /// own sessions wants the number.
     private func workPhrase(_ count: Int) -> String {
         count == 1 ? L10n.text("apple.hostupdatecard.one_thing_is.cda2ad7f") : L10n.text("apple.hostupdatecard.0_things_are.ce038154", "\(count)")
     }
@@ -310,8 +281,6 @@ struct HostUpdateCard: View {
         applied = nil
         state = nil
         supported = true
-        // A host older than these methods must not be discovered by showing
-        // somebody its `unknown method` error.
         if !local, let target {
             let available = await RemoteHostFeature.hostUpdate.isSupported(peer: target)
             guard !Task.isCancelled, generation == owner else { return }

@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Native tab additions are safe after Loaded has finished dispatching.</summary>
 internal sealed class TabViewMount : IDisposable
 {
     private readonly TabView _view;
@@ -47,11 +46,6 @@ internal sealed class TabViewMount : IDisposable
         });
     }
 
-    /// <summary>
-    /// Keep actions ordered across loading and remounting. Each action gets
-    /// its own dispatcher turn so tabs created by it can finish loading before
-    /// the next action changes their native selection or companion content.
-    /// </summary>
     public void Enqueue(Action run, Action? abandon = null)
     {
         if (_disposed) { abandon?.Invoke(); return; }

@@ -7,32 +7,6 @@
 #if DEBUG && os(macOS)
 import AppKit
 
-/// Lets a script look at the window and steer it, in Debug builds only.
-///
-/// Layout work needs pictures, and a picture of another app's window needs a
-/// Screen Recording grant the terminal usually does not have. An app may
-/// always capture its own windows, so the app takes the picture itself when
-/// asked. The same channel moves between screens, sizes the window and flips
-/// the appearance, so a screen can be checked at several widths in both
-/// themes without anybody clicking.
-///
-/// Every hook is a distributed notification whose object is a plain string:
-///
-/// - `ai.tokenstat.debug.snapshot`: a PNG path to write the main window to.
-/// - `ai.tokenstat.debug.route`: `home`, `insights`, `machines`, `todo`,
-///   `notes`, `workflows`, `automations`, `account`, `overview`, `ssh`, or
-///   `workspace:<folder name or index>:<section>`, `newchat:<folder>`
-///   (the project menu's New chat), `chat:<folder>:<n>`, or `click:<n>` (the
-///   nth row of the cross-folder chat list, opened the way a click opens it).
-/// - `ai.tokenstat.debug.window`: the content size, as `1440x900`.
-/// - `ai.tokenstat.debug.appearance`: `dark`, `light` or `system`.
-/// - `ai.tokenstat.debug.key`: a named action, such as `sidebar` or
-///   `inspector`, for the toggles the menu would otherwise post. Any other
-///   name is relayed in process for the screen on show to act on. A chat
-///   takes `update-prompt` to show the send-time update prompt for an agent
-///   that is behind, with a send that does nothing.
-///
-/// Release builds compile none of it.
 enum DebugUIHooks {
     static let snapshot = Notification.Name("ai.tokenstat.debug.snapshot")
     static let route = Notification.Name("ai.tokenstat.debug.route")
@@ -46,8 +20,6 @@ enum DebugUIHooks {
 
     @MainActor
     static func install() {
-        // Redirected to a file, stdout is block-buffered and the lines only
-        // arrive when the app quits. Line by line is what a measurement wants.
         if printsChanges { setvbuf(stdout, nil, _IOLBF, 0) }
         let center = DistributedNotificationCenter.default()
         center.addObserver(forName: snapshot, object: nil, queue: .main) { note in
@@ -93,8 +65,6 @@ enum DebugUIHooks {
 
     @MainActor private static var backdropProbe: NSWindow?
 
-    /// A controlled background makes desktop sampling measurable even on a
-    /// plain wallpaper. Toggle off after capture; never participates in Release.
     @MainActor private static func toggleBackdropProbe() {
         if let probe = backdropProbe {
             probe.parent?.removeChildWindow(probe)
@@ -123,8 +93,6 @@ enum DebugUIHooks {
         backdropProbe = probe
     }
 
-    /// The shell's window: the largest visible one that can be main. The
-    /// About window and a remote screen viewer are both smaller.
     @MainActor
     private static var shellWindow: NSWindow? {
         NSApp.windows
@@ -132,19 +100,11 @@ enum DebugUIHooks {
             .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
     }
 
-    /// `CGWindowListCreateImage`, looked up at run time.
-    ///
-    /// It is the one call that returns the window exactly as the window server
-    /// composites it, glass included, and it is marked unavailable in newer
-    /// SDKs. The symbol is still exported, and a Debug hook has no business
-    /// holding the deployment target or the warning count hostage.
     private typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
 
     @MainActor
     private static func capture(to path: String) {
         guard let window = shellWindow else { return }
-        // A sheet is a window of its own, so it is written beside the main
-        // picture as `<name>-sheet.png` when one is up.
         write(window, to: path)
         let url = URL(fileURLWithPath: path)
         func beside(_ suffix: String) -> String {
@@ -152,7 +112,6 @@ enum DebugUIHooks {
                 .appendingPathComponent(url.deletingPathExtension().lastPathComponent + suffix + ".png").path
         }
         if let sheet = window.attachedSheet { write(sheet, to: beside("-sheet")) }
-        // Popovers and other panels are windows too: `-window-1.png` and on.
         let others = NSApp.windows.filter { $0 !== window && $0 !== window.attachedSheet && $0.isVisible }
         for (index, other) in others.enumerated() { write(other, to: beside("-window-\(index + 1)")) }
     }
@@ -162,7 +121,6 @@ enum DebugUIHooks {
         guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage")
         else { return }
         let create = unsafeBitCast(symbol, to: CreateImage.self)
-        // .optionIncludingWindow, then .boundsIgnoreFraming | .bestResolution.
         guard let image = create(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0 | 1 << 3)?
             .takeRetainedValue()
         else { return }

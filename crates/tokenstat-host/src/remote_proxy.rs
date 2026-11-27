@@ -4,13 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Local loopback → peer localhost proxy for client builds (phones).
-//!
-//! The full stream machinery in `remote_stream` owns pty subscriptions and is
-//! gated on `local-host`. Phones still need to open a browser tab against a
-//! service on a Mac's loopback, which is exactly this half: bind here, dial a
-//! proxy stream on the peer, pump bytes.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -75,8 +69,7 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
                     let peer = peer.clone();
                     let host = host.clone();
                     let stop = Arc::clone(&stop);
-                    // A websocket stays open for the lifetime of a page. It
-                    // must not prevent this listener accepting other requests.
+
                     std::thread::spawn(move || {
                         let _permit = permit;
                         if stop.load(Ordering::Relaxed) {
@@ -102,19 +95,15 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
                 Err(_) => break,
             }
         }
-        if let Ok(mut registry) = listeners().lock() {
-            // A replacement can already own this key while the old thread
-            // finishes. Retire only this thread's registration.
-            if registry
+        if let Ok(mut registry) = listeners().lock()
+            && registry
                 .get(&key)
                 .is_some_and(|current| Arc::ptr_eq(current, &stop))
-            {
-                registry.remove(&key);
-            }
+        {
+            registry.remove(&key);
         }
     });
-    // The listener is IPv4-only. Returning the numeric address prevents iOS
-    // from resolving localhost to ::1, where there is no listener.
+
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
 }
 
@@ -147,8 +136,6 @@ pub(crate) fn unlisten(peer: &str, host: &str, target: u16) -> Result<Value, Str
     Ok(json!({"stopped": true}))
 }
 
-/// Same HTTP 502 the host's stream stack writes. Kept here so a client
-/// build does not have to compile `remote_stream`.
 fn write_proxy_error(mut tcp: TcpStream, error: &str) {
     let _ = tcp.set_write_timeout(Some(std::time::Duration::from_secs(2)));
     let body = format!("tokenstat could not reach the service on the host.\n\n{error}\n");
@@ -209,8 +196,7 @@ mod tests {
             let retired = registry
                 .insert(key.clone(), Arc::clone(&replacement))
                 .unwrap();
-            // Hold the registry until replacement publication is complete,
-            // so the real listener thread always finishes after replacement.
+
             retired.store(true, Ordering::Relaxed);
             retired
         };

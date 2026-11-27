@@ -15,11 +15,6 @@ using Windows.ApplicationModel.DataTransfer;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Three-column task board with a full detail editor. Matches the Mac
-/// workbench: the same columns, filters, run placement, receipts, and the
-/// rule that a lost answer is checked before anything runs twice.
-/// </summary>
 internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
@@ -88,10 +83,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
     private CheckBox? _dNoLimit;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _poll;
 
-    /// <summary>
-    /// The user's unsent field values. Kept across a conflict reload so Save
-    /// anyway retries the same draft and Take saved throws it away.
-    /// </summary>
     private sealed class TaskDraft
     {
         public string Title = "";
@@ -148,20 +139,11 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         Unloaded += (_, _) => { ++_loadGeneration; StopPolling(); };
     }
 
-    /// <summary>
-    /// The inspector column content: the selected task's detail, history, and
-    /// run views. Selection and reloads replace its children, so the column
-    /// stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _detailHost;
     public double MinimumContentWidth => 760;
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this board belongs to, or null on the global board, which
-    /// gets the folder picker in the actions instead.
-    /// </summary>
     public UIElement? ToolbarScope
     {
         get
@@ -174,11 +156,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The Mac board's bar: the folder picker on the global board only, then
-    /// new, the newest-or-board sort, and the archive, with this screen's
-    /// reload first.
-    /// </summary>
     public IList<UIElement> ToolbarActions()
     {
         var actions = new List<UIElement>
@@ -237,12 +214,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private string _toolbarKey = "";
 
-    /// <summary>
-    /// Rebuild the bar only when something on it changed. The folder filter
-    /// lives in the bar and holds its selection there, and the quiet poll
-    /// re-reads every two seconds while a run is live: rebuilding around an
-    /// open dropdown would collapse it under the reader's hand.
-    /// </summary>
     private void RaiseToolbarChangedIfNeeded()
     {
         var key = _showArchive + "|" + _newestFirst + "|" + _folders.Count + "|" + ArchivedCount();
@@ -327,12 +298,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         return false;
     }
 
-    /// <summary>
-    /// One board method against this screen's folder, local or remote. A
-    /// remote folder travels as remote.call with the peer's own folder id.
-    /// Params are copied, never mutated, so a retry cannot forward an already
-    /// rewritten id. The global board has no folder and always stays local.
-    /// </summary>
     private Task<JsonNode> CallTodoAsync(string method, JsonNode? parameters = null)
     {
         if (_scopeWorkspaceId is null
@@ -350,11 +315,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
     }
 
-    /// <summary>
-    /// The protocol of the host that owns these cards: the peer's sessionless
-    /// protocol for a remote folder, the local one otherwise. Null means
-    /// unknown, and unknown means assume the feature is there.
-    /// </summary>
     private async Task<long?> ProtocolAsync()
     {
         if (_scopeWorkspaceId is not null
@@ -396,17 +356,12 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             {
                 RunNotifications.Shared.SettleAutomations(_runs);
             }
-            // Capture the current choices against the old directory before
-            // replacing it. A refresh may reorder or remove its entries.
             var selectedFolderId = SelectedFolderId();
             var selectedBackendId = SelectedBackendId();
             _folders = ReadFolders(foldersTask.Result);
             if (_scopeWorkspaceId is not null
                 && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
             {
-                // Cards from the peer carry its own folder id. Namespace them
-                // to this page's folder id so the scope filter below keeps
-                // matching, and list the folder itself so its name resolves.
                 foreach (var card in _cards)
                 {
                     if (card is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
@@ -414,9 +369,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _scopeWorkspaceId;
                     }
                 }
-                // Folder choices must belong to the same host as the cards.
-                // Keep this page's selected folder in the shell namespace;
-                // other choices already carry the owning peer's native ids.
                 _folders = _folders.Select(folder =>
                     (Id: folder.Id == inner ? _scopeWorkspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
@@ -429,7 +381,7 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             var budget = queueTask.Result["defaultBudgetSeconds"];
             if (budget is not null)
             {
-                try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { /* keep */ }
+                try { _defaultBudgetSeconds = budget.GetValue<ulong>(); } catch { }
             }
             if (!quiet) _working = false;
             RefreshFilterLists(selectedFolderId, selectedBackendId);
@@ -708,9 +660,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             var input = column == "backlog" ? _quickTitle : _doingTitle;
             var add = column == "backlog" ? _quickAdd : _doingAdd;
-            // Filter initialization can redraw before the previous column has
-            // entered the visual tree. Keep its owner explicitly: native
-            // Parent queries alone cannot safely govern reusable controls.
             var previousEntry = column == "backlog" ? _backlogEntry : _doingEntry;
             previousEntry?.Children.Clear();
             var entry = new Grid { ColumnSpacing = Theme.SpaceXs };
@@ -887,8 +836,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
             };
             if (WorkbenchOps.TaskCreation(_protocol))
             {
-                // One operation id for the whole action. A lost answer is
-                // checked with creationReceipt, never repeated as a new task.
                 _pendingCreateInput = input;
                 _pendingCreateDraft = draft;
                 _pendingCreateRevision = submittedRevision;
@@ -962,8 +909,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ReorderAsync(string id, string column, string? anchor = null, bool after = false)
     {
-        // The host indexes the whole column, including tasks outside the
-        // current project/search filter. Visible row indices would misplace it.
         var order = TaskBoardOrder.InsertionIndex(_cards, id, column, anchor, after);
         if (order is null) return;
         _newestFirst = false;
@@ -982,9 +927,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         _working = true;
         try
         {
-            // Column moves are last-writer-wins like the Mac board. A checked
-            // edit would refuse a move whose revision the poller already
-            // advanced, so moves stay on the unchecked update.
             var changes = new JsonObject { ["id"] = id, ["column"] = column };
             if (order is not null) changes["order"] = order.Value;
             await CallTodoAsync("todo.update", changes);
@@ -1017,11 +959,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         return null;
     }
 
-    /// <summary>
-    /// A background refresh must never clobber an edit in progress. When the
-    /// detail is dirty it stays untouched, and a revision that moved under it
-    /// surfaces as a banner instead of a rebuild.
-    /// </summary>
     private void RenderDetailSafe(bool quiet)
     {
         if (quiet && _detailDirty)
@@ -1213,7 +1150,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         var budget = new TextBox { Text = budgetValue, MinWidth = 100 };
         budget.TextChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         var unit = Chrome.BudgetUnits(budgetUnit);
-        // Selection first, handler after: the initial pick is not an edit.
         unit.SelectionChanged += (_, _) => { _detailDirty = true; ++_editRevision; };
         var noLimitBox = new CheckBox { Content = L10n.Text("windows.todopage.no_limit.f7fcff0d"), IsChecked = noLimit };
         noLimitBox.Click += (_, _) => { _detailDirty = true; ++_editRevision; };
@@ -1673,8 +1609,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         {
             return;
         }
-        // A run starts from saved values. Save first like the Mac editor,
-        // which refuses to run while the draft is dirty.
         if (_detailDirty)
         {
             await SaveDraftAsync(id, force: false);
@@ -1709,8 +1643,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
                     RenderDetail();
                     return;
                 }
-                // One operation id for the whole launch. Retry and Check again
-                // reuse it, so a lost answer can never start a second run.
                 _pendingRunOp = WorkbenchOps.NewOperationId("task-run");
                 _runError = null;
                 try
@@ -1795,7 +1727,6 @@ internal sealed class TodoPage : Page, IInspectorContent, IToolbarItems
         _working = true;
         try
         {
-            // Reuse the original task, revision and placement as well as its receipt id.
             await CallTodoAsync("todo.runTask", _pendingRunParameters.DeepClone());
             _pendingRunOp = null;
             _runError = null;

@@ -13,13 +13,6 @@ using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Workflow graphs stored on this host. Matches the Mac workbench: new from a
-/// recipe, a blank graph, or a draft from a prompt, a step list with explicit
-/// Then, Else, and Body connections, run, stop, and continue, revision-checked
-/// saves on protocol 22 and later, complete run history, and unknown-field
-/// preservation on every round trip.
-/// </summary>
 internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
@@ -89,9 +82,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this screen belongs to, or null on the global list.
-    /// </summary>
     public UIElement? ToolbarScope
     {
         get
@@ -104,11 +94,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The inspector column content: the selected graph's detail, steps, run,
-    /// and history views. Selection and reloads replace its children, so the
-    /// column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _detailHost;
 
     public IList<UIElement> ToolbarActions()
@@ -159,12 +144,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         return stack;
     }
 
-    /// <summary>
-    /// One workbench method against this screen's folder, local or remote. A
-    /// remote folder travels as remote.call with the peer's own folder id.
-    /// Params are copied, never mutated, so a retry cannot forward an already
-    /// rewritten id. The global list has no folder and always stays local.
-    /// </summary>
     private Task<JsonNode> CallWorkbenchAsync(
         string method, JsonNode? parameters = null, TimeSpan? patience = null)
     {
@@ -184,8 +163,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         {
             return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
         }
-        // The one call that needs patience (workflow.design) keeps it across
-        // the hop: the same remote.call envelope CallOnPeerAsync sends.
         return AppServices.Host.CallAsync(
             "remote.call",
             new JsonObject
@@ -197,11 +174,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             patience);
     }
 
-    /// <summary>
-    /// The protocol of the host that owns these graphs: the peer's sessionless
-    /// protocol for a remote folder, the local one otherwise. Null means
-    /// unknown, and unknown means assume the feature is there.
-    /// </summary>
     private async Task<long?> ProtocolAsync()
     {
         if (_scopeWorkspaceId is not null
@@ -238,9 +210,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             if (_scopeWorkspaceId is not null
                 && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
             {
-                // Graphs from the peer carry its own folder id. Namespace them
-                // to this page's folder id so the scope filter below keeps
-                // matching, and list the folder itself so its name resolves.
                 foreach (var graph in _graphs)
                 {
                     if (graph is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
@@ -248,9 +217,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                         obj["workspaceId"] = _scopeWorkspaceId;
                     }
                 }
-                // Folder choices must belong to the same host as the cards.
-                // Keep this page's selected folder in the shell namespace;
-                // other choices already carry the owning peer's native ids.
                 _folders = _folders.Select(folder =>
                     (Id: folder.Id == inner ? _scopeWorkspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
@@ -269,7 +235,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                     _defaultBudget = budget;
                 }
             }
-            catch { /* keep */ }
+            catch { }
             _queueTimezone = Format.Text(queue, "timezone");
             if (!_detailDirty)
             {
@@ -664,11 +630,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         return index >= 0 ? KindLabels[index] : kind;
     }
 
-    /// <summary>
-    /// What one outgoing edge means on a step of this kind. A condition's ok
-    /// edge is Then and error is Else. A loop's ok edge is the Body and always
-    /// is after the last pass.
-    /// </summary>
     private static string ConnectionLabel(string kind, string when) => (kind, when) switch
     {
         ("condition", "ok") => L10n.Text("windows.workflowspage.then.0597f441"),
@@ -912,8 +873,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
 
         body.Children.Add(ScheduleEditor(graph));
 
-        // The host scheduler owns the zone. Never print a wall-clock time
-        // without saying whose clock it is.
         body.Children.Add(new TextBlock
         {
             Text = WorkbenchOps.ClockCaption("", _queueTimezone),
@@ -1636,15 +1595,9 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         RenderDetail();
     }
 
-    /// <summary>
-    /// The graph object itself carries every field, including ones this page
-    /// never shows, so saving it back preserves unknown host fields on the
-    /// graph and on every step without a separate merge pass.
-    /// </summary>
     private JsonObject SavePayload()
     {
         var payload = (JsonObject)(_graph?.DeepClone() ?? new JsonObject());
-        // The detail edits the namespaced id; the peer stores its own.
         if (_scopeWorkspaceId is not null
             && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner)
             && Format.Text(payload, "workspaceId") == _scopeWorkspaceId)
@@ -1705,8 +1658,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                             ["workflow"] = payload,
                             ["expectedRevision"] = revision.Value,
                         });
-                        // Keep edits made during the request on top of the
-                        // accepted revision, avoiding a conflict with ourselves.
                         if (ReferenceEquals(_graph, savedGraph))
                         {
                             _detailRevision = WorkbenchOps.Revision(saved);
@@ -1826,7 +1777,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
             {
                 parameters["backend"] = backend;
             }
-            // Design drains a backend for up to three minutes, so allow four.
             var designed = await CallWorkbenchAsync(
                 "workflow.design", parameters, TimeSpan.FromMinutes(4));
             if (!IsLoaded || !ReferenceEquals(_graph, designingGraph) || editRevision != _editRevision) return;
@@ -1927,11 +1877,6 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Run one workflow from its list row. The row's graph is already saved
-    /// on the host, so this starts it directly instead of going through the
-    /// detail's select-and-save path.
-    /// </summary>
     private async Task RunAsync(string id)
     {
         if (_working)
@@ -2126,7 +2071,7 @@ internal sealed class WorkflowsPage : Page, IInspectorContent, IToolbarItems
                 new JsonObject { ["id"] = runId, ["nodeId"] = nodeId, ["offset"] = offset });
             var text = Format.Text(answer, "text");
             ulong next = 0;
-            try { next = answer?["nextOffset"]?.GetValue<ulong>() ?? 0; } catch { /* keep */ }
+            try { next = answer?["nextOffset"]?.GetValue<ulong>() ?? 0; } catch { }
             var key = runId + "\n" + nodeId;
             var previous = offset > 0 && _transcripts.TryGetValue(key, out var kept) ? kept.Text : "";
             _transcripts[key] = (previous + text, next);

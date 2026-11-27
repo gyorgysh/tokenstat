@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Last verified workspace-access answers. Unknown is not permission. Search
-/// uses these local facts without contacting hosts while the person types.
 @MainActor @Observable
 final class WorkAccessStore {
     static let shared = WorkAccessStore()

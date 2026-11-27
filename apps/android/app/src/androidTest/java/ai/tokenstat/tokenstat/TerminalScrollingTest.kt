@@ -16,7 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Owns an isolated terminal surface, with no PTY, account or host transport. */
 @RunWith(AndroidJUnit4::class)
 class TerminalScrollingTest {
     @Test fun aReloadedPageUsesTheNewBridgeAndStillRendersOutput() {

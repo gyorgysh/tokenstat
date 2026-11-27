@@ -180,12 +180,6 @@ fn session_ids_in(chats: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The directory name Qwen Code gives a folder: every character that is not a
-/// letter or a digit becomes a dash.
-///
-/// Lossy in the same way Claude Code's slug is, since a real dash and a
-/// separator end up identical. Only the trailing component is used, as a
-/// display label, so the ambiguity does not affect any number.
 fn sanitize_cwd(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -206,11 +200,6 @@ pub struct ParseOutput {
     pub rows_seen: u64,
 }
 
-/// Wire shape of one ledger line.
-///
-/// `source` is the subagent that made the call, or `main` for the session
-/// itself. It is read so a background call can be recognised, not to split the
-/// event off: the spend belongs to the session either way.
 #[derive(Deserialize)]
 struct Row {
     id: Option<String>,
@@ -261,9 +250,6 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
         let cached = row.cached_tokens.unwrap_or(0).min(input);
         let thoughts = row.thoughts_tokens.unwrap_or(0);
         if input == 0 && output == 0 && thoughts == 0 {
-            // A failed or interrupted call writes zeroes. A zero row is not a
-            // fact about spend, and keeping it would put empty turns in the
-            // session count.
             continue;
         }
         out.rows_seen += 1;
@@ -371,14 +357,6 @@ pub fn parse_file(path: &Path, contents: &str, sessions: &HashMap<String, String
     out
 }
 
-/// How the call was paid for, from the login it was made under.
-///
-/// The CLI writes one of five: `qwen-oauth` is the quota that comes with a
-/// Qwen account, which is a plan rather than an invoice, and `openai`,
-/// `gemini`, `anthropic` and `vertex-ai` are all a key the person pasted,
-/// which bills. A name this list does not know is left unknown rather than
-/// guessed in either direction, since a wrong `Plan` would silently drop real
-/// money out of a total and a wrong `Metered` would invent a bill.
 fn billing_for(auth_type: Option<&str>) -> BillingMode {
     match auth_type {
         Some("qwen-oauth") => BillingMode::Plan,
@@ -421,11 +399,8 @@ mod tests {
         assert_eq!(e.model, "qwen3-coder-plus");
         assert_eq!(e.session, "s1");
         assert_eq!(e.project, "demo");
-        // 26627 prompt tokens of which 26496 came from cache.
         assert_eq!(e.counters.input_fresh, Some(131));
         assert_eq!(e.counters.cache_read, Some(26496));
-        // The provider's total is input + output, so the thoughts are already
-        // inside the output and must not be added to it.
         assert_eq!(e.counters.output, Some(328));
         assert_eq!(e.extras.reasoning_within_output, Some(253));
         assert_eq!(e.counters.total(), 26955);
@@ -435,8 +410,6 @@ mod tests {
 
     #[test]
     fn thoughts_beside_the_output_are_added_to_it() {
-        // The other convention: the provider's total only balances once the
-        // thoughts are counted as generated tokens.
         let text = line(
             r#""inputTokens":1000,"outputTokens":40,"cachedTokens":0,"thoughtsTokens":30,"totalTokens":1070"#,
         );
@@ -482,8 +455,6 @@ mod tests {
 
     #[test]
     fn a_subagent_call_belongs_to_the_session_that_made_it() {
-        // The memory extractor writes a ledger line and never appears in a
-        // transcript, which is the reason the ledger is what gets read.
         let text = format!(
             "{}\n{}",
             line(
@@ -509,8 +480,6 @@ mod tests {
 
     #[test]
     fn two_identical_id_less_lines_are_two_calls() {
-        // Without a ledger-minted id the identity is content plus the line,
-        // so a retried request recorded twice must not collapse.
         let one = r#"{"schemaVersion":1,"timestamp":"2026-09-02T05:13:13.827Z","sessionId":"s1","model":"qwen3-coder-plus","authType":"openai","source":"main","inputTokens":100,"outputTokens":10,"cachedTokens":0,"thoughtsTokens":0,"totalTokens":110,"apiDurationMs":5319}"#;
         let text = format!("{one}\n{one}");
         let out = parse_file(Path::new(LEDGER), &text, &index());

@@ -7,7 +7,6 @@ internal enum AutomationJobSort { Name, NextRun, LastRun }
 internal enum AutomationRunSort { Name, Started, Result }
 internal enum AutomationJobFilter { All, Enabled, Paused, Failing }
 
-/// <summary>Sort the host's timestamps, not their localized display labels.</summary>
 internal static class AutomationListLogic
 {
     private static string Text(JsonNode? row, string key) => row?[key]?.GetValue<string>() ?? "";
@@ -51,7 +50,6 @@ internal static class AutomationListLogic
                 var a = Time(left, key);
                 var b = Time(right, key);
                 if (order == AutomationJobSort.NextRun) { if (!Enabled(left)) a = 0; if (!Enabled(right)) b = 0; }
-                // Missing times stay below real dates in either direction.
                 if ((a <= 0) != (b <= 0)) return a <= 0 ? 1 : -1;
                 compared = a.CompareTo(b);
             }

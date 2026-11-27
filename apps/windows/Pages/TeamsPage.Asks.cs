@@ -88,8 +88,6 @@ internal sealed partial class TeamsPage
             if (footer is not null) footer.Visibility = question.Visibility == Visibility.Visible || retry.Visibility == Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         }
         question.TextChanged += (_, _) => { if (_view == view && !model.Pending && !model.Busy && question.Text != model.Text) { model.Text = question.Text; Update(); } };
-        // Running state on one line with Stop at its end; otherwise the field,
-        // then where it runs on the leading side and Ask on the trailing side.
         status.Foreground = Theme.AccentBrush; status.VerticalAlignment = VerticalAlignment.Center;
         running = Row(status, stop); footer = Row(detail, retry, ask);
         panel.Children.Add(note); panel.Children.Add(running); panel.Children.Add(question); panel.Children.Add(footer);

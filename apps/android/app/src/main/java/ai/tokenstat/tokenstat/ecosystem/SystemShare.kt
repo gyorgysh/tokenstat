@@ -7,7 +7,6 @@ import android.os.Build
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Incoming text stays a draft. Targeted shares retain the account/project boundary. */
 object SystemShare {
     data class Draft(val text: String, val projectId: String?, val owner: String?, val sequence: Long)
     private val pending = MutableStateFlow<Draft?>(null)
@@ -20,12 +19,10 @@ object SystemShare {
         if (shortcut != null && !shortcut.startsWith("project.")) return null
         val targetId = shortcut?.removePrefix("project.")
         if (targetId != null && !targetId.matches(Regex("[0-9a-f]{64}"))) return null
-        // Resolve after foreground account verification, including a cold start.
         pending.value = Draft(text, targetId, SystemProjects.find(targetId.orEmpty())?.owner ?: SystemProjects.owner, System.nanoTime())
         return targetId?.let { "project.$it" } ?: "workspaces"
     }
     @Synchronized fun take(value: Draft) = pending.compareAndSet(value, null)
-    /** Keep the incoming text available when bounded composer storage refuses it. */
     @Synchronized fun consume(value: Draft, store: (String) -> Boolean): Boolean {
         if (pending.value != value || !store(value.text)) return false
         return pending.compareAndSet(value, null)

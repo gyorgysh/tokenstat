@@ -44,11 +44,6 @@ enum ClientType {
 
     static let rowFigure = Theme.callout.monospacedDigit()
 
-    /// The +N and -N beside an edit.
-    ///
-    /// One role so a count sits with the path beside it, in the same face as
-    /// `code`, and so two edits in one thread cannot disagree about the size
-    /// of the same figure.
     static let diffFigure = Theme.monoText(13, relativeTo: .footnote).weight(.medium)
 
     /// Source code, and the gutter beside it.

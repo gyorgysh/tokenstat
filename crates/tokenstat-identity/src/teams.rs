@@ -372,7 +372,6 @@ mod tests {
             parts[1],
             URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap())
         );
-        // Public deterministic fixture seed, shared with the Node vector.
         let key = signature::Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
         TeamTicket::try_from(format!(
             "{message}.{}",

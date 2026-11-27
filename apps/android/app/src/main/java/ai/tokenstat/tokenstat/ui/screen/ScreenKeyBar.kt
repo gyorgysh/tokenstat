@@ -40,9 +40,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/// What the bar can do to the pointer. A value rather than a pile of
-/// callbacks, so the bar takes one parameter and the viewer keeps the state.
-/// Port of Apple `ScreenPointerControls`.
 class ScreenPointerControls(
     val fine: Boolean,
     val dragLatched: Boolean,
@@ -53,12 +50,6 @@ class ScreenPointerControls(
     val resetZoom: () -> Unit,
 )
 
-/// The row of keys and pointer buttons a touch screen has no other way to
-/// send. Port of Apple `ScreenKeyBar`.
-///
-/// Sticky rather than held, because holding control with one thumb and typing
-/// with the other is not a thing on a phone. A modifier stays lit until the
-/// next keystroke spends it.
 @Composable
 fun ScreenKeyBar(
     modifiers: Long,
@@ -72,11 +63,6 @@ fun ScreenKeyBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (pointer != null) {
-            // A held mouse button cannot scroll off screen: releasing it is
-            // the one pointer action that always has to be reachable. One
-            // width for both words, or the pinned button grows the moment it
-            // is pressed and shoves the row sideways under the thumb that
-            // pressed it.
             ScreenKeyCap(
                 label = if (pointer.dragLatched) L10n.text("android.screenkeybar.release.e020e3c6") else L10n.text("android.screenkeybar.hold.8e685d54"),
                 icon = ActionIcon.Move.vector,
@@ -99,8 +85,6 @@ fun ScreenKeyBar(
                 ScreenKeyCap("fine", active = pointer.fine, onClick = pointer.toggleFine)
                 if (pointer.zoom > 1.01f) {
                     ScreenKeyCap(
-                        // Pinned to US formatting: the device locale would
-                        // render this `2,0x` across much of Europe.
                         label = String.format(java.util.Locale.US, "%.1fx", pointer.zoom),
                         active = true,
                         onClick = pointer.resetZoom,

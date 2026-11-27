@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! One-turn CLI protocol runner. Live input and speed settings use a private,
 //! turn-owned mailbox. Speed settings never become agent prompt text.
 
@@ -23,9 +22,6 @@ const INTERRUPT_TIMEOUT: Duration = Duration::from_secs(3);
 const EXIT_TIMEOUT: Duration = Duration::from_secs(3);
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 const CAPABILITY_TTL: Duration = Duration::from_secs(60);
-/// How long a finished turn waits for Codex to start the next turn of an
-/// active goal. It starts one at once, so this only bounds a goal that Codex
-/// decided not to continue.
 const GOAL_CONTINUATION_WAIT: Duration = Duration::from_secs(20);
 
 type CliVersion = Option<[u64; 3]>;
@@ -45,8 +41,7 @@ impl VersionCache {
                 .entry(command.to_owned())
                 .or_default(),
         );
-        // One probe per command, including overlapping startup/on-demand
-        // reads. Other commands and unrelated RPCs do not share this lock.
+
         let mut cached = entry.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((at, value)) = *cached
             && at.elapsed() < CAPABILITY_TTL
@@ -139,8 +134,6 @@ fn now_ms() -> u64 {
 /// Conservative version floors for the exact runtime APIs used below. Older
 /// installations keep their existing exec/print behavior and next-turn toggle.
 pub(crate) fn supported(backend: &str) -> bool {
-    // Embedded readers and CLI tools do not implement the helper subcommand.
-    // They retain ordinary exec/print turns until a daemon owns their work.
     if !std::env::current_exe().ok().is_some_and(|path| {
         path.file_stem()
             .is_some_and(|name| name == "tokenstat-hostd")
@@ -343,7 +336,6 @@ impl Launch {
                 return Err("This turn has finished. Change speed for the next turn.".into());
             }
             if Instant::now() >= until {
-                // An unacknowledged paid setting must not continue invisibly.
                 let _ = self.stop(pty);
                 return Err("The agent did not acknowledge its speed setting. The turn was stopped; try again.".into());
             }
@@ -352,9 +344,6 @@ impl Launch {
     }
 
     pub(crate) fn stop(&self, pty: &str) -> Result<(), tokenstat_pty::PtyError> {
-        // PTY kill allows only a short signal grace period. Give the helper
-        // its own cancellation request first, so Codex can persist aborted
-        // tool outputs and flush its rollout before the process is retired.
         if fs::File::create(self.directory.path().join("stop")).is_ok() {
             let until = Instant::now() + STOP_TIMEOUT;
             loop {
@@ -385,19 +374,10 @@ struct Pending {
     path: PathBuf,
     steer: bool,
     accepted: bool,
-    // All input bytes and the flush completed, even if the echo is pending.
+
     written: bool,
 }
 
-/// Keeps a Codex run open across the turns of an active goal.
-///
-/// Codex continues an active goal on its own: when a turn completes it starts
-/// the next one immediately, and stops when the goal is complete, paused,
-/// blocked or out of budget. It does that only while a client is subscribed
-/// to the thread, so ending the run at the first `turn/completed` ended the
-/// goal with it. The run now holds that completion while the goal is active,
-/// follows each continuation turn, and replays the last completion once the
-/// goal settles or no further turn comes.
 #[derive(Default)]
 struct GoalContinuation {
     active: bool,
@@ -406,14 +386,12 @@ struct GoalContinuation {
 }
 
 impl GoalContinuation {
-    /// Follow the goal through the same activity records the chat shows.
     fn observe(&mut self, activity: &Value) {
         if activity["kind"] == "goal" {
             self.active = activity["goal"]["status"] == "active";
         }
     }
 
-    /// Hold a completed turn while the goal is active. False means finish now.
     fn hold(&mut self, turn: &str, completion: &Value, now: Instant) -> bool {
         if !self.active || self.settled {
             return false;
@@ -426,7 +404,6 @@ impl GoalContinuation {
         true
     }
 
-    /// Codex started the next turn, which now owns the run.
     fn continued(&mut self) {
         self.held = None;
     }
@@ -443,8 +420,6 @@ impl GoalContinuation {
     }
 }
 
-/// App-server totals are cumulative across resumed turns. Emit only the
-/// increments observed during this launch, never the restored thread total.
 #[derive(Default)]
 struct CodexUsage {
     previous: Option<Value>,
@@ -490,8 +465,6 @@ fn emit(output: &mut emitter::Emitter, value: &Value) -> Result<(), String> {
     output.emit(value)
 }
 
-/// Convert only CLI launch flags we own. Unknown flags abort before a prompt
-/// is sent, rather than silently losing an approval, sandbox or attachment.
 fn codex_launch(argv: &[String]) -> Result<(Vec<String>, Value, Value), String> {
     let mut args = Vec::new();
     let mut setup = json!({"approvalPolicy":"never"});
@@ -656,8 +629,6 @@ fn kill_agent(child: &mut Child) {
     #[cfg(windows)]
     tokenstat_pty::kill_windows_process_tree(child.id());
     #[cfg(unix)]
-    // SAFETY: this unreaped child owns a fresh process group, so its PID
-    // cannot be reused while we terminate only this turn's descendants.
     unsafe {
         libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
     }
@@ -667,12 +638,8 @@ fn kill_agent(child: &mut Child) {
 fn agent_exited(child: &mut Child) -> std::io::Result<bool> {
     #[cfg(unix)]
     {
-        // Keep the PID reserved until output and descendant cleanup finish.
-        // waitid(WNOWAIT) observes exit without reaping the provider.
-        // SAFETY: siginfo_t is a C POD; zeroing also handles WNOHANG with no event.
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        // SAFETY: the child PID and writable siginfo_t belong to this caller.
-        // WNOWAIT leaves an exited child available for the final Child::wait.
+
         let status = unsafe {
             libc::waitid(
                 libc::P_PID,
@@ -684,12 +651,11 @@ fn agent_exited(child: &mut Child) -> std::io::Result<bool> {
         if status != 0 {
             return Err(std::io::Error::last_os_error());
         }
-        // SAFETY: waitid supplies SIGCHLD fields, or leaves our zeroed PID.
+
         Ok(unsafe { info.si_pid() } != 0)
     }
     #[cfg(not(unix))]
     {
-        // Child retains the Windows process handle and therefore its identity.
         child.try_wait().map(|status| status.is_some())
     }
 }
@@ -715,9 +681,6 @@ fn read_messages_from(output: impl Read + Send + 'static) -> output::Messages {
     rx
 }
 
-/// Provider diagnostics are not assistant text. Keep a bounded tail for a
-/// failed turn rather than mixing stderr (including echoed tool scripts)
-/// into the structured transcript through the wrapper's PTY.
 fn read_diagnostics(child: &mut Child) -> (Arc<Mutex<Vec<u8>>>, mpsc::Receiver<()>) {
     let tail = Arc::new(Mutex::new(Vec::new()));
     let output = Arc::clone(&tail);
@@ -775,8 +738,6 @@ impl Protocol {
                         && message["params"]["threadId"] == self.thread
                         && message["params"]["turn"]["id"] == self.turn =>
                 {
-                    // Closing stdin next performs the server's thread shutdown
-                    // and flush. Unsubscribe alone only removes a subscriber.
                     return;
                 }
                 Ok(Ok(message))
@@ -907,9 +868,7 @@ impl Protocol {
                             continue;
                         }
                         self.deferred_result = None;
-                        // Claude may echo input only after a long tool call.
-                        // Accept after the full write, then retain the echo
-                        // fence so an earlier result cannot close this turn.
+
                         if !pending.accepted {
                             pending.accepted =
                                 write_json(&pending.path, &json!({"ok":true})).is_ok();
@@ -1062,9 +1021,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
         _ => return Err("unsupported live agent".into()),
     };
-    // A launch's standing rules and plan-mode instructions can wrap its
-    // prompt. Maintenance is an explicit operation, so it must not depend on
-    // recognizing the decorated prompt or start an ordinary model turn.
+
     if config.compact {
         if config.backend == "codex" {
             initial["tokenstatCompact"] = json!(true);
@@ -1073,12 +1030,8 @@ pub fn run(path: &Path) -> Result<(), String> {
         }
     }
     if config.backend == "codex" {
-        // Like exec, each turn uses the workspace it was launched in. A
-        // resumed thread may remember a directory that has since moved.
         setup["cwd"] = json!(std::env::current_dir().map_err(|error| error.to_string())?);
         if setup["threadId"].is_string() {
-            // Only the thread identity is needed; its old messages remain in
-            // the provider's session and must not be hydrated into this turn.
             setup["excludeTurns"] = json!(true);
         }
     }
@@ -1086,8 +1039,7 @@ pub fn run(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // The CLI's own group contains only this turn's children.
-        // Stop retires that group before the wrapper.
+
         command.process_group(0);
     }
     let mut child = command
@@ -1145,8 +1097,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                 return Err("The agent did not initialize its live protocol.".into());
             }
             let deferred = if let Some((turn, completion)) = goal.settled(Instant::now()) {
-                // The goal stopped, or Codex started no further turn: close
-                // the run with the last turn's own completion.
                 protocol.turn = turn;
                 Some(completion)
             } else if protocol.pending.values().any(|pending| pending.steer) {
@@ -1201,12 +1151,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                     )?;
                     initialized = true;
                 } else if message["type"] == "result" {
-                    // A resumed session can finish an old background task
-                    // before consuming the new prompt. Its result does not
-                    // complete or fail the person's active request. A steer
-                    // that is still waiting for its echo is the same case:
-                    // emitting this result closes the turn, and an error
-                    // result exits before the CLI has taken the new words.
                     if message["origin"]["kind"] == "task-notification" {
                         continue;
                     }
@@ -1275,14 +1219,12 @@ pub fn run(path: &Path) -> Result<(), String> {
                 input.send(&json!({"id":if compact {"compact"} else {"turn"},
                         "method":if compact {"thread/compact/start"} else {"turn/start"},
                         "params":if compact {json!({"threadId":protocol.thread})} else {params}}))?;
-                // Reuse this thread's connections. Inventory must never
-                // delay turn/start or start an unrelated agent session.
+
                 let _ = input.send(
                     &json!({"id":"inspection-mcp","method":"mcpServerStatus/list",
                     "params":{"threadId":protocol.thread,"limit":100}}),
                 );
-                // Read the existing session goal; this never creates or
-                // resumes a goal and must not delay the user's turn.
+
                 let _ = input.send(&json!({"id":"inspection-goal","method":"thread/goal/get",
                     "params":{"threadId":protocol.thread}}));
             } else if message["id"] == "compact" {
@@ -1342,9 +1284,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                 && message["params"]["threadId"].as_str() == Some(protocol.thread.as_str())
                 && message["params"]["item"]["type"] == "contextCompaction"
             {
-                // thread/compact/start returns before any turn exists. The
-                // compaction run is the turn that owns this item, not the
-                // first turn/started on a resumed thread (often a goal).
                 if let Some(id) = message["params"]["turnId"].as_str() {
                     protocol.turn = id.to_string();
                 }
@@ -1398,9 +1337,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                     continue;
                 }
                 let completed = turn["status"] == "completed";
-                // Codex keeps an active goal going itself, starting the next
-                // turn straight away, but only while a client is still
-                // subscribed. Hold this completion and stay for that turn.
+
                 if completed
                     && initial["tokenstatCompact"] != true
                     && goal.hold(&protocol.turn, &message, Instant::now())
@@ -1427,8 +1364,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                         &json!({"type":"turn.completed","usage":protocol.usage}),
                     )?;
                 }
-                // Match exec's subscription cleanup. Closing protocol stdin
-                // afterward shuts down the thread and flushes its rollout.
+
                 input.send(&json!({"id":"shutdown","method":"thread/unsubscribe","params":{"threadId":protocol.thread}}),
                 )?;
                 let until = Instant::now() + Duration::from_secs(3);
@@ -1439,9 +1375,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                     match rx.recv_timeout(Duration::from_millis(40)) {
                         Ok(Ok(reply)) if reply["id"] == "shutdown" => break,
                         Ok(Ok(reply)) => {
-                            // Goal accounting can settle after turn/completed.
-                            // Preserve owned activity while the existing,
-                            // bounded subscription shutdown flushes history.
                             if let Some(activity) = crate::chat_activity::codex_notification(
                                 &reply,
                                 &protocol.thread,
@@ -1497,8 +1430,6 @@ pub fn run(path: &Path) -> Result<(), String> {
             {
                 emit(&mut output, &item)?;
             } else if message.get("id").is_some() && message["method"].is_string() {
-                // Match exec's noninteractive contract. Never silently grant a
-                // provider permission request or leave it parked indefinitely.
                 input.send(&json!({"id":message["id"],"error":{"code":-32601,"message":"This headless turn uses tokenstat tool hooks; interactive requests are unavailable."}}),
                 )?;
             }
@@ -1512,9 +1443,7 @@ pub fn run(path: &Path) -> Result<(), String> {
     }
     drop(input);
     drop(rx);
-    // Closing protocol stdin starts the app-server's thread shutdown. Even a
-    // stopped/failed turn needs this bounded grace period to flush its history.
-    // On a protocol failure the server also cancels any still-running work.
+
     let mut exited = false;
     let mut owned = true;
     if result.is_ok() || config.backend == "codex" {
@@ -1528,9 +1457,6 @@ pub fn run(path: &Path) -> Result<(), String> {
                 Ok(false) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => {
-                    // Only ECHILD means the PID may already have been reaped.
-                    // Other observation failures must still retire a live child
-                    // before the final, potentially blocking wait.
                     owned = {
                         #[cfg(unix)]
                         {
@@ -1573,7 +1499,6 @@ pub fn run(path: &Path) -> Result<(), String> {
 
 fn install_stop_signals() {
     #[cfg(unix)]
-    // SAFETY: the handler only stores an atomic flag and performs no I/O.
     unsafe {
         libc::signal(libc::SIGHUP, stopped as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, stopped as *const () as libc::sighandler_t);
@@ -2006,7 +1931,7 @@ mod tests {
         }
         fn peak_kib() -> u64 {
             let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
-            // SAFETY: getrusage initializes the provided rusage on success.
+
             assert_eq!(
                 unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) },
                 0

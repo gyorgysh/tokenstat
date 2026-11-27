@@ -2,10 +2,6 @@
 
 import SwiftUI
 
-/// Conversation settings, the folder it runs in, the allowlist, and cost.
-///
-/// After the first turn the setup header collapses, so this pane is where
-/// those controls live for the rest of the conversation.
 struct ChatInspector: View {
     @Bindable var model: ChatModel
     var folder: WorkspaceFolder?

@@ -12,18 +12,9 @@ import AppKit
 import UIKit
 #endif
 
-/// What the host is offering for the command being typed, drawn over the
-/// terminal near the cursor.
-///
-/// Nothing in here reaches the shell by being shown. A row types its text
-/// only when somebody chooses it, and choosing it never presses Return: the
-/// line is left at the prompt for the person to read and run.
 struct SSHSuggestionPanel: View {
     let session: SSHLiveTerminal
 
-    /// Fixed rather than sized to its contents. A palette that grew and shrank
-    /// with every keystroke would be movement beside the cursor while
-    /// somebody is trying to read what they are typing.
     static let width: CGFloat = 320
 
     var body: some View {
@@ -58,9 +49,6 @@ struct SSHSuggestionPanel: View {
         .accessibilityLabel(L10n.text("apple.sshcommandpalette.suggestions.16c1d601"))
     }
 
-    /// The keys, and only the ones that are live right now. Before the palette
-    /// has been stepped into, Return and Tab still belong to the shell, and
-    /// saying otherwise would be teaching somebody the wrong thing.
     private var hint: String {
         session.highlighted == nil
             ? L10n.text("apple.sshcommandpalette.to_choose.2d5bd3ae")
@@ -68,7 +56,6 @@ struct SSHSuggestionPanel: View {
     }
 }
 
-/// One offer: a name on the server, or a command somebody saved.
 private struct SSHSuggestionRowView: View {
     let row: SSHSuggestion
     let focused: Bool
@@ -115,9 +102,6 @@ private struct SSHSuggestionRowView: View {
         return hovering ? Theme.rowHighlight : .clear
     }
 
-    /// The second line, where it says something the title does not. A folder
-    /// listed in the path being written is already named by what was typed;
-    /// one this session visited is somewhere else and has to say where.
     private var showsDetail: Bool {
         !row.detail.isEmpty && row.detail != row.title
     }
@@ -144,11 +128,6 @@ private struct SSHSuggestionRowView: View {
 }
 
 extension View {
-    /// Ask for a chosen command's placeholders before it is typed.
-    ///
-    /// Written as a modifier so it can be attached to the terminal itself
-    /// rather than to the screen around it: a view may present one sheet, and
-    /// both of these screens already have one for the snippets menu.
     func paletteSnippetSheet(_ session: SSHLiveTerminal?) -> some View {
         sheet(
             item: Binding(
@@ -176,19 +155,10 @@ extension View {
     }
 }
 
-/// Where the panel sits.
-///
-/// Under the cursor's line when there is room below it, above that line when
-/// there is not, and never outside the terminal. Anchored to the cursor
-/// rather than to a corner, because a completion list that is not beside what
-/// it completes is a list somebody has to look away to read.
 enum SSHPalettePlacement {
-    /// Clear of the edges, so the panel never sits on the terminal's border.
     static let margin: CGFloat = 8
     static let gap: CGFloat = 4
 
-    /// The panel's top-left corner, in the terminal's own coordinates with the
-    /// origin at its top-left.
     static func origin(
         panel: CGSize,
         cursor: CGPoint,
@@ -205,8 +175,6 @@ enum SSHPalettePlacement {
         } else if above >= margin {
             y = above
         } else {
-            // A window too short for either. Keeping it inside beats letting
-            // it hang off the edge, and the line is one row from view.
             y = max(margin, bounds.height - panel.height - margin)
         }
         return CGPoint(x: x, y: y)
@@ -222,8 +190,6 @@ enum SSHPalettePlacement {
 struct SSHPaletteOverlay: View {
     let session: SSHLiveTerminal
 
-    /// The panel's measured height. Its width is fixed, so this is the only
-    /// part of the geometry that has to be found out rather than known.
     @State private var height: CGFloat = 0
 
     var body: some View {
@@ -245,8 +211,6 @@ struct SSHPaletteOverlay: View {
                         }
                     )
                     .offset(x: origin.x, y: origin.y)
-                    // Hidden for the one frame before its height is known,
-                    // rather than drawn in the wrong place and corrected.
                     .opacity(height > 0 ? 1 : 0)
             }
         }
@@ -265,7 +229,6 @@ struct SSHPaletteOverlay: View {
 @MainActor
 final class SSHPaletteLayer {
     private var hosting: NSHostingView<SSHSuggestionPanel>?
-    /// The key watch, held only while the panel is on screen.
     private var keys: Any?
     private let claimKey: (NSEvent) -> Bool
 
@@ -273,8 +236,6 @@ final class SSHPaletteLayer {
         self.claimKey = claimKey
     }
 
-    /// Draw or move the panel. `cursor` and the result are in the terminal's
-    /// coordinates with the origin at its top-left.
     func show(_ panel: SSHSuggestionPanel, in view: NSView, cursor: CGPoint, lineHeight: CGFloat) {
         let hosted: NSHostingView<SSHSuggestionPanel>
         if let hosting {
@@ -314,13 +275,6 @@ final class SSHPaletteLayer {
         keys = nil
     }
 
-    /// See a key before the emulator does, while the panel is up.
-    ///
-    /// A local watch rather than a `keyDown` override, because SwiftTerm's
-    /// `TerminalView` is not open for subclassing on this platform. It is
-    /// installed only while there is something to offer, and it hands back
-    /// every key the palette does not claim, so the terminal's own handling
-    /// is unchanged in every other moment.
     private func watchKeys(over view: NSView) {
         guard keys == nil else { return }
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
@@ -330,11 +284,6 @@ final class SSHPaletteLayer {
         }
     }
 
-    /// Whether this key was the palette's.
-    ///
-    /// Only for the terminal the panel is drawn on, and only while that
-    /// terminal is the thing taking keystrokes. A window with two sessions
-    /// side by side has two of these watches, and each answers for its own.
     private func take(_ event: NSEvent, over view: NSView?) -> Bool {
         guard let view, let window = view.window, event.window === window,
             let responder = window.firstResponder as? NSView,

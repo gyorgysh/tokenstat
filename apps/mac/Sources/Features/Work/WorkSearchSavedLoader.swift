@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Opens one encrypted page at a time on the local transport. The caller
-/// supplies authorized folder labels and machine identities before loading.
-/// No account refresh, pairing or peer request is part of saved-work search.
 actor WorkSearchSavedLoader {
     struct Coverage: Sendable {
         let eligible: Int
@@ -114,8 +111,6 @@ actor WorkSearchSavedLoader {
                 throw Failure.locked
             } catch {
                 if generation != run || Task.isCancelled { throw CancellationError() }
-                // Retaining old excerpts after a failed decrypt would make an
-                // unreadable or externally removed record appear searchable.
                 _ = await cache.finishRead(ticket, documents: [])
                 unreadable += 1
             }

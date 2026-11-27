@@ -32,7 +32,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 
-/// The toolbar account control shares the plan badge and press ring with Apple.
 @Composable
 fun AccountAvatarButton(
     name: String,
@@ -86,8 +85,6 @@ fun AccountAvatarButton(
                 }
             }
         }
-        // A sibling of IconButton: its circular ripple/clip must not crop
-        // the plan badge where it extends beyond the avatar's ring.
         if (showsPlan) {
             Box(
                 Modifier.align(Alignment.BottomEnd).padding(4.dp).size(16.dp)

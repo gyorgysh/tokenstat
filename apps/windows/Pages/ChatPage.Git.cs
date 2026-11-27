@@ -25,10 +25,6 @@ internal sealed partial class ChatPage
         _pullBranch = null;
     }
 
-    /// <summary>
-    /// Local status may follow new edits. A forge lookup runs only on opening,
-    /// a branch change, or the end of a turn, and never blocks the transcript.
-    /// </summary>
     private async Task RefreshWorkspaceGitAsync(bool refreshPull = false)
     {
         if (_opening || _openId is not string chat) return;
@@ -76,7 +72,6 @@ internal sealed partial class ChatPage
             _gitStrip.Children.Add(changes);
             _gitStrip.Children.Add(DiffStat(Format.Long(_workspaceGit, "added"), Format.Long(_workspaceGit, "removed")));
         }
-        // A fresh no-PR answer supersedes the cached sidebar badge too.
         var branch = Format.Text(_workspaceGit, "branch");
         var pull = _pullBranch == branch ? _branchPull
             : (Format.Text(_openChat, "branch") == branch ? _openChat?["pull"] : null);

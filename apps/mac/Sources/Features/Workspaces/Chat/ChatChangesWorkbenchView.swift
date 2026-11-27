@@ -2,7 +2,6 @@
 import SwiftUI
 #if os(macOS)
 
-/// A value copy keeps the chosen turn independent of later transcript paging.
 struct ChatTurnReview: Identifiable {
     let id = UUID()
     let changes: ChatTurnChanges
@@ -81,8 +80,6 @@ struct ChatChangesWorkbenchView: View {
         }
     }
 
-    /// The side review owns its snapshot. A document tab's concurrent read or
-    /// close must not cancel it or empty the commit currently being reviewed.
     private func loadCommit(_ id: String?) async {
         let generation = UUID()
         commitLoadGeneration = generation
@@ -103,7 +100,6 @@ struct ChatChangesWorkbenchView: View {
     }
 }
 
-/// Recorded patches are independent of Git and remain readable after a commit.
 struct RecordedTurnReviewView: View {
     let review: ChatTurnReview
     @State private var selectedPath: String?
@@ -157,7 +153,6 @@ struct RecordedTurnReviewView: View {
 
 #endif
 
-/// A resize or a streaming chat update must not recolor every recorded patch.
 struct RecordedPatchView: View {
     let patch: String
     @State private var rendered: AttributedString?

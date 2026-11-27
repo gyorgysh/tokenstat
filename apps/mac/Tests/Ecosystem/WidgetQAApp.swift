@@ -154,8 +154,6 @@ import ActivityKit
         }
         var activities = previews.filter { $0.activityState == .active || $0.activityState == .stale }
         if phase == .working || activities.isEmpty {
-            // Ended cards may remain enumerable while visible, but cannot be
-            // updated. Clear retained previews before requesting a fresh run.
             for activity in previews { await activity.end(nil, dismissalPolicy: .immediate) }
             activities = []
         }
@@ -174,7 +172,6 @@ import ActivityKit
                                           staleDate: phase.finished ? nil : now.addingTimeInterval(180))
             for activity in activities {
                 if phase.finished {
-                    // End every QA run, retaining its final card briefly for inspection.
                     await activity.end(content, dismissalPolicy: .after(now.addingTimeInterval(60)))
                 } else {
                     await activity.update(content)

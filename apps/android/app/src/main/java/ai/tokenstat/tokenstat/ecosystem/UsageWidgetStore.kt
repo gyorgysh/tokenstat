@@ -53,7 +53,6 @@ object UsageWidgetStore {
         return lease
     }
 
-    /** A verified signed-out response is an account answer, even though it has no usage lease. */
     @Synchronized fun verifyForeground(context: Context, account: JsonObject, observed: Long): Boolean {
         if (session.epoch != observed) return false
         val lease = verify(context, account, observed, fromApp = true)
@@ -62,8 +61,6 @@ object UsageWidgetStore {
 
     @Synchronized fun clear(context: Context, block: Boolean = false) {
         session.clear(block)
-        // A background worker can start in a new process while logout is
-        // still pending. Keep sign-out's privacy boundary across that restart.
         privacy(context).edit(commit = true) { putBoolean("blocked", block) }
         file(context).delete()
         UsageWidgetProvider.updateAll(context)

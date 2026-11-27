@@ -153,7 +153,6 @@ pub mod cache {
         for provider in fresh {
             if provider.has_reading() && !provider.stale {
                 let mut keep = provider.clone();
-                // The note belongs to the attempt, not to the numbers.
                 keep.note = None;
                 all.insert(keep.cache_key(), keep);
             }
@@ -256,26 +255,15 @@ struct RolloutPayload {
     rate_limits: Option<RateLimits>,
 }
 
-/// One `rate_limits` block, read as the object Codex wrote.
-///
-/// Not a struct of named fields. Codex adds and withdraws windows as its
-/// plans change, and a window nobody wrote a field for here is exactly the
-/// one a person needs to see: two hard coded names is what hid an exhausted
-/// account limit behind a model's. Anything in the block that is not a
-/// window carries no `used_percent` and is ignored.
 #[derive(Debug, Deserialize)]
 #[serde(transparent)]
 struct RateLimits(serde_json::Map<String, serde_json::Value>);
 
 impl RateLimits {
-    /// Which allowance this block is about. `codex` is the account's own,
-    /// anything else is a model's. Absent on older Codex builds.
     fn limit_id(&self) -> &str {
         self.text("limit_id")
     }
 
-    /// What a person is shown for it, when the server names it at all:
-    /// `GPT-5.3-Codex-Spark`. Usually absent even for a model's own block.
     fn limit_name(&self) -> &str {
         self.text("limit_name")
     }
@@ -291,16 +279,11 @@ impl RateLimits {
             .unwrap_or("")
     }
 
-    /// The windows in this block, under the names Codex gave them, in the
-    /// order the block states them.
     fn windows(&self) -> Vec<(&str, RateWindow)> {
         self.0
             .iter()
             .filter_map(|(name, value)| {
                 let window = RateWindow::deserialize(value).ok()?;
-                // A percentage is the whole reading. Without one there is
-                // nothing to report, and reporting zero would claim an
-                // allowance is untouched when nobody said so.
                 window.used_percent?;
                 Some((name.as_str(), window))
             })
@@ -314,20 +297,13 @@ struct RateWindow {
     used_percent: Option<f64>,
     #[serde(default)]
     window_minutes: Option<u64>,
-    /// Unix **seconds**, not milliseconds.
     #[serde(default)]
     resets_at: Option<i64>,
-    /// Older builds wrote this instead, relative to the event's own timestamp.
     #[serde(default)]
     resets_in_seconds: Option<i64>,
 }
 
-/// Scope given to the account's own allowance, the one Codex shows under
-/// "general usage limits".
 const CODEX_ACCOUNT_SCOPE: &str = "general";
-/// Scope given to a model's own allowance when the server did not name the
-/// model. Only used once an account-wide window is in hand to contrast it
-/// with, because a machine with no per-model limits has nothing to contrast.
 const CODEX_MODEL_SCOPE: &str = "current model";
 
 /// Read Codex's limits out of its own session log.
@@ -441,9 +417,6 @@ fn codex_reading(
     plan: Option<String>,
     now: i64,
 ) -> ProviderLimits {
-    // Local logs are evidence of what Codex reported, not a fresh network
-    // request. Never make a week-old reading look current just because it
-    // could still be opened successfully.
     const STALE_AFTER_MS: i64 = 3 * 60 * 60 * 1000;
     let stale = observed_at_ms <= 0
         || now.saturating_sub(observed_at_ms) > STALE_AFTER_MS
@@ -472,19 +445,8 @@ pub fn codex_limits_for_home(home: &Path) -> Option<ProviderLimits> {
     Some(codex_reading(windows, observed_at_ms, plan, now_ms()))
 }
 
-/// How many recent session files to look through. Enough to get past a run of
-/// short sessions, few enough that this stays a disk read rather than a scan.
 const RECENT_ROLLOUTS: usize = 25;
 
-/// Feed every rate limit block in one rollout to the scan.
-///
-/// The whole file, not its tail. Codex scatters these blocks through a
-/// session rather than restating the current one at the end, and the
-/// account's own allowance is written only on a turn that spent it, which
-/// can be megabytes back in a long session. Reading a 512 KB tail found the
-/// running model's windows and missed an account limit that had already run
-/// out. The `rate_limits` test keeps this cheap: a rollout is almost all
-/// conversation, and a whole recent archive scans in well under a second.
 fn absorb_rollout(scan: &mut CodexLimitScan, path: &Path) {
     use std::io::{BufRead, BufReader};
 
@@ -549,30 +511,11 @@ fn absorb_sqlite(scan: &mut CodexLimitScan, db_path: &Path) -> Option<()> {
     Some(())
 }
 
-/// Which allowance a window belongs to: the limit, and its place in the block.
-///
-/// `limit_id` alone is not enough. Codex reports the account's own weekly
-/// window and the running model's pair of windows under the same `codex` id,
-/// and tells them apart only by the shape of the block, which is what the
-/// position in the key preserves.
 type CodexWindowKey = (String, String, u64, String);
 
-/// The newest reading of every Codex limit seen while walking its logs.
-///
-/// Written to be fed blocks in any order, oldest first by preference: each
-/// window keeps the reading with the latest timestamp, and the plan comes
-/// from the latest block that named one. Codex sends sparse updates and
-/// carries the unchanged fields forward itself, so a block can arrive with
-/// windows and no plan while the account plainly still has one.
-///
-/// A named plan change starts a new era: windows observed before that
-/// timestamp are dropped, so a Pro weekly reading cannot demote a later
-/// Plus 5-hour window into "current model" and hide it from the badge.
 #[derive(Default)]
 struct CodexLimitScan {
     windows: std::collections::HashMap<CodexWindowKey, (i64, UsageWindow)>,
-    /// Plan observations are ordered only after all files have been read:
-    /// resumed sessions and SQLite rows need not arrive chronologically.
     plans: std::collections::BTreeMap<i64, String>,
 }
 
@@ -611,15 +554,12 @@ impl CodexLimitScan {
         let account_wide = is_account_wide(&reported);
 
         for (position, reported) in &reported {
-            // `windows` already refused anything without one.
             let Some(percent) = reported.used_percent else {
                 continue;
             };
             let minutes = reported.window_minutes.unwrap_or(0);
             let scope = match (limit_name, account_wide) {
                 ("", true) => CODEX_ACCOUNT_SCOPE.to_string(),
-                // Nothing to distinguish it from yet. `finish` renames these
-                // if an account-wide window turns up beside them.
                 ("", false) => (*position).to_string(),
                 (name, _) => name.to_string(),
             };
@@ -627,9 +567,6 @@ impl CodexLimitScan {
                 label: window_label(minutes),
                 scope: Some(scope),
                 percent,
-                // The reset figures come from the rollout log. Saturating keeps
-                // a corrupt or absurd value from wrapping a deadline into the
-                // past and hiding a window that is still in force.
                 resets_at_ms: reported
                     .resets_at
                     .map(|s| s.saturating_mul(1000))
@@ -656,7 +593,6 @@ impl CodexLimitScan {
         }
     }
 
-    /// Every limit still in force, general allowance before model allowances.
     fn finish(self, now_ms: i64) -> Option<(Vec<UsageWindow>, i64, Option<String>)> {
         let mut readings: Vec<(i64, UsageWindow)> = self.windows.into_values().collect();
         let latest_plan = self.plans.last_key_value().map(|(_, plan)| plan.clone());
@@ -673,19 +609,12 @@ impl CodexLimitScan {
         {
             readings.retain(|(at, _)| *at >= era_at);
         }
-        // Newest first, so the duplicate check below keeps the fresher of two
-        // readings of the same limit.
         readings.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
 
-        // The block Codex wrote last is the set of limits the account has
-        // now. Anything older has been replaced or withdrawn since.
         let newest_at = readings.first().map(|(at, _)| *at);
 
         let mut kept: Vec<(i64, UsageWindow)> = Vec::new();
         for (at, window) in readings {
-            // A reset timestamp alone does not prove the current usage: the
-            // account can have been used from another device. Keep the last
-            // observed general reading as stale instead of inventing zero.
             if window.resets_at_ms.is_some_and(|ms| ms <= now_ms) {
                 let current_block = Some(at) == newest_at;
                 let general = matches!(
@@ -768,9 +697,6 @@ impl CodexLimitScan {
             }
         }
 
-        // Only now is there something to contrast a model's windows with.
-        // Calling them "primary" and "secondary" beside an account-wide
-        // window says nothing about which allowance they belong to.
         let has_account = kept
             .iter()
             .any(|(_, w)| w.scope.as_deref() == Some(CODEX_ACCOUNT_SCOPE));
@@ -782,14 +708,8 @@ impl CodexLimitScan {
             }
         }
 
-        // One provider timestamp covers every window. Use the oldest one so
-        // a newly updated 5-hour window cannot make a frozen week look fresh.
         let observed_at_ms = kept.iter().map(|(at, _)| *at).min().unwrap_or(0);
         let mut windows: Vec<UsageWindow> = kept.into_iter().map(|(_, w)| w).collect();
-        // General usage is the first thing to read. Within each group the
-        // shorter window leads, the way people read it: 5-hour, then weekly.
-        // Going by length rather than reset time keeps a fresh window with no
-        // reset yet in its usual place.
         windows.sort_by_key(|w| {
             let length = match w.label.as_str() {
                 "5-hour" => 0,
@@ -807,13 +727,6 @@ impl CodexLimitScan {
     }
 }
 
-/// Whether a block describes the account's whole allowance rather than one
-/// model's.
-///
-/// Codex writes the account-wide limit as a single window a week or longer,
-/// and a model's as its rolling window plus that model's week. There is no
-/// flag for it: both arrive with `limit_id` `codex` and no name, so the shape
-/// is the only thing that separates them.
 fn is_account_wide(windows: &[(&str, RateWindow)]) -> bool {
     matches!(
         windows,
@@ -900,14 +813,12 @@ fn is_sqlite_path(path: &Path) -> bool {
     )
 }
 
-/// `2026-07-12T06:44:58.735Z` and friends, to unix milliseconds.
 fn parse_iso_ms(raw: &str) -> Option<i64> {
     raw.parse::<jiff::Timestamp>()
         .ok()
         .map(|t| t.as_millisecond())
 }
 
-/// Where Codex keeps its sessions, in the order to prefer them.
 fn codex_homes() -> Vec<PathBuf> {
     let mut homes = Vec::new();
     if let Ok(explicit) = std::env::var("CODEX_HOME")
@@ -922,12 +833,6 @@ fn codex_homes() -> Vec<PathBuf> {
     homes
 }
 
-/// The most recently written rollout files across every Codex home, newest
-/// first.
-///
-/// A resumed session can be written years after its date directory was made.
-/// Inspect all date directories and retain only the most recently modified
-/// files, across all configured homes.
 fn recent_rollouts(want: usize, extra: &[PathBuf]) -> Vec<PathBuf> {
     let mut found: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for home in codex_homes().into_iter().chain(extra.iter().cloned()) {
@@ -938,8 +843,6 @@ fn recent_rollouts(want: usize, extra: &[PathBuf]) -> Vec<PathBuf> {
     found.into_iter().map(|(_, path)| path).collect()
 }
 
-/// Descend `depth` levels of date directories, newest name first, gathering
-/// rollout files until `want` of them are in hand.
 fn collect_rollouts(
     dir: &Path,
     depth: usize,
@@ -1009,7 +912,6 @@ mod tests {
             .collect();
         assert_eq!(labels, vec![("5-hour", 6.0), ("weekly", 68.0)]);
         assert_eq!(reading.windows[0].resets_at_ms, Some(1_794_508_614_000));
-        // An API-key login answers without a window.
         assert!(codex_limits_from_answer(&serde_json::json!({"rateLimits": null}), now).is_none());
     }
 
@@ -1114,7 +1016,6 @@ mod tests {
                 .percent,
             80.0
         );
-        // The inverse matters too: a newer desktop report must beat an old CLI.
         conn.execute(
             "INSERT INTO thread_items VALUES (?)",
             [record("2026-07-12T06:10:00Z", 300, 40)],
@@ -1195,10 +1096,6 @@ mod tests {
 
     #[test]
     fn a_newer_session_without_limits_falls_back_to_an_older_one() {
-        // The real case this was found on: the newest rollout file carried no
-        // `rate_limits` at all, because Codex only writes the block when the API
-        // sends one and a short session never gets that far. Reading only the
-        // newest file reported "no limit" while sixteen older files had one.
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-fb-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1238,9 +1135,6 @@ mod tests {
 
     #[test]
     fn a_sparse_update_keeps_the_plan_from_an_older_block() {
-        // Codex carries unchanged fields forward itself, so the newest block
-        // can hold windows with no plan named. The windows are the reading;
-        // the plan must keep scanning older blocks instead of going missing.
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-codex-sparse-plan-{}",
             std::process::id()
@@ -1276,12 +1170,6 @@ mod tests {
 
     #[test]
     fn an_exhausted_account_window_survives_a_session_on_one_model() {
-        // The case this exists for: the account's weekly allowance ran out, so
-        // Codex fell back to a model with its own allowance and reported only
-        // that model's windows from then on. Reading the newest block alone
-        // showed the model and hid the account at 100%, which is the one that
-        // stopped the work. A later plain multi-window account reading is a
-        // different shape and is covered by the Plus merge tests below.
         let dir = std::env::temp_dir().join(format!("tokenstat-codex-two-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1297,7 +1185,6 @@ mod tests {
         )
         .unwrap();
 
-        // After the model block, before its five-hour window rolls over.
         let now_ms = 1_789_090_000_000;
         let found = limits_in(&file, now_ms).expect("both allowances are readable");
 
@@ -1326,10 +1213,6 @@ mod tests {
 
     #[test]
     fn a_plan_change_from_pro_to_plus_keeps_the_five_hour_as_general() {
-        // Pro wrote a single weekly as general. Plus then wrote 5-hour + weekly
-        // under the plain codex id. Merging those eras used to leave the Pro
-        // weekly in place, demote Plus's 5-hour to "current model", and hide
-        // it from the composer headline.
         let found = reading_from(
             "pro-plus",
             concat!(
@@ -1359,8 +1242,6 @@ mod tests {
 
     #[test]
     fn a_newer_plus_shaped_reading_without_plan_type_still_replaces_pro_general() {
-        // Sparse Plus blocks often omit plan_type. The window shape alone has
-        // to retire the older single weekly so the 5-hour is not demoted.
         let found = reading_from(
             "plus-shape",
             concat!(
@@ -1389,9 +1270,6 @@ mod tests {
 
     #[test]
     fn an_older_pro_block_absorbed_after_plus_cannot_rebuild_the_weekly() {
-        // Rollouts are walked newest-first by mtime, so a Plus block can be
-        // absorbed before an older Pro one. The era gate must still refuse
-        // the Pro weekly or the 5-hour is demoted again.
         let mut scan = CodexLimitScan::default();
         scan.absorb(
             r#"{"timestamp":"2026-09-11T19:34:31.000Z","payload":{"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":18.0,"window_minutes":300,"resets_at":1789172231},"secondary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1789680207},"plan_type":"plus"}}}"#,
@@ -1479,11 +1357,6 @@ mod tests {
 
     #[test]
     fn a_withdrawn_model_limit_leaves_the_account_reading_alone() {
-        // What next week looks like: the per-model allowance is gone and
-        // Codex reports the account's own windows under the plain `codex` id
-        // again. Nothing should be renamed on its account, and the model's
-        // last windows are left to expire on their own reset rather than
-        // being guessed at.
         let found = reading_from(
             "gone",
             concat!(
@@ -1492,7 +1365,6 @@ mod tests {
                 r#"{"timestamp":"2026-09-18T09:00:00.000Z","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300,"resets_at":1790240000},"secondary":{"used_percent":30.0,"window_minutes":10080,"resets_at":1790500000},"plan_type":"prolite"}}}"#,
                 "\n",
             ),
-            // A week on, so the older pair has rolled over.
             1_789_700_000_000,
         )
         .expect("the account's own windows are the reading");
@@ -1513,10 +1385,6 @@ mod tests {
 
     #[test]
     fn a_window_codex_has_not_named_a_field_for_is_still_reported() {
-        // The windows are read by shape, not by two hard coded field names,
-        // so a third one arrives instead of vanishing. This is the failure
-        // that hid an exhausted limit once already, and it must not depend
-        // on this file having been updated first.
         let found = reading_from(
             "third",
             concat!(
@@ -1561,8 +1429,6 @@ mod tests {
 
     #[test]
     fn a_window_with_no_percentage_is_not_a_reading() {
-        // Never zero. "The vendor did not say" and "none of it is used" are
-        // different answers and must not render the same.
         let found = reading_from(
             "nopct",
             concat!(
@@ -1576,9 +1442,6 @@ mod tests {
 
     #[test]
     fn a_failed_read_falls_back_to_the_last_good_one_and_says_it_is_old() {
-        // The case this exists for: Claude Code's stored login expires, or the
-        // account runs out, and the vendor cannot be asked again. The quota did
-        // not become unknown, it just stopped being re-checked.
         let mut remembered = std::collections::BTreeMap::new();
         remembered.insert(
             "claude_code".to_string(),

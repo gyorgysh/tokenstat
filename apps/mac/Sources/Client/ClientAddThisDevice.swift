@@ -8,20 +8,9 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Letting this device into a machine nobody is sitting at.
-///
-/// Being on the account is not being allowed in, and on a server there is
-/// nobody at the machine to answer a request. So the machine mints a code at
-/// its own console and this screen redeems it. Three states and no more:
-/// waiting for a code, refused, and granted.
-///
-/// The refusal copy distinguishes expired from wrong on purpose. Somebody who
-/// is told only "that code is not right" retypes a code that was correct a
-/// minute ago, forever.
 struct ClientAddThisDevice: View {
     let peer: String
     let hostName: String
-    /// Called once the machine has said yes, so the screen behind can load.
     var onGranted: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss

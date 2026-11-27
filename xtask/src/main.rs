@@ -25,11 +25,6 @@ use serde_json::{Map, Value};
 
 mod notices;
 
-/// Keys kept for Claude Code transcripts, as paths from the record root.
-///
-/// Anything not listed is discarded. In particular `message.content`, `cwd`,
-/// `gitBranch`, and `toolUseResult` never survive, because they carry prompts,
-/// file contents, and local paths.
 const CLAUDE_ALLOW: &[&str] = &[
     "type",
     "requestId",
@@ -59,9 +54,6 @@ const CLAUDE_ALLOW: &[&str] = &[
     "message.usage.iterations.cache_creation_input_tokens",
 ];
 
-/// Fields holding an identifier that must be replaced but whose equality
-/// relationships have to survive, or the deduplication fixtures stop testing
-/// anything.
 const ID_FIELDS: &[&str] = &[
     "requestId",
     "uuid",
@@ -78,15 +70,6 @@ const ID_FIELDS: &[&str] = &[
     "agentId",
 ];
 
-/// Keys a Pi fixture may keep.
-///
-/// Its own allowlist rather than a wider shared one: a key that means counters
-/// in one tool can mean content in another, and the point of an allowlist is
-/// that adding a tool cannot quietly widen what an existing one publishes.
-///
-/// `cwd` is deliberately absent. It is an absolute path to somebody's work, the
-/// parser only ever takes its last component, and a fixture does not need a
-/// real one to prove that.
 const PI_ALLOW: &[&str] = &[
     "type",
     "id",
@@ -110,13 +93,6 @@ const PI_ALLOW: &[&str] = &[
     "message.usage.cost.total",
 ];
 
-/// Keys a Devin CLI fixture may keep.
-///
-/// A fixture here is one `chat_message` per line, which is how the database
-/// stores a node. Only `metadata` survives: `content` is the conversation, and
-/// `role` is all that is needed to tell an assistant node from a user one. The
-/// working directory lives in the `sessions` table rather than in a message,
-/// so it cannot reach a fixture at all.
 const DEVIN_ALLOW: &[&str] = &[
     "role",
     "metadata.request_id",
@@ -133,13 +109,6 @@ const DEVIN_ALLOW: &[&str] = &[
     "metadata.metrics.total_time_ms",
 ];
 
-/// Keys a Qwen Code fixture may keep.
-///
-/// Nearly the whole line, because nothing in this file is conversation: every
-/// field is a counter, an identifier, a timestamp, a model id or a fixed enum.
-/// `localDate` and `localMonth` are the writer's own local-calendar copies of
-/// the timestamp and say nothing more than it does, so they are dropped rather
-/// than published.
 const QWEN_ALLOW: &[&str] = &[
     "schemaVersion",
     "id",
@@ -156,8 +125,6 @@ const QWEN_ALLOW: &[&str] = &[
     "apiDurationMs",
 ];
 
-/// Keys a Kimi Code wire fixture may keep. Conversation records are discarded;
-/// these are the complete fields of its durable per-request usage record.
 const KIMI_ALLOW: &[&str] = &[
     "type",
     "time",
@@ -172,12 +139,6 @@ const KIMI_ALLOW: &[&str] = &[
     "usageScope",
 ];
 
-/// Keys a Muse fixture may keep.
-///
-/// `payload.record.workspace_root` is deliberately absent, for the same reason
-/// Pi's `cwd` is: it is an absolute path to somebody's work, the parser only
-/// ever takes its last component, and a fixture does not need a real one to
-/// prove that. The records that carry it are dropped whole by `keeps` anyway.
 const MUSE_ALLOW: &[&str] = &[
     "schema_version",
     "id",
@@ -200,11 +161,6 @@ const MUSE_ALLOW: &[&str] = &[
     "payload.event.usage.reasoning_tokens",
 ];
 
-/// Keys a DeepSeek Harness fixture may keep.
-///
-/// The session header is dropped whole (see `keeps`), so `cwd` never reaches a
-/// fixture. What remains is the finished assistant message: its counters, the
-/// model that produced them, and the ids that give a turn its identity.
 const DSH_ALLOW: &[&str] = &[
     "type",
     "seq",
@@ -222,7 +178,6 @@ const DSH_ALLOW: &[&str] = &[
     "data.usage.reasoningTokens",
 ];
 
-/// Which tool's logs are being redacted.
 #[derive(Clone, Copy, PartialEq)]
 enum Profile {
     ClaudeCode,
@@ -262,9 +217,6 @@ impl Profile {
         }
     }
 
-    /// Whether this line is worth keeping. Only rows that carry counters are,
-    /// which for Pi also means the session header is dropped: it exists to
-    /// carry `cwd`, and that is the one field a fixture must not have.
     fn keeps(self, obj: &serde_json::Map<String, Value>) -> bool {
         match self {
             Self::ClaudeCode => obj.get("type").and_then(Value::as_str) == Some("assistant"),
@@ -293,8 +245,6 @@ impl Profile {
                     .and_then(Value::as_str)
                     == Some("model_completed")
             }
-            // The assistant nodes, which are the ones with counters. A user
-            // node carries the question and nothing worth keeping.
             Self::Devin => {
                 obj.get("role").and_then(Value::as_str) == Some("assistant")
                     && obj
@@ -304,8 +254,6 @@ impl Profile {
                         .and_then(Value::as_object)
                         .is_some_and(|m| m.contains_key("output_tokens"))
             }
-            // Every line of the ledger is one API response, so the only ones
-            // worth dropping are the failed calls that recorded nothing.
             Self::Qwen => {
                 obj.contains_key("totalTokens")
                     && ["inputTokens", "outputTokens", "thoughtsTokens"]
@@ -347,8 +295,6 @@ fn main() -> Result<()> {
             let output = args
                 .next()
                 .context("usage: xtask redact <input> <output> [max] [profile]")?;
-            // Fixtures are read by humans and live in git forever, so they stay
-            // small on purpose. A whole project directory is 15 MB.
             let max = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
             let profile = match args.next() {
                 Some(name) => Profile::parse(&name)?,
@@ -357,23 +303,12 @@ fn main() -> Result<()> {
             redact(Path::new(&input), Path::new(&output), max, profile)
         }
         Some("notices") => {
-            // Generated into target/ on purpose: a tracked generated file is
-            // what check-no-artifacts.sh exists to reject.
             let out = args
                 .next()
                 .unwrap_or_else(|| "target/THIRD-PARTY-NOTICES.md".to_string());
             let root = args.next().unwrap_or_else(|| "tokenstat-cli".to_string());
             notices::generate(&root, Path::new(&out))
         }
-        // The price book that ships inside the app bundle.
-        //
-        // A desktop install fetches its own book on first launch, through the
-        // CLI or the daemon's schedule. A phone has neither, and an empty book
-        // means a heatmap with counts and no money on it. So one is downloaded
-        // at build time and the app seeds from it when it finds no local book.
-        //
-        // Generated into the bundle's Resources at build time and never
-        // committed: it is a generated file, and it goes stale.
         Some("pricing-seed") => {
             let out = args
                 .next()
@@ -394,13 +329,6 @@ fn main() -> Result<()> {
     }
 }
 
-/// Download the list-rate snapshot for an app bundle to ship.
-///
-/// A failure writes an empty but valid book rather than stopping the build. A
-/// checkout must build on a plane, and an app that starts with no rates behaves
-/// exactly as it does today: counts render, money reads as unknown, and the
-/// first refresh fixes it. Failing the build instead would trade a small,
-/// self-correcting gap for one nobody can work around.
 fn pricing_seed(out: &Path) -> Result<()> {
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
@@ -449,8 +377,6 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
 
     files.sort();
     std::fs::create_dir_all(out_dir)?;
-    // Shared across files so an id appearing in two transcripts, which is
-    // exactly the resume-duplicate case, maps to the same pseudonym in both.
     let mut names = Pseudonyms::default();
     let mut written = 0;
 
@@ -475,7 +401,6 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
             let Some(obj) = value.as_object() else {
                 continue;
             };
-            // Only usage-bearing rows are worth keeping in a fixture.
             if !profile.keeps(obj) {
                 continue;
             }
@@ -499,7 +424,6 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
     Ok(())
 }
 
-/// Deterministic, stable pseudonyms that preserve equality between records.
 #[derive(Default)]
 struct Pseudonyms {
     seen: BTreeMap<String, String>,
@@ -507,8 +431,6 @@ struct Pseudonyms {
 
 impl Pseudonyms {
     fn get(&mut self, field: &str, original: &str) -> String {
-        // Parent references inhabit the same identifier namespace as their
-        // targets; otherwise redaction severs the transcript tree.
         let field = match field {
             "parentUuid" => "uuid",
             "parentId" => "id",
@@ -559,8 +481,6 @@ fn filter_object(
                         Value::Object(inner) => {
                             Value::Object(filter_object(inner, &path, allow, names))
                         }
-                        // A bare scalar in an array cannot be verified as safe,
-                        // so it does not survive.
                         _ => Value::Null,
                     })
                     .collect(),
@@ -568,8 +488,6 @@ fn filter_object(
             Value::String(s) if ID_FIELDS.contains(&path.as_str()) => {
                 Value::String(names.get(&path, s))
             }
-            // Timestamps, model names, and enum-ish values are kept verbatim
-            // because the tests depend on them and they identify nobody.
             Value::String(s) if is_leaf && is_safe_string(&path, s) => Value::String(s.clone()),
             Value::String(_) => continue,
             other => other.clone(),
@@ -579,13 +497,6 @@ fn filter_object(
     out
 }
 
-/// A string leaf may be kept only if it is a known shape.
-///
-/// The separator check is what keeps a path from ever reaching a fixture. It
-/// does not apply to `type`, whose values are the tool's own vocabulary and
-/// are sometimes written with a slash in them ("assistant/message"). That
-/// exception is narrow on purpose: one field, and one whose values are a fixed
-/// set the tool defines rather than anything a person typed.
 fn is_safe_string(path: &str, s: &str) -> bool {
     let separators = s.contains('/') || s.contains('\\');
     if s.len() > 64 || (separators && path != "type") {

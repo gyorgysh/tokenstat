@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Explicitly shared text and host-owned attachments, never a local outbox.
 struct WorkSharedDraft: Codable, Equatable, Sendable {
     var text: String
     var attachmentIDs: [String]
@@ -13,7 +12,6 @@ struct WorkSharedDraft: Codable, Equatable, Sendable {
 
 struct WorkHandoffAnchor: Codable, Equatable, Sendable {
     var eventID: String
-    /// Basis points within the row, 0...10,000.
     var fraction: UInt16
     var followsLatest: Bool
     enum CodingKeys: String, CodingKey {

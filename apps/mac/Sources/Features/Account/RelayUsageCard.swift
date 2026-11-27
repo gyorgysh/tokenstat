@@ -2,7 +2,6 @@
 
 import SwiftUI
 
-/// The same allowance and day buckets on Mac, iPhone and iPad.
 struct RelayUsageCard: View {
     let usage: RelayUsage?
     var refresh: () async -> Void

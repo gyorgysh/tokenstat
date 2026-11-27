@@ -26,10 +26,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * Says that Teams is an early preview, beside the Team title. A phone has
- * no hover, so a tap opens the note that explains what that means.
- */
 @Composable internal fun TeamPreviewBadge(modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     var open by remember { mutableStateOf(false) }

@@ -17,9 +17,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the machine-plane ports to the same answers the Apple client's
-/// Swift originals produce: key-bar folds, TSCR frames, browser URL policy,
-/// and snippet placeholder rules.
 class MachinePlaneTest {
 
 
@@ -53,10 +50,6 @@ class MachinePlaneTest {
         assertEquals("tokenstat", TerminalKeysLogic.basename("/Users/someone/work/tokenstat/"))
     }
 
-    /// The xterm page sizes its terminal box to the measured view, in CSS
-    /// pixels, so a keyboard that pans instead of resizing cannot leave a
-    /// tall page behind a short view. Floored; zero means unmeasured and
-    /// the page keeps its last good box.
     @Test
     fun cssPxDividesByDensityAndRefusesNothing() {
         assertEquals(412, TerminalKeysLogic.cssPx(1030, 2.5f))
@@ -67,7 +60,6 @@ class MachinePlaneTest {
         assertEquals(0, TerminalKeysLogic.cssPx(500, 0f))
     }
 
-    // ScreenFrames, from ScreenEncodedFrame and ScreenViewerModel inputs.
 
     private fun envelope(payload: ByteArray, keyframe: Boolean = true): ByteArray {
         val out = ByteArray(32 + payload.size)
@@ -129,9 +121,6 @@ class MachinePlaneTest {
         assertTrue(ScreenFrames.isParameterSet(units[1]))
     }
 
-    /// MediaCodec reads the byte stream, so units are repacked behind start
-    /// codes. Four-byte lengths are what VideoToolbox is told to expect, and
-    /// feeding them here is what left every Android picture black.
     @Test
     fun annexBPrefixesStartCodes() {
         val a = byteArrayOf(0x65, 0x02)
@@ -218,7 +207,6 @@ class MachinePlaneTest {
             "scp db:/var/log {{missing}}",
             SnippetRun.fill("scp {{host}}:{{ path }} {{missing}}", mapOf("host" to "db", "path" to "/var/log")),
         )
-        // A value holding `$` stays literal, never a group reference.
         assertEquals("echo \$HOME", SnippetRun.fill("echo {{v}}", mapOf("v" to "\$HOME")))
     }
 
@@ -227,10 +215,6 @@ class MachinePlaneTest {
         assertTrue(SnippetRun.runBytes("uptime").contentEquals("uptime\r".toByteArray(Charsets.UTF_8)))
     }
 
-    /// A pty call made on behalf of this front end names it. Without the
-    /// viewer the host resizes the session outright instead of clamping it to
-    /// the smallest viewer, which collapsed the Mac's terminal to the phone's
-    /// width and left it there.
     @Test
     fun ptyCallsNameTheViewer() {
         val params = ptyViewerParams("session-1") {
@@ -244,10 +228,6 @@ class MachinePlaneTest {
         assertEquals("54", params["cols"]?.jsonPrimitive?.content)
     }
 
-    /// The same id for every call this launch makes: the resize takes the
-    /// lease, the reads keep it alive, and the detach gives it back. Three
-    /// different ids would be three viewers, and the session would stay
-    /// clamped by the two that never let go.
     @Test
     fun theViewerIdIsStableWithinTheProcess() {
         assertEquals(

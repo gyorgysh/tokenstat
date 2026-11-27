@@ -2,12 +2,6 @@
 
 import SwiftUI
 
-/// A check that wears the theme, not the platform default.
-///
-/// A `Toggle` left untinted draws the system blue, and a blue control in this
-/// app reads as a control from another app. This disc is accent-filled with a
-/// white check when on, and a quiet ring when off. The whole row is the tap
-/// target; the disc itself never handles the touch.
 struct ThemeCheckDisc: View {
     var on: Bool
 

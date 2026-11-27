@@ -2,15 +2,7 @@
 
 import SwiftUI
 
-/// When a message is about to make the agent read a whole conversation again.
-///
-/// The provider caches the conversation for one model, for a few minutes or an
-/// hour after the last turn. A message after that, or on another model, is read
-/// in full. The host records the size, model and lifetime after every turn
-/// (`ChatPromptCache`), and these rules decide whether that is worth a question.
-/// No percentage of a plan is shown: nobody publishes how tokens map onto one.
 enum ChatPromptCacheRule {
-    /// Below this a full read is cheap, and a question would only be noise.
     static let minimumTokens: UInt64 = 50_000
     static let idleSuppressedKey = "chat.cacheWarning.idle.suppressed"
     static let modelSuppressedKey = "chat.cacheWarning.model.suppressed"
@@ -27,8 +19,6 @@ enum ChatPromptCacheRule {
         return idle > cache.ttlMs ? idle : nil
     }
 
-    /// A warm cache on another model. A cold one costs the same either way,
-    /// and the send warning covers it.
     static func switching(_ chat: ChatConversation, to next: String, nowMs: Int64) -> Bool {
         guard let cache = cache(chat), nowMs - cache.atMs <= cache.ttlMs else { return false }
         return (cache.selection ?? "") != next
@@ -53,9 +43,6 @@ enum ChatPromptCacheRule {
 
 struct ChatCacheWarning: Identifiable {
     enum Kind {
-        /// Sending after the cache expired. `startNew` is nil when this message
-        /// cannot move, because it has files attached to this chat or the
-        /// host is too old to start a continuing chat.
         case idle(idleMs: Int64, startNew: (@MainActor () -> Void)?)
         case modelSwitch(from: String?, to: String)
     }
@@ -94,7 +81,6 @@ struct ChatCacheWarning: Identifiable {
     }
 }
 
-/// Presents `ChatModel.cacheWarning`. Attach it once per chat surface.
 struct ChatCacheWarningAlert: ViewModifier {
     @Bindable var model: ChatModel
     var isActive = true

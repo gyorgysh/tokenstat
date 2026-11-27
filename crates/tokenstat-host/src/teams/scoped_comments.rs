@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{AuthorizedTeamPrincipal, scoped_source::Source};
 use crate::{chat::sharing::CommentInput, error::DispatchError};
 use serde_json::Value;

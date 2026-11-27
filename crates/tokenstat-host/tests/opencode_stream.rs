@@ -132,8 +132,6 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
         .args(["chat-live", config.to_str().unwrap()])
         .current_dir(&project)
         .env("TOKENSTAT_TURN_MARKER", "owned-turn")
-        // The fixture is a UTF-8 protocol peer, even on CI's C locale.
-        // Python's locale-dependent stdout otherwise fails on café/ü.
         .env("PYTHONUTF8", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -161,9 +159,6 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
                 break;
             }
             if !line.ends_with('\n') {
-                // A deliberately unread output pipe cannot finish its last
-                // frame within Stop's flush budget. The host parser drops
-                // this incomplete tail; all prior records remain valid.
                 assert!(backpressure);
                 assert!(serde_json::from_str::<Value>(&line).is_err());
                 assert_eq!(reader.read_line(&mut String::new()).unwrap(), 0);
@@ -289,8 +284,7 @@ fn run_case(disconnect: bool, stop: bool, startup_stop: bool, backpressure: bool
             .filter(|record| record["type"] == "step_finish")
             .collect();
         assert!(!usage.is_empty());
-        // The parser unit tests fold these same correlated snapshots into
-        // one Usage event. Check the process boundary preserved identity.
+
         for record in usage {
             assert_eq!(record["tokenstatStep"], "msg_text");
             assert_eq!(record["part"]["tokens"]["output"], 5);

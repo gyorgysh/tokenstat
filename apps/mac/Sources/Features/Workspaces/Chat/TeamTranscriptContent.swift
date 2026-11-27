@@ -2,8 +2,6 @@
 import ImageIO
 import SwiftUI
 
-/// Reuses the chat renderer while leaving personal models, file transfers and
-/// approval callbacks out of this read-only Team history surface.
 struct TeamTranscriptContent: View {
     let history: TeamChatHistory
     @State private var rows: [ChatDisplayItem] = []
@@ -15,8 +13,6 @@ struct TeamTranscriptContent: View {
     @State private var error: String?
     @Environment(\.teamAvatarOwner) private var owner
     @Environment(\.teamAttachmentLoader) private var loadAttachment
-    // An image is decoded once, when it arrives, and its bytes dropped.
-    // Only a file that can be saved keeps its bytes.
     @State private var images = TeamAttachmentCache<(name: String, image: CGImage)>(byteLimit: 48 * 1024 * 1024)
     @State private var files = TeamAttachmentCache<TeamAttachmentFile>(byteLimit: 16 * 1024 * 1024)
     @State private var fetching: String?
@@ -42,9 +38,6 @@ struct TeamTranscriptContent: View {
                 }
                 if case let .attachment(file) = row.kind {
                     if let shown = images[file.id] {
-                        // Never opened from here: a file from another computer
-                        // is looked at inline when it is an image, and saved
-                        // otherwise, so nothing it names can launch.
                         Image(decorative: shown.image, scale: 1).resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 360, alignment: .leading)
                             .clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityLabel(TeamFilePreview.safeName(shown.name))
                     } else if let fetched = files[file.id] {
@@ -56,8 +49,6 @@ struct TeamTranscriptContent: View {
                             #endif
                         }
                     } else {
-                        // Fetched on request: a file comes from the publishing
-                        // computer, and only when someone wants to see it.
                         Button {
                             Task { await fetch(file.id) }
                         } label: {
@@ -80,8 +71,6 @@ struct TeamTranscriptContent: View {
             }
         }
         .preference(key: TeamTranscriptRenderedKey.self, value: readyRenderId)
-        // A link in someone else's checkout must not become an action on a
-        // personal checkout, simulator or workbench on this device.
         .environment(\.openURL, OpenURLAction { url in
             ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
         })
@@ -149,24 +138,16 @@ enum TeamFilePreview {
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int,
               width > 0, height > 0, width <= 100_000_000 / height, max(width, height) / min(width, height) <= 50 else { return nil }
-        // A small file can still describe a huge bitmap. Decode a bounded
-        // thumbnail, never the full image.
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2048,
                                         kCGImageSourceCreateThumbnailWithTransform: true]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return image
     }
-    /// Plain data a saved file may keep as its extension. Anything else,
-    /// including every type that can launch or be followed from Finder,
-    /// gets .download added, so an unknown kind is never trusted.
     private static let plainData: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "webp", "tif", "tiff", "bmp",
         "txt", "md", "markdown", "csv", "tsv", "json", "log", "pdf", "yaml", "yml", "toml", "diff", "patch",
     ]
 
-    /// The name as sent by another computer, made safe to show and to save:
-    /// no control or direction characters, no path, no leading dot, bounded,
-    /// and ending in a plain data extension or in .download.
     static func safeName(_ raw: String) -> String {
         var name = String(String.UnicodeScalarView(raw.unicodeScalars.filter { scalar in
             !(scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format

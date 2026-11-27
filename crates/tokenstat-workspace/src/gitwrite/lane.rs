@@ -77,8 +77,6 @@ fn run(dir: &Path, args: &[&str]) -> Result<String, String> {
     if output.status.success() {
         Ok(text)
     } else {
-        // These errors can appear in a shared chat. Git's stderr may contain
-        // an owner's credential-bearing remote URL or local configuration.
         Err(format!(
             "Git could not complete {}.",
             args.first().copied().unwrap_or("the operation")
@@ -246,7 +244,6 @@ fn check(lane: &Path, command: &[String]) -> Result<(), String> {
     let Some((program, args)) = command.split_first() else {
         return Ok(());
     };
-    // Outside the working tree, so the log can never be committed.
     let private = run(lane, &["rev-parse", "--absolute-git-dir"])?;
     let log = Path::new(&private).join("tokenstat-check.log");
     let file = OpenOptions::new()
@@ -374,7 +371,6 @@ pub fn land_controlled(
                 if run(lane, &["push", "-q", remote, &refspec]).is_ok() {
                     return Landing::Landed { commit };
                 }
-                // Somebody landed first. Start again from their result.
             }
             None => {
                 if checked_out(lane, target) {
@@ -438,7 +434,6 @@ pub fn escaping_link(lane: &Path) -> Result<Option<PathBuf>, String> {
             if kind.is_symlink() {
                 match path.canonicalize() {
                     Ok(target) if target.starts_with(&root) => {}
-                    // A dangling link is refused too: what it names may appear later.
                     _ => return Ok(Some(path)),
                 }
             } else if kind.is_dir() {
@@ -507,8 +502,6 @@ pub fn catch_up(dir: &Path, target: &str, remote: &str) -> CatchUp {
     if run(dir, &["merge-base", "--is-ancestor", "HEAD", &theirs]).is_err() {
         return CatchUp::Diverged;
     }
-    // Fetch can wait on another computer. Do not apply its result to a
-    // replacement folder or Git directory that appeared at this path meanwhile.
     if let Err(error) = writer.ensure_current() {
         return CatchUp::Failed(error.to_string());
     }

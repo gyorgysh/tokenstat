@@ -4,8 +4,6 @@
 
 import SwiftUI
 
-/// One example pipeline. The Design field uses `prompt`. The canvas inserts
-/// `nodes` and `edges` as a local draft. It does not call the model.
 struct WorkflowRecipe: Identifiable {
     var id: String
     var name: String
@@ -17,8 +15,6 @@ struct WorkflowRecipe: Identifiable {
 
 @MainActor
 enum WorkflowRecipes {
-    /// Agents whose CLI is on this Mac. Hidden tiles stay out. Shell is not
-    /// an agent. Empty means the example chips should hide.
     static func installedAgents(from backends: [AgentBackend]) -> [AgentBackend] {
         let agents = backends.filter { $0.id != "sh" }
         #if os(macOS)
@@ -31,8 +27,6 @@ enum WorkflowRecipes {
         #endif
     }
 
-    /// Who Design can talk to. Prefer installed agents. If the launch catalog
-    /// has not seen one yet, fall back to the advertised list minus Shell.
     static func designAgents(from backends: [AgentBackend]) -> [AgentBackend] {
         let installed = installedAgents(from: backends)
         if !installed.isEmpty { return installed }
@@ -279,10 +273,6 @@ struct WorkflowRecipeChips: View {
                             Text(recipe.name)
                                 .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(.primary)
-                            // Named steps, not tiles. An example is read by
-                            // somebody who does not know yet what the workflow
-                            // does, and "four squares and a +2" tells them
-                            // nothing they can act on.
                             WorkflowStepStrip(nodes: recipe.nodes, edges: recipe.edges)
                         }
                         Spacer(minLength: 0)
@@ -305,7 +295,6 @@ struct WorkflowRecipeChips: View {
     }
 }
 
-/// Agent, model, effort, folder. Same controls as Automations and Tasks.
 struct WorkflowDesignPickers: View {
     let agents: [AgentBackend]
     let folders: [WorkspaceFolder]

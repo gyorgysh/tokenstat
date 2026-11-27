@@ -15,14 +15,6 @@ using Windows.System;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Workspace file editor: a file tree, tabs, syntax colour from the host
-/// highlight service, find and replace, and saves that re-read before
-/// writing. Matches the Mac editor: dirty is the difference between the
-/// buffer and the last saved text, a host file that moved while the draft
-/// was dirty raises a conflict card, and saving stays off until a copy is
-/// chosen.
-/// </summary>
 internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _workspaceId;
@@ -129,9 +121,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder these files belong to.
-    /// </summary>
     public UIElement? ToolbarScope =>
         Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("common.files") : _folderName);
 
@@ -162,11 +151,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// The inspector column content: the open files with their dirty marks,
-    /// and the current file's facts. Tab switches and header changes repaint
-    /// it, so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -337,8 +321,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 Symbol.Important));
             return;
         }
-        // Opening the same file twice while its read is pending still owns
-        // one buffer, so competing tabs cannot overwrite each other's edits.
         existing = _open.FirstOrDefault(t => t.Path == path);
         if (existing is not null)
         {
@@ -384,10 +366,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// Dirty buffers need explicit discard. An in-flight save cannot be
-    /// closed.
-    /// </summary>
     private async Task CloseTabAsync(EditorTab tab)
     {
         if (tab.IsSaving)
@@ -433,11 +411,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
         _pageStatus.Children.Add(Chrome.Banner(text, Theme.Warning, Symbol.Important));
     }
 
-    /// <summary>
-    /// One file open in the editor. What is on screen versus what was last
-    /// read from or written to disk: dirty is the difference between the
-    /// two, so undoing back to the original stops reporting unsaved.
-    /// </summary>
     private sealed class EditorTab
     {
         private readonly Page _owner;
@@ -490,10 +463,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
         public string Title => Name + (IsDirty ? " •" : "");
 
-        /// <summary>
-        /// Line endings normalized: the edit box speaks carriage returns
-        /// and the host speaks newlines, and that difference is not an edit.
-        /// </summary>
         public bool IsDirty => Norm(_text) != Norm(_savedText);
 
         private static string Norm(string text) =>
@@ -573,8 +542,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _text = ReadEditorText();
             _applying = false;
             _box.TextChanged += (_, _) => OnEdited();
-            // Coalesce layout notifications; never mutate the visual tree from
-            // inside a native RichEdit layout pass.
             var gutterTimer = _box.DispatcherQueue.CreateTimer();
             gutterTimer.Interval = TimeSpan.FromMilliseconds(50);
             gutterTimer.Tick += (_, _) => { gutterTimer.Stop(); DrawLineNumbers(); };
@@ -596,8 +563,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             RefreshStatus();
         }
 
-        // RichEdit owns a final paragraph marker which is not part of the file.
-        // Read a range excluding that marker; preserve all real trailing newlines.
         private string ReadEditorText() => EditorText.Read(_box.Document);
 
         private void RebuildLineStarts()
@@ -649,7 +614,7 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                     _lineNumbers.Children.Add(label);
                 }
             }
-            catch { /* The native text layout is unavailable until the control is loaded. */ }
+            catch { }
         }
 
         private void BoxOnKeyDown(object sender, KeyRoutedEventArgs e)
@@ -783,11 +748,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _conflict.Children.Add(actions);
         }
 
-        /// <summary>
-        /// Literal, case-insensitive matches over the buffer, wrapping in
-        /// both directions. Bounded so a pathological query cannot mint
-        /// unbounded ranges.
-        /// </summary>
         private void RefreshMatches()
         {
             _matches.Clear();
@@ -890,12 +850,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _ = HighlightAsync();
         }
 
-        /// <summary>
-        /// Colour the buffer once it stops changing. The host sends kinds
-        /// and never colours, in UTF-16 units that drop straight into
-        /// ranges. A result measured against older text is dropped, not
-        /// painted over the wrong ranges.
-        /// </summary>
         public async Task HighlightAsync()
         {
             var source = _text;
@@ -983,11 +937,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        /// <summary>
-        /// The host file may have moved since this buffer opened: another
-        /// window, or a run writing output. Re-read before writing so a
-        /// stale draft cannot silently overwrite newer host content.
-        /// </summary>
         public async Task SaveAsync()
         {
             if (IsSaving || !IsDirty || ConflictHost is not null)
@@ -1022,8 +971,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
                 }
                 if (hostNormalized == draft)
                 {
-                    // Already there: a lost acknowledgement or a matching
-                    // remote edit. Mark it saved without writing again.
                     MarkSaved(host);
                     return;
                 }
@@ -1086,8 +1033,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
 
         private void MarkSaved(string content)
         {
-            // A save acknowledges the submitted version. Edits made while
-            // that request was in flight stay dirty.
             _savedText = content;
             HeaderChanged?.Invoke();
         }
@@ -1143,11 +1088,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             }
         }
 
-        /// <summary>
-        /// One-based number of the first line where two texts differ, or
-        /// null when they match. Names where to look instead of eyeballing
-        /// two full files.
-        /// </summary>
         private static int? FirstDifference(string mine, string other)
         {
             if (mine == other)
@@ -1219,11 +1159,6 @@ internal sealed class EditorPage : Page, IInspectorContent, IToolbarItems
             _status.Text = string.Join(" · ", parts);
         }
 
-        /// <summary>
-        /// One-based caret position over the buffer. A carriage return only
-        /// breaks the line on its own: inside a CRLF pair the line feed does
-        /// the counting, so Windows endings do not number every line twice.
-        /// </summary>
         private (int Line, int Col) CaretLineCol()
         {
             try

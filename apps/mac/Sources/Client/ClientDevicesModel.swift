@@ -4,14 +4,6 @@ import Observation
 
 #if !os(macOS) || TOKENSTAT_TEST
 
-/// What each device contributed, fetched once and kept.
-///
-/// One request per device on the host's side, so this is asked for when the
-/// screen opens and not warmed behind one somebody might never visit.
-///
-/// The window follows the account tier's history depth: free 30 days,
-/// supporter a year, patron all-time. Asking every tier for a month left a
-/// paid account looking like it only spent a slice of what it really had.
 @Observable
 @MainActor
 final class ClientDevicesModel {
@@ -45,8 +37,6 @@ final class ClientDevicesModel {
         }
         let request = UUID()
         generation = request
-        // Hosts only. Clients never upload an archive, so asking for their
-        // spend only produces $0 rows the UI does not show.
         let ids = machines.filter(\.isHost).compactMap(\.machineID)
         guard owner != nil, !ids.isEmpty else {
             isLoading = false
@@ -71,9 +61,6 @@ final class ClientDevicesModel {
             errorMessage = nil
         } catch {
             guard !Task.isCancelled, generation == request, owner == WorkSessionContext.shared.scope else { return }
-            // The device list itself came from the account and is already on
-            // screen. This failure costs the figures beside the names, which is
-            // a line of explanation rather than an empty screen.
             errorMessage = L10n.text("apple.clientdevicesview.could_not_work_out_what_each_device_spent.908fa25b", "\(error.localizedDescription)")
         }
     }

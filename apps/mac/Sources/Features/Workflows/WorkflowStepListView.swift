@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// Phone and compact iPad graph editor: a list of steps, not a flattened
-/// sequence. Each row names its outgoing Then / Else / Body connections.
 struct WorkflowStepListView: View {
     @Bindable var session: WorkflowEditorSession
     @Binding var path: [String]
@@ -11,7 +9,6 @@ struct WorkflowStepListView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var adding = false
 
-    /// Phone list and iPad inspector share these names. Input is Start.
     static func kindTitle(_ kind: WorkflowNodeKind) -> String {
         switch kind {
         case .input: return L10n.text("common.start")

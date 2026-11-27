@@ -82,10 +82,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
-/// A failure that stays on screen until the person deals with it: the message,
-/// a way to try again, and a way to put it away. Background refreshes never
-/// clear one; only a successful retry or an explicit dismiss does. Port of the
-/// `ClientErrorCard` contract.
 @Composable
 fun StickyErrorCard(
     message: String,
@@ -108,8 +104,6 @@ fun StickyErrorCard(
     }
 }
 
-/// One hub row: the same word the Mac sidebar uses, the count when it is
-/// news, and a chevron. Zero draws nothing, like iOS `ClientSectionRow`.
 @Composable
 fun HubSectionRow(
     section: HubSection,
@@ -186,13 +180,6 @@ private fun hubIcon(section: HubSection): ImageVector = when (section) {
     HubSection.BROWSER -> Icons.Default.Language
 }
 
-/// One folder as its sections, port of iOS `ClientWorkspaceDetailView`'s
-/// stacked list: a header card (machine, path, branch plus Switch) and one
-/// full-width row per section, each opening its own full page.
-///
-/// Badges come from two calls, like iOS `reload()`: `workspace.summary` for
-/// every badge at once, and `workspace.status` for the git state the header
-/// and the Changes row need.
 @Composable
 fun WorkspaceHubMenu(
     model: AppViewModel,
@@ -231,13 +218,9 @@ fun WorkspaceHubMenu(
                 cachedPulls = counts.pulls.takeIf { summaryHasPulls(summary) } ?: cachedPulls
                 error = null
             } else {
-                // The host answered but does not have this folder, or is too
-                // old to know the method. Badges stay as they were.
                 counts = counts.copy(changes = gitChanged ?: counts.changes)
             }
         }.onFailure {
-            // Every badge comes from this one call, so a failure leaves all
-            // of them stale rather than one blank. Say so.
             error = TunnelCopy.display(it.message ?: L10n.text("android.workspacehub.the_request_failed.db4fb447"), hostName)
         }
     }
@@ -311,9 +294,6 @@ private fun summaryHasPulls(summary: JsonObject): Boolean =
     summary["pulls"] is kotlinx.serialization.json.JsonPrimitive &&
         (summary["pulls"] as kotlinx.serialization.json.JsonPrimitive).contentOrNull != null
 
-/// The folder hub with its own navigation: the section menu, then one full
-/// page per section with a way back. Drop-in replacement for the chip-row
-/// workspace detail.
 @Composable
 fun WorkspaceHub(
     model: AppViewModel,
@@ -342,11 +322,7 @@ fun WorkspaceHub(
     var openSection by rememberSaveable(folder.str("id"), initialSection) {
         mutableStateOf(initialSection?.let { HubSection.entries.find { s -> s.key == it || s.label == it }?.key })
     }
-    // Each tap on a Sessions "start chat" tile is a fresh instruction to open
-    // the conversation worth returning to, even on an already-open Chat page.
     var chatNonce by rememberSaveable(folder.str("id")) { mutableStateOf(0) }
-    // Wide projects open directly in their workbench; compact navigation keeps
-    // the overview. Deriving the default preserves the selected chat on resize.
     val section = openSection ?: HubSection.SESSIONS.key.takeIf { wideNavigation }
     var isRepo by remember(peer, workspace) { mutableStateOf((folder["git"] as? JsonObject)?.bol("isRepo") == true) }
     LaunchedEffect(peer, workspace, wideNavigation) {
@@ -358,18 +334,12 @@ fun WorkspaceHub(
         }
     }
     val protocol = rememberWorkspaceHostProtocol(model, peer, workspace, section)
-    // A section is a push inside the folder, and the folder is a push inside
-    // Workspaces. Back steps out one at a time rather than closing the app.
     BackHandler(enabled = !wideNavigation && section != null) { openSection = null }
     BackHandler(enabled = wideNavigation && onBack != null) { onBack?.invoke() }
-    // A folder is a push, like the Apple clients push it: this screen owns
-    // the header from here down, so the app toolbar steps aside.
     HideTopBar()
     val presence = LocalTabBarPresence.current
     val compactChat = section == HubSection.CHAT.key && presence.sectionHeaderHidden && compactChatKeyboard()
     Column(modifier) {
-        // A screen inside the section can own the header instead, when it
-        // has a truer title than the section's name.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = if (presence.sectionHeaderHidden) Modifier.height(0.dp) else Modifier,

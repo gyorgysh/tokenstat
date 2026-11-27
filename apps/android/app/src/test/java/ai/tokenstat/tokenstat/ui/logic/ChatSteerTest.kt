@@ -11,8 +11,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// A mid-turn note has to survive a chat list that left a moment earlier,
-/// and only a list requested after the mutation may release that protection.
 class ChatSteerTest {
     private fun row(id: String, note: String? = null, title: String = "T"): JsonObject {
         val map = buildJsonObject {

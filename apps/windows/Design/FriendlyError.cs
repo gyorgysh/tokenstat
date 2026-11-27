@@ -8,17 +8,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// A failure, said in a way somebody can act on. One table, shared by every
-/// client, so the same failure cannot be explained two ways in one product.
-/// Titles, messages and match order are transcribed from the Apple
-/// FriendlyError, which is the source of truth. The raw text is kept: what
-/// changes is what leads.
-/// Two deliberate differences: glyphs are WinUI Symbols approximating the SF
-/// Symbols (there is no moon, key or wifi slash in the enum), and the asleep
-/// row names the remote Mac rather than this one, because on Windows the
-/// sleeper is always the other computer.
-/// </summary>
 internal sealed record FriendlyErrorInfo(
     string Title,
     string Message,
@@ -28,13 +17,8 @@ internal sealed record FriendlyErrorInfo(
     bool RequiresSignIn = false,
     Symbol Symbol = Symbol.Important)
 {
-    /// <summary>
-    /// The glyph on the action button, from the shared action vocabulary: a
-    /// crown when it leads to plans, the retry arrow when it retries.
-    /// </summary>
     public ActionIcon ActionIcon => OpensPlans ? ActionIcon.Plans : RequiresSignIn ? ActionIcon.SignIn : ActionIcon.Refresh;
 
-    /// <summary>Whether this is something the user can fix now.</summary>
     public bool IsActionable => ActionTitle is not null;
 }
 
@@ -42,12 +26,6 @@ internal static class FriendlyError
 {
     public static string Display(string? raw) => From(raw).Message;
 
-    // Matching is on substrings of the message rather than typed errors on
-    // purpose: these strings cross a JSON boundary from Rust, where they are
-    // deliberately human sentences and not a code enum. A new phrasing that
-    // falls through lands in the default, which is honest, rather than being
-    // mapped to the wrong advice. Arm order mirrors the Apple table, where
-    // order is load bearing.
     public static FriendlyErrorInfo From(string? text)
     {
         var raw = (text ?? "").Trim();
@@ -177,10 +155,6 @@ internal static class FriendlyError
                 raw,
                 Symbol: Symbol.Important);
         }
-        // Before the sign-in case, and deliberately: a refused tunnel
-        // credential repairs itself, and its sentence used to contain the
-        // words "sign in again", which sent people to fix something that was
-        // already being fixed.
         var wantsSignIn = lower.Contains("sign in") || lower.Contains("signed out")
             || lower.Contains("not logged in")
             || (lower.Contains("token") && lower.Contains("revoked"));
@@ -217,8 +191,6 @@ internal static class FriendlyError
                 RequiresSignIn: true,
                 Symbol: Symbol.Contact);
         }
-        // No Apple row for this one. A refused account or device is not a
-        // dead login, so it must not send people to sign in again.
         if (lower.Contains("unauthorized") || lower.Contains("forbidden"))
         {
             return new FriendlyErrorInfo(
@@ -304,8 +276,6 @@ internal static class FriendlyError
                 ActionTitle: L10n.Text("windows.friendlyerror.try_again.d8b8392e"),
                 Symbol: Symbol.Refresh);
         }
-        // Bare codes only count inside a failure sentence, never on their own:
-        // a number alone could be a port or a count in some other sentence.
         var readsAsFailure = lower.Contains("status") || lower.Contains("gateway")
             || lower.Contains("error") || lower.Contains("failed");
         if (lower.Contains("bad gateway") || lower.Contains("service unavailable")

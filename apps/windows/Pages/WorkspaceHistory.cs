@@ -11,17 +11,8 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Commit history for one workspace: a scrolling list, then one commit in
-/// full, message first. Matches the Mac history surface: the message is
-/// the part people came for and it goes at the top, in full.
-/// </summary>
 internal static class WorkspaceHistory
 {
-    /// <summary>
-    /// The history card, or null when this folder has no git history to
-    /// show. File details come from the selected commit.
-    /// </summary>
     public static async Task<UIElement?> LoadCardAsync(
         UIElement owner, string workspaceId)
     {
@@ -51,12 +42,12 @@ internal static class WorkspaceHistory
                 workspaceId, "workspace.status", new JsonObject { ["id"] = workspaceId });
             hasUpstream = !string.IsNullOrEmpty(Format.Text(status["git"], "upstream", Format.Text(status, "upstream")));
         }
-        catch { /* Do not claim that a commit was pushed without an upstream. */ }
+        catch { }
         JsonNode? ownAccount = null;
         string? ownAvatar = null;
         string ownHandle = "", ownName = "";
         try { var status = await AppServices.Host.CallAsync("account.status"); var account = status["account"] ?? status; ownAccount = account; ownAvatar = Format.Text(account, "avatar"); ownHandle = Format.Text(account, "handle"); ownName = Format.Text(account, "displayName"); }
-        catch { /* History remains usable while account status is unavailable. */ }
+        catch { }
         var publicAvatars = HistoryAvatars.PublicAsync(workspaceId, array);
         var ownEmails = await HistoryAvatars.OwnEmailsAsync(ownAccount, array);
         var faces = await publicAvatars;
@@ -80,9 +71,6 @@ internal static class WorkspaceHistory
             }.Where(part => !string.IsNullOrEmpty(part)));
             if (commit?["tags"] is JsonArray tags && tags.Count > 0)
             {
-                // A non-string tag must not take down the whole list. The
-                // parse materializes inside the try, so a bad entry lands
-                // here instead of at the join below.
                 List<string> names;
                 try
                 {
@@ -189,22 +177,11 @@ internal static class WorkspaceHistory
 
 }
 
-/// Git identities are device-local. A commit recognised as ours on another
-/// linked computer can identify the same author here without changing Git config.
 internal static class HistoryAvatars
 {
     private static readonly HistoryAvatarCache PublicCache = new();
-    /// <summary>
-    /// The forge's public profile pictures for these commits' authors, by
-    /// commit id and by email. Every author gets their own picture, not only
-    /// this machine's git identity. Empty when the folder has no forge remote,
-    /// the forge cannot be reached, or it does not answer in a few seconds:
-    /// initials are a fine fallback and must never hold the list back.
-    /// </summary>
     internal static async Task<JsonNode?> PublicAsync(string workspaceId, JsonArray commits)
     {
-        // Start from the newest commit the forge can know; local-only commits
-        // are matched through their author's email instead.
         var from = commits.FirstOrDefault(c => !Format.Flag(c, "unpushed")) is JsonNode pushed
             ? Format.Text(pushed, "id")
             : "";
@@ -241,10 +218,6 @@ internal static class HistoryAvatars
         }
     }
 
-    /// <summary>
-    /// The picture for one commit: the account's own upload for commits that
-    /// are ours, otherwise the author's public forge picture, otherwise none.
-    /// </summary>
     internal static string? For(JsonNode? commit, bool mine, string? ownAvatar, JsonNode? publicAvatars)
     {
         if (mine && !string.IsNullOrEmpty(ownAvatar)) return ownAvatar;
@@ -282,7 +255,7 @@ internal static class HistoryAvatars
                             if (Format.Flag(c, "mine") && Format.Text(c, "id").Length > 0 && Format.Text(c, "email") is { Length: > 0 } email)
                                 emails[Format.Text(c, "id")] = email;
                     }
-                    catch { /* Offline computers do not delay or erase local history. */ }
+                    catch { }
                     return emails;
                 }
                 cached = (DateTime.UtcNow, Fetch());

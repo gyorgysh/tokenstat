@@ -44,21 +44,12 @@ import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/// The face of a conversation. Port of `PersonaMark`.
-///
-/// Drawn, not drawn-by-someone: every persona gets a character built from one
-/// number, so a new persona has a face the moment it is named and there is no
-/// asset to ship, scale, or theme.
-///
-/// Simulation runs only while resumed; frame ticks invalidate the Canvas draw
-/// pass without recomposing or relaying out its conversation row.
 @Composable
 fun PersonaMark(
     seed: ULong,
     modifier: Modifier = Modifier,
     size: Dp = 28.dp,
     mood: PersonaMood = PersonaMood.Idle,
-    /** Seconds of motion before the character rests on its last frame. Null moves while shown. */
     settlesAfter: Double? = null,
 ) {
     val colors = LocalTsColors.current
@@ -80,8 +71,6 @@ fun PersonaMark(
                     var firstFrame = -1L
                     try {
                         while (currentCoroutineContext().isActive) {
-                            // A face that has said its piece rests on its last
-                            // frame: every moving one costs the screen a frame.
                             if (settlesAfter != null && firstFrame >= 0 &&
                                 (lastDraw - firstFrame) / 1_000_000_000.0 > settlesAfter) break
                             withFrameNanos { frame ->
@@ -100,12 +89,11 @@ fun PersonaMark(
         }
     }
     Canvas(modifier.size(size)) {
-        tick.longValue // Read only in draw: no frame-driven recomposition.
+        tick.longValue
         drawPersonaFace(traits, hue, motion)
     }
 }
 
-/** A chat with nothing to do alternates quiet moments with short playful activity. */
 @Composable
 fun PersonaPastime(seed: ULong, modifier: Modifier = Modifier, size: Dp = 84.dp) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -138,18 +126,12 @@ fun PersonaPastime(seed: ULong, modifier: Modifier = Modifier, size: Dp = 84.dp)
     PersonaMark(seed = seed, modifier = modifier, size = size, mood = mood)
 }
 
-/// Everything a resting persona looks like, drawn in one pass. Port of the
-/// `PersonaRenderer` body, shadow, antenna, highlight and idle face, over the
-/// resting body the soft body settles into. Shared with the chat empty art so
-/// the placeholder and the mark are the same creature.
 fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: PersonaMotion? = null) {
     val unit = min(size.width, size.height)
     if (unit <= 1f) return
     val w = size.width
     val h = size.height
 
-    // Resting nodes: the reach in `PersonaSoftBody` is the radius widened by
-    // each lump, which is where a settled body sits.
     val count = traits.lumps.size
     val cx = 0.5f
     val cy = 0.95f - 0.355f
@@ -159,8 +141,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
         if (motion == null) Offset(cx + cos(angle) * reach, cy + sin(angle) * reach)
         else Offset(motion.x[index].toFloat(), motion.y[index].toFloat())
     }
-    // The outline smoothing from `PersonaSoftBody.outline`, then the same
-    // Catmull-Rom to Bezier closed curve.
     val smoothing = 0.18f
     val points = (0 until count).map { index ->
         val prev = nodes[(index + count - 1) % count]
@@ -205,8 +185,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     )
 
     if (traits.hasAntenna && unit >= 18f) {
-        // Rooted in the crown node, so it whips with the squash instead of
-        // floating over a rectangle the body no longer fills.
         val root = Offset(crown.x * w, crown.y * h)
         val lean = (crown.x - centroid.x) * w
         val tip = Offset(root.x + unit * 0.06f + lean * 1.6f, root.y - unit * 0.15f)
@@ -231,10 +209,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     drawPath(outline, hue.copy(alpha = 0.65f), style = Stroke(width = max(0.5f, unit * 0.012f)))
 
     clipPath(outline) {
-        // The highlight sits off the middle rather than off the bounding box,
-        // so a squash slides it across the body instead of pinning it to a
-        // corner. A soft gradient rather than a flat ellipse: at 26% white a
-        // hard edge reads as a scuff instead of light.
         val hlW = (maxX - minX) * w * 0.155f
         val hlH = (maxY - minY) * h * 0.085f
         val hlX = midX * w - hlW * 1.55f
@@ -251,9 +225,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
                 Size(hlW, hlH),
             )
         }
-        // Turning is drawn inside the face: each feature sits on the body as
-        // if it were a ball, so a turn or a glance slides it round and
-        // narrows it. Only the roll applies to the whole face.
         val origin = Offset(centroid.x * w, centroid.y * h)
         rotate(((motion?.roll ?: 0.0) * 180 / PI).toFloat(), origin) {
             drawPersonaIdleFace(traits, androidx.compose.ui.graphics.lerp(hue, Color.Black, 0.78f),
@@ -268,10 +239,6 @@ fun DrawScope.drawPersonaFace(traits: PersonaTraits, hue: Color, motion: Persona
     }
 }
 
-/// The face: eyes seen through their lids, blush and the mouth, all placed on
-/// the body as if it were a ball. Clipped to the body by the caller, so a
-/// heavy squash pushes them around inside the creature rather than letting an
-/// eye escape. Without motion it is the resting idle face.
 private fun DrawScope.drawPersonaIdleFace(
     traits: PersonaTraits,
     ink: Color,
@@ -286,13 +253,10 @@ private fun DrawScope.drawPersonaIdleFace(
 ) {
     val w = size.width
     val h = size.height
-    // The face borrows the body's own squash: wide and flat means narrow eyes
-    // further apart, tall and thin means round eyes closer together.
     val aspect = ((maxY - minY) / max(maxX - minX, 1e-4f)).coerceIn(0.45f, 1.7f)
     val lean = (atan2(crown.x - centroid.x, max(centroid.y - crown.y, 1e-4f)) * 0.25f).coerceIn(-0.12f, 0.12f)
     val tilt = lean + (motion?.headTilt ?: 0.0).toFloat()
     val heightPoints = (maxY - minY) * h
-    // Eyes just above the middle: low, wide-set features read as friendly.
     val anchorHeight = heightPoints * 0.05f
     val origin = Offset(centroid.x * w, centroid.y * h)
 
@@ -315,8 +279,6 @@ private fun DrawScope.drawPersonaIdleFace(
     fun onFace(dx: Float, dy: Float): Offset = place(project(dx, dy).point)
 
     val count = traits.eyeCount
-    // Small marks need proportionally bigger features or the face turns into
-    // two specks. Three fixed steps, not a curve.
     val lod = if (unit / density < 24f) 1.28f else if (unit / density < 34f) 1.12f else 1.0f
     val radius = unit * 0.060f * lod
     val spread = unit * 0.25f / max(sqrt(aspect), 0.6f)
@@ -340,7 +302,6 @@ private fun DrawScope.drawPersonaIdleFace(
 
     val facing = min(1f, max(0f, cos(turn)) * 4f)
     if (facing <= 0.01f || unit / density < 21f) return
-    // Two warm patches under the eyes.
     val strength = ((motion?.blush ?: 0.32).toFloat()).coerceIn(0f, 1f)
     for (side in listOf(-1f, 1f)) {
         val centre = onFace(side * (spread * 0.62f + radius * 0.9f), -anchorHeight + radius * 1.25f)
@@ -355,8 +316,6 @@ private fun DrawScope.drawPersonaIdleFace(
             Size(bw, radius * 0.78f),
         )
     }
-    // The persona's own mouth is a bias on the mood's, not a replacement: a
-    // naturally glum character still smiles when it wins, just less widely.
     val resting = when (traits.mouth) {
         PersonaTraits.Mouth.SMILE -> 0.34f
         PersonaTraits.Mouth.FROWN -> -0.34f
@@ -387,9 +346,6 @@ private fun DrawScope.drawPersonaIdleFace(
     drawPath(mouth, ink.copy(alpha = 0.78f * facing), style = Stroke(width = max(1f, unit * 0.020f), cap = StrokeCap.Round))
 }
 
-/// One eye: a solid shape seen through the gap its lids leave. Every
-/// expression is lid positions, not a different drawing, so the eye can
-/// travel from any of them to any other.
 private fun DrawScope.drawPersonaEye(
     centre: Offset,
     radius: Float,
@@ -407,8 +363,6 @@ private fun DrawScope.drawPersonaEye(
 ) {
     val wide = ((motion?.openness ?: 1.0).toFloat()).coerceIn(0f, 1.3f)
     val closing = blink.coerceIn(0f, 1f)
-    // A blink squeezes the eye wider as it shuts; its overshoot on the way
-    // out (a negative blink) opens it a little taller.
     val ew = radius * 2f * (if (oval) 0.86f else 1f) * widthScale * (1f + closing * 0.10f)
     val eh = radius * 2f * (if (oval) 1.14f else 1f) * min(1.4f, heightScale * max(1f, wide)) * (1f - min(0f, blink) * 0.9f)
     val open = (min(wide, 1f) * (1f - closing)).coerceIn(0f, 1f)
@@ -420,7 +374,6 @@ private fun DrawScope.drawPersonaEye(
     rotate(tilt * 180f / PI.toFloat(), centre) {
         val minX = centre.x - ew / 2f; val maxX = centre.x + ew / 2f
         val minY = centre.y - eh / 2f; val maxY = centre.y + eh / 2f
-        // Where the lids meet when shut: below the middle, as on a face.
         val meet = minY + eh * 0.68f
         val shut = 1f - open
         val upper = minY + (meet - minY) * shut
@@ -431,13 +384,10 @@ private fun DrawScope.drawPersonaEye(
         fun lidY(x: Float) = innerY + (outerY - innerY) * (x - innerX) / (outerX - innerX)
         val left = minX - ew
         val right = maxX + ew
-        // The lid's edge arches, most of all half way down, so a heavy lid
-        // leaves a rounded eye. Fully open or fully shut it is straight.
         val arch = lidY(centre.x) - eh * (1.6f * shut * (1f - shut) + 0.26f * min(1f, focus + droop))
         val lowerBase = maxY - (maxY - meet) * shut - eh * 0.30f * squint
         val lowerEdge = max(lowerBase - eh * 0.10f * smile, max(lidY(left), lidY(right)))
         val lowerPeak = max(lowerBase - eh * 1.35f * smile, arch)
-        // The gap between the lids, which the eye and its lights show through.
         val gap = Path().apply {
             moveTo(left, lidY(left))
             quadraticTo(centre.x, arch, right, lidY(right))
@@ -448,8 +398,6 @@ private fun DrawScope.drawPersonaEye(
         if (open > 0.04f) {
             clipPath(gap) {
                 drawOval(ink.copy(alpha = ink.alpha * opacity), Offset(minX, minY), Size(ew, eh))
-                // Two catchlights: the single most effective thing for making
-                // a dark eye look wet and alive. The lids cut them too.
                 if (unit / density >= 22f && open > 0.3f) {
                     val size = min(ew, eh)
                     drawCircle(Color.White.copy(alpha = 0.92f * opacity), size * 0.15f,
@@ -459,8 +407,6 @@ private fun DrawScope.drawPersonaEye(
                 }
             }
         }
-        // A shut eye is still an expression: a curve up when pleased, down
-        // when content or asleep. It fades in as the lids close.
         val line = ((0.24f - open) / 0.18f).coerceIn(0f, 1f)
         if (line > 0f) {
             val sag = eh * 0.22f * (if (smile > 0.5f) -1f else 1f) - eh * 0.10f * droop

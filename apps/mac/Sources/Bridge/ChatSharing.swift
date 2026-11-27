@@ -28,8 +28,6 @@ struct ChatAgentRunRecovered: Decodable, Sendable {
 
 #if os(macOS)
 extension Bridge {
-    /// These calls always address this computer. They have no account receipt
-    /// and must never follow the selected personal peer or a Team connection.
     static func localChatSharing(workspaceID: String, id: String,
                                  scope: WorkReference.Scope, generation: UInt64) async throws -> ChatLocalSharingInfo {
         try await chatInvoke(peer: nil, "chat.sharing.info", ["workspaceId": workspaceID, "id": id],
@@ -43,8 +41,6 @@ extension Bridge {
             expectedScope: scope, expectedGeneration: generation, as: ChatLocalSharingStopped.self)
     }
 
-    /// Release a chat held by an agent run whose guardian is gone. The host
-    /// refuses unless it can prove no process of that run is left.
     static func recoverAgentRun(workspaceID: String, id: String,
                                 scope: WorkReference.Scope, generation: UInt64) async throws -> ChatAgentRunRecovered {
         try await chatInvoke(peer: nil, "chat.sharing.recoverRun", ["workspaceId": workspaceID, "id": id, "confirmRecovery": true],

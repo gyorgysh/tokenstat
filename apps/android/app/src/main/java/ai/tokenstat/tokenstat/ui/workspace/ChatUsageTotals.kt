@@ -4,7 +4,6 @@ package ai.tokenstat.tokenstat.ui.workspace
 import java.math.BigInteger
 import kotlinx.serialization.json.*
 
-/** Whole-conversation totals from the host, with only subsequently accepted tail events added. */
 internal data class ChatUsageTotals(
     val input: BigInteger,
     val output: BigInteger,
@@ -24,8 +23,6 @@ internal data class ChatUsageTotals(
     fun tail(rows: List<JsonObject>): ChatUsageTotals? {
         var total = this
         for (row in rows) {
-            // A new summary can overlap previously counted events. Ask the host
-            // for verified totals instead of adding an ambiguous segment twice.
             when (row.str("kind")) { "retainedUsage", "teamAgentSegment" -> return null }
             val event = row["event"] as? JsonObject ?: continue
             if (event.str("kind") != "usage") continue

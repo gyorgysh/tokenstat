@@ -1,22 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //! Where the Claude plan limits come from, in order of trust.
-//!
-//! 1. **The live feed.** Claude Code pipes `rate_limits` into its status line
-//!    command after every reply. When the person turned the feed on, that
-//!    command is ours and the latest reading sits on disk. It costs nothing
-//!    and is as current as the last message.
-//! 2. **Claude Code's own report.** The `get_usage` control request asks a
-//!    short lived `claude` for the usage report. Claude Code fetches it with
-//!    its own login, so nothing here reads, renews or writes that login, and
-//!    no Keychain dialog can follow from it.
-//! 3. **The usage endpoint, directly.** `tokenstat_sync::claude_limits`, for a
-//!    machine where the `claude` command cannot be found.
-//! 4. **The remembered reading**, marked as old, with the reason the others
-//!    failed.
-//!
-//! Each step only runs when the one before it had nothing, so on a machine
-//! where Claude Code works the direct endpoint is never asked and the stored
-//! login is never touched.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
@@ -27,19 +10,12 @@ use serde_json::{Value, json};
 use tokenstat_core::claude_feed::{self, SOURCE};
 use tokenstat_core::limits::ProviderLimits;
 
-/// Long enough for a cold start of `claude` plus one request on a slow
-/// network, short enough that a hung child cannot hold the limits pass.
 const GET_USAGE_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// An automatic pass reuses Claude Code's answer this long. The host asks
-/// every five minutes, and the live feed covers the time in between.
 const REUSE_AUTOMATIC: Duration = Duration::from_secs(120);
 
-/// An explicit refresh still shares an answer this young, so several screens
-/// refreshing together start one `claude`, not several.
 const REUSE_FORCED: Duration = Duration::from_secs(15);
 
-/// After a failure, automatic passes leave `claude` alone this long.
 const FAILURE_PAUSE: Duration = Duration::from_secs(60);
 
 fn now_ms() -> i64 {
@@ -67,9 +43,6 @@ pub(crate) fn read(force: bool) -> ProviderLimits {
         return newest(direct, live.as_ref());
     }
 
-    // Claude Code's own words win when it was there to ask: they describe
-    // the source that normally works. The direct read's reason is only
-    // useful when no `claude` could be found.
     let failure = cli.unwrap_or(direct);
     let Some(mut reading) = live else {
         return failure;
@@ -91,8 +64,6 @@ fn age(reading: &ProviderLimits, now: i64) -> i64 {
     now.saturating_sub(reading.observed_at_ms)
 }
 
-/// A live reading newer than the one just fetched is the better answer: it
-/// came from a reply that happened after the request was answered.
 fn newest(fetched: ProviderLimits, live: Option<&ProviderLimits>) -> ProviderLimits {
     match live {
         Some(live) if live.observed_at_ms > fetched.observed_at_ms => ProviderLimits {
@@ -108,8 +79,6 @@ struct Pace {
     reading: ProviderLimits,
 }
 
-/// `None` when there is no `claude` to ask, so the caller tries the next
-/// source. A reading or a reason otherwise.
 fn read_through_claude(force: bool) -> Option<ProviderLimits> {
     static LAST: Mutex<Option<Pace>> = Mutex::new(None);
     let mut last = LAST
@@ -164,8 +133,6 @@ fn get_usage(program: &str, environment: &[(String, String)]) -> ProviderLimits 
         ])
         .env("PATH", crate::launcher::search_path_var())
         .envs(environment.iter().map(|(key, value)| (key, value)))
-        // A host started from inside a Claude Code session must not make
-        // this child believe it is nested in one.
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE_ENTRYPOINT")
         .stdin(Stdio::piped())
@@ -193,8 +160,7 @@ fn get_usage(program: &str, environment: &[(String, String)]) -> ProviderLimits 
         "request_id": request_id,
         "request": {"subtype": "get_usage", "skip_behaviors": true},
     });
-    // Stdin stays open until the answer is in: closing it ends the session
-    // before the request has been read.
+
     let mut stdin = child.stdin.take();
     if let Some(input) = stdin.as_mut() {
         let _ = writeln!(input, "{request}");
@@ -299,8 +265,6 @@ pub(crate) mod status_line {
     use super::*;
     use std::path::PathBuf;
 
-    /// Marks the command as ours, so the state can be read back from the
-    /// settings file alone.
     const ARGUMENT: &str = "statusline";
 
     fn settings_path() -> Option<PathBuf> {
@@ -331,9 +295,6 @@ pub(crate) mod status_line {
             .is_some_and(|c| c.contains("tokenstat-hostd") && c.trim_end().ends_with(ARGUMENT))
     }
 
-    /// The settings file as text, or `None` when there is none yet. Parsed
-    /// once to make sure it is a JSON object: a file Claude Code itself would
-    /// refuse is left alone rather than repaired.
     fn read_settings(path: &std::path::Path) -> Result<Option<String>, String> {
         match std::fs::read_to_string(path) {
             Ok(raw) if raw.trim().is_empty() => Ok(None),
@@ -357,7 +318,6 @@ pub(crate) mod status_line {
     }
 
     fn write_settings(path: &std::path::Path, text: &str) -> Result<(), String> {
-        // Never write something Claude Code would fail to read.
         if !matches!(serde_json::from_str::<Value>(text), Ok(Value::Object(_))) {
             return Err("The edited settings were not valid JSON, so nothing was written.".into());
         }
@@ -398,8 +358,6 @@ pub(crate) mod status_line {
         let original = text.clone().unwrap_or_else(|| "{}\n".to_string());
 
         if enable && !ours {
-            // Kept aside, as the exact text it was written in, before anything
-            // is changed, so a failed write below can never lose it.
             let previous = json_text::member_value(&original, "statusLine")?;
             write_private(&chain, &json!({ "statusLineText": previous }))?;
             let command = serde_json::to_string(&our_command()?).map_err(|e| e.to_string())?;
@@ -483,11 +441,6 @@ pub(crate) mod status_line {
     }
 }
 
-/// Editing one top-level member of a JSON object as text.
-///
-/// Rewriting a settings file through a parser would sort its keys and
-/// respace it, which is a change to somebody else's file that nobody asked
-/// for. This finds the member's exact span and replaces only that.
 mod json_text {
     struct Member {
         key: String,
@@ -554,7 +507,6 @@ mod json_text {
         }
     }
 
-    /// The members of the top-level object, plus where it opens and closes.
     fn members(text: &str) -> Result<(usize, usize, Vec<Member>), String> {
         let b = text.as_bytes();
         let open = skip_ws(b, 0);

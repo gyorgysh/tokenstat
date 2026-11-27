@@ -21,10 +21,6 @@ using Windows.UI.Core;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// A VT terminal shared by local and remote PTY sessions. The session outlives
-/// the page, so navigating back reattaches to the running shell.
-/// </summary>
 internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _workspaceId;
@@ -56,12 +52,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     private readonly Button _close;
     private readonly Button _respawn;
     private readonly TerminalSurface _terminal = new();
-    /// <summary>
-    /// The spawn-to-first-paint cover over the scroll area: the session is
-    /// up while the program has not drawn yet. Its shade is the pane
-    /// surface, the same number the cells use, so no seam shows while it is
-    /// up or when it lifts.
-    /// </summary>
     private readonly Grid _startOverlay = new();
     private readonly TextBlock _startTitle = new();
     private bool _loaded;
@@ -160,8 +150,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
         {
             if (_released) return;
             if (RetainOnUnload && _loaded) { RefreshOnUi(); FocusTerminal(); return; }
-            // A tree move can load again while the first host attach awaits.
-            // Keep that attach and its one pair of output subscriptions.
             if (RetainOnUnload && _starting) return;
             _starting = true;
             try
@@ -203,25 +191,13 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this shell runs in.
-    /// </summary>
     public UIElement? ToolbarScope =>
         Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.terminalpage.terminal.e0926fda") : _folderName);
 
-    /// <summary>
-    /// Kill, close, and respawn. The same buttons the page holds, so session
-    /// state keeps driving their enabled marks from one place.
-    /// </summary>
     public IList<UIElement> ToolbarActions() => new List<UIElement> { _kill, _close, _respawn };
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// The inspector column content: what this shell is and how it is doing.
-    /// Session changes repaint it, so the column stays live without the shell
-    /// asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -346,8 +322,6 @@ internal sealed class TerminalPage : Page, IInspectorContent, IToolbarItems
     {
         var label = string.IsNullOrEmpty(_session.Command) ? L10n.Text("windows.terminalpage.shell.a7332854") : _session.Command;
         _startTitle.Text = L10n.Text("windows.terminalpage.starting_0.099752ea", $"{StartingLabel()}");
-        // Up but not painted yet: agent CLIs spend seconds in that gap. A
-        // failed spawn or an exited process shows its banner instead.
         _startOverlay.Visibility = !_session.HasOutput && _session.Alive && !_session.Closed
             && string.IsNullOrEmpty(_session.LastError)
             ? Visibility.Visible

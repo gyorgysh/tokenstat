@@ -98,16 +98,11 @@ private sealed interface Standing {
     data object Available : Standing
     data class Refused(val message: String) : Standing
 
-    /// The question could not be asked. The claim is still offered: it is the
-    /// claim that decides, and it will say so if the network is gone.
     data class Unknown(val message: String) : Standing
 }
 
 private val profileShape = RoundedCornerShape(16.dp)
 
-/// The profile window, behind the name in Account: the address, who can open
-/// it, and the way to see it. An account with no handle starts on choosing
-/// one, and the one-time offer is this same window. Port of `ProfileSheet`.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileSheet(
@@ -144,7 +139,6 @@ fun ProfileSheet(
             reason != null -> standing = Standing.Refused(HandleRules.message(reason))
             else -> {
                 standing = Standing.Checking
-                // Wait for typing to pause. A new character cancels this.
                 delay(400)
                 standing = try {
                     val answer = model.checkHandle(typed)
@@ -283,9 +277,6 @@ fun ProfileSheet(
                                 color = colors.textSecondary,
                                 modifier = Modifier.padding(start = 4.dp),
                             )
-                            // Both answers, always in view, with the current
-                            // one checked. Going back is the same tap as
-                            // going there.
                             Column(Modifier.profileCard().selectableGroup()) {
                                 ProfileRow(
                                     icon = ActionIcon.Security,
@@ -300,8 +291,6 @@ fun ProfileSheet(
                                     icon = ActionIcon.Browser,
                                     title = L10n.text("common.profile.public"),
                                     detail = L10n.text("common.profile.public_detail"),
-                                    // Going public shows things to strangers,
-                                    // so it is asked once more.
                                     modifier = Modifier.selectable(profile.isPublic, enabled = !saving, role = Role.RadioButton) {
                                         if (!profile.isPublic) confirming = true
                                     },
@@ -430,8 +419,6 @@ private fun HandleEditor(
     }
 }
 
-/// The person and the address, over the grid the product draws days on. The
-/// grid lights when the page is public. Port of `ProfilePlate`.
 @Composable
 private fun ProfilePlate(
     avatar: String?,
@@ -440,8 +427,6 @@ private fun ProfilePlate(
     isExample: Boolean,
     isPublic: Boolean,
     copied: Boolean,
-    /// Null while the address is only a draft: a link to nowhere is not worth
-    /// copying.
     onCopy: (() -> Unit)?,
 ) {
     val colors = LocalTsColors.current
@@ -450,8 +435,6 @@ private fun ProfilePlate(
         label = "profileGrid",
     )
     Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(colors.accentSoft, Color.Transparent)))) {
-        // Every cell is the same colour and only fades with distance, so it
-        // never reads as somebody's activity.
         Canvas(Modifier.matchParentSize()) {
             val step = 15.dp.toPx()
             val side = 11.dp.toPx()
@@ -561,8 +544,6 @@ private fun ProfileRow(
     }
 }
 
-/// The line under the name in Account: the handle and whether its page is
-/// public, or the invitation to have one.
 @Composable
 fun ProfileNameLine(profile: AccountProfile?) {
     val colors = LocalTsColors.current
@@ -584,7 +565,6 @@ fun ProfileNameLine(profile: AccountProfile?) {
     }
 }
 
-/// Always one line, so the sheet does not jump as the answer changes.
 @Composable
 private fun StandingLine(standing: Standing) {
     val colors = LocalTsColors.current

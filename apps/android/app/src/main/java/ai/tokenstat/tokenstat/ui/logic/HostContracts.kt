@@ -7,9 +7,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/// Shared host contract constants. Mirrors Apple `Bridge.swift`
-/// `expectedProtocolVersion` and `RemoteHostFeature` minimums, plus the
-/// `insights.snapshot` (proto 5) shape the Mac uses.
 object HostContracts {
     const val TEAMS_MIN_PROTOCOL = 38
     const val TEAM_SESSIONS_MIN_PROTOCOL = 39
@@ -29,12 +26,10 @@ object HostContracts {
     const val CHAT_FORK_MIN_PROTOCOL = 26
     const val CHAT_REMOVE_ALL_MIN_PROTOCOL = 26
     fun supportsChatFork(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_FORK_MIN_PROTOCOL
-    /// Version 54 adds `chat.continueInNew` and the prompt cache record.
     const val HANDOFF_MIN_PROTOCOL = 12
     fun supportsHandoff(protocol: Long?): Boolean = protocol != null && protocol >= HANDOFF_MIN_PROTOCOL
     const val CHAT_CONTINUE_MIN_PROTOCOL = 54
     fun supportsChatContinue(protocol: Long?): Boolean = protocol != null && protocol >= CHAT_CONTINUE_MIN_PROTOCOL
-    /// Version 55 adds `launcher.updates` and `launcher.update`.
     const val AGENT_UPDATES_MIN_PROTOCOL = 55
     fun supportsAgentUpdates(protocol: Long?): Boolean = protocol != null && protocol >= AGENT_UPDATES_MIN_PROTOCOL
     fun supportsPullCreation(protocol: Long?): Boolean = protocol != null && protocol >= PULL_CREATION_MIN_PROTOCOL
@@ -47,13 +42,9 @@ object HostContracts {
     fun supportsPullAllState(protocol: Long?): Boolean = protocol != null && protocol >= PULL_ALL_STATE_MIN_PROTOCOL
     const val CHAT_QUESTIONS_MIN_PROTOCOL = 29
 
-    /// Version 29 records the agent's questions and takes their answers. An
-    /// older host never records one, so this guards the answer, not the card.
     fun supportsChatQuestions(protocol: Long?): Boolean =
         protocol != null && protocol >= CHAT_QUESTIONS_MIN_PROTOCOL
 
-    /// Version 30 adds the reviewed fast-forward pull and `pulls.branch`,
-    /// and conversations carry their branch with its pull request.
     const val REVIEWED_PULL_MIN_PROTOCOL = 30
 
     fun supportsReviewedPull(protocol: Long?): Boolean =
@@ -71,8 +62,6 @@ object HostContracts {
     fun supportsPulls(protocol: Long?): Boolean =
         protocol == null || protocol >= PULLS_MIN_PROTOCOL
 
-    /// Version 15 added reviewed selected-file commits and outcome
-    /// recovery. Version 16 added reviewed branch push and recovery.
     const val SELECTED_COMMIT_MIN_PROTOCOL = 15
     const val REVIEWED_PUSH_MIN_PROTOCOL = 16
 
@@ -82,12 +71,6 @@ object HostContracts {
     fun supportsReviewedPush(protocol: Long?): Boolean =
         protocol == null || protocol >= REVIEWED_PUSH_MIN_PROTOCOL
 
-    /// Version 17 added revision-checked task editing. Version 18 added
-    /// checked task deletion. Version 19 added create-once tasks. Version
-    /// 20 added checked task runs, exact-run stops and launch receipts.
-    /// Version 21 added revision-checked automation edits and create/run
-    /// receipts. Version 22 added revision-checked workflow edits.
-    /// Version 25 adds a short note that rides the next tool step.
     const val TASK_EDITING_MIN_PROTOCOL = 17
     const val TASK_DELETION_MIN_PROTOCOL = 18
     const val TASK_CREATION_MIN_PROTOCOL = 19
@@ -117,19 +100,11 @@ object HostContracts {
     fun supportsSteer(protocol: Long?): Boolean =
         protocol == null || protocol >= STEER_MIN_PROTOCOL
 
-    /// Version 6 added asking the host to read an agent's model list again,
-    /// mirroring `RemoteHostFeature.modelRefresh`. An older host still lists
-    /// the models it cached, so only the Refresh goes away.
     const val MODEL_REFRESH_MIN_PROTOCOL = 6
 
     fun supportsModelRefresh(protocol: Long?): Boolean =
         protocol == null || protocol >= MODEL_REFRESH_MIN_PROTOCOL
 
-    /// Version 10 added `clientMessageId` on `chat.send` and `chat.receipt`,
-    /// and version 14 added the send revision, mirroring
-    /// `RemoteHostFeature.confirmedSend`. A host below 14 refuses an id
-    /// without the revision, so sending needs all of 14 while reading an
-    /// older receipt only needs 10.
     const val RECEIPT_MIN_PROTOCOL = 10
     const val CONFIRMED_SEND_MIN_PROTOCOL = 14
 
@@ -139,16 +114,11 @@ object HostContracts {
     fun supportsConfirmedSend(protocol: Long?): Boolean =
         protocol == null || protocol >= CONFIRMED_SEND_MIN_PROTOCOL
 
-    /// Version 14 added the host self-update check and apply, mirroring
-    /// `RemoteHostFeature.hostUpdate`.
     const val HOST_UPDATE_MIN_PROTOCOL = 14
 
     fun supportsHostUpdate(protocol: Long?): Boolean =
         protocol == null || protocol >= HOST_UPDATE_MIN_PROTOCOL
 
-    /// A transport error fails open, preserving the screen's offline and
-    /// retry behaviour. Only a definite older protocol becomes the update
-    /// state, mirroring `RemoteHostFeatureGate`.
     fun updateMessage(feature: String, hostName: String, hostProtocol: Long?, minimum: Long): String? {
         if (hostProtocol == null || hostProtocol >= minimum) return null
         val computer = hostName.ifBlank { L10n.text("android.hostcontracts.this_computer.058bf37c") }
@@ -156,8 +126,6 @@ object HostContracts {
     }
 }
 
-/// Relative time, port of Apple `RelativeTimeText.swift` (single 15s tick).
-/// Returns a short string; callers re-compose on a 15s ticker.
 object RelativeClock {
     private fun unit(count: Long, unit: String): String = when (unit) {
         "second" -> if (count == 1L) L10n.text("android.hostcontracts.second_one", count)
@@ -177,10 +145,6 @@ object RelativeClock {
         else -> error("Unknown relative time unit: $unit")
     }
 
-    /// "3 days ago", in full words like Foundation's numeric relative style.
-    /// "now" for the first minute, so the label never ticks by the second.
-    /// Each unit is rounded to the nearest rather than floored, so a reset
-    /// 2.8 days out reads "in 3 days" here and on the Apple client alike.
     fun label(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
         if (delta < 60) return L10n.text("android.hostcontracts.now.ed5eb9a3")
@@ -195,10 +159,6 @@ object RelativeClock {
         return L10n.text("android.hostcontracts.0_ago.cace2682", "${unit((days + 182) / 365, "year")}")
     }
 
-    /// "4h ago", the tightest form, for a row that already carries a title
-    /// and an agent name beside it. The iPhone's conversation list uses this
-    /// one: "5 hours ago" spent a third of the row saying what "5h ago"
-    /// says, and the row has better uses for the width.
     fun compact(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = ((nowMillis - epochMillis) / 1000).coerceAtLeast(0)
         if (delta < 60) return "now"
@@ -213,9 +173,6 @@ object RelativeClock {
         return L10n.text("android.hostcontracts.0_y_ago.cd926fc6", "${(days + 182) / 365}")
     }
 
-    /// "3 min ago", for chat rows and run times. The same abbreviated
-    /// units Foundation's abbreviated style draws: seconds, minutes and
-    /// hours shorten, days stay written out, weeks and up shorten again.
     fun abbreviated(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = (nowMillis - epochMillis) / 1000
         if (delta >= 0 && delta < 1) return L10n.text("android.hostcontracts.just_now.7ddb44d8")
@@ -245,7 +202,6 @@ object RelativeClock {
         return L10n.text("android.hostcontracts.in_years", (days + 182) / 365)
     }
 
-    /// Future mirror of `label`: "in 3 days", for limit reset dates.
     fun until(epochMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
         val delta = (epochMillis - nowMillis) / 1000
         if (delta < 0) return label(epochMillis, nowMillis)

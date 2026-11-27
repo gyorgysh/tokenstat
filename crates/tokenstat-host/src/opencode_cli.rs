@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! The executable name no longer identifies OpenCode's CLI generation.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -90,9 +88,7 @@ fn detected_generation(command: &str) -> Option<Generation> {
     type Cache = HashMap<Executable, (Instant, Option<Generation>)>;
     static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
     let binary = executable(command)?;
-    // Shell wrappers can keep their own metadata while replacing the real
-    // executable they forward to. Recheck those rather than caching a v1
-    // answer through an upgrade of the wrapped binary.
+
     let cacheable = cacheable_executable(&binary.path);
     let mut cache = CACHE
         .get_or_init(Mutex::default)
@@ -180,7 +176,7 @@ fn generation_from_version(version: &str) -> Option<Generation> {
         match major {
             "1" => Some(Generation::V1),
             "2" => Some(Generation::V2),
-            _ => None, // Preview versions are identified by their help flags.
+            _ => None,
         }
     })
 }
@@ -211,9 +207,6 @@ pub(crate) fn directory_header(directory: &Path) -> String {
     value
 }
 
-/// Early v2 releases expose empty and bundled snapshots before provider
-/// plugins settle. Debounce changes on the same leased server, bounded by
-/// its deadline, so neither the picker nor effort selection caches that race.
 fn settled_snapshot<T: PartialEq>(
     server: &probe::Server,
     route: &str,
@@ -227,9 +220,6 @@ fn settled_snapshot<T: PartialEq>(
             return snapshot;
         }
         let Some((success, output)) = server.get(route, 4 * 1024 * 1024) else {
-            // Newer v2 routes wait for plugin activation themselves. One
-            // short request timeout must not consume the whole startup
-            // budget before their first catalog response is available.
             std::thread::sleep(Duration::from_millis(100));
             continue;
         };
@@ -275,9 +265,7 @@ fn variants(
     {
         return variants.clone();
     }
-    // Keep one leased server alive while its plugin-backed model registry
-    // settles. A fresh standalone CLI per poll would keep seeing a cold
-    // snapshot; the user's service may also run an incompatible CLI version.
+
     let variants = (|| {
         let server = probe::Server::start(&key.0.path, &key.1, SERVER_TIMEOUT)?;
         settled_snapshot(&server, "/api/model", parse_variants, |variants| {
@@ -287,7 +275,7 @@ fn variants(
     .unwrap_or_default();
     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
     cache.retain(|_, (at, _)| at.elapsed() < CACHE_TTL);
-    // Bound project-specific catalogs even on hosts opening many folders.
+
     if cache.len() >= 32 {
         cache.clear();
     }
@@ -382,8 +370,6 @@ pub(crate) fn model_arguments(
                 };
                 args.extend(["--model".into(), selected_model(model, effort, &variants)]);
             } else if let Some(effort) = effort {
-                // V2 has no independent effort flag. Resolve the configured
-                // default before applying an effort to an otherwise empty pick.
                 let default = (|| {
                     let binary = executable(command)?;
                     let directory = directory
@@ -456,7 +442,7 @@ pub(crate) fn session_exists(command: &str, id: &str, directory: Option<&Path>) 
 fn session_from_response(success: bool, output: &str, id: &str) -> Option<bool> {
     let value: serde_json::Value = serde_json::from_str(output).ok()?;
     let tag = value.get("_tag").and_then(|v| v.as_str());
-    // Older preview CLIs exit zero even for an HTTP error body.
+
     if tag == Some("SessionNotFoundError") {
         return Some(false);
     }
@@ -514,9 +500,6 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        // Start the fixture outside the production lease. Spawning Python and
-        // cold-importing its HTTP server consumed the probe's eight-second
-        // budget on busy CI workers before any discovery was exercised.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let ready = serde_json::json!({"url": format!("http://{address}")});
@@ -587,7 +570,7 @@ mod tests {
                 } else {
                     &payload
                 };
-                // The timeout fixture deliberately loses its first reader.
+
                 let _ = write!(
                     connection,
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -686,9 +669,7 @@ mod tests {
             false,
             true,
         );
-        // Give this deliberate three-second HTTP stall its own lease. Cold
-        // catalog settlement above should not also consume a timeout, and a
-        // loaded CI worker still needs scheduling time within that margin.
+
         let server = probe::Server::start(&binary, root.path(), Duration::from_secs(20)).unwrap();
         let catalog = settled_snapshot(&server, "/api/model", parse_variants, |models| {
             models.contains_key("custom/slow")
@@ -700,8 +681,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn leased_probe_bounds_startup_and_retires_a_stalled_process_group() {
-        // Login-shell discovery is shared lazy setup, not the fake service's
-        // readiness behavior. Do it before measuring either leased process.
         let _ = tokenstat_pty::login_env();
         for response in ["echo '{}'", "true"] {
             let root = tempfile::tempdir().unwrap();
@@ -710,11 +689,7 @@ mod tests {
                 &format!("echo $$ > \"$0.pid\"\n{response}\nsleep 30"),
             );
             let start = Instant::now();
-            assert!(
-                // Leave scheduling time for the fixture to record its PID on
-                // a loaded worker; an ignored deadline still hits the 5s bound.
-                probe::Server::start(&binary, root.path(), Duration::from_secs(1)).is_none()
-            );
+            assert!(probe::Server::start(&binary, root.path(), Duration::from_secs(1)).is_none());
             assert!(start.elapsed() < Duration::from_secs(5));
             let pid: i32 = std::fs::read_to_string(format!("{binary}.pid"))
                 .unwrap()

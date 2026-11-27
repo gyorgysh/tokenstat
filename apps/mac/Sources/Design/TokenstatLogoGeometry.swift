@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The brand mark's ink bounds, shared by the ordinary logo and its glass
-/// treatment. Three bars, one baseline, the same proportions and colours.
 enum TokenstatLogoGeometry {
     static let inkSide: CGFloat = 42
     static let cornerRadius: CGFloat = 3.5

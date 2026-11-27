@@ -8,8 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The same cases as scripts/tests/ChatTranscriptFoldTests.swift, so the two
-/// clients fold a conversation the same way.
 class ChatTranscriptDetailTest {
     private fun user(id: String) = ChatDisplayItem.User(id, "q")
     private fun say(id: String) = ChatDisplayItem.Assistant(id, "a", null)

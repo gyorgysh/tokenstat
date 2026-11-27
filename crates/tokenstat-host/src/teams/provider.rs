@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Team execution uses the same guarded CLI argv and native sign-in routing as
-//! private chat. Native tools are disabled: only the guardian's scoped MCP can
-//! read context or edit a lane. No personal settings, sessions or hooks load.
-
 use super::run_home::RunHome;
 use crate::{error::DispatchError, team_process::Program};
 use serde_json::json;
@@ -112,8 +107,6 @@ pub(super) fn supported(backend: &str) -> Result<(), DispatchError> {
 }
 
 pub(super) fn default_backend() -> Result<&'static str, DispatchError> {
-    // Creating an empty shared chat neither executes nor grants an agent.
-    // Preserve its legacy metadata default on machines with no CLI installed.
     Ok(default_choice(|backend| {
         crate::launcher::resolve_command(backend).is_some()
     }))
@@ -169,7 +162,7 @@ pub(super) fn program(
     }
     let executable = crate::launcher::resolve_command(executable(backend).ok_or_else(missing)?)
         .ok_or_else(missing)?;
-    // Probe help/version only. Never inspect credentials or spend a model call.
+
     let args = match backend {
         "claude" => vec!["--version".into()],
         "codex" => vec!["exec".into(), "--help".into()],
@@ -276,8 +269,6 @@ struct Auth {
     environment: BTreeMap<String, String>,
 }
 
-/// The settled native CLI login environment, without importing the rest of
-/// the person's shell configuration into the isolated run.
 fn native_env(name: &str) -> Option<String> {
     #[cfg(unix)]
     let login = tokenstat_pty::login_env_ready();
@@ -298,9 +289,6 @@ fn native_home_from_env(
     env: impl Fn(&str) -> Option<String>,
     fallback: impl FnOnce() -> Option<PathBuf>,
 ) -> io::Result<PathBuf> {
-    // Native Windows CLIs use the platform profile, even when Git Bash sets
-    // a different HOME. Preserve Unix login-shell HOME and the paths crate's
-    // platform fallback order without changing explicit backend selectors.
     let keys: &[&str] = if windows {
         &["USERPROFILE", "HOME"]
     } else {
@@ -316,7 +304,6 @@ fn native_home_from_env(
 
 #[cfg(target_os = "macos")]
 fn local_username() -> io::Result<String> {
-    // Match native os.userInfo().username rather than trusting a shell USER.
     let mut size = 16 * 1024;
     loop {
         let mut bytes = vec![0 as libc::c_char; size];
@@ -352,9 +339,6 @@ fn local_username() -> io::Result<String> {
     }
 }
 
-/// Windows can report NotFound for a child of a regular file. Only treat a
-/// startup source as absent after its nearest existing ancestor is proven to
-/// be a directory; unreadable or dangling ancestors remain unknown/refused.
 fn startup_source_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(Some(metadata)),
@@ -380,8 +364,6 @@ fn startup_source_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
     }
 }
 
-/// Adapters route capability variables through native stdio inheritance or
-/// environment interpolation. Inference/keyring overrides are always empty.
 fn mcp_server(helper: &Path) -> serde_json::Value {
     let env = INFERENCE_ENV
         .iter()
@@ -392,8 +374,6 @@ fn mcp_server(helper: &Path) -> serde_json::Value {
 
 impl Auth {
     fn capture(folder: &Path) -> io::Result<Self> {
-        // Settle the same login baseline the CLI launcher uses before checking
-        // env-only sign-in; a cold launchd environment may not contain its key.
         #[cfg(unix)]
         let login = tokenstat_pty::login_env_ready();
         #[cfg(not(unix))]
@@ -412,8 +392,7 @@ impl Auth {
         } else {
             folder.join(codex)
         };
-        // Native Claude 2.1.309 supports a credential-store selector independent
-        // of CLAUDE_CONFIG_DIR. Empty preserves its default keychain namespace.
+
         let (claude_selector, claude_file) = claude_auth_location(
             &home,
             folder,
@@ -444,8 +423,7 @@ fn claude_auth_location(
         .clone()
         .or_else(|| config.clone())
         .unwrap_or_default();
-    // Claude hashes the raw NFC selector, including a relative spelling. Do
-    // not absolutize it: that would select a different keychain account.
+
     let storage = match secure {
         Some(value) if value.is_empty() => home.join(".claude"),
         Some(value) => PathBuf::from(value.nfc().collect::<String>()),
@@ -511,9 +489,7 @@ pub(super) fn configure(
 
 fn claude_auth_binding(auth: &Auth) -> String {
     use sha2::{Digest, Sha256};
-    // Bind routing, not refreshable credential contents. Repairs reuse these
-    // same environment values and native stores; a changed login baseline
-    // must not classify one provider/account and launch another.
+
     let environment = CLAUDE_AUTH_ENV.map(|key| (key, auth.environment.get(key)));
     tokenstat_identity::hex(&Sha256::digest(
         json!([
@@ -573,10 +549,6 @@ fn configure_with_auth(
             )?;
         }
         "claude" => {
-            // Claude's independent config root and discovery switches isolate
-            // settings. Its real HOME preserves the native default keychain
-            // namespace AND plaintext store, whose atomic writes cannot use a
-            // credential-file symlink. MCP children get the private HOME below.
             program
                 .env
                 .insert("HOME".into(), auth.home.display().to_string());
@@ -622,8 +594,7 @@ fn configure_with_auth(
                         .parent()
                         .ok_or_else(|| io::Error::other("Invalid Claude credential directory."))?,
                 )?;
-                // A directory alias preserves the raw keychain selector and
-                // publishes atomic native file refreshes into the real store.
+
                 std::os::unix::fs::symlink(
                     auth.claude_file
                         .parent()
@@ -677,8 +648,7 @@ fn configure_with_auth(
         }
         _ => other::prepare(home, program, helper, backend, native_folder)?,
     }
-    // CLI cwd never exposes the checkout's project settings or instructions.
-    // Lane access is the SDK's separately pinned capability, not cwd authority.
+
     program.folder = home.file("home");
     rebuild(
         home,
@@ -741,17 +711,11 @@ fn rebuild(
         Some(&program.folder),
     )
     .map_err(io::Error::other)?;
-    // Keep the common guarded CLI construction, but transport the prompt on
-    // stdin. Conflict paths can exceed Windows' command-line limit. Native
-    // Codex accepts '-' after '--'; Claude -p reads stdin without a positional
-    // prompt, as the previous Team launcher did.
+
     let input_prompt = prompt_to_stdin(&mut argv, backend)?;
     write_new(&program.input, input_prompt.as_bytes())?;
     match backend {
         "claude" => {
-            // Bare disables policy/user/plugin hooks too. The native registry
-            // is empty and the only explicit MCP is our run-scoped SDK, whose
-            // authority checks replace hooks on this API-key route.
             if program.env.contains_key("TOKENSTAT_TEAM_CLAUDE_BARE") {
                 argv.insert(1, "--bare".into());
             }
@@ -883,10 +847,7 @@ pub(super) fn follow_up(
         let mode = claude_policy::admit(program, &auth, native_folder)?;
         claude_mode(program, mode);
     }
-    // Native CLIs can expand @file mentions and slash commands before any
-    // tool hook runs. Check output and conflict filenames are untrusted data.
-    // JSON keeps the entire failure reversible without exposing those forms
-    // to native prompt preprocessing, including embedded newlines.
+
     let failure = serde_json::to_string(instruction)
         .map_err(io::Error::other)?
         .replace('@', "\\u0040");
@@ -1127,8 +1088,7 @@ mod tests {
             let expected = _root.path().join("checkout/nested/auth");
             assert!(selector.is_absolute());
             assert!(selector.components().eq(expected.components()));
-            // Dot components are equivalent for file storage. Their raw
-            // spelling is significant only to the macOS keychain selector.
+
             assert!(
                 _root
                     .path()
@@ -1542,11 +1502,6 @@ mod tests {
         }
     }
 
-    /// Run a fake CLI the test just wrote, retrying briefly on ETXTBSY.
-    ///
-    /// Another test thread can fork while this one still holds the script open
-    /// for writing. The child keeps that descriptor until it execs, and Linux
-    /// refuses to exec a file open for writing ("Text file busy").
     #[cfg(unix)]
     fn run_fake(program: &Program) -> std::process::Output {
         let mut delay = std::time::Duration::from_millis(10);

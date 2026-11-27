@@ -52,7 +52,6 @@ import java.util.Locale
 internal data class ChartExport(val format: String, val mime: String, val data: ByteArray)
 private const val MAX_CHART_SOURCE_BYTES = 256 * 1024
 
-/** The chart owns a bundled page. It never joins a browsing session or makes a network request. */
 @Composable
 internal fun ChatChartView(source: String, pending: Boolean = false) {
     val context = LocalContext.current
@@ -89,8 +88,6 @@ internal fun ChatChartView(source: String, pending: Boolean = false) {
     } else if (failure != null) {
         Text(L10n.text("common.chart.unavailable") + failure?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty(), modifier = Modifier.padding(16.dp), color = colors.textSecondary)
     } else {
-        // Keep every chart's place in the reply while only visible charts own
-        // a browser. Clipped bounds include the transcript's scroll viewport.
         Box(Modifier.fillMaxWidth().height(height.dp).onGloballyPositioned { coordinates ->
             val bounds = coordinates.boundsInWindow()
             visible = bounds.width > 0 && bounds.height > 0
@@ -250,7 +247,7 @@ internal class ChartWebSurface(context: Context) : WebView(context) {
                             if (data.size <= 8 * 1024 * 1024) onExport(ChartExport(format, mime, data))
                         }
                     }
-                } catch (_: Exception) { /* A malformed bridge message has no effect. */ }
+                } catch (_: Exception) { }
             }
         }
     }

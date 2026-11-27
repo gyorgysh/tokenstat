@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Navigation;
 
-/// <summary>
-/// Visit hosts independently without allowing an account with many computers
-/// to start every remote handshake at once.
-/// </summary>
 internal static class BoundedHostSweep
 {
     public static async Task RunAsync<T>(IReadOnlyList<T> hosts, int limit, Func<T, Task> visit)

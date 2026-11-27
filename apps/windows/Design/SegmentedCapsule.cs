@@ -12,20 +12,8 @@ using Windows.UI;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// A capsule selector in the app's own language: equal segments inside a
-/// bordered panel, the selected one filled with the accent's soft tint and
-/// accent text, hover in the same grey the rows use. Mirrors the Mac
-/// SegmentedCapsulePicker, which is the source of truth: this is what the
-/// This device and All devices scope switch is on every client.
-/// </summary>
 internal static class SegmentedCapsule
 {
-    /// <summary>
-    /// Build the picker. A null glyph draws the label alone, for text-only
-    /// options like the period chips. Tapping the selected segment does
-    /// nothing. Segments take equal shares of the strip.
-    /// </summary>
     public static Border View(
         IList<(string Value, string Label, ActionIcon? Glyph)> options,
         string selected,
@@ -40,10 +28,6 @@ internal static class SegmentedCapsule
                 Width = new GridLength(1, GridUnitType.Star),
             });
         }
-        // The picker owns its selection. A tap repaints first and then runs
-        // the handler, so the highlight and the content cannot disagree while
-        // a load is in flight, and tapping the lit segment stays a no-op.
-        // Callers that rebuild the bar in their handler get the same end state.
         string current = selected;
         var paints = new List<(string Value, Action<bool> Paint)>();
         int column = 0;
@@ -121,7 +105,6 @@ internal static class SegmentedCapsule
             BorderThickness = new Thickness(0),
             Padding = new Thickness(glyph.HasValue ? 12 : 10, 6, glyph.HasValue ? 12 : 10, 6),
             CornerRadius = new CornerRadius(8),
-            // The native minimum is 32 high, which would stretch the strip.
             MinWidth = 0,
             MinHeight = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -142,8 +125,6 @@ internal static class SegmentedCapsule
                 ? Theme.AccentSoftBrush
                 : Theme.ClearBrush;
             segment.Background = resting;
-            // Hover in the row grey, pressed settling back to the resting fill.
-            // The native grey hover would be a second grey beside the row one.
             segment.Resources["ButtonBackgroundPointerOver"] = now
                 ? Theme.AccentSoftBrush
                 : Theme.Brush(static () => WithAlpha(Theme.RowHighlight, 0.7));

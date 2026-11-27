@@ -6,11 +6,6 @@
 
 import SwiftUI
 
-/// Archive usage that the source marked as covered by a subscription.
-///
-/// This is deliberately separate from `PlanLimitsCard`: vendor quota windows
-/// answer what is left, while this answers what the archive has already seen.
-/// A source can have plan usage without publishing a remaining-limit endpoint.
 struct PlanUsageCard: View {
     let rows: [Bucket]
     var fillsHeight = false

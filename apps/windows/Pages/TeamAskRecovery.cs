@@ -27,8 +27,6 @@ internal sealed record TeamAskRecord(JsonObject Input, JsonObject? Fence = null)
         && Regex.IsMatch(Text(receipt["runId"]) ?? "", "\\Arun_[a-f0-9]{32}\\z");
 }
 
-/// Separate Ask envelopes reuse locked, atomic CAS files. They never enter
-/// the Comment queue, and opening a chat never resends saved work.
 internal sealed class TeamAskRecoveryStore(string directory)
 {
     internal static readonly TeamAskRecoveryStore Shared = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "team-asks"));

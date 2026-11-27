@@ -6,12 +6,6 @@
 
 import SwiftUI
 
-/// One file's changes, in the centre pane beside the terminals.
-///
-/// Unified rather than side by side, with both gutters shown. Side by side
-/// wastes half the width on a pane that is already sharing the window with a
-/// sidebar, a terminal and an inspector, and the two line numbers carry the
-/// same information a split would.
 struct DiffView: View {
     let diff: FileDiff
 
@@ -46,15 +40,8 @@ struct DiffView: View {
     }
 }
 
-/// The hunks and lines of one diff, without any scrolling of its own.
-///
-/// Shared by the file viewer, which scrolls it, and by the commit view, which
-/// stacks several of them inside one scroll view. A commit's files scrolling
-/// independently of each other would be a strange way to read a change.
 struct DiffBody: View {
     let diff: FileDiff
-    /// At least this wide, so a tint spans the pane rather than stopping at the
-    /// last character. Zero is fine: rows then size to their content.
     var minWidth: CGFloat = 0
     /// Whether the lines build lazily.
     ///
@@ -74,9 +61,6 @@ struct DiffBody: View {
     @State private var rows: [DiffDocumentRow] = []
     @State private var total = 0
     @State private var extraRows = 0
-    /// The snapshot and row limit `rows` were built from. Rows stay on screen
-    /// until a newer snapshot's rows replace them, so a refresh never drops
-    /// the body to zero height.
     @State private var displayedRevision: UUID?
     @State private var builtLimit = 0
 
@@ -107,7 +91,6 @@ struct DiffBody: View {
         .task(id: "\(diff.renderRevision)|\(lazy)|\(extraRows)") {
             let revision = diff.renderRevision
             let current = displayedRevision == revision
-            // A new snapshot starts again from the first page.
             let limit = page + (current ? extraRows : 0)
             if current, builtLimit >= limit { return }
             if !current, let first = DiffRowCache.first(for: diff, limit: limit) {
@@ -115,7 +98,6 @@ struct DiffBody: View {
                 return
             }
             let input = diff
-            // "Show more" cannot change how many rows there are in all.
             let knownTotal = current ? total : nil
             let task = Task.detached(priority: .userInitiated) {
                 DiffRowCache.Entry(
@@ -137,7 +119,6 @@ struct DiffBody: View {
         builtLimit = limit
         if displayedRevision != revision {
             displayedRevision = revision
-            // Restarts the task, which then finds this page already built.
             extraRows = 0
         }
     }
@@ -152,22 +133,13 @@ struct DiffBody: View {
     }
 }
 
-/// One line, with the line number each side would show.
-///
-/// A dash where a number does not exist, not a blank: on an added line there is
-/// no old number, and leaving the column empty reads as a number that failed to
-/// load rather than one that does not apply.
 struct DiffRow: View {
     let line: DiffLine
-    /// At least the pane's width, so the tint behind a short line still spans
-    /// the pane instead of stopping at the last character.
     let minWidth: CGFloat
     var continuation = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            // One text for both numbers and the marker. A screen of a diff is
-            // sixty of these, and four views a line was most of its cost.
             (Text(Self.column(continuation ? nil : line.oldLine) + Self.column(continuation ? nil : line.newLine) + " ")
                 .foregroundStyle(.tertiary)
                 + Text(marker).foregroundStyle(line.kind.tint))
@@ -178,8 +150,6 @@ struct DiffRow: View {
                 .font(Theme.mono(11))
                 .foregroundStyle(line.kind == .context ? Color.primary : line.kind.tint)
                 .textSelection(.enabled)
-                // Never wrap: a wrapped line breaks the alignment with its
-                // gutter, and long lines are what the horizontal scroll is for.
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.trailing, Theme.Space.m)
         }
@@ -196,7 +166,6 @@ struct DiffRow: View {
         }
     }
 
-    /// A line number right-aligned in seven monospaced characters.
     private static func column(_ number: UInt32?) -> String {
         let text = number.map(String.init) ?? "·"
         return String(repeating: " ", count: max(1, 7 - text.count)) + text
@@ -211,8 +180,6 @@ struct DiffRow: View {
     }
 }
 
-/// A preview has both a row budget and a text budget. Two minified lines
-/// must not hand megabytes to an eager Text layout in the inspector.
 struct InlineDiffView: View {
     let diff: FileDiff
     let onReview: () -> Void
@@ -268,7 +235,6 @@ struct InlineDiffView: View {
                 guard !Task.isCancelled else { return }
                 DiffRowCache.store(built, for: input, limit: limit)
             }
-            // The previous snapshot's rows stay until these replace them.
             rows = built.rows
             total = built.total
             displayedRevision = revision
@@ -276,11 +242,6 @@ struct InlineDiffView: View {
     }
 }
 
-/// Built rows for one diff snapshot at one row limit.
-///
-/// A view that finds its rows here as it is created draws at full height in
-/// its first frame. A transcript card that started empty and grew once its
-/// rows arrived moved the reading place, and a remounted card did it again.
 enum DiffRowCache {
     struct Entry {
         let rows: [DiffDocumentRow]
@@ -298,9 +259,6 @@ enum DiffRowCache {
         return cache
     }()
 
-    /// Rows a view can draw on its first frame: from the cache, or built
-    /// here when the diff is small enough to cost nothing. Nil for a large
-    /// diff, which is built off the main actor and `store`d instead.
     static func first(for diff: FileDiff, limit: Int) -> Entry? {
         if let held = cache.object(forKey: key(diff, limit)) { return held.entry }
         guard isSmall(diff) else { return nil }
@@ -321,7 +279,6 @@ enum DiffRowCache {
         "\(diff.renderRevision)|\(limit)" as NSString
     }
 
-    /// A few hundred short lines build in well under a frame.
     private static func isSmall(_ diff: FileDiff) -> Bool {
         var lines = 0
         var bytes = 0

@@ -29,7 +29,6 @@ pub struct HandleCheck {
 pub fn check_handle(host_flag: Option<&str>, handle: &str) -> Result<HandleCheck, ProfileError> {
     let handle = handle.trim().to_lowercase();
     if handle.is_empty() {
-        // An empty path segment would be a different route.
         return Ok(HandleCheck {
             handle,
             available: false,
@@ -138,7 +137,6 @@ fn decode(status: reqwest::StatusCode, text: &str) -> Result<Value, ProfileError
         404 | 405 => Err(ProfileError::Unsupported(
             "this account service does not support handles in the app yet".into(),
         )),
-        // `forbidden` is about the token. Every other reason is about the name.
         403 if field("error").is_none_or(|code| code == "forbidden") => {
             Err(refusal_error(text, 403))
         }
@@ -158,7 +156,6 @@ fn check_from_value(asked: String, raw: &Value) -> HandleCheck {
     let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_string);
     HandleCheck {
         handle: text("handle").unwrap_or(asked),
-        // Absent is not a yes.
         available: raw
             .get("available")
             .and_then(Value::as_bool)

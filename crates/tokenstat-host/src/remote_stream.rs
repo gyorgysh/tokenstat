@@ -4,20 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Byte streams between machines, on top of the remote transport.
-//!
-//! `remote.call` is one request, one response. A terminal subscription or a
-//! localhost proxy is many bytes in each direction with no natural request, so
-//! each is a dedicated Noise connection used as a pipe: the local side opens
-//! a reservation with `stream.open` over the call channel, dials a fresh
-//! connection, and claims it by sending `{"stream": "<token>"}` as its first
-//! message. The owning side's accept path sees that handshake and hands the
-//! connection to the pump instead of treating it as a request.
-//!
-//! Everything here runs over the same pinned, end-to-end encrypted session the
-//! calls run over, so the tunnel stays a blind pipe for streams exactly as it
-//! is for calls. See the streaming design in `docs/remote-streaming.md`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
@@ -29,9 +16,6 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokenstat_remote::{Connection, StreamWriter};
 
-/// How long a stream reservation waits for its connection before it is given
-/// up. A dial that fails after `stream.open` would otherwise leave an entry
-/// and a parked thread forever.
 const CLAIM_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
@@ -45,8 +29,6 @@ pub(crate) enum StreamKind {
         id: String,
         peer: String,
         control: bool,
-        /// What the viewer asked the picture to be worth, from a fixed set.
-        /// None means let the host decide from the route it came in on.
         quality: Option<String>,
     },
 }
@@ -57,8 +39,6 @@ enum StreamAccess {
     Screen {
         control: bool,
     },
-    /// The bridge tests exercise framing, not authorization, and must not
-    /// consult this machine's real peer store.
     #[cfg(test)]
     Unchecked,
 }
@@ -95,8 +75,6 @@ impl StreamAccess {
 struct PendingStream {
     peer: String,
     access: StreamAccess,
-    /// The connection, and how it reached this machine. The route is only
-    /// known when the reservation is claimed, not when it is made.
     tx: mpsc::Sender<(Connection, crate::remote::Route)>,
 }
 
@@ -140,8 +118,6 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
         let (connection, route) = match rx.recv_timeout(CLAIM_TIMEOUT) {
             Ok(claimed) => claimed,
             Err(_) => {
-                // Nobody claimed it. Give the reservation back rather than
-                // leaking an entry and a parked thread.
                 let _ = registry().lock().map(|mut r| r.remove(&token));
                 return;
             }
@@ -162,8 +138,6 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
     Ok(answer)
 }
 
-/// Host half of a screen channel. Video arrives from the device-local macOS
-/// helper; input returns to that helper only when the capability grants it.
 fn pump_screen(
     connection: Connection,
     id: String,
@@ -191,9 +165,7 @@ fn pump_screen(
                     if frame.kind != crate::screen_stream::FrameKind::Input {
                         break;
                     }
-                    // A view-only session rejects move/click. Drop that frame
-                    // and keep the pump: tearing the input channel down also
-                    // kills display switching.
+
                     let _ = crate::screen_runtime::queue_input(&input_id, frame.payload);
                 }
                 Err(_) => break,
@@ -205,10 +177,7 @@ fn pump_screen(
             break;
         }
     }
-    // Ending capture must also wake the input half. Closing only the writer
-    // leaves its sibling reader polling forever when the viewer is still
-    // connected but no longer sending input, and this join then leaks the
-    // screen pump and its capture session.
+
     reader.close();
     writer.close();
     let _ = input.join();
@@ -220,7 +189,6 @@ fn pump_screen(
 pub(crate) fn accept(token: &str, connection: Connection, route: crate::remote::Route) -> bool {
     let peer = tokenstat_identity::hex(&connection.peer_key());
     let pending = registry().lock().ok().and_then(|mut r| {
-        // A different authenticated peer cannot consume another peer's token.
         let pending = r.get(token)?;
         if pending.peer != peer {
             return None;
@@ -231,8 +199,6 @@ pub(crate) fn accept(token: &str, connection: Connection, route: crate::remote::
     match pending {
         Some(pending) => pending.tx.send((connection, route)).is_ok(),
         None => {
-            // Not a live reservation: refuse outright, and make sure the
-            // connection is gone either way.
             drop(connection);
             false
         }
@@ -246,11 +212,6 @@ pub(crate) fn parse_handshake(first: &str) -> Option<String> {
     Some(token.to_string())
 }
 
-/// Bridge a TCP socket and a stream connection in both directions.
-///
-/// Two threads, one per direction. EOF on either side is propagated: a closed
-/// stream sends an empty message (the clean end-of-stream marker) before
-/// closing, and a closed socket shuts the remote TCP end down.
 fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAccess) {
     let (reader, writer) = access.split(connection);
     let tcp_reader = match tcp.try_clone() {
@@ -317,8 +278,6 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection, access: StreamAcc
     let _ = to_tcp.join();
 }
 
-/// The owning side of a proxy stream: dial the far machine's own loopback and
-/// bridge.
 fn pump_proxy(mut connection: Connection, host: &str, port: u16, access: StreamAccess) {
     let host = if host == "[::1]" { "::1" } else { host };
     let tcp = match TcpStream::connect((host, port)) {
@@ -344,8 +303,6 @@ fn proxy_error_response(error: &str) -> String {
     )
 }
 
-/// One pushed chunk of terminal output. The same shape `pty.read` answers
-/// with, so the local daemon can serve its cache with no translation.
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PtyFrame {
@@ -356,21 +313,10 @@ struct PtyFrame {
     paused: bool,
 }
 
-/// The owning side of a terminal subscription: read the session's buffer by
-/// offset and push every new chunk. The far side's bounded buffer does the
-/// memory accounting and its `dropped` counter travels with each frame, so no
-/// ack channel is needed in this version; the read half is kept only so the
-/// connection's close is observed.
 fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAccess) {
-    // This pump only runs on the machine that owns the pty: a remote peer
-    // attached to a terminal here. That is the keep-awake case. The
-    // assertion drops when the stream ends, even if the app is closed.
     let _hold = crate::keep_awake::StreamHold::acquire();
     let (reader, writer) = access.split(connection);
-    // The channel is bidirectional: output flows this way (pushed below),
-    // keystrokes flow the other way, straight into the pty. A keystroke is a
-    // single frame over the persistent tunnel socket instead of a request and
-    // a round trip per key, which is what makes typing feel native.
+
     let session_id = session.to_string();
     let input = {
         let reader = std::sync::Arc::new(reader);
@@ -423,8 +369,6 @@ fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAcces
                 sent = true;
             }
             Ok(_) if !alive => {
-                // Child exit can precede the pipe reader's final bytes. Wait
-                // for EOF, with a grace for descendants that keep stdout open.
                 let exited = exited_at.get_or_insert_with(std::time::Instant::now);
                 let drained = tokenstat_pty::manager()
                     .output_end_offset(session)
@@ -441,8 +385,6 @@ fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAcces
             }
         }
         if sent {
-            // The socket supplies backpressure. Drain existing chunks without
-            // a polling delay, then batch an active producer at frame cadence.
             if tokenstat_pty::manager()
                 .info(session)
                 .is_ok_and(|info| info.total_bytes > offset)
@@ -451,7 +393,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAcces
             }
             std::thread::sleep(Duration::from_millis(16));
         }
-        // Wake on output after idle; keep disconnect and liveness checks bounded.
+
         match tokenstat_pty::manager().wait_for_output(
             session,
             offset,
@@ -467,8 +409,6 @@ fn pump_pty_subscribe(connection: Connection, session: &str, access: StreamAcces
     let _ = input.join();
 }
 
-/// How much pushed output a subscription cache keeps. Terminals are small, and
-/// anything older is evicted from the front with the lost bytes counted.
 const PTY_CACHE_CAP: usize = 8 * 1024 * 1024;
 
 struct PtySubscription {
@@ -601,8 +541,6 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                     if !append_pty_frame(&mut guard, &frame, &bytes) {
                         break;
                     }
-                    // The owning side is blocked while this cache is full, so
-                    // output is never evicted to make room.
                 }
                 Err(_) => break,
             }
@@ -612,8 +550,6 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
     });
 }
 
-// Keep the owner's absolute offsets, including an already-trimmed first
-// frame. A missing range cannot be silently joined to older cached bytes.
 fn append_pty_frame(cache: &mut PtySubscription, frame: &PtyFrame, bytes: &[u8]) -> bool {
     let Some(start) = frame.next_offset.checked_sub(bytes.len() as u64) else {
         return false;
@@ -645,8 +581,6 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
         guard.trimmed += count as u64;
     }
     if !guard.active && guard.buffer.is_empty() {
-        // The reader acknowledged the final output after the pump stopped.
-        // Release its slot without removing a concurrent replacement.
         drop(guard);
         if let Ok(mut map) = pty_subscriptions().lock()
             && map
@@ -668,8 +602,6 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
     }))
 }
 
-/// Cap one cached read the same way the owning `pty.read` does, so a phone
-/// attaching to a full window does not decode 8 MiB of JSON in one go.
 const READ_CHUNK_BYTES: usize = 256 * 1024;
 
 fn cache_window(len: usize, trimmed: u64, offset: u64) -> (usize, usize, u64, u64) {
@@ -710,23 +642,10 @@ pub(crate) fn write_pty_input(peer: &str, session: &str, bytes: &[u8]) -> Result
         .map_err(|e| format!("the tunnel channel dropped: {e}"))
 }
 
-/// How long a peer's pty list is reused before the peer is dialled again.
-///
-/// The app reconciles `pty.list` every few seconds (session parity), and
-/// dialling a peer on every one of those calls is what the relay log shows as
-/// a new channel every few seconds. Sessions do not appear and vanish that
-/// fast, so a short cache absorbs the polling.
 const PTY_LIST_TTL: Duration = Duration::from_secs(30);
 
 const MAX_REMOTE_PTY_ITEMS: usize = 512;
 
-/// Per-peer cached pty lists. `Instant` does not advance while a Mac sleeps,
-/// so an empty list fetched just before the lid closed stayed "fresh" after
-/// wake. Wall-clock milliseconds avoid that.
-///
-/// `generation` rises on every local patch (spawn, close, nudge). A refresh
-/// that left before the patch must not publish: it would hide a session that
-/// just appeared, or put back one that just closed.
 #[derive(Clone, Debug)]
 struct PtyListEntry {
     at_ms: i64,
@@ -793,8 +712,6 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
     out
 }
 
-/// Cached remote lists to return now, and the peers whose entries are missing
-/// or older than the TTL.
 struct RemotePtySnapshot {
     served: Vec<(String, Vec<Value>)>,
     stale: Vec<String>,
@@ -882,8 +799,6 @@ fn refresh_remote_pty_list(peer: &str) {
     apply_refresh_result(&mut guard, peer, started_gen, fetched, pty_list_now_ms());
 }
 
-/// Publish a fetch, or stamp a failed one, only when nothing local patched
-/// the list while the call was on the wire.
 fn apply_refresh_result(
     cache: &mut PtyListCache,
     peer: &str,
@@ -1029,8 +944,7 @@ mod tests {
         assert!(access.allowed(&peer.public_key_hex()));
         std::fs::write(&settings, r#"{"tunnel":false}"#).unwrap();
         assert!(!access.allowed(&peer.public_key_hex()));
-        // Switch changes do not revoke the pairing; the live stream guard is
-        // what ends access, including direct connections off the relay.
+
         assert!(
             tokenstat_identity::PeerStore::cached()
                 .unwrap()
@@ -1156,7 +1070,7 @@ mod tests {
             .collect();
         assert_eq!(ids, vec!["pty-1", "pty-2"]);
         assert_eq!(snap.stale, vec![peer.clone()]);
-        // A fetch that left before the spawn must not hide it.
+
         super::apply_refresh_result(
             &mut cache,
             &peer,
@@ -1471,9 +1385,6 @@ mod tests {
         );
     }
 
-    /// A local port on one machine bridged through a Noise connection to a
-    /// service on another machine's loopback, both directions, with EOF
-    /// propagated. This is the whole proxy path minus the dispatch layer.
     #[test]
     fn a_proxy_stream_bridges_a_local_port_to_the_peer() {
         let echo = std::net::TcpListener::bind("127.0.0.1:0").expect("an echo listener");
@@ -1514,8 +1425,7 @@ mod tests {
         });
 
         let stream = TcpStream::connect(address).expect("dial the peer");
-        // The production direct dialer disables Nagle before the handshake.
-        // Mirror it here rather than adding delayed-ACK stalls to the fixture.
+
         stream.set_nodelay(true).expect("production socket setup");
         let connection = handshake_initiator(
             Box::new(stream),
@@ -1538,8 +1448,6 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(10)))
             .expect("bounded reply wait");
         for payload in [b"ping", b"pong"] {
-            // Exercise idle split-reader timeouts both before the first byte
-            // and after traffic, rather than relying on scheduler timing.
             std::thread::sleep(Duration::from_millis(200));
             client.write_all(payload).expect("write");
             let mut reply = [0u8; 4];

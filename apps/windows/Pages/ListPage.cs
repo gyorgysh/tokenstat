@@ -88,12 +88,6 @@ internal sealed class ListPage : Page
         _root.Children.Add(Chrome.Card(_title, list));
     }
 
-    /// <summary>
-    /// One row in the Mac folder and session anatomy: a leading accent tile,
-    /// the name, one secondary line, an optional accent line, and a trailing
-    /// chevron. The figure is what the row is for, so the title keeps the
-    /// same left edge on every row and the mark fills the tile in front.
-    /// </summary>
     private Border Row(JsonNode? item)
     {
         var label = Format.Text(item, _itemKey, Format.Text(item, "id", L10n.Text("windows.listpage.item.bf3b9bab")));

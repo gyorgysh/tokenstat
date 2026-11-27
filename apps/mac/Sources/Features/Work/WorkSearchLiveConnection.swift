@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// One explicitly selected host in a search presentation. Every suspension
-/// rechecks the captured owner; this connection never pairs or wakes machines.
 @MainActor
 final class WorkSearchLiveConnection {
     struct Unavailable: LocalizedError {

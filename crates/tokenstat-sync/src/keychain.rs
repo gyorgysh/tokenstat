@@ -48,11 +48,6 @@ pub fn load_token(host: &str) -> Result<Option<String>, KeychainError> {
     #[cfg(target_os = "macos")]
     {
         if let Some(t) = legacy_keychain_load(host)? {
-            // The legacy entry is the only durable copy of the secret. Delete
-            // it only once the file store has actually accepted it, or a
-            // failed write loses the token twice over. A write that cannot
-            // happen is not a failed read: the token is still returned, and
-            // the legacy entry stays for the next attempt.
             if file_store(host, &t).is_ok() {
                 let _ = legacy_keychain_delete(host);
             }
@@ -65,8 +60,6 @@ pub fn load_token(host: &str) -> Result<Option<String>, KeychainError> {
 /// Delete the sync bearer token for `host`. Idempotent.
 pub fn delete_token(host: &str) -> Result<(), KeychainError> {
     let _lock = token_lock(host)?;
-    // Remove the legacy fallback first. If deletion is refused, preserve the
-    // current token and report the failure rather than resurrecting it later.
     #[cfg(target_os = "macos")]
     legacy_keychain_delete(host)?;
     file_delete(host)?;
@@ -112,7 +105,6 @@ fn creds_path(host: &str) -> Result<std::path::PathBuf, KeychainError> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     }
-    // Host origin as filename is awkward on Windows; hash for the path.
     Ok(dir.join(format!("{}.token", blake3_lite(host.as_bytes()))))
 }
 
@@ -131,7 +123,6 @@ fn token_lock(host: &str) -> Result<std::fs::File, KeychainError> {
 }
 
 fn blake3_lite(bytes: &[u8]) -> String {
-    // Avoid a core dependency just for a filename: FNV-ish hex of bytes.
     let mut h: u64 = 0xcbf29ce484222325;
     for b in bytes {
         h ^= u64::from(*b);

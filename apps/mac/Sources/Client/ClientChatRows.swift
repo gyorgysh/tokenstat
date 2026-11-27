@@ -6,9 +6,6 @@ import UIKit
 import ImageIO
 import QuickLook
 
-/// Phone-sized transcript blocks. Assistant prose and tools are the same
-/// views as the Mac. Edits use `DiffLineRow` so a hunk does not spend a
-/// quarter of the screen on two gutters.
 struct ClientChatEventRow: View {
     let item: ChatDisplayItem
     let attachmentData: Data?
@@ -24,26 +21,16 @@ struct ClientChatEventRow: View {
     var downloadAttachment: (ChatAttachment) -> Void = { _ in }
     var openAttachment: (ChatAttachment, Data) -> Void = { _, _ in }
     var faceSeed: UInt64 = 0
-    /// The row still being written. Selectable chains are held back until
-    /// the turn ends; copy buttons stay live throughout.
     var isLive = false
-    /// Stable per rendered row, independent of other chats and windows.
     @State private var markdownCacheID = UUID().uuidString
-    /// Whether this row may run the transcript's spinner. See
-    /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
-    /// The chat's Detailed level: tool output and diffs start open.
     var expandsOutput = false
     var compactTools = false
-    /// Opens or folds a step group, by the group's row id.
     var toggleGroup: (String) -> Void = { _ in }
     var onToggleOutput: () -> Void = {}
     var answerQuestion: (ChatQuestion, String) -> Void = { _, _ in }
-    /// This row's question is on its way to the host.
     var answeringQuestion = false
-    /// False for a saved copy, which cannot send anything.
     var canAnswerQuestions = true
-    /// Opens the recorded edits for this turn at one file or the first.
     var reviewChanges: ((ChatTurnChanges, String?) -> Void)? = nil
 
     var body: some View {
@@ -132,7 +119,6 @@ struct ClientChatEventRow: View {
             }
             .accessibilityLabel(L10n.text("apple.clientchatrows.new_turn_with_0.9f95018a", "\(agentLabel(backend))"))
         case let .thinking(text):
-            // Same as the Mac: reasoning is markdown, and it stays an aside.
             MessageMarkdown(
                 text,
                 bodyFont: ClientType.caption,
@@ -180,8 +166,6 @@ struct ClientChatEventRow: View {
         case let .attachment(attachment) where attachment.mediaType?.hasPrefix("image/") == true:
             EmptyView()
         case let .attachment(attachment):
-            // Same as the Mac: stable identity across polls. The revision
-            // still redraws through Equatable; recreating collapsed the row.
             ClientChatResponseAttachment(
                 attachment: attachment, data: attachmentData, file: attachmentFile,
                 isLoading: attachmentIsLoading, downloadError: attachmentError,
@@ -337,8 +321,6 @@ private struct ClientChatResponseAttachment: View {
         let file: URL?
     }
     private var imageSource: ImageSource { ImageSource(data: data, file: file) }
-    // Header metadata is available before the async task starts, so the first
-    // layout already has the final image box. Pixels only paint its overlay.
     private var imageAspect: CGFloat? {
         guard attachment.mediaType?.hasPrefix("image/") == true else { return nil }
         if let data { return ChatImageDims.aspect(of: data) }
@@ -368,8 +350,6 @@ private struct ClientChatResponseAttachment: View {
 
 }
 
-/// The point where a conversation changed hands. Same banner as the Mac, in
-/// the phone's type.
 struct ClientChatHandoffRow: View {
     let agent: String
     let brief: String
@@ -471,11 +451,6 @@ struct ClientChatApprovalCard: View {
     }
 }
 
-/// Compared by value so a transcript can skip a row that did not move.
-///
-/// Same rule as `ChatEventRow`: a global attachment revision must not rebuild
-/// every markdown row when one file arrives. Only an attachment card looks at
-/// loading, error, and whether bytes are present.
 extension ClientChatEventRow: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item

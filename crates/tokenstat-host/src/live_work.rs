@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Push status for visible workspace terminals, independent of an attached
-//! frontend. The existing activity sampler supplies the single polling thread.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -84,9 +80,7 @@ fn start_terminal_with(info: &tokenstat_pty::SessionInfo, begin: impl FnOnce(&st
     if info.hidden {
         return;
     }
-    // Local results belong in a later foreground overview even when no
-    // account was available at launch. Background pushes keep their original
-    // binding and never acquire credentials from a later sign-in.
+
     begin(&info.id);
     let mut terminals = terminals()
         .lock()
@@ -105,8 +99,6 @@ fn start_terminal_with(info: &tokenstat_pty::SessionInfo, begin: impl FnOnce(&st
 
 fn terminal_phase(alive: bool, exit_code: Option<i32>, waiting: bool) -> Option<&'static str> {
     if !alive {
-        // EOF can precede the child's exit status. Wait for the reap rather
-        // than reporting success for a process that subsequently fails.
         exit_code.map(|code| if code == 0 { "done" } else { "failed" })
     } else if waiting {
         Some("waiting")
@@ -125,10 +117,6 @@ pub(crate) fn poll_terminals() {
     for id in ids {
         let info = tokenstat_pty::manager().info(&id).ok();
         let phase = info.as_ref().map_or(Some("stopped"), |info| {
-            // A Live Activity tracks the PTY lifetime, not individual turns:
-            // sending done here would retire its account binding while Claude
-            // is still accepting the next prompt. Between turns it is waiting;
-            // pty.info/list carry the full done/error state to the app.
             let waiting = info.program_status.as_ref().map_or_else(
                 || {
                     info.pid
@@ -316,8 +304,7 @@ fn snapshot() -> (tokenstat_sync::push::WorkOverview, Vec<serde_json::Value>) {
 pub(crate) fn overview() -> serde_json::Value {
     let mut monitor = overview_monitor().lock().unwrap_or_else(|e| e.into_inner());
     let (summary, hints) = snapshot();
-    // Capture the current account only on an authorized foreground request.
-    // Background status never rebinds to an account that arrived later.
+
     if tokenstat_sync::push::begin_overview_activity() {
         tokenstat_sync::push::overview_activity_in_background(summary.clone());
         *monitor = Some(Overview {
@@ -356,8 +343,7 @@ pub(crate) fn stop_terminal(id: &str, close: bool) -> Result<(), tokenstat_pty::
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let info = tokenstat_pty::manager().info(id).ok();
-    // A reaped session has already recorded its result. Closing its old tab
-    // later must not start a second retention window after that result expires.
+
     if terminals.contains_key(id)
         && let Some(info) = info.as_ref()
     {
@@ -413,7 +399,7 @@ mod tests {
                 environment: Vec::new(),
             })
             .unwrap();
-        // No credentials or network. An overview can be requested after sign-in.
+
         start_terminal_with(&info, |_| false);
         let deadline = Instant::now() + Duration::from_secs(5);
         while manager.info(&info.id).unwrap().exit_code.is_none() && Instant::now() < deadline {

@@ -20,18 +20,8 @@ import Foundation
 /// the background spends none, because a spring integrated across a two second
 /// gap is a spring that leaves the frame.
 final class PersonaEngine {
-    /// The simulation's own step. Springs this stiff are stable well past it,
-    /// and it divides evenly into both 60 and 120.
     private static let fixedStep: CGFloat = 1.0 / 120
-    /// The most real time one frame may spend. Beyond this the clock is
-    /// simply skipped: catching up is never worth a visible lurch.
     private static let maxFrame: CGFloat = 1.0 / 12
-    /// How long one mood takes to become another.
-    ///
-    /// Long enough that a newspaper has time to be put down and a game picked
-    /// up, short enough that nobody waits through it. Both moods run for the
-    /// whole of it: the one leaving keeps moving as it fades, because a prop
-    /// that freezes and then disappears is two cuts instead of none.
     private static let shiftDuration: CGFloat = 0.55
 
     private(set) var body: PersonaSoftBody
@@ -41,65 +31,38 @@ final class PersonaEngine {
     private(set) var traits: PersonaTraits
     private(set) var seed: UInt64
 
-    /// Seconds since this mood began. Every mood function reads this, so a
-    /// mood always starts at its own beginning however long the app has run.
     private(set) var clock: CGFloat = 0
-    /// These keep moving across mood changes, so the creature never cuts to
-    /// another silhouette or restarts its turn when its work state changes.
     private var lifetime: CGFloat = 0
     private(set) var roll: CGFloat = 0
     private(set) var yaw: CGFloat = 0
     private var rollVelocity: CGFloat = 0
     private var yawVelocity: CGFloat = 0
 
-    /// The instant the body has been simulated up to, or zero before the
-    /// first frame. Read by the lab when it samples frames off the clock.
     var sampledTime: TimeInterval { lastTime ?? 0 }
 
-    /// The mood being left behind, still running on its own clock, and how
-    /// much of it is left. One means the change just happened.
     private var leaving: (mood: PersonaMood, clock: CGFloat)?
     private var shift: CGFloat = 0
 
-    /// How soft a recent landing has left the body, one to nought.
-    ///
-    /// A landing that only bounces is a ball. A landing that also stops the
-    /// creature holding its own shape for a fifth of a second is jelly, and
-    /// the difference is the whole character. It decays on its own, so no mood
-    /// has to remember to put the stiffness back.
     private var softening: CGFloat = 0
-    /// The ring-out after an impact, and the clock it runs on.
     private var jiggle: CGFloat = 0
     private var jiggleClock: CGFloat = 0
-    /// Dust from recent landings. A fixed four, oldest overwritten, because a
-    /// growing array in a per-frame path is a leak with a nice name.
     private var dust: [(x: CGFloat, age: CGFloat, weight: CGFloat)] = []
     private var dustCursor = 0
 
     private var lastTime: TimeInterval?
     private var pending: CGFloat = 0
     private var blinkCountdown: CGFloat = 2.5
-    /// Seconds into the current blink, or negative between blinks.
     private var blinkAge: CGFloat = -1
     private var blinkLength: CGFloat = 0.17
-    /// One blink in five or so comes as a pair, which is most of what makes
-    /// blinking look like a habit rather than a timer.
     private var blinkAgain = false
-    /// A wink: one eye, held a little, in the moods that are enjoying
-    /// themselves. Minus one is the left eye, plus one the right, zero none.
     private(set) var winkSide: CGFloat = 0
     private var winkAge: CGFloat = -1
     private var winkCountdown: CGFloat = 7
 
-    /// Where the eyes are looking on top of the mood's own gaze, in eye
-    /// radii. It jumps between fixations rather than drifting: a saccade is
-    /// fast, then the eyes hold, which is how attention looks from outside.
     private(set) var look = CGPoint.zero
     private var lookVelocity = CGVector.zero
     private var lookTarget = CGPoint.zero
     private var fixation: CGFloat = 0.8
-    /// The head leaning into where it looks, in radians. Underdamped on
-    /// purpose: a glance that tips the head and settles back is curiosity.
     private(set) var headTilt: CGFloat = 0
     private var headTiltVelocity: CGFloat = 0
     private var beatIndex = 0
@@ -120,10 +83,6 @@ final class PersonaEngine {
 
     var energy: CGFloat { body.energy }
 
-    /// Become a different character in the same seat. A reroll in the editor
-    /// changes the seed of a view that is already on screen, and rebuilding
-    /// the whole view to change one number would throw away the motion the
-    /// person is watching.
     func reseed(_ seed: UInt64) {
         guard seed != self.seed else { return }
         self.seed = seed
@@ -131,23 +90,17 @@ final class PersonaEngine {
         random = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
         body = PersonaSoftBody(lumps: traits.lumps)
         settle()
-        // A new face announces itself rather than appearing mid-breath.
         body.impulse(CGVector(dx: 0, dy: -0.75))
         body.pulse(0.10)
     }
 
-    // MARK: - Time
 
-    /// Advance to a wall-clock instant and refresh everything the renderer
-    /// reads. Safe to call with the same date twice.
     func advance(to time: TimeInterval, mood requested: PersonaMood, moving: Bool) {
         if requested != mood {
             enter(requested)
         }
 
         guard moving else {
-            // Motion is off, or nobody is looking. Present the mood's resting
-            // pose rather than freezing mid-bounce, which reads as a glitch.
             settle()
             roll = 0
             yaw = 0
@@ -186,7 +139,6 @@ final class PersonaEngine {
         refresh()
     }
 
-    /// Freeze in place during interactive layout; resume without catching up.
     func suspendClock() {
         lastTime = nil
         pending = 0
@@ -203,10 +155,6 @@ final class PersonaEngine {
             }
         }
 
-        // While a mood is changing, both are asked what they want and the
-        // answers are mixed. The body is never handed a new set of forces in
-        // one frame, so it never has a moment where it visibly changes its
-        // mind.
         let arriving = mood.drive(clock: now, traits: traits)
         let arrivingFace = mood.face(clock: now, traits: traits).expressed()
         var drive: PersonaDrive
@@ -221,9 +169,6 @@ final class PersonaEngine {
         }
 
         let quiet = mood == .sleeping || mood == .failed || mood == .waiting
-        // Shape belongs to the seed. Emotion moves the same plush character.
-        // A full somersault during play; a small settling lean otherwise.
-        // Integrate the angle so switching moods never jumps to a new pose.
         if mood == .bouncing || mood == .dancing {
             rollVelocity += (1.25 - rollVelocity) * Self.fixedStep * 4
         } else {
@@ -237,9 +182,6 @@ final class PersonaEngine {
         yawVelocity += ((desiredYaw - yaw) * 12 - yawVelocity * 7) * Self.fixedStep
         yaw += yawVelocity * Self.fixedStep
 
-        // What a landing left behind. Both decay on their own clock, so the
-        // squash always comes back and no mood can leave the body permanently
-        // slack by forgetting to tidy up after itself.
         if softening > 0 || jiggle > 0 {
             softening = max(0, softening - Self.fixedStep / 0.24)
             jiggle = max(0, jiggle - Self.fixedStep / 0.55)
@@ -254,18 +196,12 @@ final class PersonaEngine {
 
         body.step(dt: Self.fixedStep, drive: drive)
         absorbLanding()
-        // The face eases toward the mood's pose rather than being set to it,
-        // which is what makes a change of mood read as an expression moving.
         face.ease(towards: target, rate: Self.fixedStep * 11)
         advanceGaze(Self.fixedStep)
         advanceBlink(Self.fixedStep)
     }
 
-    // MARK: - Gaze
 
-    /// How far this mood's eyes wander between fixations, in eye radii.
-    /// Asleep and let down they do not. Busy they stay near the work, idle
-    /// they look around the room.
     private var wander: CGFloat {
         switch mood {
         case .sleeping, .failed: 0
@@ -280,8 +216,6 @@ final class PersonaEngine {
         let reach = face.openness > 0.3 ? wander : 0
         fixation -= dt
         if fixation <= 0 {
-            // Mostly small hops near the last place, now and then a proper
-            // look somewhere else. A uniform pick reads as a scanner.
             let far = nextUnit() < 0.3
             let angle = nextUnit() * 2 * .pi
             let distance = reach * (far ? 0.7 + nextUnit() * 0.3 : nextUnit() * 0.45)
@@ -289,21 +223,17 @@ final class PersonaEngine {
             let jump = hypot(next.x - lookTarget.x, next.y - lookTarget.y)
             lookTarget = next
             fixation = 0.45 + nextUnit() * (far ? 2.4 : 1.4)
-            // A big look often brings a blink along with it.
             if jump > 0.45, blinkAge < 0, face.blinks, nextUnit() < 0.35 {
                 startBlink(0.26)
             }
         }
         if reach == 0 { lookTarget = .zero }
-        // Critically damped and quick: there and still in about a tenth of a
-        // second, with no wobble, because eyes do not wobble.
         let omega: CGFloat = 34
         lookVelocity.dx += ((lookTarget.x - look.x) * omega * omega - 2 * omega * lookVelocity.dx) * dt
         lookVelocity.dy += ((lookTarget.y - look.y) * omega * omega - 2 * omega * lookVelocity.dy) * dt
         look.x += lookVelocity.dx * dt
         look.y += lookVelocity.dy * dt
 
-        // The head follows the eyes, late and softly, and overshoots a touch.
         let tiltTarget = clamp(-(look.x + face.gaze.x * 0.5) * 0.10, -0.16, 0.16)
         let stiffness: CGFloat = 70
         let damping: CGFloat = 2 * 0.55 * sqrt(stiffness)
@@ -315,21 +245,12 @@ final class PersonaEngine {
         min(max(value, lower), upper)
     }
 
-    /// Turn a landing into a splat.
-    ///
-    /// The floor reports how hard the body arrived. Everything a landing looks
-    /// like is bought here, once, for every mood: the body goes briefly slack
-    /// so the squash lingers past the bounce, a wave rings round the rim, and
-    /// the ground puffs. A mood that adds a hop gets all of it for nothing.
     private func absorbLanding() {
         for index in dust.indices {
             dust[index].age += Self.fixedStep
         }
         guard let hit = body.takeImpact(), hit.speed > 0.32 else { return }
         let force = min(1, (hit.speed - 0.32) / 1.5)
-        // The hardest recent landing, not the sum of them. Adding meant a
-        // dancing character, which lands on every beat, saturated inside two
-        // bars and stayed a slack bag for the rest of the song.
         softening = max(softening, force)
         jiggle = max(jiggle, force)
         jiggleClock = 0
@@ -338,13 +259,6 @@ final class PersonaEngine {
         dustCursor = (dustCursor + 1) % dust.count
     }
 
-    /// Everything the renderer reads that is not integrated: the blink, the
-    /// motes, and the squash the face borrows from the body.
-    ///
-    /// Mid-change, both moods put their things in the air at once. The old
-    /// ones shrink away and the new ones grow in, which is what puts something
-    /// between a newspaper and a game console rather than swapping one for the
-    /// other on a single frame.
     private func refresh() {
         motes.removeAll(keepingCapacity: true)
         let anchors = body.anchors
@@ -361,9 +275,6 @@ final class PersonaEngine {
         addDust()
     }
 
-    /// The ground answering back. Two puffs per landing, thrown outwards from
-    /// where the body actually hit rather than from the middle of the frame,
-    /// so a character that lands off to one side kicks dust up on that side.
     private func addDust() {
         for grain in dust where grain.age < 0.46 {
             let life = grain.age / 0.46
@@ -381,16 +292,10 @@ final class PersonaEngine {
         }
     }
 
-    /// Zero to one, clamped. The two props overlap only in the middle third of
-    /// a shift: the old one is most of the way gone before the new one is
-    /// really there, so the handover has a moment of empty hands in it rather
-    /// than a moment of holding both.
     private func ramp(_ value: CGFloat) -> CGFloat {
         max(0, min(1, value))
     }
 
-    /// Take a prop down to nothing, or bring it up from nothing. It shrinks as
-    /// well as fades, because something set down moves away from the hands.
     private func fade(_ range: Range<Int>, to amount: CGFloat) {
         for index in range {
             motes[index].opacity *= amount
@@ -398,25 +303,16 @@ final class PersonaEngine {
         }
     }
 
-    /// Smoothstep. A linear crossfade has a corner at each end and the eye
-    /// finds both of them.
     private func eased(_ value: CGFloat) -> CGFloat {
         let t = max(0, min(1, value))
         return t * t * (3 - 2 * t)
     }
 
-    // MARK: - Moods
 
     private func enter(_ next: PersonaMood) {
-        // Keep the old mood alive for half a second while the new one takes
-        // over, and blink on the way through. A blink over a change is the
-        // oldest trick in animation: the eye forgives almost anything that
-        // happens behind one.
         leaving = (mood, clock)
         shift = 1
         startBlink(0.30)
-        // A gather. The body dips and springs back, which is the beat that
-        // makes the change look like a decision rather than an edit.
         body.pulse(-0.13)
 
         mood = next
@@ -426,9 +322,6 @@ final class PersonaEngine {
         enterImpulse(next)
     }
 
-    /// The kick a mood arrives with. Without one, a change of mood is a change
-    /// of forces, and forces take time to show. With one, the character reacts
-    /// on the frame the news arrives.
     private func enterImpulse(_ mood: PersonaMood) {
         switch mood {
         case .idle:
@@ -478,24 +371,9 @@ final class PersonaEngine {
         }
     }
 
-    /// Discrete beats. Everything continuous is a force in `PersonaMood`;
-    /// this is only what has to happen *at* an instant, which is what a hop, a
-    /// beat and a bounce are.
-    ///
-    /// Anticipation lives here too, and it is most of what separates this from
-    /// a thing that merely moves. A jump with nothing before it reads as a
-    /// teleport upward. The same jump with a crouch an eighth of a second
-    /// earlier reads as a decision, and the crouch is one extra call.
     private func fireEvents(from previous: CGFloat, to now: CGFloat) {
         switch mood {
         case .bouncing:
-            // Re-kick once it has run out of bounce, rather than on a timer,
-            // so the rhythm comes from the physics and a heavy persona takes
-            // longer to get going again than a light one.
-            // Down, and no longer going anywhere. Measured on the body's
-            // travel rather than its total energy, because a slack blob
-            // quivering on the floor has plenty of the second kind and would
-            // never be kicked again.
             let low = body.centroid.y > PersonaStage.floor - PersonaStage.restRadius * 1.12
             if low, abs(body.momentum.dy) < 0.14 {
                 launches += 1
@@ -506,8 +384,6 @@ final class PersonaEngine {
 
         case .working:
             guard PersonaMood.workAdmire(now) < 0.02 else { break }
-            // The blow, and the body arriving behind it. A hammer that lands
-            // without the shoulder following through is a hammer being waved.
             if crossed(PersonaMood.blowPeriod, previous + 0.07, now + 0.07) {
                 body.pulse(-0.06)
             }
@@ -529,8 +405,6 @@ final class PersonaEngine {
 
         case .juggling:
             if crossed(PersonaMood.rallyPeriod, previous, now) {
-                // The ball lands on the crown at the seam between two arcs,
-                // and the wild one lands harder because it fell further.
                 let wild = Int(floor(now / PersonaMood.rallyPeriod)) % 4 == 0
                 body.poke(at: body.crown, strength: wild ? -1.25 : -0.85, reach: 0.26)
                 body.impulse(CGVector(dx: 0, dy: wild ? 0.34 : 0.22))
@@ -545,7 +419,6 @@ final class PersonaEngine {
             }
 
         case .failed:
-            // A shake it cannot absorb, then it stops fighting.
             if now < 0.34, crossed(0.085, previous, now) {
                 let side: CGFloat = Int(previous / 0.085).isMultiple(of: 2) ? -1 : 1
                 body.impulse(CGVector(dx: side * 1.05, dy: 0))
@@ -553,8 +426,6 @@ final class PersonaEngine {
             if previous < 0.34, now >= 0.34 {
                 body.slump(0.85)
             }
-            // It has another go every few seconds, gets a third of the way up,
-            // and gives that up as well.
             if now > 1.5, struck(4.4, 0.55, previous - 1.5, now - 1.5) {
                 body.impulse(CGVector(dx: 0, dy: -0.62))
             }
@@ -563,7 +434,6 @@ final class PersonaEngine {
             }
 
         case .idle:
-            // A shift of weight, so a resting character is not a loop.
             if crossed(5.4, previous, now) {
                 let side: CGFloat = nextUnit() > 0.5 ? 1 : -1
                 body.impulse(CGVector(dx: side * 0.12, dy: -0.10))
@@ -573,8 +443,6 @@ final class PersonaEngine {
             }
 
         case .thinking:
-            // The idea arrives as a jolt. It is the one moment in this mood
-            // that is not churn, so it has to land like one.
             if struck(7.2, 0.84, previous, now) {
                 body.impulse(CGVector(dx: 0, dy: -0.80))
                 body.pulse(0.18)
@@ -593,8 +461,6 @@ final class PersonaEngine {
 
         case .pacing:
             if PersonaMood.pacingIdea(now) < 0.25 {
-                // A footfall, and a heavier one at each turn where it plants
-                // and pushes off the other way.
                 if crossed(0.42, previous, now) {
                     body.impulse(CGVector(dx: 0, dy: -0.32))
                 }
@@ -609,9 +475,6 @@ final class PersonaEngine {
             }
 
         case .typing:
-            // Keystrokes, not hops. A small local knock at the hands for each
-            // one, fast and uneven, so the body ripples the way a hand landing
-            // on a key ripples the arm it is on.
             let keys = PersonaMood.typing(now)
             if keys.tap > 0.5, crossed(0.078, previous, now) {
                 body.poke(at: body.anchors.hands, strength: -0.20, reach: 0.22)
@@ -633,8 +496,6 @@ final class PersonaEngine {
             }
 
         case .reading:
-            // Something on the page. The body has to move for it, or the face
-            // is reacting to nothing.
             if struck(8.4, 0.66, previous, now) {
                 if PersonaMood.readingGag(now).shock > 0 {
                     body.impulse(CGVector(dx: 0, dy: -0.70))
@@ -645,15 +506,12 @@ final class PersonaEngine {
             }
 
         case .sipping:
-            // Hot. The whole body finds out at once.
             if struck(PersonaMood.teaPeriod, 0.30, previous, now) {
                 body.impulse(CGVector(dx: 0, dy: -0.55))
                 body.poke(at: body.anchors.mouth, strength: -0.55, reach: 0.28)
             }
 
         case .sketching:
-            // A small knock at each end of the sweep, where the hand changes
-            // direction. That is the only impulse a brush stroke has in it.
             if PersonaMood.sketch(now).look < 0.25, crossed(0.725, previous, now) {
                 body.poke(at: body.anchors.hands, strength: -0.16, reach: 0.24)
             }
@@ -665,13 +523,11 @@ final class PersonaEngine {
             }
 
         case .sleeping:
-            // A twitch, in the middle of a good dream.
             if struck(13.0, 0.62, previous, now) {
                 body.poke(at: body.crown, strength: -0.22, reach: 0.28)
             }
 
         case .ok:
-            // Once is a result. Twice is a celebration.
             if now < 0.7, crossed(0.62, previous, now) {
                 body.impulse(CGVector(dx: 0, dy: -0.72))
                 body.pulse(0.10)
@@ -679,7 +535,6 @@ final class PersonaEngine {
 
         case .bubbling:
             if struck(5.4, 0.60, previous, now) {
-                // It knew. It has always known. It is surprised anyway.
                 body.poke(at: body.anchors.mouth, strength: -0.95, reach: 0.34)
                 body.impulse(CGVector(dx: -0.30, dy: -0.18))
                 startBlink(0.26)
@@ -700,16 +555,12 @@ final class PersonaEngine {
         }
     }
 
-    // MARK: - One-shot the app can ask for
 
-    /// Poke the character. A real, local hit at a point in unit space, so a
-    /// click on its left side pushes its left side.
     func poke(at point: CGPoint) {
         body.poke(at: point, strength: 0.85, reach: 0.30)
         blinkCountdown = min(blinkCountdown, 0.12)
     }
 
-    // MARK: - Blink
 
     private func startBlink(_ length: CGFloat) {
         blinkAge = 0
@@ -761,8 +612,6 @@ final class PersonaEngine {
         }
     }
 
-    /// How shut one eye is from a wink, zero to one. Quick in, held long
-    /// enough to be read as meant, and out.
     var wink: CGFloat {
         guard winkAge >= 0 else { return 0 }
         let t = winkAge
@@ -772,12 +621,6 @@ final class PersonaEngine {
         return 1 - x * x * (3 - 2 * x)
     }
 
-    /// How shut the eyes are from blinking alone, zero to one.
-    ///
-    /// Fast down, a beat shut, then open a touch past where it started and
-    /// back. A real blink is not symmetric, a straight down-and-up reads as a
-    /// flicker, and the small overshoot on the way out is what makes the eye
-    /// look awake rather than reset. Negative means wider than at rest.
     var blink: CGFloat {
         guard blinkAge >= 0 else { return 0 }
         let close: CGFloat = 0.06
@@ -797,10 +640,7 @@ final class PersonaEngine {
         return -0.08 * (1 - x * x * (3 - 2 * x))
     }
 
-    // MARK: - Rest
 
-    /// Put the body at the mood's resting shape with no motion in it. Used on
-    /// the first frame, and whenever motion is off.
     private func settle() {
         leaving = nil
         shift = 0
@@ -829,15 +669,10 @@ final class PersonaEngine {
         floor(previous / period) != floor(now / period)
     }
 
-    /// Once per cycle, at a given phase of it. The same shift a mood applies
-    /// when it works out where in its own story it is, so an impulse lands on
-    /// the frame the face is already reacting.
     private func struck(_ period: CGFloat, _ at: CGFloat, _ previous: CGFloat, _ now: CGFloat) -> Bool {
         crossed(period, previous - at * period, now - at * period)
     }
 
-    /// xorshift, so a blink pattern is this persona's own and the same on
-    /// every machine. Not security, just variety.
     private func nextUnit() -> CGFloat {
         random ^= random << 13
         random ^= random >> 7

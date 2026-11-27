@@ -42,20 +42,6 @@ import ai.tokenstat.tokenstat.ui.sample.SampleStore.Turn
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// What the product is, before anybody rents anything. Port of
-/// `ClientSampleWorkspace`.
-///
-/// Setting a machine up costs money and half an hour, and until now that had
-/// to happen before somebody could see what they were getting. This is the ten
-/// seconds in front of it: a task, the answer, the one line that changed, and
-/// what the reading looks like.
-///
-/// It is a picture and says so, twice, in the places somebody would otherwise
-/// mistake for their own data. Nothing here is running: there is no machine,
-/// no agent and no account involved.
-///
-/// Read-only. Leaving lands back where setup was. No step is marked finished
-/// by having looked at this, because none of them is.
 @Composable
 fun SampleSheet(onDismiss: () -> Unit) {
     val colors = LocalTsColors.current
@@ -176,10 +162,6 @@ private fun TurnRow(turn: Turn) {
     }
 }
 
-/// A diff line, marked by its sign as well as its colour.
-///
-/// Green and red alone are the oldest way to make a diff unreadable, and a
-/// sample is exactly where somebody is looking at one for the first time.
 @Composable
 private fun DiffRow(line: Change) {
     val colors = LocalTsColors.current

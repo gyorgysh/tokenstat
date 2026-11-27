@@ -3,7 +3,6 @@
 import Foundation
 import Darwin
 
-/// A bounded, binary-safe tool invocation. Each stream drains independently.
 enum SimulatorCommand {
     struct Result: Sendable { let data: Data; let errors: String; let status: Int32 }
     struct Failure: LocalizedError {
@@ -30,8 +29,6 @@ enum SimulatorCommand {
         return value.data
     }
 
-    /// simctl versions differ in stdout support. A private, disposable file
-    /// works with both current and older Xcode without depending on the app's cwd.
     static func screenshot(deviceID: String, displayID: UInt32) async throws -> Data {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-simulator-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -47,9 +44,6 @@ enum SimulatorCommand {
         if let override = selection ?? ProcessInfo.processInfo.environment["DEVELOPER_DIR"], !override.isEmpty {
             selected = override
         } else {
-            // Asking xcrun on a pristine Mac can open the command-line-tools
-            // installer, which does not provide Simulator. Inspect selection
-            // first so discovery stays quiet and the app can explain setup.
             let result = try await run("/usr/bin/xcode-select", ["--print-path"])
             guard result.status == 0 else { throw Failure(message: L10n.text("apple.simulator.xcode_missing_help")) }
             selected = String(decoding: result.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -120,8 +114,6 @@ enum SimulatorCommand {
             return cancelled || timedOut
         }
     }
-    /// A descendant may keep a pipe open after its parent exits. Poll all
-    /// three streams so the job's deadline also bounds draining and stdin.
     private final class PipeIO: @unchecked Sendable {
         let pipe = Pipe()
         var data = Data()

@@ -5,21 +5,10 @@ import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Render filmstrips to a PNG instead of opening a window.
-///
-/// A motion problem is hard to argue about in prose and slow to check by
-/// launching a window and watching. A strip of frames, one row per mood, is
-/// something you can look at, diff against the last attempt, and point at.
-///
-///   swift run --package-path apps/mac/PersonaLab PersonaLab --shots out.png
-///   swift run --package-path apps/mac/PersonaLab PersonaLab --animation out.gif --span 15
 @MainActor
 enum LabShots {
     struct Plan {
         var size: CGFloat = 132
-        /// How big the frame is drawn, when that is not how big the mark is.
-        /// Rendering at 18 and drawing at 132 is the only honest way to check
-        /// a size that is too small to look at.
         var cell: CGFloat?
         var columns = 8
         var span: Double = 2.0
@@ -130,8 +119,6 @@ enum LabShots {
         return true
     }
 
-    /// A review artifact from the production engine, sampled at25fps. This
-    /// does not measure the app's live UI frame rate or native compositing.
     private static func animation(to path: String, size: CGFloat, span: Double, moods: [PersonaMood]) {
         let fps = 25.0
         let count = Int(span * fps)
@@ -221,9 +208,6 @@ enum LabShots {
         return image
     }
 
-    /// Step in real 60fps increments up to the sample instant, so what is
-    /// drawn is what the app would have drawn at that moment rather than one
-    /// enormous jump the fixed-step cap would have thrown away.
     private static func advance(_ engine: PersonaEngine, to time: Double, mood: PersonaMood) {
         var now = engine.sampledTime
         while now < time - 1e-9 {
@@ -257,8 +241,6 @@ enum LabShots {
     }
 }
 
-/// One frame of one character, with no time in it: the engine has already
-/// been advanced, and this only paints what it is holding.
 private struct LabShotFrame: View {
     let engine: PersonaEngine
     let size: CGFloat
@@ -274,7 +256,6 @@ private struct LabShotFrame: View {
 
 
 extension LabShots {
-    /// One row per seed, so the cast can be compared doing the same thing.
     static func cast(plan: Plan, mood: PersonaMood) -> NSImage {
         var seeds: [UInt64] = []
         var bits = plan.seed
@@ -313,7 +294,6 @@ extension LabShots {
         return image
     }
 
-    /// Numbers, for when a shape is wrong and the picture cannot say why.
     static func probe(mood name: String, arguments: [String]) {
         guard let mood = PersonaMood.allCases.first(where: { String(describing: $0) == name }) else {
             print("no mood called \(name)")
@@ -341,11 +321,6 @@ extension LabShots {
 
 
 extension LabShots {
-    /// One mood turning into another, frame by frame.
-    ///
-    /// The change is the thing being looked at here, so the strip runs at the
-    /// frame rate rather than at reading speed: half a second across the whole
-    /// row, which is exactly the length of a shift.
     static func shift(plan: Plan, from: PersonaMood, to: PersonaMood) -> NSImage {
         let cell = plan.cell ?? plan.size
         let width = cell * CGFloat(plan.columns)
@@ -360,8 +335,6 @@ extension LabShots {
 
             let engine = PersonaEngine(seed: plan.seed, mood: from)
             engine.advance(to: 0, mood: from, moving: true)
-            // Settle into the outgoing mood first, so what the strip shows is
-            // a change and not a start.
             advance(engine, to: 3.0, mood: from)
             let began = engine.sampledTime
 

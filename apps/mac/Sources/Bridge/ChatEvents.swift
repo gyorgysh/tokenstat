@@ -8,14 +8,11 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
         case question, options, multiple, blocking, delivery
         case defaultAnswer = "default"
         case questionID = "questionId"
-        /// The spelling the archive itself holds. A host new enough writes
-        /// both; one that is not writes only this. Read, never written.
         case atMsLegacy = "at_ms"
     }
 
     var kind: String
     var text: String?
-    /// Additional context acknowledged during the same turn. Older archives omit it.
     var steer: Bool? = nil
     /// Where this record starts in the conversation's archive.
     ///
@@ -28,20 +25,14 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var backend: String?
     var event: ChatAgentEvent?
     var approval: ChatApproval?
-    /// Handoff only: the agent picking the conversation up, and the summary it
-    /// was given. Recorded in the timeline rather than hidden, because it is
-    /// text tokenstat put in front of somebody's agent on their behalf.
     var to: String?
     var brief: String?
-    /// Question only: the agent's question, its choices, and what it goes
-    /// with if nobody answers. `recordID` names the question.
     var recordID: String?
     var question: String?
     var options: [String]?
     var multiple: Bool?
     var defaultAnswer: String?
     var blocking: Bool?
-    /// Answer only: which question, and how the answer was sent on.
     var questionID: String?
     var delivery: String?
     var id: String {
@@ -110,8 +101,6 @@ struct ChatAgentEvent: Codable, Sendable {
     var patch: String?
     var status: String?
     var text: String?
-    /// Token count on `usage`. Tool calls send `input` as an object, which
-    /// this field ignores so the row can still decode.
     var input: UInt64?
     var output: UInt64?
     var costUsd: Double?
@@ -131,8 +120,6 @@ struct ChatAgentEvent: Codable, Sendable {
         case kind, delta, verb, target, path, added, removed, patch, status, text
         case input, output, costUsd, callId, ok, detail, cacheRead, cacheWrite, exitCode
         case id, name, mediaType, size, steps
-        // The spellings the archive itself holds. A host new enough writes
-        // both, and one that is not writes only these. Read, never written.
         case callIdLegacy = "call_id"
         case cacheReadLegacy = "cache_read"
         case cacheWriteLegacy = "cache_write"
@@ -201,7 +188,6 @@ struct ChatAgentEvent: Codable, Sendable {
 }
 
 private extension KeyedDecodingContainer where K == ChatAgentEvent.CodingKeys {
-    /// Usage counters are numbers. Tool `input` is an object. Never throw.
     func decodeCount(forKey key: K) -> UInt64? {
         if let value = try? decodeIfPresent(UInt64.self, forKey: key) {
             return value

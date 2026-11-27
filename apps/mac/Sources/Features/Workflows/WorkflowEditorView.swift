@@ -187,8 +187,6 @@ struct WorkflowEditorView: View {
         }
     }
 
-    /// Phone: the list pushes a step. Back sits above the stack so it does
-    /// not scroll away with the fields.
     private var graphStack: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if let current = stepPath.last {
@@ -220,7 +218,6 @@ struct WorkflowEditorView: View {
         .disabled(!session.loaded || session.working || session.creating)
     }
 
-    /// iPad keeps the list. The right pane is the selected step, or settings.
     private func graphList(selectsInPlace: Bool) -> some View {
         ScrollView {
             fields(section: .graph, showValidation: false, selectsInPlace: selectsInPlace)
@@ -239,8 +236,6 @@ struct WorkflowEditorView: View {
 #endif
     }
 
-    /// Wide with room: the touch canvas, or the step list as the accessible
-    /// alternate. Both edit the same document and inspector.
     @ViewBuilder
     private var graphColumn: some View {
         if canvasMode == .canvas, allowsCanvas {

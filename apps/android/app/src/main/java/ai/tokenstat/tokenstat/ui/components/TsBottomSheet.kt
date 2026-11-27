@@ -18,14 +18,10 @@ internal fun TsBottomSheet(
     onDismissRequest: () -> Unit,
     containerColor: Color,
     sheetState: SheetState = rememberModalBottomSheetState(),
-    /// Null for a sheet whose own art runs to its top edge and draws a handle
-    /// over it.
     dragHandle: (@Composable () -> Unit)? = { BottomSheetDefaults.DragHandle() },
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val lightBars = !LocalTsColors.current.isDark
-    // Sheets own their window. Match the visible app theme even on versions
-    // that cannot apply an application night mode to new windows.
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,

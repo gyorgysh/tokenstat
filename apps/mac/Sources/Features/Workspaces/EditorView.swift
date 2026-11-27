@@ -6,15 +6,6 @@
 
 import SwiftUI
 
-/// A focused code editor for one workspace file.
-///
-/// A real editor, and deliberately not an IDE: syntax colour, line numbers, the
-/// system find bar, indentation, bracket pairing, a comment toggle, and marks
-/// in the gutter for what changed. No language server, no completion, no
-/// refactoring. The terminal beside it is where the work happens, and this is
-/// for the focused change you do not want to open another application for.
-///
-/// Saving is always explicit. Nothing here writes on a timer or on focus loss.
 struct EditorView: View {
     @Bindable var model: WorkspacesModel
     let folder: WorkspaceFolder
@@ -27,10 +18,6 @@ struct EditorView: View {
                 Banner(text: error, severity: .danger)
             }
 
-            // One branch, not one per platform. Everything except the editor
-            // itself and its status line is the same on both, and two copies
-            // of the document lookup and the loading fallback would have to be
-            // kept in step by hand across a boundary neither side compiles.
             if let document = model.document(for: path, in: folder.id) {
                 editor(document)
                     .background(Theme.background)
@@ -94,10 +81,6 @@ struct EditorView: View {
     }
 
     #if os(macOS)
-    /// Path, language, unsaved state, and the Save button.
-    ///
-    /// The language sits here rather than in the tab because it is only ever
-    /// interesting when the colours look wrong, and this is where you look then.
     private func statusLine(_ document: EditorDocument) -> some View {
         HStack(spacing: Theme.Space.s) {
             Text(path)
@@ -116,9 +99,6 @@ struct EditorView: View {
             }
 
             if let note = document.highlightNote {
-                // Not an error. "No grammar for this file type" is a normal
-                // thing for a text file to be, and the file still edits and
-                // saves. It belongs here in grey, not in a banner in red.
                 Text(note)
                     .font(Theme.caption)
                     .foregroundStyle(.tertiary)

@@ -40,7 +40,6 @@ final class ModelUITests: XCTestCase {
         XCTAssertTrue(wait { self.number("draws") > initial })
         XCTAssertEqual(number("position"), position, accuracy: 2, "Orbit must not scroll the transcript")
         capture("model-after-orbit")
-        // Wait for OrbitControls damping to settle, then verify an idle interval.
         var last = -1, stable = 0
         for _ in 0..<30 {
             Thread.sleep(forTimeInterval: 0.2)

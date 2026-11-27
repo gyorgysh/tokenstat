@@ -82,7 +82,7 @@ fn text(value: &Value, limit: usize) -> Option<String> {
 
 fn id(value: &Value) -> Option<String> {
     let result = text(value, 160)?;
-    // Truncating an identity could join two agents or calls.
+
     (value.as_str()?.trim().len() <= 160 && !result.chars().any(char::is_control)).then_some(result)
 }
 
@@ -132,8 +132,7 @@ fn codex_agent_status(value: &Value) -> String {
     if value["status"].is_string() {
         return agent_status(&value["status"]);
     }
-    // Legacy Rust enum payloads carry terminal detail under one variant
-    // key. Only the key is used; result and error text are never copied.
+
     if let Some(object) = value.as_object().filter(|object| object.len() == 1)
         && let Some(key) = object.keys().next().filter(|key| {
             matches!(
@@ -224,9 +223,6 @@ impl Activity {
     }
 
     pub fn observe(&mut self, backend: &str, value: &Value) -> bool {
-        // Text deltas cannot change activity. Avoid cloning the accumulated
-        // plan, agents and pending tool joins for each token. The handlers
-        // still validate the contents and ownership of relevant records.
         let relevant = match backend {
             "codex" => match value["type"].as_str() {
                 Some("tokenstat.activity") => true,
@@ -373,8 +369,7 @@ impl Activity {
                             Some("started") => "running",
                             Some("completed") => "completed",
                             Some("interrupted") => "stopped",
-                            // Interaction is activity, not a lifecycle
-                            // transition. Keep the last attested status.
+
                             _ => self
                                 .agents
                                 .iter()
@@ -434,8 +429,7 @@ impl Activity {
                 }
             }
         }
-        // Earlier app-server versions use a single recipient and an
-        // optional singular agentStatus. Keep that explicit identity too.
+
         let singular = id(&item["newThreadId"]).or_else(|| id(&item["receiverThreadId"]));
         if let Some(singular) = singular.as_ref()
             && !agent_ids.contains(singular)
@@ -445,7 +439,7 @@ impl Activity {
         self.partial |= agent_ids.len() > AGENTS;
         for agent_id in agent_ids.into_iter().take(AGENTS) {
             let state = states.and_then(|states| states.get(&agent_id));
-            // A tool finishing does not mean its recipient has finished.
+
             let status = state
                 .map(codex_agent_status)
                 .or_else(|| {
@@ -491,8 +485,6 @@ impl Activity {
     }
 
     fn claude(&mut self, value: &Value) {
-        // Subagent assistant records use parent_tool_use_id. Their todos are
-        // not the main agent's plan.
         if value["type"] == "assistant"
             && value["parent_tool_use_id"].is_null()
             && let Some(blocks) = value.pointer("/message/content").and_then(Value::as_array)
@@ -571,8 +563,6 @@ impl Activity {
                     agent.status = if block["is_error"] == true {
                         "failed"
                     } else if call.input["run_in_background"] == true {
-                        // Background launch completion is not child
-                        // completion. Keep a native status if known.
                         agent.status.as_str()
                     } else {
                         "completed"
@@ -814,7 +804,7 @@ impl Activity {
             let Some(agent_id) = id(&agent["conversation_id"]) else {
                 continue;
             };
-            // The containing spawn step's DONE is not a child completion.
+
             self.agent(Agent {
                 id: agent_id,
                 name: text(&agent["type_name"], 160),
@@ -831,8 +821,6 @@ impl Activity {
         let payload = &value["payload"];
         let event = &payload["event"];
         if value["payload_type"] == "todo.snapshot.updated" {
-            // Muse 1.4 moved the list under `facts`. Earlier builds put it
-            // straight on the payload.
             let items = payload
                 .pointer("/facts/items")
                 .filter(|items| items.is_array())
@@ -853,8 +841,7 @@ impl Activity {
                 self.reported_goal(&record["goal"], "agent");
             }
         }
-        // Runtime task lifecycle also contains ordinary tools. Only the
-        // explicit subagent control record establishes a child agent.
+
         if payload["kind"] != "subagent_control" {
             return;
         }
@@ -937,8 +924,7 @@ impl Activity {
             if !result.is_object() {
                 continue;
             }
-            // Full successful result lists are authoritative even for a
-            // merge request. Never replace a plan with just the merge input.
+
             let todos = result
                 .get("todos")
                 .or_else(|| (tool == "createPlanToolCall").then(|| &call["args"]["todos"]));
@@ -1077,8 +1063,6 @@ impl Activity {
                 && state["status"] == "completed"
                 && !metadata["background"].is_boolean()
             {
-                // V2's CLI reports tool completion; absent an explicit child
-                // lifecycle field, it cannot establish child completion.
                 "unknown".into()
             } else {
                 agent_status(&state["status"])

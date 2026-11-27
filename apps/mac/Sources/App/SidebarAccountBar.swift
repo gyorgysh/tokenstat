@@ -24,7 +24,6 @@ struct SidebarAccountBar: View {
                 .frame(width: 32, height: 32)
                 .help(L10n.text("common.settings"))
         }
-        // Match the rail's account slot; the native menu must not size the row.
         .frame(height: 40)
         .padding(.horizontal, Theme.Space.s)
         .padding(.bottom, Theme.Space.m)

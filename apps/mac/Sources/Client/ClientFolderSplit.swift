@@ -7,8 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A project workbench. Sections sit above the content, like the Mac, leaving
-/// the available width to the work instead of a second navigation column.
 struct ClientFolderSplit: View {
     let peer: String
     let hostName: String
@@ -350,14 +348,9 @@ struct ClientFolderSplit: View {
 }
 
 
-/// One of a folder's sections, drawn on its own.
-///
-/// Shared by compact pushes and the project workbench's section strip.
 struct ClientWorkspaceSectionDetail: View {
     let peer: String
     let hostName: String
-    /// What the list this came from knew, and the freshest read of it. The
-    /// split view has both, and the sidebar passes the same folder twice.
     let folder: WorkspaceFolder
     var current: WorkspaceFolder?
     let section: WorkspaceSection

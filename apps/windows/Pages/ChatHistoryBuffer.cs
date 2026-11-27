@@ -5,7 +5,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Bounded initial history, older pages, and generation-aware live tails.</summary>
 internal sealed class ChatHistoryBuffer
 {
     public JsonArray Events { get; set; } = new();
@@ -64,7 +63,6 @@ internal sealed class ChatHistoryBuffer
     }
 }
 
-/// <summary>Verified whole-conversation counts; invalid telemetry never blocks history.</summary>
 internal static class ChatUsageTotals
 {
     private static readonly string[] Counts = ["input", "output", "cacheRead", "cacheWrite", "turns"];

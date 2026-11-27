@@ -4,8 +4,6 @@ package ai.tokenstat.tokenstat.ui.logic
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/// The spend window must agree with `DeviceHistory`: the same depth per
-/// tier, the same phrases, and the same detail line under the figure.
 class DeviceHistoryTest {
     @Test
     fun daysFollowTheTier() {

@@ -12,7 +12,6 @@ import AppKit
 import UIKit
 #endif
 
-/// Bytes ready to stage as a chat attachment: a name, a type, and the file.
 struct ChatInboxItem: Sendable {
     var data: Data
     var name: String
@@ -21,34 +20,18 @@ struct ChatInboxItem: Sendable {
     var importFailure: String? = nil
 }
 
-/// What a drop means before the chat decides how to present it.
-///
-/// Keeping text and refusals beside attachments is deliberate: every surface
-/// can share one decoding policy without pretending a sentence is a file or a
-/// directory is an unreadable attachment.
 enum ChatInboxDrop: Sendable {
     case attachment(ChatInboxItem)
     case text(String)
     case folder
 }
 
-/// Drops become explicit outcomes here, while pastes and the file picker share
-/// the same attachment decoding path, so no composer talks to a pasteboard.
-///
-/// Screenshot thumbnails are the reason this is not just `Data(contentsOf:)`.
-/// They often carry pixels without a durable file, or a `file://` that vanishes
-/// when the thumbnail slides away. Read the bytes immediately. Convert TIFF and
-/// HEIC to PNG so the agent CLI is opening something it can actually decode.
 enum ChatInbox {
     static let maxBytes = 12 * 1024 * 1024
     static let dropTypes: [UTType] = [
         .fileURL, .url, .image, .png, .jpeg, .gif, .webP, .heic, .tiff, .pdf, .plainText,
     ]
 
-    /// The last answer and the pasteboard generation it was for. The
-    /// composer asks on every redraw, and asking read the pasteboard from
-    /// another process, decoding a copied image each time. `changeCount`
-    /// moves with every copy, so a cached answer is never stale.
     @MainActor private static var attachmentAnswer: (change: Int, has: Bool)?
 
     @MainActor
@@ -82,7 +65,6 @@ enum ChatInbox {
             || NSImage(pasteboard: pasteboard) != nil
         #else
         let pasteboard = UIPasteboard.general
-        // Query types here; read copied content only after the Paste action.
         return pasteboard.hasImages || pasteboard.hasURLs
         #endif
     }
@@ -169,8 +151,6 @@ enum ChatInbox {
         ))
     }
 
-    /// Read one extra byte so oversized imports reach the existing refusal
-    /// without allocating the whole file. This prefix must never be staged.
     static func boundedFileData(from url: URL) -> Data? {
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
               values.isRegularFile == true,
@@ -230,7 +210,6 @@ enum ChatInbox {
         #endif
     }
 
-    // MARK: - Providers
 
     private static func item(from provider: NSItemProvider) async -> ChatInboxItem? {
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
@@ -252,9 +231,6 @@ enum ChatInbox {
     }
 
     private static func drop(from provider: NSItemProvider) async -> ChatInboxDrop? {
-        // Screenshot thumbnails can offer an unavailable file URL alongside
-        // readable pixels. Keep the original file when it works, then try
-        // the provider's other supported representations before giving up.
         let offersFile = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         if offersFile,
            let url = await url(from: provider, type: .fileURL),
@@ -279,8 +255,6 @@ enum ChatInbox {
                 )))
             }
         }
-        // An unreadable file may also advertise its path as plain text.
-        // Preserve file-drop intent instead of inserting that path as prose.
         if offersFile { return nil }
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
            let url = await url(from: provider, type: .url)
@@ -347,7 +321,6 @@ enum ChatInbox {
         }
     }
 
-    // MARK: - Pasteboards
 
     #if os(macOS)
     private static func macPasteboardItems() -> [ChatInboxItem] {
@@ -457,8 +430,6 @@ enum ChatAttachmentDownloadPolicy {
     static let automaticImageLimit: UInt64 = 250 * 1024 * 1024
 
     static func permitsAutomaticDownload(size: UInt64?, isLocalImage: Bool = false, isImage: Bool = false) -> Bool {
-        // The local host already owns these bytes. The download threshold
-        // controls network transfers, not whether a local image is visible.
         if isLocalImage { return size != 0 }
         guard let size else { return false }
         return size > 0 && size <= (isImage ? automaticImageLimit : automaticLimit)
@@ -484,8 +455,6 @@ extension Notification.Name {
     static let chatAttachmentCachePurged = Notification.Name("chatAttachmentCachePurged")
 }
 
-/// Disposable downloads and preview copies. Disk work is serialized away
-/// from the UI actor. Purging invalidates writes from in-flight downloads.
 actor ChatAttachmentCache {
     static let shared = ChatAttachmentCache(
         previewDirectory: FileManager.default.temporaryDirectory
@@ -558,7 +527,6 @@ actor ChatAttachmentCache {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             try prune()
         } catch {
-            // Cache failure must not prevent opening the downloaded file.
         }
         return true
     }
@@ -568,9 +536,6 @@ actor ChatAttachmentCache {
         guard let root = file(reference: reference, attachment: attachment)?.appendingPathExtension("file"),
               let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), urls.count == 1,
               let url = urls.first, let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
-              // This cache publishes only completed, SHA-verified downloads.
-              // Archive sizes may be missing or stale; the immutable attachment
-              // ID identifies the file, just as it does for byte-backed entries.
               values.isRegularFile == true, (values.fileSize ?? 0) > 0,
               let date = values.contentModificationDate, Date().timeIntervalSince(date) < lifetime else { return nil }
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
@@ -586,8 +551,6 @@ actor ChatAttachmentCache {
         if let sourceRoot = roots.first(where: { sourceDirectory.path.hasPrefix($0.standardizedFileURL.path + "/") }) {
             removeEmptyDirectories([(sourceDirectory, sourceRoot)])
         }
-        // A resumed transfer can carry an old modification date. Retention
-        // starts when the completed download enters this cache.
         try FileManager.default.setAttributes([.modificationDate: Date(), .posixPermissions: 0o600], ofItemAtPath: destination.path)
         try prune()
         guard FileManager.default.fileExists(atPath: destination.path) else { throw CocoaError(.fileNoSuchFile) }
@@ -629,8 +592,6 @@ actor ChatAttachmentCache {
             var current = directory.standardizedFileURL
             let prefix = root.standardizedFileURL.path + "/"
             while current.path.hasPrefix(prefix), !rootPaths.contains(current.path) {
-                // rmdir refuses non-empty directories atomically. A cache or
-                // transfer writer can create a file while this pass runs.
                 let removed = current.withUnsafeFileSystemRepresentation { path -> Bool in
                     guard let path else { return false }
                     return Darwin.rmdir(path) == 0
@@ -641,12 +602,6 @@ actor ChatAttachmentCache {
         }
     }
 
-    /// Oldest first, until the budget is met and nothing is past its lifetime.
-    ///
-    /// One file that will not go, because something has it open or its folder
-    /// turned read-only, must not stop the pass: the rest of the eviction is
-    /// what keeps the cache inside its budget. The failure is reported after
-    /// everything that could be removed has been.
     private func prune() throws {
         let files = entries().sorted { $0.1 < $1.1 }
         var total = files.reduce(0) { $0 + $1.2 }
@@ -661,10 +616,6 @@ actor ChatAttachmentCache {
                 failure = error
             }
         }
-        // Eviction cleans its own parents immediately. Sweep folders left by
-        // interrupted writes once an hour. Leave newly created folders alone,
-        // since a transfer may be about to open its file. Avoid another directory
-        // walk on every successful cache write.
         if Date().timeIntervalSince(lastDirectoryCleanup) > 3600 {
             for root in roots {
                 guard let directories = FileManager.default.enumerator(at: root,

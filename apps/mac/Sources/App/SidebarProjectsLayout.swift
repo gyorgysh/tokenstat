@@ -14,11 +14,9 @@ struct SidebarChatEntry: Identifiable, Hashable, Sendable {
 }
 
 enum SidebarChatDay: Hashable, Sendable {
-    /// A turn is running right now. Drawn first, whatever its date.
     case working
     case today
     case yesterday
-    /// Start of a calendar day within `SidebarProjectsLayout.olderAfterDays`.
     case day(Date)
     case older
 
@@ -67,8 +65,6 @@ enum SidebarProjectsLayout {
         sort: SidebarProjectsSort,
         activity: (WorkspaceFolder) -> Int64
     ) -> [WorkspaceFolder] {
-        // "No repository" leads, and only once it holds a chat: an empty
-        // row would be one more project-shaped line with nothing in it.
         let general = folders.filter { $0.isGeneral && activity($0) > 0 }
         return general + ordered(folders.filter { !$0.isGeneral }, sort: sort, activity: activity)
     }
@@ -114,9 +110,6 @@ enum SidebarProjectsLayout {
         }
         switch sort {
         case .manual, .recent:
-            // The keys are read once per entry rather than once per
-            // comparison. This list is rebuilt on every sidebar update, and
-            // the comparator ran each conversation's accessors log n times.
             let keyed = entries.map { (entry: $0, running: $0.conversation.running, activity: $0.activityMs) }
             return keyed.sorted {
                 if $0.running != $1.running { return $0.running && !$1.running }
@@ -134,11 +127,8 @@ enum SidebarProjectsLayout {
     }
 
     static let chatPageSize = 30
-    /// Past this many days, chats share one Older heading instead of a day each.
     static let olderAfterDays = 7
 
-    /// Splits recency-ordered entries into dated headings, keeping their order.
-    /// Running chats lead under their own heading so live work stays on top.
     static func dayGroups(
         _ entries: [SidebarChatEntry],
         now: Date = Date(),
@@ -152,8 +142,6 @@ enum SidebarProjectsLayout {
             if buckets[day] == nil { order.append(day) }
             buckets[day, default: []].append(entry)
         }
-        // Entries arrive running-first, then newest first, so first sight
-        // order is already Working, Today, Yesterday, dates, Older.
         return order.map { SidebarChatDayGroup(day: $0, entries: buckets[$0] ?? []) }
     }
 

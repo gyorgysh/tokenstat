@@ -2,9 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Re-resolve stored identifiers through the same availability gate as Continue.
-/// A terminal reference attaches only to an existing session; no launch request
-/// is reconstructed from navigation storage.
 struct ClientRestoredRouteView: View {
     let route: WorkMobileRoute
     @Environment(ClientNavigationModel.self) private var navigation
@@ -66,8 +63,6 @@ struct ClientRestoredDestination: ViewModifier {
         return content.navigationDestination(isPresented: Binding(
             get: { navigation.destination == tab && navigation.restoredRoute != nil },
             set: { shown in
-                // Ignore a teardown callback from a stack which never
-                // presented this generation of the restored route.
                 if !shown, presentedGeneration == generation,
                    layout == navigation.stackGeneration, navigation.destination == tab {
                     presentedGeneration = nil

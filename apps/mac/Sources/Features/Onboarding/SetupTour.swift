@@ -2,34 +2,23 @@
 
 import SwiftUI
 
-/// Remote access as the tour can drive it. Only a host has the switch: the
-/// Mac passes one, a phone passes nil and is told where the switch lives.
 struct SetupTourRemote {
     let allowed: Bool
     let enabled: Bool
     let set: (Bool) async -> Void
 }
 
-/// The host helper's lifetime, as the tour can drive it. Mac only.
 struct SetupTourHost {
     let policy: HostPolicy?
     let saving: Bool
     let set: (Bool) async -> Void
-    /// Plan limits shared with the account's other devices.
     let limitsShared: Bool
     let setLimitsShared: (Bool) async -> Void
 }
 
-/// A short, skippable pass over the choices that change how the app feels:
-/// how it looks, and how it reaches your other machines.
-///
-/// Three steps, each one screen, each one optional. Nothing here is a
-/// setting that lives only here: every control is the same one Settings has,
-/// so skipping costs nothing and a choice made here shows up there.
 struct SetupTour: View {
     let signedIn: Bool
     var remote: SetupTourRemote?
-    /// Quick settings for this machine. A phone passes nil and skips the step.
     var host: SetupTourHost? = nil
     let onSignIn: () -> Void
     let onFinish: () -> Void
@@ -67,7 +56,6 @@ struct SetupTour: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: step)
     }
 
-    // MARK: Chrome
 
     private var header: some View {
         HStack {
@@ -87,9 +75,6 @@ struct SetupTour: View {
         .padding(.top, Theme.Space.l)
     }
 
-    /// One row on the Mac. On a phone the choice to stop showing it gets a
-    /// row of its own and the two buttons share the width, because four
-    /// things across a phone truncated both buttons to their icons.
     private var footer: some View {
         VStack(spacing: Theme.Space.s) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
@@ -165,7 +150,6 @@ struct SetupTour: View {
         }
     }
 
-    // MARK: Steps
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -263,8 +247,6 @@ struct SetupTour: View {
 }
 
 #if os(macOS)
-/// The sidebar's glass, in the tour. The same stored values Appearance
-/// settings write, so the two can never disagree.
 private struct SetupTourGlass: View {
     @AppStorage(SidebarAppearancePreferences.enabledKey) private var enabled = true
     @AppStorage(SidebarAppearancePreferences.washKey) private var wash = SidebarAppearancePreferences.defaultWash
@@ -293,9 +275,6 @@ private struct SetupTourGlass: View {
     }
 }
 
-/// The two switches that change the most at a glance: whether this Mac stays
-/// reachable after quitting, and whether plan limits reach your phone. Both
-/// write the same stored state Account settings shows.
 private struct SetupTourQuickSettings: View {
     let host: SetupTourHost
 

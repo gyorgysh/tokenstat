@@ -6,7 +6,6 @@
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>The forces for an instant of a mood. Clock is seconds since the mood began.</summary>
 internal static class PersonaMoodDrive
 {
     public static PersonaDrive Drive(this PersonaMood mood, double clock, PersonaTraits traits)
@@ -41,9 +40,6 @@ internal static class PersonaMoodDrive
                 drive.Gravity = 3.1;
                 drive.Restitution = 0.62;
                 drive.Friction = 0.94;
-                // Loose and underdamped on purpose. A bouncing ball that holds
-                // its shape is a bouncing ball, and this one should be a
-                // bouncing water balloon.
                 drive.Damping = 1.25 * traits.Firmness;
                 drive.Pressure = 58 * traits.Firmness;
                 drive.ShapeStiffness = 118 * traits.Firmness;
@@ -76,9 +72,6 @@ internal static class PersonaMoodDrive
                 drive.Damping = 4.4 * traits.Firmness;
                 drive.Pressure = 50 * traits.Firmness;
                 drive.Radius = PersonaStage.RestRadius * 0.96;
-                // It stands over the job rather than pacing past it. The swing
-                // is the motion, and a character walking while it hammers is a
-                // character doing two things badly.
                 drive.AnchorX = PersonaStage.CentreX - 0.06;
                 drive.AnchorPull = 12;
                 drive.Lean = 0.10 + job.Strike * 0.30 - job.Lift * 0.16 - job.Admire * 0.34;
@@ -108,9 +101,6 @@ internal static class PersonaMoodDrive
                 double swing = ball.Point.X - PersonaStage.CentreX;
                 drive.Gravity = 1.0;
                 drive.Damping = (3.0 - ball.Panic * 0.9) * traits.Firmness;
-                // The body chases the ball rather than swinging on a fixed
-                // sine, so the fourth throw going wide drags the whole
-                // creature after it.
                 drive.AnchorX = PersonaStage.CentreX + swing * (0.55 + ball.Panic * 0.55);
                 drive.Lean = swing * (1.5 + ball.Panic * 1.4);
                 drive.AnchorPull = 9 + ball.Panic * 7;
@@ -126,9 +116,6 @@ internal static class PersonaMoodDrive
                 drive.Gravity = 1.35;
                 drive.Restitution = 0.30;
                 drive.Damping = 3.0 * traits.Firmness;
-                // Small. This is somebody enjoying a song where they are
-                // standing, not a routine: a light bob, a shift of weight left
-                // and right, and that is the whole dance.
                 drive.Stretch = new PSize(1 + pump * 0.045, 1 - pump * 0.042);
                 drive.AnchorX = PersonaStage.CentreX + sway * 0.075;
                 drive.Radius = PersonaStage.RestRadius * 0.95;
@@ -165,8 +152,6 @@ internal static class PersonaMoodDrive
 
             case PersonaMood.Failed:
             {
-                // Three phases in one expression: a shake it cannot absorb, a
-                // collapse, then a puddle that has not entirely given up.
                 double melt = Math.Clamp((clock - 0.34) / 0.85, 0, 1);
                 double eased = melt * melt * (3 - 2 * melt);
                 double retry = PersonaMoodTiming.FailedRetry(clock);
@@ -200,8 +185,6 @@ internal static class PersonaMoodDrive
 
             case PersonaMood.Gaming:
             {
-                // Rocking, not swaying: two rates beating against each other,
-                // so the lean never settles into a metronome.
                 double rock = Math.Sin(clock * 2 * Math.PI * 1.15) * 0.65
                     + Math.Sin(clock * 2 * Math.PI * 0.43) * 0.35;
                 var round = PersonaMoodTiming.GamingRound(clock);
@@ -254,9 +237,6 @@ internal static class PersonaMoodDrive
                 var tea = PersonaMoodTiming.Tea(clock);
                 drive.Gravity = 0.95;
                 drive.Damping = 4.2 * traits.Firmness;
-                // The still one. A long slow breathe, a sip now and then, and
-                // nothing else asking for attention. The body tips back a
-                // little into the sip, which is the only way a ball can drink.
                 double breathe = Math.Sin(clock * 2 * Math.PI / 5.2);
                 drive.Lean = breathe * 0.020 - tea.Lift * 0.16;
                 drive.AnchorX = PersonaStage.CentreX - 0.020 * tea.Lift;
@@ -352,7 +332,6 @@ internal static class PersonaMoodDrive
                 break;
             }
         }
-        // Gentle plush compression preserves identity in every emotion.
         drive.Stretch = new PSize(Math.Clamp(drive.Stretch.Width, 0.88, 1.12),
             Math.Clamp(drive.Stretch.Height, 0.88, 1.12));
         drive.ShapeStiffness = Math.Max(drive.ShapeStiffness, 145 * traits.Firmness);

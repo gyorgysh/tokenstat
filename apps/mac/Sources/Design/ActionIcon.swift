@@ -6,7 +6,6 @@
 
 import SwiftUI
 
-/// One glyph per action. Case names match `shared/web/actionIcons.js`.
 enum ActionIcon {
     case save
     case claim
@@ -46,8 +45,6 @@ enum ActionIcon {
     case revoke
     case device
 
-    // Jobs, runs and cards. App-only cases, same enum so every button
-    // still picks from one list.
     case run
     case stop
     case history
@@ -69,16 +66,12 @@ enum ActionIcon {
 
     case delete
 
-    // Navigation out of the current surface
     case external
     case next
     case latest
     case back
     case more
     case search
-    /// Search everything the account has, as opposed to filtering what is
-    /// already on the page. Both sit in the same bar on a wide layout, and
-    /// two plain magnifiers side by side read as one control drawn twice.
     case searchAll
     case reveal
     case docs
@@ -101,8 +94,6 @@ enum ActionIcon {
     case compare
     case benchmarks
 
-    // States that sit in a button row and would otherwise be the one bare
-    // capsule among glyphed ones.
     case dismiss
     case done
     case hideKeyboard
@@ -141,11 +132,6 @@ enum ActionIcon {
         case .theme: return "paintpalette"
         case .layout: return "square.grid.2x2"
 
-        // A link for every connection action. A mains plug says cables.
-        // Android already draws this key as its Link icon and Windows as
-        // its Link symbol, so all three clients now show the same picture.
-        // The website still draws a plug for this key; that is its own
-        // change to make.
         case .connect: return "link"
         case .disconnect: return "xmark.circle"
         case .refresh: return "arrow.clockwise"
@@ -162,10 +148,6 @@ enum ActionIcon {
         case .pinned: return "pin.fill"
         case .browser: return "globe"
         case .collapse: return "chevron.up"
-        // The two arrows every platform draws for this, rather than the
-        // generic "leaves this surface" arrow the button used to borrow.
-        // Filling a display is not going somewhere else, and the pair also
-        // says which direction it is about to go in.
         case .enterFullScreen: return "arrow.up.left.and.arrow.down.right"
         case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
         case .commit: return "checkmark.circle"
@@ -239,7 +221,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Glyph and title, in the order `trails` asks for.
 struct ActionLabel: View {
     let title: String
     let icon: ActionIcon
@@ -265,24 +246,15 @@ struct ActionLabel: View {
 }
 
 extension Button where Label == ActionLabel {
-    /// `Button("Save", .save) { … }`
     init(_ title: String, _ icon: ActionIcon, action: @escaping () -> Void) {
         self.init(action: action) { icon.label(title) }
     }
 
-    /// Destructive and cancel actions outside alerts. Alerts stay text-only.
     init(_ title: String, _ icon: ActionIcon, role: ButtonRole?, action: @escaping () -> Void) {
         self.init(role: role, action: action) { icon.label(title) }
     }
 }
 
-/// An action's glyph on a tinted square.
-///
-/// The same seat `HarnessMark` draws a product logo on, at the same radius and
-/// the same tint, so a row that leads with an action and a row that leads with
-/// a harness read as one list rather than two. For whole-row targets, where the
-/// glyph has to carry the row's weight and an inline `Label` is too small to
-/// find.
 struct ActionSeat: View {
     let icon: ActionIcon
     var size: CGFloat = 34

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use std::{
     ffi::c_void,
     io, mem,
@@ -79,7 +78,7 @@ use crate::win32::{FileTime, GetCurrentProcess, GetExitCodeProcess, GetProcessTi
 fn started(process: Handle) -> Option<u64> {
     let blank = || FileTime { low: 0, high: 0 };
     let (mut creation, mut exit, mut kernel, mut user) = (blank(), blank(), blank(), blank());
-    // SAFETY: four valid out-pointers to FILETIME structures.
+
     let ok = unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
     let created = (u64::from(creation.high) << 32) | u64::from(creation.low);
     (ok != 0 && created != 0).then_some(created)
@@ -94,7 +93,6 @@ pub(super) fn check_anchor() -> io::Result<()> {
     Ok(())
 }
 pub(super) fn run_owner(_anchor: u32) -> (u32, u64) {
-    // SAFETY: the pseudo handle for this process needs no closing.
     let born = started(unsafe { GetCurrentProcess() }).unwrap_or(0);
     (std::process::id(), born)
 }
@@ -105,18 +103,18 @@ pub(super) fn run_owner_gone(pid: u32, born: u64) -> bool {
     if pid == 0 || born == 0 {
         return false;
     }
-    // SAFETY: OpenProcess returns null or a handle we own and close below.
+
     let raw = unsafe { OpenProcess(QUERY_LIMITED, 0, pid) };
     if raw.is_null() {
         return io::Error::last_os_error().raw_os_error() == Some(INVALID_PARAMETER);
     }
-    // SAFETY: a non-null handle from OpenProcess, closed when dropped.
+
     let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
     match started(handle.as_raw_handle()) {
         Some(creation) if creation != born => true,
         Some(_) => {
             let mut code = 0u32;
-            // SAFETY: valid handle and out-pointer.
+
             let ok = unsafe { GetExitCodeProcess(handle.as_raw_handle(), &mut code) };
             ok != 0 && code != STILL_ACTIVE
         }
@@ -156,8 +154,7 @@ impl Owner {
         {
             return Err(error());
         }
-        // Only our trusted pipe-waiting anchor exists. No backend can be born
-        // until assignment and membership checks finish and Start is written.
+
         if unsafe { AssignProcessToJobObject(owner.job.as_raw_handle(), child.as_raw_handle()) }
             == 0
         {
@@ -199,8 +196,6 @@ impl Owner {
     }
 }
 
-/// The recovery proof on a real Windows process table. CI runs these on its
-/// Windows runner, which is where "the guardian is gone" has to be true.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,10 +215,9 @@ mod tests {
     }
 
     fn creation(pid: u32) -> u64 {
-        // SAFETY: OpenProcess returns null or a handle we own and close below.
         let raw = unsafe { OpenProcess(QUERY_LIMITED, 0, pid) };
         assert!(!raw.is_null());
-        // SAFETY: a non-null handle from OpenProcess.
+
         let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
         started(handle.as_raw_handle()).unwrap()
     }
@@ -242,7 +236,7 @@ mod tests {
         assert_eq!(pid, std::process::id());
         assert_ne!(born, 0);
         assert!(!run_owner_gone(pid, born));
-        // Nothing unclear proves a run gone.
+
         assert!(!run_owner_gone(0, born));
         assert!(!run_owner_gone(pid, 0));
     }

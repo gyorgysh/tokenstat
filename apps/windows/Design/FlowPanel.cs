@@ -5,12 +5,10 @@ using Windows.Foundation;
 
 namespace Tokenstat.Design;
 
-/// <summary>Wrap actions, or form equal-width responsive device cards.</summary>
 internal sealed class FlowPanel : Panel
 {
     public double Spacing { get; set; } = Theme.SpaceS;
     public double MinimumItemWidth { get; set; }
-    /// <summary>Centre each line, like the Mac's FlowRow, instead of starting it at the left.</summary>
     public bool CentersLines { get; set; }
 
     private double ItemWidth(double width)

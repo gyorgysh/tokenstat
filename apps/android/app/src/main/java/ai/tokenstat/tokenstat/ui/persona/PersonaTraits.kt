@@ -11,19 +11,7 @@ import kotlin.math.max
 import kotlin.math.abs
 import kotlin.math.min
 
-/// The fixed features of one character, derived from its seed. Port of
-/// `PersonaTraits`.
-///
-/// Deterministic and cheap: the same persona is the same creature on every
-/// launch, on every device, with nothing stored but the number.
-///
-/// The draw order mirrors `PersonaRenderer`: contact shadow, antenna, body
-/// gradient fill, stroke, clipped highlight, then the face. Colour stays
-/// inside the brand: the hue walks the accent-to-secondary arc, never the
-/// whole wheel.
 class PersonaTraits(seed: ULong, nodes: Int = 20) {
-    /// How this creature's eyes are drawn when they are open. Curved arcs are
-    /// deliberately not in here: arcs are an expression, not a feature.
     enum class BodyShape { BALL, STAR, HEART, TORTILLA }
     val bodyShape = BodyShape.entries[((seed shr 1) % 4UL).toInt()]
 
@@ -35,18 +23,14 @@ class PersonaTraits(seed: ULong, nodes: Int = 20) {
     val eyeShape: EyeShape
     val mouth: Mouth?
 
-    /** How wide this creature's mouth sits, as a multiplier. */
     val mouthWidth: Float
 
-    /** Stiffness multiplier. Below one is slime, above one is gel. */
     val firmness: Float
 
-    /** A permanent radial offset per node: this creature's own dents. */
     val lumps: List<Float>
 
     val hasAntenna: Boolean
 
-    /** How far along the accent-to-secondary arc this creature sits, 0 to 1. */
     val hueMix: Float
 
     companion object {
@@ -80,7 +64,6 @@ class PersonaTraits(seed: ULong, nodes: Int = 20) {
             bits = bits xor (bits shl 17)
             return bits % modulo
         }
-        // Preserve draw order: existing personas keep their palette position.
         next(10UL)
         eyeCount = 2
         eyeShape = if (next(4UL) == 0UL) EyeShape.ROUND else EyeShape.OVAL
@@ -90,8 +73,6 @@ class PersonaTraits(seed: ULong, nodes: Int = 20) {
         hasAntenna = false
         mouthWidth = 0.72f + next(9UL).toFloat() * 0.035f
         firmness = 0.95f + next(9UL).toFloat() * 0.03f
-        // Two low harmonics rather than per-node noise. Noise reads as a
-        // damaged circle, harmonics read as a shape somebody drew.
         val firstPhase = next(360UL).toFloat() * PI.toFloat() / 180f
         val secondPhase = next(360UL).toFloat() * PI.toFloat() / 180f
         val firstAmount = 0.10f + next(100UL).toFloat() / 100f * 0.15f
@@ -113,21 +94,9 @@ class PersonaTraits(seed: ULong, nodes: Int = 20) {
         hueMix = next(7UL).toFloat() / 6f
     }
 
-    /// This creature's tint: a colour the app already owns, on the arc from
-    /// the accent to the secondary.
     fun hue(accent: Color, secondary: Color): Color = lerp(accent, secondary, hueMix)
 }
 
-/// A face for something that has no persona.
-///
-/// Every conversation gets a character, whether or not anybody made one, so
-/// the transcript is never a row of grey dots waiting for a feature to be
-/// used. Derived from the conversation's own id, so it is that chat's face for
-/// as long as the chat exists.
-///
-/// The same FNV-1a as `chat_turn::stable_hash` on the host, on purpose: a
-/// persona seeded there and a chat seeded here have to sit in the same family,
-/// and a second hash function would be a second set of faces.
 fun personaSeed(identifier: String): ULong {
     var hash = 0xCBF29CE484222325UL
     for (byte in identifier.toByteArray(Charsets.UTF_8)) {

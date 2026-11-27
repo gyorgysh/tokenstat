@@ -2,8 +2,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// Read the observable session inside the popover's own view graph. Passing
-/// preformatted fields from the row left an open card holding a snapshot.
 struct SidebarTerminalDetailCard: View {
     let session: TerminalSession
     let folder: WorkspaceFolder

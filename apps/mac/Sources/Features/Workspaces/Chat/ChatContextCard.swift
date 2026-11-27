@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Context, tools and activity share the chat's visible inspection reader.
-/// Its run-scoped owner and foreground lease also govern MCP live status.
 struct ChatContextCard: View {
     @Bindable var model: ChatModel
     @State private var contextOpen = false
@@ -97,8 +95,6 @@ struct ChatContextCard: View {
             }
             if contextOpen {
                 if currentInspection == nil { ThemeRule() }
-                // Verified event-page totals predate chat.inspection. Keep
-                // them available when an older host cannot report context.
                 ChatDisclosureRow(title: L10n.text("common.chat.stats.conversation"), expanded: $conversationOpen)
                 if conversationOpen { ChatCostMeter(totals: model.turnUsage) }
             }
@@ -233,8 +229,6 @@ struct ChatContextCard: View {
                     }
                     Spacer(minLength: 8)
                     if showsStatus {
-                        // A dot and a word. A filled capsule here was the
-                        // loudest thing in the pane while saying "idle".
                         let running = model.selected?.running == true
                         HStack(spacing: 5) {
                             Circle().fill(running ? Theme.accent : Theme.stateIdle)
@@ -264,8 +258,6 @@ private var chatDisclosureHeight: CGFloat {
     #endif
 }
 
-/// Prompt categories occupy their real share of the reported context window.
-/// The unfilled track is available capacity, not a fabricated token category.
 private struct ChatContextSplitBar: View {
     let inspection: ChatInspection
     var body: some View {
@@ -282,7 +274,6 @@ private struct ChatContextSplitBar: View {
     }
 }
 
-/// A full-width, keyboard-accessible target; the chevron is only an indicator.
 struct ChatDisclosureRow: View {
     let title: String
     @Binding var expanded: Bool

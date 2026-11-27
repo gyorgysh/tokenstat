@@ -28,8 +28,6 @@ internal data class TeamAskRecord(val input: JsonObject, val fence: JsonObject? 
     }
 }
 
-/** Separate Ask envelopes reuse the atomic, locked CAS draft storage. They
- * never enter the Comment queue and are never replayed just by opening a chat. */
 internal class TeamAskRecoveryStore(directory: File) {
     data class Snapshot(val saved: TeamCommentDraft, val record: TeamAskRecord)
     data class Entry(val target: TeamCommentTarget, val snapshot: Snapshot)

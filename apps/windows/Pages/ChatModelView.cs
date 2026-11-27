@@ -7,7 +7,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>An offline, profile-isolated viewer for portable game model files.</summary>
 internal sealed class ChatModelView : Grid
 {
     private static Task<CoreWebView2Environment>? _environment;
@@ -112,7 +111,6 @@ internal sealed class ChatModelView : Grid
                 if (length is <= 0 or > InlineByteLimit) return null;
                 var bytes = new byte[(int)length];
                 await file.ReadExactlyAsync(bytes).ConfigureAwait(false);
-                // Reject growth after opening, without allocating the extra bytes.
                 if (file.ReadByte() != -1) return null;
                 return Convert.ToBase64String(bytes);
             });

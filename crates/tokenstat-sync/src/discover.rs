@@ -121,8 +121,6 @@ fn freshest_unexpired(candidates: Vec<String>, now: i64) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
     for token in candidates {
         match jwt_expiry(&token) {
-            // A minute of skew, so a request does not leave with a token that
-            // expires in flight.
             Some(exp) if exp > now + 60 => {
                 if best.as_ref().is_none_or(|(seen, _)| exp > *seen) {
                     best = Some((exp, token));
@@ -324,7 +322,6 @@ fn gemini_oauth_access_token() -> Option<String> {
             .duration_since(std::time::UNIX_EPOCH)
             .ok()?
             .as_millis() as i64;
-        // 60s skew so we refresh before the server rejects us.
         if now_ms + 60_000 >= exp_ms {
             return None;
         }

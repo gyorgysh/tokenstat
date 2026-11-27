@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Bound peer-supplied input before converting it to native event integers.
 enum ScreenInputValues {
     static func isText(_ value: String) -> Bool {
         guard let scalar = value.unicodeScalars.first else { return false }

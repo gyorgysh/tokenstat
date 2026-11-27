@@ -79,7 +79,6 @@ internal static class PersonaDraw
             SweepDirection = sweep,
         });
 
-    /// <summary>A closed axis-aligned ellipse, as two arcs.</summary>
     public static void Ellipse(PathGeometry g, double cx, double cy, double rx, double ry)
     {
         if (rx <= 0 || ry <= 0)
@@ -92,11 +91,6 @@ internal static class PersonaDraw
         g.Figures.Add(f);
     }
 
-    /// <summary>
-    /// A closed ellipse rotated by an angle in radians, as four Beziers.
-    /// Arcs cannot carry a rotation here, so the highlight and other tilted
-    /// ellipses go through this.
-    /// </summary>
     public static void EllipseRotated(PathGeometry g, double cx, double cy, double rx, double ry, double angle)
     {
         const double k = 0.5522847498;
@@ -123,7 +117,6 @@ internal static class PersonaDraw
         g.Figures.Add(f);
     }
 
-    /// <summary>A closed axis-aligned rounded rectangle.</summary>
     public static void RoundedRect(PathGeometry g, double x, double y, double w, double h, double r)
     {
         r = Math.Min(r, Math.Min(w, h) / 2);
@@ -148,7 +141,6 @@ internal static class PersonaDraw
         g.Figures.Add(f);
     }
 
-    /// <summary>Rotate a point about a pivot, in radians, y down.</summary>
     public static PPoint Rot(double x, double y, double cx, double cy, double angle)
     {
         double dx = x - cx;
@@ -158,11 +150,6 @@ internal static class PersonaDraw
         return new PPoint(cx + dx * c - dy * s, cy + dx * s + dy * c);
     }
 
-    /// <summary>
-    /// Spin an element about a point in the mark's frame. Used for props drawn
-    /// in their own straight frame: console, mug, brush, hammer, sweat, heart.
-    /// Anything with a clip bakes the rotation into its points instead.
-    /// </summary>
     public static void Spin(ShapesPath path, double radians, double cx, double cy)
     {
         path.RenderTransform = new RotateTransform

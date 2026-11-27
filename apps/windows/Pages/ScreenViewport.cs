@@ -3,7 +3,6 @@ namespace Tokenstat.Pages;
 
 internal static class ScreenViewport
 {
-    // The video uses Uniform stretch. Exclude its letterbox margins from input.
     public static (double x, double y)? Normalize(double x, double y, double viewWidth, double viewHeight,
         double imageWidth, double imageHeight, bool dragging)
     {

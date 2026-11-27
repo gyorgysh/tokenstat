@@ -172,8 +172,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         let Some(usage) = row.usage else {
             continue;
         };
-        // A missing bucket is unknown, not zero: writing it down as a zero
-        // would defeat `has_unknown` and present a partial sum as complete.
         let fresh = usage.input_other;
         let cache_read = usage.input_cache_read;
         let cache_write = usage.input_cache_creation;

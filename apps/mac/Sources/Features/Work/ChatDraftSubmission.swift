@@ -2,8 +2,6 @@
 
 import Foundation
 
-/// The destination and recovery copy captured synchronously when Send is
-/// pressed. Nothing after an await is allowed to retarget these words.
 struct ChatDraftSubmission {
     let conversationID: String
     let peer: String?

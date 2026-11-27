@@ -39,9 +39,6 @@ class PullDetailTest {
                 "<h2>v7.2.0</h2>\n<h3>Features</h3>\n<ul>\n<li>add a thing</li>\n<li>and another</li>\n</ul>\n</details>",
         )
         assertFalse(out.contains("<"))
-        // A list follows its heading on the next line, with no blank line
-        // between: consecutive rows are one list, the way the Apple
-        // converter writes them.
         assertEquals(
             "### Release notes\n\n## v7.2.0\n\n### Features\n- add a thing\n- and another",
             out,

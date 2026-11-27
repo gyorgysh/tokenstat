@@ -209,8 +209,7 @@ pub fn search(
             if let Some(hit) = best {
                 hits.push(hit);
             }
-            // Only the best displayed destinations are retained, even on hosts
-            // with many conversations. Text snapshots drop after each iteration.
+
             rank(&mut hits);
             if hits.len() > MAX_DISPLAYED {
                 coverage.partial = true;
@@ -226,8 +225,7 @@ pub fn search(
         coverage.partial = true;
     }
     hits.truncate(MAX_DISPLAYED);
-    // A deletion or edit after an earlier snapshot must not publish its old
-    // excerpt. Reject this generation and let the caller retain/retry results.
+
     let current_folders = source.folders();
     for hit in &hits {
         if !current_folders

@@ -11,7 +11,6 @@ struct TeamSharedProjectSettings: View {
     @State private var showsSavedSharing = false
     @State private var savedSharingError: String?
     @State private var stoppingSharing: TeamStopSharingRequest?
-    /// Only the computer that published a checkout can stop it.
     private var localPublication: TeamLocalPublication? {
         store.localProjects.first { $0.id == checkout.id && ($0.phase == "active" || $0.accountCleanupPending) }
     }

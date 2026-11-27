@@ -4,14 +4,10 @@
 
 import SwiftUI
 
-/// A kanban board of work. A card is tracked here; delegating it hands it to an
-/// agent on the chosen backend, and the run's transcript shows up in the
-/// Automations screen.
 struct TodoView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
     var onViewRun: ((String, String) -> Void)? = nil
-    /// Spawn an interactive terminal for this card. Not an automation.
     var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
 
     private static let columns: [(String, String)] = [
@@ -22,17 +18,12 @@ struct TodoView: View {
     @State private var agentFilter = ""
     @State private var attentionOnly = false
     @State private var dropTarget: String?
-    /// Card id the drag would land before, or "__end__".
     @State private var dropBeforeID: String?
-    /// Scroll-view height per column, so empty space under the cards is a drop target.
     @State private var columnBodyHeights: [String: CGFloat] = [:]
 
-    /// The sheet belongs to the board, so a lazy column cannot unmount it.
     @State private var addingIn: String?
     private struct CreationColumn: Identifiable { let id: String }
 
-    /// A value the menu can hold. Not a folder id anyone could own: ids are
-    /// paths or `remote:…`, and neither starts with two underscores.
     private static let unfiledValue = "__unfiled__"
 
     private static func value(of scope: TodoScope) -> String {
@@ -64,9 +55,6 @@ struct TodoView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // The bar names the place. Everything the board does sits on the
-            // one row under it, filters on the left and actions on the right,
-            // the way Automations reads.
             DetailChromeBar(scope: scopeChip) {
                 EmptyView()
             }
@@ -79,8 +67,6 @@ struct TodoView: View {
                 let available = proxy.size.height - Theme.Space.m * 2
                 let gap = Theme.Space.m
                 let usable = proxy.size.width - Theme.Space.m * 2 - Theme.Space.s * 6
-                // Show all three stages at ordinary desktop widths; smaller
-                // windows can still scroll without changing stage order.
                 let columnWidth = max(210, (usable - gap * 2) / 3)
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: gap) {
@@ -120,7 +106,6 @@ struct TodoView: View {
         .onChange(of: model.sortNewestFirst) { _, on in
             newestFirst = on
         }
-        // The model outlives this view, and its poll loop must not.
         .onDisappear { model.disappeared() }
     }
 
@@ -184,9 +169,6 @@ struct TodoView: View {
             SearchField(text: $search, prompt: L10n.text("apple.todoview.search_tasks.46c6f1de"))
                 .frame(minWidth: 120, maxWidth: 220)
             if model.scope == nil {
-                // Only the global board gets a selector. A folder's board is
-                // that folder's, and a filter on top of it would be two
-                // answers to one question.
                 AppMenuPicker(
                     options: [
                         (value: "", label: L10n.text("apple.todoview.all_projects.4b87271b")),
@@ -240,8 +222,6 @@ struct TodoView: View {
                     .background(tint(for: id).opacity(0.12), in: Capsule())
                 Spacer()
             }
-            // One way in per column, at the foot of its cards, where a board
-            // puts it. A second "+" in the header was the same button twice.
             .frame(minHeight: 32)
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
@@ -284,10 +264,6 @@ struct TodoView: View {
                         insertionLine
                     }
                     if isWarming {
-                        // Card-shaped grey, so the columns are already the
-                        // right width and the board does not jump when the
-                        // real cards land. Backlog gets more of them because
-                        // that is where cards usually are. Sharp, then fade.
                         ForEach(0..<(id == "backlog" ? 3 : 1), id: \.self) { _ in
                             Skeleton.CardPlaceholder(rows: 2)
                         }
@@ -301,8 +277,6 @@ struct TodoView: View {
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
                     }
-                    // Work lands in Done by being finished, not by being
-                    // written there, so that column has no way to add.
                     if id != "done" {
                         AddCardTrigger(expanded: Binding(
                                 get: { addingIn == id },
@@ -311,8 +285,6 @@ struct TodoView: View {
                                 }
                         ))
                     }
-                    // Empty space under the last card is a drop target. The
-                    // outer column destination only wins on the header.
                     Color.clear
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .frame(maxHeight: .infinity)
@@ -371,8 +343,6 @@ struct TodoView: View {
         }
     }
 
-    /// Accent rule marking where the dragged card would land. Rows above
-    /// and below slide apart with a spring, like home-screen icon reorder.
     private var insertionLine: some View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
@@ -380,9 +350,6 @@ struct TodoView: View {
             .transition(.opacity.combined(with: .scale))
     }
 
-    /// Drop highlight is local to the pointer. A same-column drop never
-    /// leaves the column, so `isTargeted(false)` on the column does not fire
-    /// and the insertion line would stay without this.
     private func clearDropChrome() {
         dropTarget = nil
         dropBeforeID = nil
@@ -427,7 +394,6 @@ struct TodoView: View {
     }
 }
 
-// MARK: - One card
 
 private struct CardView: View {
     @State private var confirmingDelete = false
@@ -435,8 +401,6 @@ private struct CardView: View {
     @State private var titleDraft = ""
     @State private var titleSaveState: FieldSaveState = .idle
     @State private var delegating = false
-    /// A drop onto this card also looks like a tap. Ignore that one so the
-    /// inspector stays on the card that moved, not the one it landed on.
     @State private var ignoreNextTap = false
     @FocusState private var titleFocused: Bool
     @Bindable var model: TodoModel
@@ -661,9 +625,6 @@ private struct CardView: View {
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
             }
-            // The result lives on the Automations screen; this is the door to
-            // it, so a delegated card is never a dead end that only says
-            // "Done" with nowhere to look.
             Button(L10n.text("apple.todoview.view_result.fdb7eafd"), .preview) {
                 onViewRun?(delegate.runId, card.workspaceID)
             }
@@ -733,7 +694,6 @@ private struct CardView: View {
     }
 }
 
-// MARK: - New card
 
 private struct AddCardTrigger: View {
     @Binding var expanded: Bool
@@ -761,7 +721,6 @@ private struct AddCardTrigger: View {
     }
 }
 
-/// Last-minute agent pick before a card is handed to a run.
 struct DelegateSheet: View {
     @Bindable var model: TodoModel
     var card: TodoCard

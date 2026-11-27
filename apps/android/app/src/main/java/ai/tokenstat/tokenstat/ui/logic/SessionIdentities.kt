@@ -11,8 +11,6 @@ data class SessionIdentity(val backend: String, val id: String, val status: Sess
 data class SessionIdentities(val entries: List<SessionIdentity> = emptyList(), val total: Int = 0, val truncated: Boolean = false,
     val sourceConversationIds: List<String> = emptyList())
 
-/** Only the host's explicit identity projection is readable. Legacy resume
- * tokens, nested meters, archive paths and arbitrary resume objects are not IDs. */
 fun parseChatSessionIdentities(inspection: JsonObject?): SessionIdentities = parseSessionIdentities(inspection?.get("sessions"))
 fun parseTerminalSessionIdentities(info: JsonObject?): SessionIdentities = parseSessionIdentities(info?.get("sessionIdentities"))
 
@@ -44,8 +42,6 @@ private fun parseSessionIdentities(value: JsonElement?): SessionIdentities {
         val status = when (text(row, "status")) {
             "current" -> SessionIdentityStatus.Current
             "saved" -> SessionIdentityStatus.Saved
-            // A newer host may add lifecycle states. They remain lookup-only
-            // historical references until this client understands the state.
             else -> SessionIdentityStatus.Historical
         }
         SessionIdentity(backend, sessionId, status, id(text(row, "sourceConversationId")),
@@ -54,7 +50,6 @@ private fun parseSessionIdentities(value: JsonElement?): SessionIdentities {
     }
     val entries = validEntries.sortedWith(compareBy<SessionIdentity> { it.status.ordinal }.thenByDescending { it.lastSeenAtMs ?: 0 })
         .distinctBy { it.backend to it.id }
-    // Keep every visible source even when repeated native IDs are merged.
     val sourceConversationIds = validEntries.mapNotNull { it.sourceConversationId }.distinct().take(64)
     val total = ((objectValue["total"] as? JsonPrimitive)?.intOrNull ?: entries.size).coerceAtLeast(entries.size)
     return SessionIdentities(entries.take(64), total,

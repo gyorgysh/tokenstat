@@ -56,7 +56,6 @@ struct ClientTaskBoard: View {
     @State private var showingFilters = false
     @State private var selectedStage = "backlog"
     @State private var targetedColumn: String?
-    /// Live drop-placement preview: the column and card id the drag would land before, or "__end__".
     @State private var dropColumn: String?
     @State private var dropBeforeID: String?
     @State private var presentedRun: ClientTaskRunPresentation?
@@ -382,8 +381,6 @@ struct ClientTaskBoard: View {
             presentedTerminal = ClientTerminalSession(peer: peer, info: info)
         }
     }
-    /// Accent rule marking where the dragged card would land, like a
-    /// home-screen icon gap opening between rows.
     private var insertionLine: some View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
@@ -391,8 +388,6 @@ struct ClientTaskBoard: View {
             .transition(.opacity.combined(with: .scale))
     }
 
-    /// Drop highlight is local to the pointer. Clearing it on drop keeps a
-    /// stale preview from lingering after the card moves.
     private func clearDropPreview() {
         dropColumn = nil
         dropBeforeID = nil

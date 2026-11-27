@@ -22,8 +22,6 @@ internal sealed record TeamCommentUnsaved(string Text, TeamCommentDraft? Expecte
 internal sealed record TeamCommentDraftPage(IReadOnlyList<TeamCommentRecovery> Entries, string? Next, bool Unreadable);
 internal sealed class TeamDraftException(string key) : IOException(key) { internal string Key => Message; }
 
-/// App-owned local writing, separated by stable verified person and exact
-/// published resource. Persist the immutable attempt before any network send.
 internal sealed class TeamCommentDraftStore(string directory)
 {
     internal static readonly TeamCommentDraftStore Shared = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "team-comment-drafts"));
@@ -49,8 +47,6 @@ internal sealed class TeamCommentDraftStore(string directory)
             if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) throw new TeamDraftException("comment_save_failed");
             var owner = Owner(target); Directory.CreateDirectory(owner);
             if ((File.GetAttributes(owner) & FileAttributes.ReparsePoint) != 0) throw new TeamDraftException("comment_save_failed");
-            // FileShare.None also excludes another running app instance. Busy
-            // storage fails promptly; it never discards the person's writing.
             using var guard = new FileStream(Path.Combine(owner, "drafts.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             return work(owner);
         }
@@ -90,10 +86,9 @@ internal sealed class TeamCommentDraftStore(string directory)
             using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
             if (OperatingSystem.IsWindows())
             {
-                // Atomic replace with write-through, before a send is allowed.
                 if (!MoveFileEx(temp, file, 0x1 | 0x8)) throw new IOException("draft rename failed", Marshal.GetLastWin32Error());
             }
-            else File.Move(temp, file, true); // Portable fixture runner.
+            else File.Move(temp, file, true);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
@@ -154,8 +149,6 @@ internal sealed class TeamCommentDraftStore(string directory)
         var probe = new TeamCommentTarget(origin, person, "list", "list", "list", "list", "list");
         return Locked(probe, owner => {
             var recovery = _unsaved.Where(p => p.Key.Origin == origin && p.Key.Person == person).ToDictionary(p => Name(p.Key), p => p);
-            // Retain only the next bounded candidate window while scanning
-            // the directory; recovery never materializes the whole archive.
             var candidates = new SortedSet<string>(StringComparer.Ordinal);
             foreach (var name in Directory.EnumerateFiles(owner, "*.json").Select(Path.GetFileName).OfType<string>().Concat(recovery.Keys))
             {

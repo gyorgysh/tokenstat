@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use std::{
     io,
     process::{Child, Command},
@@ -7,8 +6,7 @@ use std::{
 
 pub(super) fn configure(command: &mut Command) {
     use std::os::unix::process::CommandExt;
-    // SAFETY: the pre-exec child performs only async-signal-safe setsid and
-    // errno access. The trusted executable, not a backend, is born first.
+
     unsafe {
         command.pre_exec(|| {
             if libc::setsid() < 0 {
@@ -35,28 +33,24 @@ pub(super) fn group_gone(group: u32) -> bool {
     if group <= 1 {
         return false;
     }
-    // Signal 0 sends nothing. Only ESRCH proves absence.
+
     let gone = |target: i32| {
-        // SAFETY: signal 0 only checks for existence and delivers nothing.
         let status = unsafe { libc::kill(target, 0) };
         status == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
     };
-    // The anchor leads its own session too. A child can move to another
-    // group but not back into the session once it leaves it, so the
-    // session is the proof that holds. Unknown answers keep the fence.
+
     gone(-group) && gone(group) && session_gone(group)
 }
 
 #[cfg(target_os = "macos")]
 fn session_gone(session: i32) -> bool {
-    // SAFETY: a null buffer asks only for the count.
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return false;
     }
     let mut pids = vec![0 as libc::pid_t; count as usize * 2 + 64];
     let bytes = i32::try_from(pids.len() * std::mem::size_of::<libc::pid_t>()).unwrap_or(i32::MAX);
-    // SAFETY: the buffer holds `bytes` bytes of pid_t values.
+
     let found = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
     if found <= 0 || found as usize >= pids.len() {
         return false;
@@ -65,7 +59,6 @@ fn session_gone(session: i32) -> bool {
         .iter()
         .filter(|pid| **pid > 0)
         .all(|pid| {
-            // SAFETY: getsid reads another process's session id and nothing else.
             let owner = unsafe { libc::getsid(*pid) };
             if owner == -1 {
                 return io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
@@ -92,7 +85,7 @@ fn session_gone(session: i32) -> bool {
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
             Err(_) => return false,
         };
-        // After the command name: state, ppid, pgrp, session.
+
         let Some(session_field) = stat
             .rsplit_once(')')
             .and_then(|(_, rest)| rest.split_whitespace().nth(3))
@@ -148,8 +141,7 @@ impl Owner {
         if child.id() != self.pid as u32 {
             return Err(super::invalid());
         }
-        // Child is never polled/reaped by any other owner. Even an exited
-        // anchor's waitable PID pins this group's identity until final wait.
+
         if unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0 {
             return Ok(());
         }
@@ -157,10 +149,7 @@ impl Owner {
         if error.raw_os_error() == Some(libc::ESRCH) {
             return Ok(());
         }
-        // A hosted macOS runner can refuse a signal addressed to another
-        // session even when it owns every member. Signal those members
-        // directly. The caller retries, so a child born between sweeps is
-        // still reached.
+
         #[cfg(target_os = "macos")]
         if error.raw_os_error() == Some(libc::EPERM) {
             return signal_members(self.pid);
@@ -196,8 +185,6 @@ impl Owner {
 
 #[cfg(target_os = "macos")]
 fn group_pids(group: i32) -> io::Result<Vec<i32>> {
-    // The unreaped anchor pins the group id. A growing list is retried and
-    // bounded; a failed process inspection is never treated as completion.
     let mut capacity = 64usize;
     loop {
         let mut pids = vec![0i32; capacity];
@@ -244,10 +231,6 @@ fn signal_members(group: i32) -> io::Result<()> {
 }
 #[cfg(target_os = "macos")]
 fn no_live_members(session: i32) -> io::Result<bool> {
-    // A descendant can create a process group for ordinary job control while
-    // remaining in our anchor's session. The original group being empty is
-    // not proof that such a child stopped. Unknown session membership keeps
-    // the writer fence instead of completing a run too early.
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return Err(super::invalid());
@@ -353,7 +336,6 @@ mod tests {
 
     #[test]
     fn a_live_session_is_never_gone() {
-        // SAFETY: getsid(0) reads this process's own session id.
         let own = unsafe { libc::getsid(0) };
         assert!(own > 0);
         assert!(!session_gone(own));
@@ -368,7 +350,7 @@ mod tests {
         let mut child = command.spawn().unwrap();
         let session = child.id();
         child.wait().unwrap();
-        // A reused id would read as alive, which is the safe answer.
+
         if group_gone(session) {
             assert!(session_gone(session as i32));
         }

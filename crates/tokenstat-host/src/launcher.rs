@@ -4,13 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! What can be launched in a workspace on this machine.
-//!
-//! The app decides the launcher for a local folder from its own PATH. For a
-//! remote folder the launcher has to mean *that machine's* PATH, so the host
-//! answers the same question here and the app asks over the remote call when
-//! the folder belongs to a peer.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -34,51 +28,13 @@ struct Profile {
     bypass_args: &'static [&'static str],
     harness_id: Option<&'static str>,
     symbol: Option<&'static str>,
-    /// The tool's official one-shot installer, when one exists. `None` for
-    /// the shell, for a CLI that ships inside an editor, and for anything
-    /// with no clean standalone installer. The front end offers the command
-    /// to a user who has not installed the tool; the host runs it.
     install_command: Option<&'static str>,
-    /// The same, for Windows. Separate because it is a different command, not
-    /// a different path: the Unix entries are `curl | bash`, and `install()`
-    /// runs the string under `cmd.exe /C`, where there is no `bash` and the
-    /// pipe means something else. Every value here was read off the vendor's
-    /// own `.ps1` rather than guessed from the Unix URL.
-    ///
-    /// `None` means this tool has no installer we have verified for Windows.
-    /// The catalog then reports no install command, the front end offers no
-    /// Install button, and somebody sees a tile they cannot install rather
-    /// than a button that fails.
     install_command_windows: Option<&'static str>,
-    /// Where this tool's own installer puts it, relative to `$HOME`.
-    ///
-    /// A CLI that ships its own directory is only on the PATH because its
-    /// installer edited a startup file, and that edit is exactly what does not
-    /// survive a fresh machine, a shell the user changed afterwards, or a
-    /// profile that guards it behind a condition. The daemon then cannot see a
-    /// harness the user has plainly installed, and the launcher offers a
-    /// shorter list on one Mac than on another with no way to tell why.
-    ///
-    /// Searched after the PATH, so a version manager or a deliberate override
-    /// still wins. Only directories a known installer actually writes belong
-    /// here: the policy is to under-report rather than to guess, and a wrong
-    /// absolute path is worse than a missing tile.
     install_dirs: &'static [&'static str],
-    /// A loopback page this command starts. The front end opens it after
-    /// spawn. None for a TTY session.
     open_url: Option<&'static str>,
 }
 
 impl Profile {
-    /// The installer for the machine this host is running on.
-    ///
-    /// A catalog answer is about *this* machine: a phone asking a Windows host
-    /// what it can install must be told what that host can actually run, not
-    /// what a Mac would.
-    /// `cfg!` rather than `#[cfg]` on purpose: both arms compile everywhere, so
-    /// the whole table stays type-checked and read on every platform. Behind
-    /// `#[cfg]` the Windows column would be dead code on a Mac and could rot
-    /// until somebody ran a Windows build.
     fn installer(&self) -> Option<&'static str> {
         if cfg!(windows) {
             self.install_command_windows
@@ -149,8 +105,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
-        // The current v2 installer delivers `opencode`, not `opencode2`.
-        // Keep existing aliases runnable without reinstalling over `opencode`.
+
         install_command: None,
         install_command_windows: None,
         install_dirs: &[".opencode/bin"],
@@ -260,8 +215,7 @@ const PROFILES: &[Profile] = &[
         install_command: None,
         install_command_windows: None,
         install_dirs: &[],
-        // `npx @deepseek-ai/dsh web` serves the UI here. The session is the
-        // server process. The front end opens this URL once it answers.
+
         open_url: Some("http://127.0.0.1:3080/"),
     },
     Profile {
@@ -311,17 +265,14 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("hermes"),
         symbol: None,
-        // --non-interactive --skip-setup: the script otherwise opens /dev/tty
-        // for a setup wizard even when stdin is a pipe, so an in-app install
-        // sat on "Installing…" until the host timeout.
+
         install_command: Some(
             "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup",
         ),
         install_command_windows: Some(
             "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup",
         ),
-        // The installer puts a symlink in ~/.local/bin, which search_path
-        // already looks at. No extra directory to declare.
+
         install_dirs: &[],
         open_url: None,
     },
@@ -373,26 +324,18 @@ const PROFILES: &[Profile] = &[
         name: "Devin CLI",
         command: "devin",
         args: &[],
-        // `--permission-mode` takes a word rather than a flag, and "dangerous"
-        // is the only one of the four that auto-approves every tool. The
-        // default, "auto", already runs read-only tools without asking, so
-        // anything less than "dangerous" would leave the switch half on.
+
         bypass_args: &["--permission-mode", "dangerous"],
         harness_id: Some("devin"),
         symbol: None,
         install_command: Some("curl -fsSL https://cli.devin.ai/install.sh | bash"),
         install_command_windows: Some("irm https://static.devin.ai/cli/install.ps1 | iex"),
-        // Its installer symlinks into ~/.local/bin, which search_path already
-        // looks at.
+
         install_dirs: &[],
         open_url: None,
     },
 ];
 
-/// Tools taken off this machine's launcher. Display only: the binary stays.
-///
-/// Lives beside the machine key, not in the viewing app's defaults, so a
-/// phone that asks this host sees the same grid the Mac does.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct LauncherPrefs {
     #[serde(default)]
@@ -416,7 +359,6 @@ fn save_prefs_in(dir: &Path, prefs: &LauncherPrefs) -> Result<(), String> {
     tokenstat_sync::snapshot::write_private_atomically(&path, &text).map_err(|e| e.to_string())
 }
 
-/// Read only. A catalog draw must not create the identity directory.
 fn load_prefs() -> LauncherPrefs {
     tokenstat_identity::identity_dir_path()
         .ok()
@@ -532,17 +474,14 @@ pub(crate) fn catalog() -> Value {
                 "installCommand": profile.installer(),
                 "canCheckSignIn": profile.id != "shell" && profile.open_url.is_none(),
             });
-            // Installed is not ready. A tool with no login answers prompts
-            // with somebody else's auth error, and a grid that cannot say so
-            // sends every new server through that once.
+
             if profile.id != "shell"
                 && let Some(state) = ready.as_object()
             {
                 for (key, answer) in state {
                     value[key] = answer.clone();
                 }
-                // Every installed CLI can be opened for its own first-run
-                // setup. Only verified flows promise browser/code steps.
+
                 if profile.open_url.is_none()
                     && crate::agent_readiness::sign_in(profile.id).is_none()
                 {
@@ -562,13 +501,10 @@ pub(crate) fn catalog() -> Value {
                     value["command"] = json!(shell);
                     value["args"] = json!(shell_args);
                 }
-            } else if installed {
-                // Absolute path so a click does not need the login PATH to
-                // find the binary. Spawn used to block on `$SHELL -ilc env`
-                // just to resolve `claude` → `/Users/…/bin/claude`.
-                if let Some(full) = resolve_profile(profile, &path, Path::new(&home)) {
-                    value["command"] = json!(full);
-                }
+            } else if installed
+                && let Some(full) = resolve_profile(profile, &path, Path::new(&home))
+            {
+                value["command"] = json!(full);
             }
             value
         })
@@ -595,15 +531,11 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
         "claude_code" => &["auth", "status"],
         "codex" => &["login", "status"],
         "opencode" | "opencode2" if !environment.is_empty() => {
-            // A provider list is not a sign-in requirement: free models can
-            // still work without a provider account. Avoid gating such sends.
             return Ok(json!({"readiness": "unknown", "checked": false}));
         }
-        // Its `status` reports a login whose tokens have all expired, so the
-        // stored expiry is the answer and it counts as checked.
+
         "cursor_agent" => return Ok(crate::agent_readiness::describe_checked(id)),
-        // Muse has no status command. Its `auth.json` names the provider it
-        // signed in to, which is the same answer.
+
         "muse" if let Some((_, base)) = environment.first() => {
             let base = Path::new(base);
             let (readiness, _) = crate::agent_readiness::muse_readiness(base, &|key| {
@@ -621,17 +553,13 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
         }
         "muse" => return Ok(crate::agent_readiness::describe(id, true)),
         _ => {
-            // File evidence only. A missing login file is not the CLI saying
-            // it is signed out (an environment key has no file at all), so it
-            // must never be reported as checked, which lets a client stop a send.
             let mut result = crate::agent_readiness::describe(id, true);
             result["checked"] = json!(false);
             return Ok(result);
         }
     };
     let mut result = crate::agent_readiness::describe(id, true);
-    // Older CLI versions may lack a status command. A timeout or an unknown
-    // response proves neither signed-in nor signed-out.
+
     let output = run_probe_with(&command, args, &environment);
     let probe = output
         .as_ref()
@@ -648,11 +576,6 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
     }
     let probed = probe.is_some();
     let state = probe.unwrap_or_else(|| {
-        // An older CLI or a Windows npm shim may not support this process
-        // probe. Keep positive saved-login evidence; inconclusive failures
-        // must not block a working environment/provider credential.
-        // That evidence is the machine's own files, so it says nothing
-        // about a profile's separate login.
         if result["readiness"] == "signedIn" && environment.is_empty() {
             "signedIn"
         } else {
@@ -660,8 +583,7 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
         }
     });
     result["readiness"] = json!(state);
-    // Only the CLI's own answer counts as checked. A fallback to saved-login
-    // evidence keeps its readiness but is not proof either way.
+
     result["checked"] = json!(probed && state != "unknown");
     result["signedIn"] = match state {
         "signedIn" => json!(true),
@@ -671,9 +593,6 @@ pub(crate) fn check_sign_in_for(id: &str, profile: Option<&str>) -> Result<Value
     Ok(result)
 }
 
-/// Run one of an agent's own commands to completion, for what it prints on
-/// stdout and stderr. None when it cannot start or takes longer than five
-/// seconds, which is killed rather than left behind.
 fn run_probe(command: &str, args: &[&str]) -> Option<[Vec<u8>; 2]> {
     run_probe_with(command, args, &[])
 }
@@ -711,7 +630,7 @@ fn run_probe_with(
     for key in crate::profiles::inherited_auth(environment) {
         cmd.env_remove(key);
     }
-    // A profile's variables last, so they win over the login shell's.
+
     for (key, value) in environment {
         cmd.env(key, value);
     }
@@ -746,8 +665,6 @@ fn run_probe_with(
             }
         }
         if Instant::now() >= deadline {
-            // The whole tree, so a shim's child cannot keep the pipes open
-            // and strand both reader threads.
             reap_child(&mut child);
             return None;
         }
@@ -759,13 +676,6 @@ fn run_probe_with(
     ])
 }
 
-/// The arguments that start this agent's sign-in, for the version installed.
-///
-/// Claude Code gained `claude auth login` along the way. An older version
-/// answers `claude auth --help` with its general help, and exits zero either
-/// way, so the help text decides. Without the subcommand, plain `claude` is
-/// its documented first-launch login. Anything inconclusive keeps the
-/// current command.
 fn sign_in_args(id: &str, command: &str) -> &'static [&'static str] {
     let args = crate::agent_readiness::sign_in(id).map_or(&[][..], |flow| flow.args);
     if id == "claude_code"
@@ -862,16 +772,11 @@ pub(crate) fn sign_in(
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
 
-/// Whether an installer that just exited zero actually delivered: the same
-/// resolve the catalog uses, so the two answers can never disagree and a
-/// tile cannot flip back to not installed with no error shown.
 fn install_delivered(profile: &Profile, path: &[String], home: &Path) -> bool {
     absolute_command(profile.command) || resolve_profile(profile, path, home).is_some()
 }
 
 fn opencode_install_conflict(home: &Path, path: &[String]) -> Option<PathBuf> {
-    // The vendor's primary installer also removes/recreates its legacy
-    // alias. Preserve wrappers even if they are broken or not executable.
     for name in [
         "opencode",
         "opencode.exe",
@@ -950,11 +855,6 @@ pub(crate) fn installer_process(command: &str) -> std::process::Command {
     }
     #[cfg(not(windows))]
     {
-        // A pipeline only reports the interpreter's exit status. During a
-        // reinstall the old binary still exists, so even the delivery check
-        // cannot catch `curl` failing and `bash` succeeding on an empty script.
-        // Finish the download before starting the interpreter: failed or
-        // partial scripts must never run. These are hardcoded catalog commands.
         let script = match command.split_once(" | ") {
             Some((download, runner)) if download.starts_with("curl ") => format!(
                 "installer_script=$({download}) || exit $?; printf '%s\\n' \"$installer_script\" | {runner}"
@@ -998,26 +898,8 @@ pub(crate) fn run_installer_command(
 
     let home = user_home();
 
-    // PowerShell, not `cmd.exe`. Every Windows installer a vendor publishes is
-    // a `.ps1` fetched with `irm` and run with `iex`, which is PowerShell
-    // syntax and means nothing to cmd. Handing cmd a `powershell -Command "…"`
-    // wrapper would work in principle and quote badly in practice: the string
-    // goes through Rust's Windows quoting and then cmd's own, which are not
-    // the same rules. Running the shell that owns the syntax removes both
-    // layers, and `npm` resolves under PowerShell as well.
-    //
-    // `-NoProfile` so a machine's own profile cannot change what an installer
-    // sees. `-NonInteractive` alongside the null stdin below, so an installer
-    // that wants to ask something fails rather than hanging on a prompt no
-    // one can answer.
     let mut cmd = installer;
-    // From the home folder, never the host's own working directory. On
-    // Windows hostd runs from the app's install folder, a self-contained .NET
-    // app that ships facade `System.dll` and friends. Windows PowerShell's
-    // `Add-Type` compiles with csc, which resolves references from the current
-    // directory first, so an installer that compiles C# (Codex does) picks up
-    // the facades and fails with "Win32Exception has been forwarded to
-    // System.Private.CoreLib".
+
     cmd.current_dir(if home.is_empty() {
         std::env::temp_dir()
     } else {
@@ -1026,9 +908,7 @@ pub(crate) fn run_installer_command(
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    // Own process group, so a timeout can kill the installer's whole tree
-    // rather than only the shell that launched it: `curl | bash` and npm
-    // postinstall scripts outlive the shell they hang under otherwise.
+
     #[cfg(unix)]
     cmd.process_group(0);
     let login_env = tokenstat_pty::login_env_ready();
@@ -1059,9 +939,6 @@ pub(crate) fn run_installer_command(
         let _ = err_tx.send(capture_installer_output(stderr));
     });
 
-    // The pipes are drained on the reader threads, so waiting on the child
-    // cannot deadlock on a full buffer. The deadline bounds a hung installer
-    // so the connection thread it runs on does not stay busy forever.
     let deadline = Instant::now() + INSTALLER_TIMEOUT;
     let status = loop {
         match child.try_wait() {
@@ -1090,20 +967,13 @@ pub(crate) fn run_installer_command(
     );
     let truncated = combined.len() > 4096;
     combined.truncate(4096);
-    // Installer output is display text. Some installers paint a TTY when they
-    // can, and their ANSI cursor codes would be noise in the error a failed
-    // install shows, so the escapes are stripped before the text is returned.
+
     let mut output = strip_ansi(&String::from_utf8_lossy(&combined));
     if truncated {
         output.push_str("\n… (output truncated)");
     }
     let mut ok = status.success();
-    // Believe the filesystem over the exit code. A downloader that is not
-    // installed makes `curl … | bash` succeed on an empty script: exit zero,
-    // nothing installed, and the tile flips back to not installed with no
-    // error shown. Verify against the same login PATH the installer ran
-    // with, so a tool delivered to a login-only prefix is not misreported
-    // as a failure because the daemon PATH is shorter.
+
     let verify_path = match &login_env {
         Some(env) => {
             let mut paths: Vec<String> =
@@ -1134,15 +1004,9 @@ pub(crate) fn run_installer_command(
     }))
 }
 
-/// Remove ANSI escape sequences from installer output.
-///
-/// Handles CSI (`ESC [ … final`) and OSC (`ESC ] … BEL`) and the one-shot
-/// sequences (`ESC X`). Everything else passes through untouched; a trailing
-/// half-eaten sequence from the 4 KiB cap simply has nothing left to strip.
 fn reap_child(child: &mut std::process::Child) {
     #[cfg(unix)]
     if let Ok(pid) = i32::try_from(child.id()) {
-        // SAFETY: this process was spawned in its own process group.
         unsafe {
             libc::kill(-pid, libc::SIGKILL);
         }
@@ -1189,9 +1053,7 @@ fn strip_ansi(input: &str) -> String {
             }
             Some(']') => {
                 chars.next();
-                // A BEL ends an OSC; so does the ST escape (`ESC \`), which
-                // this branch swallows whole since the ESC was already taken
-                // by the iteration.
+
                 loop {
                     match chars.next() {
                         None | Some('\u{07}') => break,
@@ -1206,7 +1068,6 @@ fn strip_ansi(input: &str) -> String {
                 }
             }
             _ => {
-                // `ESC` followed by a single char, e.g. `ESC 7`.
                 chars.next();
             }
         }
@@ -1243,8 +1104,7 @@ pub(crate) fn model_environment(
                 ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
             ])
         }
-        // Recent Ollama releases serve Anthropic's API at the server root.
-        // An older one answers "not found", which Claude Code reports.
+
         ("claude", Some("ollama")) => {
             let base = crate::local_models::origin("ollama")?;
             Ok(vec![
@@ -1252,14 +1112,12 @@ pub(crate) fn model_environment(
                 ("ANTHROPIC_AUTH_TOKEN".into(), "ollama".into()),
             ])
         }
-        // Copilot takes the endpoint through its own variables rather than the
-        // generic OPENAI_* pair, and needs no key for a loopback server that
-        // asks for none.
+
         ("copilot", Some(provider)) => {
             let base = crate::local_models::api_base_url(provider)?;
             Ok(vec![("COPILOT_PROVIDER_BASE_URL".into(), base)])
         }
-        // Codex's OSS port override leaves its built-in provider contract intact.
+
         ("codex", Some(provider @ ("lmstudio" | "ollama"))) => {
             let port = crate::local_models::configured_port(provider)?;
             Ok(vec![
@@ -1270,12 +1128,7 @@ pub(crate) fn model_environment(
                 ),
             ])
         }
-        // OpenCode only accepts a `provider/id` that is in its catalog. A
-        // freshly loaded LM Studio model is often missing from that cache.
-        // `OPENCODE_CONFIG_CONTENT` is per-process and registers the one
-        // selected id without writing `~/.config/opencode/`. The same blob
-        // names the default model, which is how OpenCode 2 picks one: its
-        // TUI has no `--model` flag.
+
         ("opencode" | "opencode2", Some(provider @ ("lmstudio" | "ollama"))) => {
             let model = model.ok_or("local model selection needs both a provider and a model")?;
             Ok(vec![(
@@ -1294,15 +1147,6 @@ pub(crate) fn model_environment(
     }
 }
 
-/// Per-process OpenCode config that names one local model.
-///
-/// OpenCode splits `provider/model` on the first slash and then looks the
-/// rest up in that provider's catalog. A model id that itself contains a
-/// slash (`meta/muse-glimmer`) is valid once it is in that catalog.
-///
-/// `model` is the default the TUI starts on. OpenCode 1 also accepts
-/// `--model` on the root command. OpenCode 2 does not, so this field is
-/// the only way to point that CLI at the selection.
 fn opencode_model_config(
     provider: &str,
     model: &str,
@@ -1310,13 +1154,9 @@ fn opencode_model_config(
 ) -> Result<String, String> {
     let name = model.rsplit('/').next().unwrap_or(model);
     let base_url = format!("{}/v1", crate::local_models::origin(provider)?);
-    // The model's real size, so a long first prompt is not mistaken for an
-    // overflow and compacted before the model has said anything.
+
     let mut entry = json!({ "name": name });
     if let Some(context) = crate::local_models::context_window(provider, model) {
-        // A small reply reserve: OpenCode compacts once the prompt and the
-        // reserve pass the window, and tokenstat's chat context already
-        // fills much of a 32k local model before anybody has typed.
         entry["limit"] =
             json!({ "context": context, "output": (context / 8).clamp(1_024, 16_384) });
     }
@@ -1365,8 +1205,6 @@ pub(crate) fn model_arguments(
         return Vec::new();
     };
     match executable_name(command).to_ascii_lowercase().as_str() {
-        // Codex names the provider itself, and refuses a local model without
-        // being told to leave its cloud account out of it.
         "codex" => vec![
             "--oss".into(),
             "--local-provider".into(),
@@ -1374,11 +1212,7 @@ pub(crate) fn model_arguments(
             "--model".into(),
             model.into(),
         ],
-        // OpenCode 1 takes `--model` on the TUI. OpenCode 2 rejects that flag
-        // on the root command (`Unrecognized flag: --model`). Its default
-        // lives in `OPENCODE_CONFIG_CONTENT` instead, and `--standalone`
-        // keeps that config on this process rather than on a background
-        // service that never saw it.
+
         "opencode" | "opencode2" => {
             if crate::opencode_cli::generation(command) == crate::opencode_cli::Generation::V1 {
                 vec!["--model".into(), format!("{provider}/{model}")]
@@ -1391,7 +1225,6 @@ pub(crate) fn model_arguments(
     }
 }
 
-/// The file name a command runs as, for matching a harness contract.
 fn executable_name(command: &str) -> &str {
     let name = command.rsplit(['/', '\\']).next().unwrap_or(command);
     for extension in [".exe", ".cmd", ".bat", ".com"] {
@@ -1432,14 +1265,6 @@ pub(crate) fn profile_name(id: &str) -> Option<&'static str> {
     PROFILES.iter().find(|p| p.id == id).map(|p| p.name)
 }
 
-/// Where this profile's command actually is: the search path first, then the
-/// directory its own installer uses.
-///
-/// The order is the point. A tool on the PATH is the one the user's shell
-/// would run, so it wins even when a copy sits in the install directory as
-/// well. The install directory is the answer to "it is plainly installed and
-/// tokenstat cannot see it", which happens on any machine whose startup file
-/// does not export it.
 fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<String> {
     for name in command_names(profile) {
         if let Some(found) = resolve_on_path(name, path) {
@@ -1462,11 +1287,6 @@ fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<St
     None
 }
 
-/// Executable names this profile answers to.
-///
-/// Most tools have one. Kilo's npm page calls the command `kilocode` and the
-/// docs call it `kilo`, so both are probed rather than guessing which install
-/// a machine has.
 fn command_names(profile: &Profile) -> impl Iterator<Item = &'static str> {
     let extra: &[&str] = match profile.id {
         "kilo" => &["kilo"],
@@ -1525,9 +1345,7 @@ fn user_home() -> String {
     #[cfg(not(windows))]
     {
         let process_home = std::env::var("HOME").unwrap_or_default();
-        // The login shell's answer is read without waiting: the catalog
-        // warms it ahead of time, and a resolve that has not finished yet
-        // behaves exactly as before.
+
         let login_env = tokenstat_pty::login_env();
         let login_home = login_env
             .as_ref()
@@ -1537,26 +1355,10 @@ fn user_home() -> String {
     }
 }
 
-/// The password database's answer, which needs no environment at all.
 fn passwd_home() -> Option<String> {
     tokenstat_paths::home_dir().map(|home| home.display().to_string())
 }
 
-/// HOME for path building: the process value wins, the login shell's answer
-/// covers a daemon started with a scrubbed environment, and the password
-/// database covers a machine where neither names a home.
-///
-/// A systemd system unit has no HOME at all. Building conventional paths
-/// from that turned `~/.local/bin` into `/.local/bin`, so an installed tool
-/// the daemon itself had just delivered resolved as missing and the install
-/// read as a failure.
-///
-/// The login shell was supposed to cover that and does not: asked from a unit
-/// with no HOME, `bash -ilc env` answers with no HOME either, because it
-/// inherits the environment it was given. So the last resort is the one
-/// source that does not depend on an environment at all, which is the same
-/// place `directories` reads the data directory from. `passwd` is taken as a
-/// function so a test can supply an answer without a real account.
 #[cfg(not(windows))]
 fn home_from(
     process_home: &str,
@@ -1606,8 +1408,6 @@ fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
     for candidate in candidates {
         #[cfg(windows)]
         if candidate.extension().is_none() {
-            // npm installs a POSIX shim beside its Windows command file.
-            // CreateProcess cannot execute the extensionless shell script.
             for ext in ["exe", "com", "cmd", "bat"] {
                 let executable = candidate.with_extension(ext);
                 if is_executable(&executable) {
@@ -1649,19 +1449,10 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-/// The daemon's PATH plus the usual install directories. The daemon runs under
-/// launchd with a smaller PATH than a terminal, so the conventional locations
-/// are added explicitly; this under-reports rather than guesses wrong, and the
-/// shell entry keeps the launcher usable either way.
 fn search_path() -> Vec<String> {
     let mut paths: Vec<String> =
         split_path_var(&std::env::var("PATH").unwrap_or_default()).collect();
-    // The login shell's PATH, resolved once per process and shared with the
-    // sessions that will actually run. Same answer for "what can launch" and
-    // "what the launched session can find", so a tile and its spawn agree.
-    // Blocking here on purpose: a catalog that answered before the resolve
-    // finished would hide harnesses that only exist in the login PATH, and
-    // this runs on the launch surface, not on a terminal click.
+
     if let Some(env) = tokenstat_pty::login_env_ready() {
         paths.extend(split_path_var(&env.path));
     }
@@ -1734,9 +1525,6 @@ fn conventional_paths(home: &str) -> Vec<String> {
     }
 }
 
-/// npm can install global commands under a user-selected prefix that is absent
-/// from a desktop helper's PATH. Use only the prefix setting, never credentials,
-/// and give the launched CLI the same directory used for discovery.
 fn npm_bin_paths_with(home: &str, env: impl Fn(&str) -> Option<String>) -> Vec<String> {
     let setting = |upper, lower| env(upper).or_else(|| env(lower));
     let configured = setting("NPM_CONFIG_PREFIX", "npm_config_prefix").or_else(|| {
@@ -1833,7 +1621,7 @@ mod tests {
         assert!(has(
             "Usage: claude auth [options] [command]\n\nCommands:\n  login [options]   Sign in"
         ));
-        // An older CLI prints its general help for an unknown subcommand.
+
         assert!(!has(
             "Usage: claude [options] [command] [prompt]\n\nClaude Code - starts an interactive session"
         ));
@@ -1863,8 +1651,6 @@ mod tests {
         assert_eq!(classify("codex", "unknown command status"), None);
     }
 
-    /// A client picks a row. It never supplies a command, an argument or a
-    /// path, so `launcher.signIn` cannot become a way to run something.
     #[test]
     fn signing_in_refuses_anything_that_is_not_a_known_agent() {
         for id in [
@@ -1886,8 +1672,6 @@ mod tests {
         assert!(crate::agent_readiness::sign_in("shell").is_none());
     }
 
-    /// Every agent with a sign-in flow is a profile that exists, or the button
-    /// would be offered for something the catalog cannot start.
     #[test]
     fn every_sign_in_flow_names_a_profile_in_the_catalog() {
         for id in ["claude_code", "codex", "cursor_agent", "muse"] {
@@ -1987,9 +1771,6 @@ mod tests {
         assert!(npm_path("relative/npm", home, &|_| None).is_none());
     }
 
-    /// The reported bug: `~/.opencode/bin/opencode` exists, the machine's
-    /// startup file never exported that directory, and the launcher offered no
-    /// OpenCode tile with nothing to say about why.
     #[cfg(unix)]
     #[test]
     fn a_tool_in_its_own_install_directory_is_found_off_the_path() {
@@ -2000,9 +1781,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// The PATH still decides. A version manager or a deliberate override is
-    /// what the user's own shell would run, and the install directory must not
-    /// quietly take precedence over it.
     #[cfg(unix)]
     #[test]
     fn the_path_wins_over_the_install_directory() {
@@ -2093,13 +1871,6 @@ mod tests {
         }
     }
 
-    /// A scrubbed daemon environment still finds home. A systemd system unit
-    /// has no HOME, and without a fallback every conventional path degrades
-    /// to `/.local/bin`, which is how a delivered tool resolved as missing.
-    ///
-    /// The login shell is asked first and is not enough on its own: started
-    /// from a unit with no HOME, it answers with no HOME either. The password
-    /// database is what actually ends the chain.
     #[cfg(unix)]
     #[test]
     fn home_falls_back_past_a_scrubbed_environment() {
@@ -2113,9 +1884,6 @@ mod tests {
         assert_eq!(home_from("", None, none), "");
     }
 
-    /// Exit zero is not delivered. An installer that ran clean and left
-    /// nothing the catalog can see must read as a failure, not as a success
-    /// whose tile flips back to not installed with no error shown.
     #[cfg(unix)]
     #[test]
     fn an_installer_that_delivers_nothing_is_not_an_install() {
@@ -2140,8 +1908,6 @@ mod tests {
         assert!(resolve_profile(&profile("opencode", &[]), &[], Path::new("")).is_none());
     }
 
-    /// The tools that ship their own directory are the ones this exists
-    /// for. A rename here silently reintroduces the bug.
     #[test]
     fn the_tools_that_ship_a_directory_declare_it() {
         for (id, dir) in [
@@ -2162,17 +1928,6 @@ mod tests {
         }
     }
 
-    /// The v2 next build is its own binary in the same install directory as
-    /// v1, so a machine that runs the beta gets its own tile while v1 keeps
-    /// the classic one. It bills as the same product, so the harness id and
-    /// its installer command must not drift from the OpenCode family.
-    /// Every Windows installer is PowerShell, because that is the shell
-    /// `install` hands it to.
-    ///
-    /// This is the check that was missing. The catalog carried one installer
-    /// per tool, `curl -fsSL … | bash`, and Windows ran that string under
-    /// `cmd.exe`, where there is no `bash` and `|` pipes to something else.
-    /// Thirteen tiles offered an Install button that could only fail.
     #[test]
     fn windows_installers_are_powershell() {
         for profile in PROFILES {
@@ -2201,9 +1956,6 @@ mod tests {
         }
     }
 
-    /// A tool we cannot install on Windows says so by having nothing, rather
-    /// than by borrowing the Unix command. Pinned by name so removing one is
-    /// a decision somebody makes here, not a slip.
     #[test]
     fn tools_without_a_windows_installer_are_named() {
         let missing: Vec<_> = PROFILES
@@ -2214,9 +1966,6 @@ mod tests {
         assert_eq!(missing, ["cursor_agent"], "{missing:?}");
     }
 
-    /// Muse's Windows installer, pinned by value. Meta publishes the `.ps1`
-    /// beside the Unix script, and the catalog must keep pointing at it
-    /// rather than degrading Muse to a tile with no Install button.
     #[test]
     fn muse_keeps_its_windows_installer() {
         let muse = PROFILES
@@ -2280,9 +2029,6 @@ mod tests {
         }
     }
 
-    /// The catalog answers for the whole supported list, not only what is on
-    /// the machine. Every profile carries the verdict a front end draws on and
-    /// the command that would install it.
     #[test]
     fn the_catalog_carries_an_install_verdict_and_command() {
         let list = catalog();
@@ -2305,8 +2051,7 @@ mod tests {
             .iter()
             .find(|v| v.get("id").and_then(|v| v.as_str()) == Some("claude_code"))
             .expect("claude_code must be listed");
-        // The catalog answers for the machine it is running on, so this is the
-        // one assertion in the file that has to know which machine that is.
+
         let expected = if cfg!(windows) {
             "irm https://claude.ai/install.ps1 | iex"
         } else {
@@ -2318,9 +2063,6 @@ mod tests {
         );
     }
 
-    /// The id is the only thing a client may choose. Anything else is refused
-    /// before a command is built, so a remote caller cannot make the host run
-    /// a command of its own.
     #[test]
     fn install_refuses_unknown_profiles() {
         for request in [install, super::reinstall] {
@@ -2463,18 +2205,12 @@ mod tests {
         );
     }
 
-    /// A profile without an installer for this machine is refused too, rather
-    /// than launching nothing or running a guessed command. The message names
-    /// the platform because that is now the usual reason: a tool can have a
-    /// Unix installer and no Windows one.
     #[test]
     fn install_refuses_a_profile_without_an_installer() {
         let error = install("cursor").expect_err("no installer");
         assert!(error.contains("no installer for this platform"), "{error}");
     }
 
-    /// Installer output is shown to people as an error message, so the ANSI
-    /// cursor codes an installer aimed at a TTY must not survive into it.
     #[test]
     fn installer_output_has_ansi_escapes_stripped() {
         assert_eq!(
@@ -2571,9 +2307,6 @@ mod tests {
 
     #[test]
     fn the_pi_harness_is_in_the_catalog() {
-        // The launcher, the session-tab mark and the archive display name are
-        // keyed by the same harness id. The profile's id must match so the
-        // launched session renders with the Pi mark rather than a letter tile.
         let pi = PROFILES
             .iter()
             .find(|p| p.id == "pi")
@@ -2585,9 +2318,6 @@ mod tests {
 
     #[test]
     fn the_deepseek_harness_starts_its_web_ui() {
-        // Official start is `npx @deepseek-ai/dsh web`. `--yes` skips the
-        // first-run install prompt so a tile click does not hang the session.
-        // The UI is the page on :3080, not the TTY.
         let dsh = PROFILES
             .iter()
             .find(|p| p.id == "dsh")

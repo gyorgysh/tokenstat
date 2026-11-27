@@ -39,18 +39,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import androidx.compose.ui.text.style.TextOverflow
 
-/// One shell the host is holding, as `ssh.session.list` reports it.
-///
-/// The sessions live in the host process, not in the app, so this is how the
-/// screen finds the shells it left running. Port of `SSHSessionSummary`.
 data class SshSessionEntry(
     val id: String,
     val hostId: String?,
     val label: String,
     val alive: Boolean,
-    /// Locally ended by reconcile: the host reaped the shell, but the tab
-    /// stays until the person explicitly closes it, so the command's final
-    /// output can still be read.
     val locallyEnded: Boolean = false,
 ) {
     companion object {
@@ -68,17 +61,6 @@ data class SshSessionEntry(
     }
 }
 
-/// The SSH sessions this app is showing, in one place.
-///
-/// Port of the phone half of `SSHSessionsModel`. A refresh reconciles against
-/// `ssh.session.list`: it adopts what the host is holding and never drops a
-/// live local terminal. Leaving the screen leaves shells running, and the
-/// Open sessions section is the way back to them.
-///
-/// Held by the app model so navigating between tabs cannot orphan a shell:
-/// the old screen kept the open session in composable `remember`, so leaving
-/// SSH and coming back lost the only reference to a shell that was still
-/// running on the host, with nothing on any screen mentioning it.
 class SshConnectionState(
     private val call: suspend (method: String, params: JsonObject) -> JsonElement = { _, _ ->
         JsonArray(emptyList())
@@ -93,11 +75,6 @@ class SshConnectionState(
     private val mutableConnecting = MutableStateFlow<JsonObject?>(null)
     val connecting: StateFlow<JsonObject?> = mutableConnecting.asStateFlow()
 
-    /// Sessions whose close is still in flight. Closing takes a tab off
-    /// screen straight away and tells the host afterwards, so for a moment
-    /// the host still lists a session this app has forgotten. Without this
-    /// the next reconcile adopts it back and the tab somebody just closed
-    /// reappears.
     private val closingIds = mutableSetOf<String>()
     private val mutableCloseError = MutableStateFlow<String?>(null)
     val closeError: StateFlow<String?> = mutableCloseError.asStateFlow()
@@ -116,8 +93,6 @@ class SshConnectionState(
         mutableConnecting.value = null
     }
 
-    /// Take a freshly opened session and select it. One entry per session id,
-    /// always: an adopt racing a reconcile must not list the same shell twice.
     fun adopt(entry: SshSessionEntry) {
         mutableSessions.update { current ->
             if (current.any { it.id == entry.id }) current else current + entry
@@ -130,8 +105,6 @@ class SshConnectionState(
         mutableSelectedId.value = entry.id
     }
 
-    /// Done leaves the shell running on the host. The entry stays in the list
-    /// so Open sessions is the way back; only [close] ends the shell.
     fun dismiss() {
         mutableSelectedId.value = null
     }
@@ -146,8 +119,6 @@ class SshConnectionState(
         try {
             call("ssh.session.close", buildJsonObject { put("id", entry.id) })
         } catch (error: Exception) {
-            // A failed close is not evidence the shell ended. Keep it reachable
-            // and allow a retry rather than suppressing every later list echo.
             closingIds.remove(entry.id)
             mutableSessions.update { current ->
                 if (current.any { it.id == entry.id }) current else current + entry
@@ -157,18 +128,10 @@ class SshConnectionState(
         }
     }
 
-    /// Close every session on one host. Used when a saved record is deleted.
     suspend fun closeAll(hostId: String) {
         for (entry in sessionsFor(hostId)) close(entry)
     }
 
-    /// Adopt what the host is holding and mark what it has forgotten.
-    ///
-    /// A session the host no longer lists is marked ended locally, not
-    /// removed: `ssh.session.list` reaps an ended shell before answering, and
-    /// removing the entry here would erase the command's final output before
-    /// it has been read. A failed list call changes nothing: a refresh that
-    /// cannot reach the host must not read as every session having ended.
     suspend fun reconcile() {
         val summaries = runCatching { call("ssh.session.list", buildJsonObject {}) }
             .getOrNull() as? JsonArray ?: return
@@ -184,9 +147,6 @@ class SshConnectionState(
     }
 }
 
-/// Pure half of [SshConnectionState.reconcile], so unit tests pin the same
-/// answers. Adopts unknown live sessions, marks known-alive ones the host
-/// forgot as locally ended, and never removes or resurrects an entry.
 fun reconcileSessions(
     current: List<SshSessionEntry>,
     held: List<SshSessionEntry>,
@@ -209,10 +169,6 @@ fun reconcileSessions(
     return out
 }
 
-/// The on-connect commands for a host: saved snippets flagged to run, without
-/// placeholders. Placeholder snippets are skipped, because asking for values
-/// is a sheet, and a sheet that opens by itself the moment a connection lands
-/// is not something to do to somebody. Port of `runStartup`'s filter.
 fun startupCommands(hostId: String?, snippets: JsonArray): List<String> {
     if (hostId.isNullOrEmpty()) return emptyList()
     return snippets.mapNotNull { it as? JsonObject }
@@ -224,9 +180,6 @@ fun startupCommands(hostId: String?, snippets: JsonArray): List<String> {
         .filter { SnippetRun.placeholders(it).isEmpty() }
 }
 
-/// Live shells, above everything. Without this row a shell somebody left
-/// running is running with nothing on any screen that mentions it. Port of
-/// the iOS library's Open sessions section plus `sessionRow`.
 @Composable
 fun SshOpenSessionsSection(
     state: SshConnectionState,

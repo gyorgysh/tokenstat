@@ -14,10 +14,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the workspace pure logic to the Apple originals in
-/// `ClientWorkspaceSections.swift`, `GitCommitSession.swift`,
-/// `ClientReviewAllView.swift`, `GitPushView.swift`, and
-/// `ClientWorkspaceNotesView.swift`.
 class WorkspaceLogicTest {
 
     @Test

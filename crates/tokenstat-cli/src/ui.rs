@@ -45,8 +45,6 @@ fn detect_caps(env: impl Fn(&str) -> Option<String>) -> Caps {
     let lower = |name: &str| env(name).map(|v| v.to_ascii_lowercase());
     let term = lower("TERM").unwrap_or_default();
 
-    // `TOKENSTAT_ASCII=1` is the escape hatch for anyone whose terminal lies,
-    // and for recording tools that render a fixed font.
     let forced_ascii = env("TOKENSTAT_ASCII").is_some_and(|v| v != "0");
 
     let colorterm = lower("COLORTERM").unwrap_or_default();
@@ -117,7 +115,6 @@ pub fn to_xterm256(r: u8, g: u8, b: u8) -> u8 {
     16 + 36 * axis(r) + 6 * axis(g) + axis(b)
 }
 
-/// Nearest of the eight bright ANSI colours, for 16-colour terminals.
 fn to_basic(r: u8, g: u8, b: u8) -> AnsiColor {
     const CANDIDATES: [(AnsiColor, (u8, u8, u8)); 8] = [
         (AnsiColor::BrightBlack, (0x55, 0x55, 0x55)),
@@ -327,8 +324,6 @@ pub fn sparkline(values: &[u64]) -> String {
                 return ' ';
             }
             let f = *v as f64 / max as f64;
-            // A non-zero value always gets at least the lowest visible step, so
-            // a quiet day reads as quiet rather than as missing.
             if unicode {
                 LEVELS[((f * LEVELS.len() as f64).ceil() as usize).clamp(1, LEVELS.len()) - 1]
             } else {
@@ -357,7 +352,6 @@ pub fn pad_left(s: &str, w: usize) -> String {
     }
 }
 
-/// Approximate display width. Full width CJK and emoji count as two columns.
 fn width(s: &str) -> usize {
     ratatui::text::Span::raw(s).width()
 }
@@ -378,9 +372,6 @@ pub(crate) fn truncate(s: &str, w: usize) -> String {
     if w == 0 {
         return String::new();
     }
-    // The marker is one column as `…` and two as `..`, so the budget has to be
-    // measured rather than assumed. Getting this wrong shifts every column to
-    // the right of a truncated cell.
     let marker = ellipsis();
     let marker_w = width(marker);
     if w <= marker_w {
@@ -430,10 +421,6 @@ pub const HEAT_GUTTER: usize = 4;
 /// Terminal columns one week occupies: the cell plus its gap.
 pub const HEAT_COL: usize = 2;
 
-// The calendar itself lives in `tokenstat_core::activity`, because the desktop
-// app draws the same grid and a second implementation would be a second answer
-// to "how long is my streak". What stayed here is the part that is genuinely
-// about a terminal: the column arithmetic and the two label strings.
 pub use tokenstat_core::activity::HeatCalendar;
 
 /// Build an activity grid, marking the days that were worked without measured tokens.
@@ -449,8 +436,6 @@ pub fn heat_calendar(
     unmeasured: &[String],
 ) -> Option<HeatCalendar> {
     let mut cal = tokenstat_core::activity::calendar(days, weeks, anchor)?;
-    // Match tokenstat.ai: interpolated quartiles over visible positive days,
-    // with relative thresholds when fewer than four days have measurements.
     let mut values: Vec<u64> = cal.days().map(|c| c.value).filter(|v| *v > 0).collect();
     values.sort_unstable();
     for cell in cal.rows.iter_mut().flatten().flatten() {
@@ -460,7 +445,6 @@ pub fn heat_calendar(
     Some(cal)
 }
 
-/// `values` contains the sorted positive values in the visible calendar.
 fn website_heat_level(value: u64, values: &[u64]) -> u8 {
     if value == 0 {
         return 0;
@@ -496,7 +480,6 @@ fn website_heat_level(value: u64, values: &[u64]) -> u8 {
 /// crate now and these are of no use to anything that is not a terminal.
 pub trait HeatRender {
     fn width(&self) -> usize;
-    /// The month header strip, already padded to line up with the columns.
     fn header(&self) -> String;
 }
 
@@ -535,8 +518,6 @@ pub fn heat_row_label(row: usize) -> &'static str {
 mod tests {
     use super::*;
 
-    /// Detection against a fixed environment, so tests do not depend on the
-    /// terminal that happens to be running them.
     fn caps_for(vars: &[(&str, &str)]) -> Caps {
         detect_caps(|name| {
             vars.iter()
@@ -550,8 +531,6 @@ mod tests {
         assert!(caps_for(&[("COLORTERM", "truecolor")]).truecolor);
         assert!(caps_for(&[("COLORTERM", "24bit")]).truecolor);
         assert!(!caps_for(&[("TERM", "xterm-256color")]).truecolor);
-        // Apple Terminal reports 256 colours and no COLORTERM. Sending it RGB
-        // would pick unrelated colours rather than degrade.
         assert!(caps_for(&[("TERM", "xterm-256color")]).palette256);
         assert!(!caps_for(&[("TERM", "vt100")]).palette256);
     }
@@ -568,7 +547,6 @@ mod tests {
             caps_for(&[("LANG", "en_US.ISO-8859-1")]).unicode,
             cfg!(windows)
         );
-        // The override wins over a UTF-8 locale, for terminals that lie.
         assert!(!caps_for(&[("LANG", "en_US.UTF-8"), ("TOKENSTAT_ASCII", "1")]).unicode);
         assert!(caps_for(&[("LANG", "en_US.UTF-8"), ("TOKENSTAT_ASCII", "0")]).unicode);
     }
@@ -577,10 +555,7 @@ mod tests {
     fn brand_colors_map_onto_the_256_palette() {
         let (r, g, b) = ACCENT_RGB;
         let index = to_xterm256(r, g, b);
-        // Inside the 6x6x6 cube, not the greyscale ramp, and not a system color.
         assert!((16..232).contains(&index), "accent mapped to {index}");
-        // A near-neutral colour uses the greyscale ramp, which has finer steps
-        // than the cube's washed-out greys.
         assert!(to_xterm256(0x40, 0x42, 0x41) >= 232);
         assert_eq!(to_xterm256(0, 0, 0), 16);
     }
@@ -592,8 +567,6 @@ mod tests {
         let chars: Vec<char> = line.chars().collect();
         assert!(chars[0] != ' ');
         assert!(chars[2] == '█' || chars[2] == '#');
-        // A zero leaves a gap rather than a floor value, so an idle day reads
-        // as idle instead of as a small amount of usage.
         assert_eq!(sparkline(&[0, 10]).chars().next(), Some(' '));
         assert_eq!(sparkline(&[0, 0]), "");
         assert_eq!(sparkline(&[]), "");
@@ -627,7 +600,6 @@ mod tests {
     fn padding_accounts_for_wide_characters() {
         assert_eq!(pad_right("ab", 4), "ab  ");
         assert_eq!(pad_left("ab", 4), "  ab");
-        // A CJK character occupies two columns, so only one fits plus padding.
         assert_eq!(width(&pad_right("日本", 6)), 6);
     }
 
@@ -641,8 +613,6 @@ mod tests {
 
     #[test]
     fn truncation_marks_elision() {
-        // The marker differs by terminal, but the column count must not: a
-        // truncated cell that is one column short shifts the whole table.
         assert!(pad_right("averylongprojectname", 8).ends_with(ellipsis()));
         assert_eq!(width(&pad_right("averylongprojectname", 8)), 8);
         assert_eq!(width(&pad_right("averylongprojectname", 3)), 3);
@@ -656,7 +626,6 @@ mod tests {
         assert_eq!(intensity_rgb(0.0), (0x3B, 0x2A, 0x6B));
         assert_eq!(intensity_rgb(1.0), SECONDARY_RGB);
         let mid = intensity_rgb(0.5);
-        // Mid should sit between brand purple and electric, not at either end.
         assert_ne!(mid, intensity_rgb(0.0));
         assert_ne!(mid, intensity_rgb(1.0));
     }
@@ -664,7 +633,6 @@ mod tests {
     #[test]
     fn website_quartiles_interpolate_and_keep_equal_values_together() {
         let values = [10, 20, 30, 40, 50, 60];
-        // Interpolated breaks are 22.5, 35, 47.5 (not nearest ranks).
         assert_eq!(
             [22, 23, 35, 36, 47, 48].map(|v| website_heat_level(v, &values)),
             [1, 2, 2, 3, 3, 4]
@@ -699,7 +667,6 @@ mod tests {
         assert_eq!(cal.unmeasured_days(), 1);
     }
 
-    /// Wednesday 2026-07-29, the anchor most of these cases hang off.
     fn anchor() -> jiff::civil::Date {
         jiff::civil::date(2026, 7, 29)
     }
@@ -719,7 +686,6 @@ mod tests {
     fn calendar_puts_each_day_in_its_real_weekday_row() {
         let days = vec![("2026-07-29".to_string(), 10)];
         let cal = heat_calendar(&days, 4, anchor(), &[]).expect("calendar");
-        // 2026-07-29 is a Wednesday: row 2, Monday first.
         let found = cal.rows[2]
             .iter()
             .flatten()

@@ -12,8 +12,6 @@ protocol WorkflowEditorService: Sendable {
     func automations() async throws -> [Automation]
     func automationQueue() async throws -> AutomationQueue
     func liveWorkflowIDs() async throws -> [String]
-    /// Draft a graph from a prompt. Side-effect-free: it saves nothing and
-    /// runs nothing, so a lost response is safely retried with the same prompt.
     func designWorkflow(prompt: String, backend: String?, model: String?, effort: String?) async throws -> WorkflowDesignResult
     func supportsWorkflowEdits() async -> Bool
     func editWorkflow(_ graph: WorkflowGraph, revision: UInt64) async throws -> WorkflowGraph
@@ -35,7 +33,6 @@ extension WorkflowEditorService {
     func liveWorkflowIDs() async throws -> [String] { [] }
 }
 
-/// One computer. Mobile always has a peer. Mac local uses the daemon.
 struct WorkflowEditorTarget: Hashable, Sendable, WorkflowEditorService {
     let peer: String?
 

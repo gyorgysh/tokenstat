@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Cheap project metadata, independent of a selected transcript. This cache
-/// belongs to the signed-in scene alongside its connection and chat readers.
 @MainActor
 @Observable
 final class ClientProjectChats {
@@ -37,8 +35,6 @@ final class ClientProjectChats {
                 interactions.insert(owner)
             } else {
                 interactions.remove(owner)
-                // Covers lifting a finger into a context menu and a queued
-                // refresh completing just as the touch ends.
                 holdUntil = now.addingTimeInterval(2)
             }
         }
@@ -71,7 +67,6 @@ final class ClientProjectChats {
             }
         }
 
-        /// A mutation invalidates any read already on the wire before acting.
         func invalidate() { revision &+= 1; lastSuccess = nil }
         func replace(_ chat: ChatConversation) {
             invalidate()

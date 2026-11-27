@@ -70,12 +70,8 @@ pub fn classify(previous: Option<&Watermark>, size: u64, mtime_ms: i64) -> Chang
             if w.size == size && w.mtime_ms == mtime_ms {
                 Change::Unchanged
             } else if size < w.byte_offset {
-                // Fewer bytes than were already consumed: the file cannot be an
-                // extension of what was read.
                 Change::Rewritten
             } else {
-                // Provisional. The head signature decides, but that needs the
-                // file open, so the caller confirms.
                 Change::Appended {
                     from_byte: w.byte_offset,
                 }
@@ -91,8 +87,6 @@ pub fn classify(previous: Option<&Watermark>, size: u64, mtime_ms: i64) -> Chang
 pub fn confirm(change: Change, previous: Option<&Watermark>, contents: &[u8]) -> Change {
     match (change, previous) {
         (Change::Appended { from_byte }, Some(w)) => {
-            // Compare the same prefix that was signed last time. Signing the
-            // new file's own head would differ purely because it grew.
             if contents.len() as u64 >= w.sig_len
                 && signature_of(contents, w.sig_len as usize) == w.head_sig
             {
@@ -179,7 +173,6 @@ mod tests {
             Change::Appended { from_byte: 18 }
         );
 
-        // Same length as the append, entirely different content.
         let rotated = b"different!\nentirely new\ncontent\n";
         assert_eq!(
             confirm(classify(Some(&w), 32, 9), Some(&w), rotated),
@@ -210,9 +203,6 @@ mod tests {
 
     #[test]
     fn appending_to_a_small_file_stays_an_append() {
-        // Regression: signing the new file's own head would differ purely
-        // because it grew, so every file under HEAD_BYTES would be re-read in
-        // full on every scan.
         let original = b"one\n";
         let w = wm_of(original, 1, 4);
         let grown = b"one\ntwo\nthree\n";

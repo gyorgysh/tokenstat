@@ -7,9 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Feeds the gutter's change marks from the same diff the Changes panel
-/// parsed, so the two cannot disagree. Reloads when the file opens and
-/// whenever its dirty state settles after a save.
 struct EditorChangedLines: ViewModifier {
     let peer: String
     let workspace: String
@@ -49,7 +46,6 @@ extension View {
 }
 
 #if WORKBENCH_QA
-/// Deterministic added lines for the gutter capture. No host involved.
 enum FileDiffFixture {
     static var changed: FileDiff {
         try! JSONDecoder().decode(FileDiff.self, from: Data(

@@ -7,8 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Host-wide scheduler defaults. Opened from the automations library, never
-/// from a job editor, so it cannot look like a folder setting.
 struct AutomationQueueDestination: View {
     let peer: String
     let hostName: String
@@ -231,14 +229,11 @@ struct AutomationQueueView: View {
     }
 }
 
-/// Library row for host-wide scheduler defaults. The list may be one folder.
-/// The copy must not be.
 struct ClientSchedulerCard: View {
     let hostName: String
     let folderName: String
     let queue: AutomationQueue?
     var showsChevron: Bool = true
-    /// Narrow list columns cannot hold the phone's "not just this folder" line.
     var compactCopy: Bool = false
     let action: () -> Void
 
@@ -311,17 +306,12 @@ struct ClientSchedulerCard: View {
 }
 
 struct QueueSheetPresentation: ViewModifier {
-    /// From the presenter: inside the sheet the size classes describe the sheet.
     let hasRoom: Bool
 
     func body(content: Content) -> some View {
         if hasRoom {
-            // iPad keeps the default form sheet. Detents would turn it into a
-            // full-window card, which is how the dedicated fixture looked empty.
             content.presentationDragIndicator(.visible)
         } else {
-            // Medium clips the host-clock line above the footer. 540 leaves
-            // that caption and Save on screen together; large is still there.
             content
                 .presentationDetents([.height(540), .large])
                 .presentationDragIndicator(.visible)

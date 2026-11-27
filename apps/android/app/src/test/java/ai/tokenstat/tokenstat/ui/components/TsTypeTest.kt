@@ -6,9 +6,6 @@ import androidx.compose.ui.unit.sp
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/// Pins the Android type scale to the Apple client's phone ladder in
-/// `Sources/Design/Theme.swift`, so the two clients cannot drift apart
-/// silently. Every size and weight here traces to that file.
 class TsTypeTest {
 
     @Test

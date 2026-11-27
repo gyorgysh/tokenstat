@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// The setup action is the person's consent to install LFS on the host and
-/// enable it for this repository. It never submits a pull or push.
 struct GitLFSSetupView: View {
     let status: GitLFSStatus
     let working: Bool

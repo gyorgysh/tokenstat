@@ -292,7 +292,6 @@ const CAPTURES: &[&str] = &[
     "escape",
 ];
 
-/// One [`Kind`] per entry of [`CAPTURES`], by position.
 const KINDS: &[Kind] = &[
     Kind::Keyword,
     Kind::String,
@@ -317,8 +316,6 @@ const KINDS: &[Kind] = &[
     Kind::String,
 ];
 
-/// JavaScript's highlights, plus what TypeScript adds. See the note at the
-/// TypeScript arm of `configuration`.
 static TYPESCRIPT_HIGHLIGHTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "{}\n{}",
@@ -327,7 +324,6 @@ static TYPESCRIPT_HIGHLIGHTS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// The same, plus JSX.
 static TSX_HIGHLIGHTS: LazyLock<String> = LazyLock::new(|| {
     format!(
         "{}\n{}\n{}",
@@ -337,11 +333,6 @@ static TSX_HIGHLIGHTS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Grammars are compiled once and reused.
-///
-/// Building a `HighlightConfiguration` compiles the grammar's highlight query,
-/// which is milliseconds, and the editor re-highlights on a keystroke debounce.
-/// Paying that per keystroke would be the whole latency budget.
 static CONFIGS: LazyLock<Mutex<HashMap<Language, &'static HighlightConfiguration>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -431,9 +422,6 @@ fn configuration(language: Language) -> Result<&'static HighlightConfiguration, 
             "",
             "",
         ),
-        // Block grammar only. The inline grammar is a separate parser reached
-        // through an injection, and headings, fences and lists are the part
-        // worth colouring in a file someone is editing beside a terminal.
         Language::Markdown => (
             tree_sitter_md::LANGUAGE.into(),
             tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
@@ -458,9 +446,6 @@ fn configuration(language: Language) -> Result<&'static HighlightConfiguration, 
     .map_err(|e| HighlightError::Grammar(language.id(), e.to_string()))?;
     config.configure(CAPTURES);
 
-    // Leaked on purpose, once per language for the life of the process. The
-    // alternative is an `Arc` clone on every keystroke to satisfy a lifetime
-    // that outlives every caller anyway.
     let config: &'static HighlightConfiguration = Box::leak(Box::new(config));
     cache.insert(language, config);
     Ok(config)
@@ -490,8 +475,6 @@ pub fn spans(language: Language, text: &str) -> Result<Vec<Span>, HighlightError
 
     let mut spans: Vec<Span> = Vec::new();
     let mut stack: Vec<Kind> = Vec::new();
-    // Walked alongside the events rather than recomputed per span. The events
-    // cover the text in order, so this is one pass over the file in total.
     let mut cursor_byte = 0usize;
     let mut cursor_u16 = 0usize;
 
@@ -510,8 +493,6 @@ pub fn spans(language: Language, text: &str) -> Result<Vec<Span>, HighlightError
                 cursor_u16 += width;
                 cursor_byte = end;
 
-                // The innermost highlight wins: a string inside a macro call
-                // should read as a string.
                 let Some(&kind) = stack.last() else { continue };
                 if width == 0 {
                     continue;
@@ -537,11 +518,6 @@ pub fn spans(language: Language, text: &str) -> Result<Vec<Span>, HighlightError
     Ok(spans)
 }
 
-/// Capture names that mark a node for something other than colour.
-///
-/// `@spell` tells an editor's spell checker where prose lives, and `@conceal`
-/// tells it what to hide. They are not colours and this crate has no meaning
-/// for them.
 const MODIFIER_CAPTURES: &[&str] = &["@spell", "@nospell", "@conceal", "@none"];
 
 /// Remove the modifier captures from a highlight query.
@@ -613,8 +589,6 @@ mod tests {
 
     #[test]
     fn spans_are_ordered_and_do_not_overlap() {
-        // `file!()` is relative to the workspace root and the test runs in the
-        // package directory, so it is joined rather than opened directly.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
         let text = std::fs::read_to_string(path).expect("this file");
         let spans = spans(Language::Rust, &text).expect("rust highlights");
@@ -633,17 +607,10 @@ mod tests {
         }
     }
 
-    /// The reason offsets are UTF-16 at all. A comment containing an astral
-    /// character makes the byte offset and the code unit offset diverge, and
-    /// nothing downstream would report the mismatch: the file would simply be
-    /// coloured from the wrong place onwards.
     #[test]
     fn offsets_are_utf16_code_units() {
         let text = "// 🎉\nfn f() {}\n";
         let spans = spans(Language::Rust, text).expect("rust highlights");
-        // "// 🎉" is 5 UTF-16 units, since the emoji is a surrogate pair, and
-        // the newline is the sixth, so `fn` starts at 6 and not at its byte
-        // offset of 9.
         assert_eq!(kind_at(&spans, 6), Some(Kind::Keyword), "{spans:?}");
     }
 
@@ -681,10 +648,6 @@ mod tests {
         }
     }
 
-    /// TypeScript's own highlight query only covers what TypeScript adds to
-    /// JavaScript. Configured with that query alone, `const` and every string
-    /// literal come back uncoloured, which looks like a theme problem rather
-    /// than a missing query.
     #[test]
     fn typescript_inherits_the_javascript_query() {
         let text = "const greeting: string = \"hi\";";
@@ -713,13 +676,6 @@ mod tests {
         }
     }
 
-    /// Comments must colour in every language that has them.
-    ///
-    /// This is the test for [`without_modifier_captures`]. Swift, and any
-    /// grammar written the same way, tags comments `@comment @spell`, the last
-    /// capture wins, and `@spell` is not a colour. The file then highlights
-    /// everywhere except its comments, which reads as a theme problem and sends
-    /// you looking in the wrong place entirely.
     #[test]
     fn comments_colour_in_every_language_that_has_them() {
         let samples: &[(Language, &str, &str)] = &[
@@ -746,8 +702,6 @@ mod tests {
         }
     }
 
-    /// Every capture name must have a kind, or a grammar's captures silently
-    /// shift onto the wrong colours.
     #[test]
     fn every_capture_has_a_kind() {
         assert_eq!(CAPTURES.len(), KINDS.len());

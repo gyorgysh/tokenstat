@@ -138,7 +138,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
     /// Reuse the one SSH page so Hosts/Keys/session switches do not tear
     /// WebView2 out of the tree. A new SshPage per section was the crash.
     /// </summary>
-    /// <summary>Connect to a host from outside the page, such as a starred server in the sidebar.</summary>
     internal async Task ConnectHostAsync(JsonNode host)
     {
         await OpenAsync(SSHSection.Hosts);
@@ -168,13 +167,8 @@ internal sealed partial class SshPage : Page, IToolbarItems
 
     public event Action? ToolbarChanged { add { } remove { } }
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
-    /// <summary>
-    /// The library re-read, which stays reachable while a session runs below.
-    /// A reload rebuilds the hidden list and leaves the session alone.
-    /// </summary>
     public IList<UIElement> ToolbarActions()
     {
         if (_terminalOnly) return new List<UIElement>();
@@ -191,11 +185,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         };
     }
 
-    /// <summary>
-    /// The four library sections as tabs. The strip stays up while a session
-    /// runs below it, so leaving a shell for the library is one tap rather
-    /// than a close. The session keeps running on the host either way.
-    /// </summary>
     private void RefreshStrip()
     {
         var tabs = new List<(string Value, string Label, ActionIcon? Glyph)>();
@@ -465,12 +454,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The credential vault, as one card above the key list. Like the Apple
-    /// vault screen it leads with what the store holds and gates use on
-    /// presence: a key whose secret is not on this PC connects with a
-    /// password or a pasted key, never with a displayed one.
-    /// </summary>
     private void AddVaultCard(JsonArray? keys)
     {
         var body = new StackPanel { Spacing = Theme.SpaceS };
@@ -918,11 +901,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         if (await SshHostPlatform.RememberAsync(host, connection) && IsLoaded && !_terminalOnly) await LoadAsync();
     }
 
-    /// <summary>
-    /// Add a host, or edit the label, address, user, and starting directory
-    /// of a saved one. Keys, secrets, and fingerprints stay where they are:
-    /// this form never shows private material.
-    /// </summary>
     private async Task EditHostAsync(JsonNode? host, string? folderId = null)
     {
         var editing = host is JsonObject;
@@ -1191,8 +1169,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         if (RetainOnUnload && _sessionId == id)
         {
             ShowSession();
-            // Retained emulators already contain VT state. A read retry must
-            // continue at their offset rather than replaying it over itself.
             if (_poll is null || _poll.IsCancellationRequested || _pollTask?.IsCompleted == true)
             {
                 _poll?.Cancel();
@@ -1223,15 +1199,10 @@ internal sealed partial class SshPage : Page, IToolbarItems
                 if (!token.IsCancellationRequested && _sessionId == id)
                     _sessionHostId = Format.Text(sessions?.FirstOrDefault(session => Format.Text(session, "id") == id), "hostId");
             }
-            catch { /* The terminal still works if saved-snippet metadata is unavailable. */ }
+            catch { }
         }
     }
 
-    /// <summary>
-    /// What to offer part-way through a command: saved snippets first, then
-    /// names the server itself reported. Tapping a row types its text,
-    /// rubbing out the characters it stands in for first.
-    /// </summary>
     private async Task SuggestAsync()
     {
         var id = _sessionId;
@@ -1345,11 +1316,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         return false;
     }
 
-    /// <summary>
-    /// Saved commands, runnable in the open session. A value for a
-    /// {{placeholder}} is asked for at run time and never stored, because
-    /// the useful ones are hostnames, ticket numbers, and passwords.
-    /// </summary>
     private async Task LoadSnippetsAsync()
     {
         JsonArray? snippets;
@@ -1659,11 +1625,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         return array;
     }
 
-    /// <summary>
-    /// Folders group hosts in the library. Deleting one never deletes what
-    /// is in it: children move up one level, which is recoverable, where a
-    /// cascade is not.
-    /// </summary>
     private async Task LoadFoldersAsync()
     {
         JsonArray? folders;
@@ -1772,11 +1733,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Which servers this machine has decided to trust, and how to take it
-    /// back. Forgetting is what makes the next connection ask again, which
-    /// is the only honest answer to a changed server key.
-    /// </summary>
     private async Task LoadKnownHostsAsync()
     {
         JsonArray? rows;
@@ -2038,14 +1994,6 @@ internal sealed partial class SshPage : Page, IToolbarItems
     }
 }
 
-/// <summary>
-/// Private key bytes, held in memory and in the Windows credential store.
-/// The host record keeps a secretRef, never PEM: "wincred:" ids live in
-/// Credential Manager under tokenstat/ssh/ and survive restarts, "winmem:"
-/// ids are this process only. Like the Apple vault, use is gated on the
-/// secret being present, and secret material is never displayed. Removing a
-/// key deletes both the host record and the stored secret.
-/// </summary>
 internal static class SshSecrets
 {
     private static readonly ConcurrentDictionary<string, string> Store = new();

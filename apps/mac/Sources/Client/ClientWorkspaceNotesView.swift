@@ -7,20 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Small things worth keeping, for one folder, on the machine that owns it.
-///
-/// The Mac's `NotesView` for a single project, with the scope chips left out:
-/// there is no global list here to scope, and a filter on top of "this
-/// folder's notes" would be two answers to one question.
-///
-/// **Quick capture is the whole point.** One field at the top, return saves,
-/// the field keeps focus so the next note is ready, and an Add button beside
-/// it so the keyboard is not the only way in. The cost of writing something
-/// down has to stay below the cost of deciding not to.
-///
-/// A note is a `todo` card whose kind is `note`, which is why every action
-/// here is a method that already existed. Notes are not tasks and no longer
-/// share a screen with them.
 struct ClientWorkspaceNotesView: View {
     let peer: String
     let workspaceID: String
@@ -46,8 +32,6 @@ struct ClientWorkspaceNotesView: View {
 
     @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
 
-    /// Newest first. A note is a moment, not a position in a queue, so the
-    /// order it was written in is the only order that means anything.
     private var notes: [TodoCard] {
         cards
             .filter { $0.kind == .note && ($0.column == "archive") == showingArchive }
@@ -61,9 +45,6 @@ struct ClientWorkspaceNotesView: View {
 
     private var place: String { folderName.isEmpty ? L10n.text("apple.clientworkspacenotesview.this_folder.9d6325c8") : folderName }
 
-    /// Offline the machine that owns these notes cannot be reached, so there
-    /// is nothing to write to. Saying so beside a disabled field beats a field
-    /// that takes text and loses it.
     private var isOffline: Bool { connectivity?.isOffline ?? false }
 
     var body: some View {
@@ -128,7 +109,6 @@ struct ClientWorkspaceNotesView: View {
         .task { await load() }
     }
 
-    // MARK: - Capture
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -173,7 +153,6 @@ struct ClientWorkspaceNotesView: View {
         !isOffline && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    // MARK: - List
 
     private var list: some View {
         ClientCardList(
@@ -241,7 +220,6 @@ struct ClientWorkspaceNotesView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Editing
 
     private func startEditing(_ note: TodoCard) {
         editText = note.title
@@ -306,7 +284,6 @@ struct ClientWorkspaceNotesView: View {
         .interactiveDismissDisabled(editSaving || editText != note.title || editBody != note.notes)
     }
 
-    // MARK: - Work
 
     private func load() async {
         do {
@@ -319,12 +296,6 @@ struct ClientWorkspaceNotesView: View {
         loaded = true
     }
 
-    /// Write it down, and show it before the round trip finishes.
-    ///
-    /// The optimistic row carries a temporary id and is swapped for the card
-    /// the host returns. A failure takes it back off and says why: a note left
-    /// on screen that does not exist on the machine is the one unforgivable
-    /// bug a notes screen can have.
     private func save() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -346,9 +317,6 @@ struct ClientWorkspaceNotesView: View {
                 errorMessage = nil
             } catch {
                 cards.removeAll { $0.id == pending.id }
-                // Only if nothing has been typed since. The round trip
-                // outlives the field, and putting the old text back over a
-                // half-written note loses the wrong one of the two.
                 if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { draft = text }
                 errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             }

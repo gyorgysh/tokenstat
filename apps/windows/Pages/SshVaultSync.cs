@@ -3,8 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// The account a vault call was started for. The host rejects it when a
-/// different login now holds the credentials.
 internal static class SshVaultScope
 {
     public static JsonObject? From(JsonNode? status)
@@ -57,8 +55,6 @@ internal static class SshVaultSync
             var records = answer["records"] as JsonArray ?? throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.the_vault_returned_no_records.e0b54c7b"));
             var known = records.OfType<JsonNode>().Select(r => Format.Text(r, "id")).ToHashSet();
             var local = await ReadLocalAsync();
-            // A child folder cannot be saved before its parent. Repeatedly
-            // take ready folders; refuse cycles rather than partially guessing.
             var pending = records.OfType<JsonNode>().OrderByDescending(r => Format.Flag(r, "deleted")).ToList();
             while (pending.Count > 0)
             {
@@ -77,8 +73,6 @@ internal static class SshVaultSync
                             await AppServices.Host.CallAsync($"ssh.{kind}.delete", new JsonObject { ["id"] = split[1] });
                             if (kind == "key") SshSecrets.Forget(Format.Text(current, "secretRef"));
                             local.Remove(id);
-                            // Deleting a folder reparents and stamps its children.
-                            // Continue merging with those records, not old copies.
                             if (kind == "folder") local = await ReadLocalAsync();
                         }
                     }
@@ -106,9 +100,6 @@ internal static class SshVaultSync
                             string? reference = null;
                             if (kind == "key")
                             {
-                                // Stage under a fresh reference. If metadata save
-                                // fails (or its answer is lost), the existing key
-                                // and any successfully saved new record stay valid.
                                 reference = CredentialVault.RefFor(split[1] + "_" + Guid.NewGuid().ToString("N"));
                                 if (!SshSecrets.Put(reference, Format.Text(remote, "privateKey")))
                                     throw new InvalidOperationException(L10n.Text("windows.sshvaultsync.could_not_store_the_synced_key_in_windows.c890a396"));
@@ -146,8 +137,6 @@ internal static class SshVaultSync
         return local;
     }
 
-    // Mirror edits before the next pull can bring an old record back. A
-    // configured, locked vault must be unlocked before editing synced data.
     public static async Task<JsonNode> WriteAsync(string method, JsonObject parameters, long? expectedAccount = null)
     {
         void CheckAccount()
@@ -187,8 +176,6 @@ internal static class SshVaultSync
             var saved = await AppServices.Host.CallAsync(method, parameters);
             if (synced && method == "ssh.folder.delete")
             {
-                // The host also moves children up a level. Publish those
-                // stamped moves so another client never restores the old tree.
                 foreach (var pair in await ReadLocalAsync())
                     if (moved.Contains(pair.Key))
                         await PushAsync(pair.Key.Split(':', 2)[0], pair.Value, scope);

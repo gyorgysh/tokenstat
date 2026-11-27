@@ -66,8 +66,6 @@ internal sealed class TeamFolderShareModel(TeamDirectoryClient client, JsonObjec
         Require(Verified && (Existing is not null || CanCreate && ValidName(Name)) && AccessRole is "viewer" or "contributor");
         if (Created is null && Existing is null)
         {
-            // A name collision always requires a fresh, explicit decision to
-            // use the existing project. Never attach a folder by name alone.
             Require(Collision is null);
             var result = await client.Request("repositories.create", new() { ["organization"] = Org, ["name"] = Name.Trim() });
             var created = result["repository"] as JsonObject ?? throw new InvalidDataException();

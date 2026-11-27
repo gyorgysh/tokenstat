@@ -23,12 +23,6 @@ struct TerminalViewRepresentable: NSViewRepresentable {
     let session: TerminalSession
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Focus is **not** claimed here, deliberately. Every session in a folder is
-    /// mounted at once so that switching tabs does not relayout the terminal,
-    /// which means hidden sessions are created too. A view that grabbed the
-    /// keyboard on creation would let whichever session happened to mount last
-    /// take it, including one nobody can see. `TerminalPane` gives focus to the
-    /// session that is actually in front.
     func makeNSView(context: Context) -> TerminalView {
         let view = session.view
         // Ask for a repaint, because this view has just been put into a new

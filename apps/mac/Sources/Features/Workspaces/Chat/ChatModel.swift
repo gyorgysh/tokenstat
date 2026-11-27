@@ -12,20 +12,13 @@ final class ChatModel {
         var effort: String?
         var mode: String
         var autonomy: String
-        /// The persona the last conversation ended up with. Three states, and
-        /// they are all different: absent means nothing has been recorded yet
-        /// and the workspace default applies, empty means the person chose no
-        /// persona, and an id means that one.
         var personaID: String?
     }
 
     private static let launchChoiceKey = "chat.lastLaunchChoice.v1"
-    /// Set only on an isolated landing-page reader, before its first create.
     var newChatChoice: ChatStartDraft.AgentChoice?
     weak var landingDraft: ChatStartDraft?
     var landingCanSubmit = false
-    /// Why a landing Send cannot be pressed, in the words the button
-    /// shows when somebody points at it. Nil once it can.
     var landingBlockReason: String?
 
     private let profileCatalog = AgentProfileCatalog.shared
@@ -74,8 +67,6 @@ final class ChatModel {
 
     func usesOwnLogin(_ backend: ChatBackend, chat: ChatConversation?) -> Bool {
         guard let id = profileID(for: chat), id != AgentProfiles.system else { return false }
-        // Until the local catalog arrives, there is no evidence that a named
-        // profile uses the machine login.
         guard let profile = agentProfiles?.profile(id) else { return true }
         return backend.launcherID.map(profile.own.contains) ?? false
     }
@@ -93,8 +84,6 @@ final class ChatModel {
         return profileSignIn[id]?[backend.id]?.readiness
     }
 
-    /// An in-memory adapter lets the real composer edit local landing state.
-    /// Its synthetic ID is never dispatched to a host or a conversation store.
     func configureLanding(_ state: ChatStartDraft, backends: [ChatBackend], peer: String?) {
         landingDraft = state
         self.backends = backends
@@ -109,7 +98,6 @@ final class ChatModel {
         chat.mode = state.agent?.mode ?? "execute"; chat.autonomy = state.agent?.autonomy ?? Self.newChatInitialAutonomy
         chat.fastMode = state.agent?.fastMode ?? false
         chat.profileId = state.agent?.profileID
-        // A new import generation must close an old picker before it can edit.
         chat.id += reference.anchor ?? ""
         if selected?.id != chat.id { loadGeneration &+= 1 }
         selected = chat
@@ -159,8 +147,6 @@ final class ChatModel {
         } catch { if state.attachmentReference == reference { state.error = error.localizedDescription } }
     }
 
-    /// Copy originals into the real conversation's normal owned draft. Source
-    /// files remain available if navigation, staging or delivery fails.
     func installLandingDraft(_ submission: ChatStartDraft.Submission, permits: () -> Bool) async -> Bool {
         guard permits(), let reference = currentReference, reference.scope == submission.owner.scope else { return false }
         draft = submission.text
@@ -191,19 +177,11 @@ final class ChatModel {
                      autonomy: "bypass")
     }
 
-    /// New chats start in Don't ask; a draft can explicitly choose Ask first.
     static let newChatInitialAutonomy = "bypass"
     var chats: [ChatConversation] = [] {
         didSet { noteRunningChats() }
     }
-    /// When each known conversation was first seen running, by conversation
-    /// id. The host reports only whether a turn is running, so the stamp is
-    /// the moment this app observed it: exact for a turn sent from here, a
-    /// lower bound for one already going when the list was read. Reconciled
-    /// on every list write, so a stopped turn leaves no stamp behind it.
     private var runningSince: [String: Date] = [:]
-    /// When this conversation's current turn started, for the Working clock
-    /// in the composer and the sidebar. Nil when it is not running.
     func turnStartedAt(for conversationID: String) -> Date? {
         runningSince[conversationID]
     }
@@ -216,8 +194,6 @@ final class ChatModel {
             }
         }
     }
-    /// Personal drafts and pending writing remain device-local after sharing.
-    /// This state never authorizes a Team send or moves those words into it.
     var isSharedSource: Bool { selected?.teamShare != nil }
     private(set) var sharingRecoveryNotice: String?
 
@@ -241,55 +217,22 @@ final class ChatModel {
         didSet { outgoingRevision &+= 1 }
     }
     var approvals: [ChatApproval] = []
-    /// Whether the live approval list has answered for the current selection.
-    /// Until it has, the transcript's own records are the only evidence of a
-    /// question still waiting, and one with time left must not read as
-    /// expired.
     private(set) var approvalsLoaded = false
-    /// What this conversation says to its agent ahead of the person's
-    /// words. Read so the inspector can show it rather than describe it.
     var instructions: ChatInstructions?
-    /// Whether the instructions read has finished for the current selection.
-    /// Once it has, a nil `instructions` means the host could not answer
-    /// rather than a load still in flight.
     private(set) var instructionsLoaded = false
     var offset: UInt64 = 0
     @ObservationIgnored private var tailCursor: String?
-    /// Asks the host for the page before the oldest one held. Nil once the
-    /// beginning of the archive is on screen.
     private(set) var earlierCursor: String?
-    /// Whether there is anything before what is held.
     private(set) var hasEarlier = false
-    /// An older page is on its way, and the transcript should say so. Quiet
-    /// backfill while a conversation opens does not set this: nobody is
-    /// waiting at the top of a screen that has not been drawn yet.
     private(set) var loadingEarlier = false
-    /// An older page is on its way at all.
-    ///
-    /// Separate from what the transcript shows, and the reason is that two
-    /// loads on one cursor is how a stale cursor gets written back over a
-    /// fresh one. Everything that fetches sets this.
     private var earlierInFlight = false
     @ObservationIgnored private var hasPagedBack = false
-    /// Whether the person has actually paged back in this sitting. Until they
-    /// have, saying "start of chat" would be announcing the obvious about a
-    /// short conversation.
     private(set) var reachedStart = false
     private(set) var historyTrimmed = false
-    /// What the whole conversation has spent, as counted by the host over the
-    /// whole archive. Nil on a host that predates paging, and then the meter
-    /// folds what is held, which on that host is everything.
     private(set) var conversationUsage: ChatUsageTotals?
-    /// Where the host's count stopped. Usage written after this is added on
-    /// top of it, so a turn taken while the conversation is open moves the
-    /// meter without asking the host to read the archive again.
     private var usageThrough: UInt64?
-    /// This host predates `chat.eventPage`, so the timeline is read whole the
-    /// way it always was. Latched per model, not per call: a host does not
-    /// grow the method while a conversation is open.
     private var pagingUnavailable = false
     var attachments: [ChatAttachment] = []
-    /// Downsampled JPEG for the composer strip, keyed by attachment id.
     var attachmentPreviews: [String: Data] = [:]
     private(set) var stagingAttachments = 0
     private(set) var missingDraftAttachments: Set<String> = []
@@ -302,7 +245,6 @@ final class ChatModel {
     var fileRelayName: String?
     var fileRelayRemaining: UInt64?
     var fileRelaySize: UInt64?
-    /// A presented image viewer owns relay consent while it covers the chat.
     var fileRelayPresenter: UUID?
     @ObservationIgnored var fileRelayAnswer: CheckedContinuation<Bool, Never>?
     @ObservationIgnored var fileRelayTicket: UUID?
@@ -312,13 +254,8 @@ final class ChatModel {
     @ObservationIgnored var fileTransferInFlight = false
     var backends: [ChatBackend] = []
     var backendRefreshError: String?
-    /// A failed authentication attempt is useful evidence even when the CLI's
-    /// status command is unavailable. Only the latest turn may offer recovery;
-    /// earlier failures in an otherwise working conversation are history.
     private var signInRecovery: ChatAuthenticationFailure.Recovery? {
         guard let selected else { return nil }
-        // Every visible row asks whether it is the recovery row. A scroll
-        // must not repeat a full transcript projection for each of them.
         _ = displayRevision
         _ = displayCache
         _ = outgoing
@@ -338,8 +275,6 @@ final class ChatModel {
     @ObservationIgnored private var outgoingRevision: UInt64 = 0
     @ObservationIgnored private var signInRecoveryCache: (key: SignInRecoveryKey, value: ChatAuthenticationFailure.Recovery?)?
     var signInQueuedMessage: ChatQueuedMessage? {
-        // Rows need no account/cache ownership lookup when no sign-in send
-        // exists. A matching item still passes the same gate before exposure.
         guard savedCopy == nil, let selected,
               let item = queued.first(where: { $0.signInBackend == selected.backend && $0.delivery == .waiting }),
               ownsQueue else { return nil }
@@ -355,9 +290,6 @@ final class ChatModel {
         return "\(selected.id):\(gate)"
     }
 
-    /// Whether this agent's own CLI said it is signed out. Only that stops a
-    /// send: a stored token past its expiry is routine (the CLI renews it),
-    /// and an agent signed in with an environment key has no login file.
     func needsSignIn(_ backendID: String) -> Bool {
         if let chat = selected, chat.backend == backendID, let model = chat.model,
            LocalChatModel.parse(model) != nil { return false }
@@ -372,10 +304,6 @@ final class ChatModel {
 
     enum SignInHold { case notNeeded, held, refused }
 
-    /// Keep a send for after sign-in, when the agent needs one. The Mac and
-    /// the phone both submit through here, so they hold the same sends.
-    /// Only one message waits: a second is refused and its words stay in the
-    /// draft, which is cleared only once the first is safely queued.
     func holdForSignIn(_ text: String, backend backendID: String) -> SignInHold {
         guard !isSharedSource else { return .refused }
         if busy && selected?.nativeSteer == true && ChatCommandRules.canSteer(text,
@@ -390,8 +318,6 @@ final class ChatModel {
         return .held
     }
 
-    /// Explicit Continue reuses durable delivery and receipts, keeping any new
-    /// composer draft untouched. A stale card cannot send into a different chat.
     func continueAfterSignIn(gateID: String?, owner: WorkReference?) async {
         guard let owner, owner == currentReference, ownsQueue, savedCopy == nil,
               gateID == signInGateRowID, !busy, !sending, unconfirmedSend == nil, heldSubmission == nil, let selected else { return }
@@ -430,46 +356,21 @@ final class ChatModel {
         backend(for: selected?.backend ?? "")?.installed == false
     }
     var personas: [ChatPersona] = []
-    /// New conversations inherit this persona unless the person picks none.
     var defaultPersonaID: String?
     var isLoading = false
-    /// The selected conversation's first page is still on its way.
-    ///
-    /// Separate from `isLoading`, which is about the folder's list. A chat
-    /// that has been picked but not yet read back has no rows, and an empty
-    /// transcript and an unread one look identical while meaning opposite
-    /// things.
     private(set) var openingConversation = false
     var error: String?
-    /// What the transcript is showing when the machine cannot be reached.
-    ///
-    /// Set exactly when the live open failed and a sealed copy was read
-    /// instead. While set, the transcript is a snapshot: sending, approvals,
-    /// attachment downloads and earlier-page fetches are refused with a
-    /// reason, and drafting, copying and reading carry on. A live page
-    /// arriving clears it.
     private(set) var savedCopy: SavedCopyInfo?
-    /// Rechecks belong to the selection that started them. A slow previous
-    /// host must not hold the next conversation's retry button or spinner.
     private var savedCopyCheckGeneration: UInt64?
     var checkingSavedCopy: Bool {
         savedCopyCheckGeneration == selectionGeneration
             && continuityScope == WorkSessionContext.shared.scope
     }
-    /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
-    /// workspace on another machine. Host methods use `workspaceID` instead.
     private(set) var folderID: String?
-    /// The workspace id the owning host stores. Local, even for a remote folder.
     private(set) var workspaceID: String?
-    /// Set when this model is talking to a peer over the tunnel.
     private(set) var peer: String?
-    /// Whether the peer can take a mid-turn note. Nil until a probe or a
-    /// successful steer says so. A failed probe stays nil: an unreachable
-    /// computer is not an older one. Local hosts are always current.
     private var remoteSteer: Bool?
 
-    /// Remember a peer change. A different computer has its own protocol, so
-    /// a previous answer must not decide the next placeholder.
     private func adoptPeer(_ next: String?) {
         if peer != next {
             remoteSteer = nil
@@ -479,19 +380,12 @@ final class ChatModel {
         }
         peer = next
     }
-    /// Async bridge calls may finish after navigation. Only the generation
-    /// that started them may mutate the currently displayed workspace/chat.
     private var loadGeneration: UInt64 = 0
     @ObservationIgnored private var setupLoadTask: Task<Void, Never>?
     private(set) var selectionGeneration: UInt64 = 0
     @ObservationIgnored let viewportContinuity = ChatViewportContinuity()
-    /// Conversation a notification asked to open, consumed by the next load.
     private var pendingRevealID: String?
-    /// The folder that reveal was asked for, so a load of a different one
-    /// cannot answer for it. See the not-found branch in `load`.
     private var pendingRevealFolderID: String?
-    // Old unscoped v1 ids cannot prove which account owned them. Leave them
-    // untouched rather than silently migrating them into the next account.
     private var continuityScope: WorkReference.Scope?
 
     private func continuityOwner(folderID: String) -> (scope: WorkReference.Scope, host: String, workspace: String)? {
@@ -521,36 +415,22 @@ final class ChatModel {
             hostIdentity: owner.host, workspaceID: owner.workspace)
     }
 
-    /// A deleted conversation takes its unsent words with it. There is nothing
-    /// left to send them to.
     private func forgetDraft(chatID: String, folderID: String) {
         guard let owner = continuityOwner(folderID: folderID) else { return }
         let reference = WorkReference(scope: owner.scope, hostIdentity: owner.host,
             workspaceID: owner.workspace, kind: .conversation, itemID: chatID)
         if draftReference == reference {
             draftReference = nil
-            // Keep the old conversation identity until selection swaps the
-            // composer. Clearing both would make a nil selection keep its
-            // deleted draft, attachments and unresolved receipt in memory.
             draftSaveTask?.cancel()
             draftSaveTask = nil
         }
         ChatDraftStore.shared.clear(for: reference)
-        // And the place somebody had reached in it. There is nothing left to
-        // come back to.
         ChatReadingStore.shared.forget(for: reference)
     }
 
-    // MARK: - Unsent words
 
     var agentPickerRequest: UInt64 = 0
 
-    /// What is in the composer.
-    ///
-    /// It lives here rather than in the view because it belongs to the
-    /// conversation, not to the pane it was typed in. Switching conversations
-    /// swaps it, leaving the folder keeps it, and it is on disk within a
-    /// third of a second of the last keystroke.
     var draft = "" {
         didSet {
             guard !restoringDraft, draft != oldValue else { return }
@@ -558,40 +438,22 @@ final class ChatModel {
             scheduleDraftSave()
         }
     }
-    /// The conversation the words in `draft` belong to. Saves use this rather
-    /// than recomputing a reference, so a save that lands after the selection
-    /// moved still writes to the conversation the words were typed in.
     private var draftReference: WorkReference?
-    /// The conversation the composer's words were typed into, known even
-    /// before the account and machine identity that key them have arrived.
     private var draftConversationID: String?
     private var draftSaveTask: Task<Void, Never>?
     private var restoringDraft = false
     private var heldSubmission: ChatDraftSubmission?
-    /// Context captured before the displayed transcript request, never a newer
-    /// metadata-only refresh that the reader has not seen yet.
     private var contextRevision: UInt64?
-    /// Long enough that a save is not queued per keystroke, short enough that
-    /// nothing meaningful is lost to a crash.
     private static let draftSaveDelay = Duration.milliseconds(300)
 
-    /// The last save did not reach the disk, so the composer is the only copy.
     var draftSaveFailed: Bool { ChatDraftStore.shared.saveFailed }
 
-    /// How to name one of this folder's conversations to the draft store.
-    ///
-    /// Built by the list once and handed to each row's mark, so the list
-    /// itself never reads the store. See `ChatDraftMark`.
     func draftReference(for conversationID: String, in folderID: String) -> WorkReference? {
         guard let owner = continuityOwner(folderID: folderID) else { return nil }
         return WorkReference(scope: owner.scope, hostIdentity: owner.host,
             workspaceID: owner.workspace, kind: .conversation, itemID: conversationID)
     }
 
-    /// How to name the conversation on screen to a device-local store.
-    ///
-    /// The same reference the draft is filed under, so the words somebody
-    /// left and the place they were reading are kept together.
     var currentReference: WorkReference? {
         if let landingDraft { return landingDraft.attachmentReference }
         guard let selected, let folderID else { return nil }
@@ -609,9 +471,6 @@ final class ChatModel {
         WorkSharedDraft(text: draft, attachmentIDs: attachments.map(\.id))
     }
 
-    /// Explicit import is a new local draft, never another device's send.
-    /// Compare the snapshot again after metadata resolution so later typing wins.
-    /// Pending local files are not in that snapshot yet; wait for them before replacing it.
     func importHandoffDraft(_ shared: WorkSharedDraft, files: [ChatAttachment],
                             replacing expected: WorkSharedDraft, reference: WorkReference) -> Bool {
         guard currentReference == reference, draftReference == reference,
@@ -629,8 +488,6 @@ final class ChatModel {
         return true
     }
 
-    /// A search hit in the already-mounted conversation must move the
-    /// viewport too, without changing selection or touching the draft.
     @discardableResult
     func restoreSearchReadingPosition(_ reference: WorkReference) -> Bool {
         guard WorkDestinationResolver.sameConversation(reference, currentReference),
@@ -664,29 +521,21 @@ final class ChatModel {
         }
     }
 
-    /// Write the composer out now: leaving the screen, going to the
-    /// background, or handing the words to a send.
     func saveDraftNow() {
         if landingDraft != nil { return }
         draftSaveTask?.cancel()
         draftSaveTask = nil
         guard let reference = draftReference else { return }
-        // The empty composer is only a presentation change while delivery is
-        // pending. Lifecycle saves must leave the durable recovery copy alone.
         guard heldSubmission?.owns(reference: draftReference, conversationID: draftConversationID,
                                    peer: peer, scope: continuityScope) != true else { return }
         ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference)
     }
 
-    /// Try the write again. The words never left the composer, so this is a
-    /// retry of the save and not a resend of anything.
     func retryDraftSave() {
         ChatDraftStore.shared.retryFailedSave()
         saveDraftNow()
     }
 
-    /// Point the composer at another conversation: the words on screen go to
-    /// the one being left, and the one being opened brings its own back.
     private func loadDraft(for id: String?, scope: WorkReference.Scope?,
                            hostIdentity: String?, workspaceID: String?) {
         saveDraftNow()
@@ -746,16 +595,12 @@ final class ChatModel {
                   workspaceID: owner.workspace)
     }
 
-    /// Clear the composer without persisting the change: for restoring stored
-    /// words, and for a send that has not been answered yet.
     private func setDraft(_ text: String) {
         restoringDraft = true
         draft = text
         restoringDraft = false
     }
 
-    /// Clear the composer but keep the stored copy until the send resolves.
-    /// Nothing is lost if the app stops between the two.
     @discardableResult
     func holdDraftForSending(_ text: String) -> Bool {
         guard !isSharedSource, !selectedBackendMissing, savedCopy == nil, let selected, !sending, stagingAttachments == 0, heldSubmission == nil else { return false }
@@ -788,14 +633,11 @@ final class ChatModel {
             messageID: deliveryID(forDraft: draftMessageID, text: text, attachments: attachments) ?? draftMessageID,
             expectedRevision: contextRevision
         )
-        // Reserve the send before the caller starts its Task or capability
-        // discovery suspends, so a second click cannot replace this snapshot.
         composerSendToken = noteSendStarted()
         setDraft("")
         return true
     }
 
-    /// The host took the words, or they moved to the queue.
     func clearDraft() {
         draftSaveTask?.cancel()
         draftSaveTask = nil
@@ -803,35 +645,21 @@ final class ChatModel {
         if let reference = draftReference { ChatDraftStore.shared.clear(for: reference) }
     }
 
-    /// The send did not happen. Put the words back where they were typed.
     func returnDraft(_ text: String) {
         guard draft.isEmpty else { return }
         setDraft(text)
     }
 
-    /// The name this draft's words travel under. Minted with the draft and
-    /// kept for as long as it exists, so sending again is the same message
-    /// rather than a second one.
     private var draftMessageID: String? {
         guard let draftReference else { return nil }
         return ChatDraftStore.shared.draft(for: draftReference)?.messageID
     }
 
-    /// The queued rows that carry this draft's delivery.
-    ///
-    /// A send after an attempt takes a new delivery id and keeps the
-    /// composer's original id in `sourceDraftMessageID`, so comparing ids
-    /// alone misses the row it became.
     private func queuedDeliveries(forDraft messageID: String?) -> [ChatQueuedMessage] {
         guard let messageID else { return [] }
         return queued.filter { $0.belongsToDraft(messageID) }
     }
 
-    /// The delivery id this writing should travel under.
-    ///
-    /// Reuse the row that already holds the same words so a retry cannot
-    /// queue the message twice. A different writing is a new message and
-    /// must not borrow that row's identity.
     private func deliveryID(forDraft messageID: String?, text: String,
                             attachments: [ChatAttachment]) -> String? {
         guard let messageID else { return nil }
@@ -842,12 +670,7 @@ final class ChatModel {
         return related.isEmpty ? messageID : nil
     }
 
-    // MARK: - Sends that are not confirmed
 
-    /// A message the machine had and did not answer for.
-    ///
-    /// Neither failure nor success. Keep the original payload and check its
-    /// receipt before any retry. An expired receipt cannot prove non-delivery.
     struct UnconfirmedSend: Equatable, Sendable {
         let conversationID: String
         let messageID: String
@@ -856,8 +679,6 @@ final class ChatModel {
 
     private(set) var unconfirmedSend: UnconfirmedSend?
 
-    /// Leave the uncertain original in Pending and give the composer a new
-    /// delivery identity. This never resends or discards the original writing.
     func startNewMessage() {
         guard let pending = unconfirmedSend, let reference = currentReference,
               reference.itemID == pending.conversationID, !pending.checking, !sending,
@@ -868,23 +689,17 @@ final class ChatModel {
             attachmentPreviews = [:]
             missingDraftAttachments = []
         } else {
-            // Writing typed after the refused/uncertain send is already a new
-            // intent. Keep it exactly as written, under a fresh message id.
             ChatDraftStore.shared.save(text: draft, attachments: attachments, for: reference, newMessage: true)
         }
         unconfirmedSend = nil
         error = L10n.text("common.chat_original_pending")
     }
-    /// Probe when acting. An unavailable computer is not an older host, and
-    /// a failed probe must not remain cached after reconnection or an update.
     private func machineConfirmsSends(peer: String?, checkingReceipt: Bool) async throws -> Bool {
         guard let peer, !peer.isEmpty else { return true }
         let version = try await Bridge.peerProtocolVersion(peer)
-        // Reading an older receipt is safe. New sends require revision-checked protocol 14.
         return version >= (checkingReceipt ? 10 : RemoteHostFeature.confirmedSend.minimumProtocol)
     }
 
-    // MARK: Composer commands
 
     var showingCommandStats = false
     var showingUsageStats = false
@@ -938,14 +753,6 @@ final class ChatModel {
         return true
     }
 
-    /// Send what is in the composer.
-    ///
-    /// The composer is emptied by the caller and the stored copy is kept, so
-    /// the words exist somewhere at every moment. They come back on a refusal,
-    /// and on a machine that did not answer they come back with a note saying
-    /// so rather than a claim in either direction.
-    /// The landing page transfers into a fresh conversation, then uses the
-    /// same command, sign-in and durable-send reservation as its composer.
     func sendInitialDraft() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSharedSource, !text.isEmpty || !attachments.isEmpty, let selected, !busy, !sending else { return }
@@ -960,9 +767,6 @@ final class ChatModel {
 
     @ObservationIgnored private var preparedInitialPresentation: (reference: WorkReference, session: UInt64, epoch: UInt64, consumed: Bool)?
 
-    /// The retained reader already owns a live page, including a valid empty
-    /// page while an upload or sign-in is pending. Its first mount should not
-    /// open it again and put a loading cover over the work just prepared.
     func prepareInitialPresentation() {
         guard liveWindowLoaded, let reference = currentReference else { return }
         preparedInitialPresentation = (reference, WorkSessionContext.shared.generation, eventsEpoch, false)
@@ -1053,7 +857,6 @@ final class ChatModel {
         returnDraft(submission.draftText)
     }
 
-    /// Ask the machine what became of a message it never answered for.
     func checkUnconfirmedSend() async {
         guard savedCopy == nil, let pending = unconfirmedSend, !pending.checking,
               let reference = currentReference, reference.itemID == pending.conversationID,
@@ -1062,8 +865,6 @@ final class ChatModel {
         defer { if unconfirmedSend?.messageID == pending.messageID { unconfirmedSend?.checking = false } }
         do {
             guard let item = try ChatOutboxStore.shared.items(for: reference).first(where: { $0.id == pending.messageID }) else {
-                // A legacy unresolved send has no durable payload to compare.
-                // Never interpret a missing record or receipt as permission to replay.
                 error = L10n.text("apple.chatmodel.review_the_conversation_before_starting_a.51f999d2")
                 return
             }
@@ -1109,7 +910,6 @@ final class ChatModel {
     }
     @ObservationIgnored private var previewWarmTask: Task<Void, Never>?
     @ObservationIgnored private let previewProjector = ChatTranscriptProjector()
-    /// Chats waiting to be warmed, for one account, host and project.
     @ObservationIgnored private var warmQueue: [ChatConversation] = []
     @ObservationIgnored private var warmQueueOwner: String?
     @ObservationIgnored private var warmGeneration: UInt64 = 0
@@ -1117,8 +917,6 @@ final class ChatModel {
     private(set) var recentMessagePreview: [ChatDisplayItem] = [] {
         didSet { previewRevision &+= 1 }
     }
-    /// Bumped on every preview write, so the preview's fold is cached the
-    /// same way the live transcript's is.
     @ObservationIgnored private var previewRevision: UInt64 = 0
     private struct PreviewFoldKey: Equatable {
         var revision: UInt64
@@ -1129,8 +927,6 @@ final class ChatModel {
     @ObservationIgnored private var previewFoldCache: [ChatDisplayItem] = []
     @ObservationIgnored private var previewFoldKey: PreviewFoldKey?
 
-    /// The transcript reads the preview, so an empty write to an empty
-    /// preview still redrew it.
     private func clearRecentMessagePreview() {
         if !recentMessagePreview.isEmpty { recentMessagePreview = [] }
     }
@@ -1145,8 +941,6 @@ final class ChatModel {
         warmQueueOwner = nil
     }
 
-    /// A row's cancellable dwell task calls this without selecting the chat.
-    /// Uses the same bounded preview cache and account/host keys as opening.
     func warmConversationPreview(_ conversation: ChatConversation, in folder: String) async {
         #if os(macOS)
         guard !Task.isCancelled, !pagingUnavailable,
@@ -1178,14 +972,10 @@ final class ChatModel {
             recentMessages.store(rows, for: key, speculative: true) { $0.estimatedBytes }
             DiagnosticsLog.note("chat preview prepared source=hover rows=\(rows.count) held=\(recentMessages.contains(key))")
             Self.warmMarkdown(recentMessages.peek(key))
-        } catch { /* Opening still performs its normal fresh read. */ }
+        } catch { }
         #endif
     }
 
-    /// Opening a project's sessions also prepares its recent chat previews,
-    /// without changing the active conversation or starting an agent.
-    /// False when the folder's list could not be read. Every other outcome,
-    /// including a cancelled or superseded read, counts as answered.
     @discardableResult
     func warmWorkspacePreviews(_ folder: String, includeMessages: Bool = true) async -> Bool {
         #if os(macOS)
@@ -1203,11 +993,6 @@ final class ChatModel {
             guard continuityScope == scope else { return true }
             let list = applyChatList(answer, read: listRead, current: sidebarChats(in: folder))
             storeChatListCache(Self.uniqued(list), folderID: folder)
-            // Directory reads belong to the account and repository, not the
-            // transcript-preview epoch. First opening a chat or deleting an
-            // unrelated chat must not discard these titles without a retry.
-            // Expanded sidebar projects need titles, not every transcript.
-            // Leave message warming to hover or explicitly opening a project.
             guard includeMessages, previewCacheEpoch == epoch else { return true }
             let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: host, workspaceID: route.workspaceID)
             let worth = Self.uniqued(list).filter { !isUnused($0, in: folder) }
@@ -1244,14 +1029,12 @@ final class ChatModel {
                     DiagnosticsLog.note("chat preview prepared source=workspace rows=\(rows.count) held=\(recentMessages.contains(key))")
                     Self.warmMarkdown(recentMessages.peek(key))
                 } catch {
-                    // One unavailable conversation must not stop the rest.
                     continue
                 }
             }
             return true
         } catch {
             guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return true }
-            // A list already on screen stays; the caller hears the read failed.
             guard chatListCache[folder] == nil else { return false }
             sidebarListErrors[folder] = (scope, error.localizedDescription)
             if sidebarListErrors.count > Self.chatListCacheCap,
@@ -1265,14 +1048,6 @@ final class ChatModel {
         #endif
     }
 
-    /// Speculative reads use the same small, memory-only preview as a chat
-    /// just left. Never fall back to the legacy whole-conversation endpoint.
-    ///
-    /// A queue per project rather than one task per call. Every selection
-    /// used to cancel the warm-up in flight and start one for the next three
-    /// chats, so a person moving around a project never got past the first
-    /// few and came back to chats that opened cold. Now a selection adds to
-    /// the queue, and only a change of project throws it away.
     private func warmRecentChats() {
         #if os(macOS)
         guard !pagingUnavailable, let folderID,
@@ -1284,9 +1059,6 @@ final class ChatModel {
             cancelPreviewWarmup()
             warmQueueOwner = prefix
         }
-        // The chats the sidebar shows. Empty New chats have nothing to read,
-        // and a project with twenty of them at the top spent every warm read
-        // on those and never reached a real conversation.
         let worth = chats.filter { !isUnused($0, in: folderID) }
         let candidates = ChatHistoryWindow.previews(in: worth,
             limit: ChatRecentMessages<ChatDisplayItem>.perFolderLimit) { $0.id == selected?.id }
@@ -1302,7 +1074,6 @@ final class ChatModel {
             defer {
                 if let self, self.warmGeneration == generation { self.previewWarmTask = nil }
             }
-            // Let the selected conversation and its first frame finish first.
             try? await Task.sleep(for: .milliseconds(250))
             while let self, !Task.isCancelled, !self.warmQueue.isEmpty,
                   self.warmGeneration == generation, self.warmQueueOwner == prefix,
@@ -1326,7 +1097,6 @@ final class ChatModel {
                     guard !Task.isCancelled, self.folderID == folderID,
                           self.warmGeneration == generation,
                           WorkSessionContext.shared.scope == owner.scope else { break }
-                    // Opened while this was reading: the live page owns it.
                     guard self.selected?.id != chat.id,
                           !self.recentMessages.contains(key),
                           self.previewCacheEpoch == epoch else { continue }
@@ -1342,7 +1112,6 @@ final class ChatModel {
                     DiagnosticsLog.note("chat preview prepared source=recent rows=\(rows.count) held=\(self.recentMessages.contains(key))")
                     Self.warmMarkdown(self.recentMessages.peek(key))
                 } catch {
-                    // Warming is optional. One failed read skips that chat.
                     continue
                 }
             }
@@ -1351,19 +1120,11 @@ final class ChatModel {
     }
 
     var isShowingCachedTranscript: Bool { openingConversation && !recentMessagePreview.isEmpty }
-    /// The rows a transcript draws: the conversation folded to the chosen
-    /// detail level. `displayItems` stays every row, for anything that has
-    /// to see a step whether or not it is folded away.
     var transcriptItems: [ChatDisplayItem] {
         let detail = ChatDetailPreference.shared.level
-        // Read before the cache check, so Observation sees both every time.
         let open = groupsOpen
         let toggled = toggledGroups
         if isShowingCachedTranscript {
-            // A preview is one window of rows, briefly, while a chat opens.
-            // That brief window is exactly when a switch is judged, and the
-            // transcript reads this several times per draw, so it is folded
-            // once per preview rather than once per read.
             let preview = recentMessagePreview
             let key = PreviewFoldKey(revision: previewRevision, detail: detail, open: open, toggled: toggled)
             if key != previewFoldKey {
@@ -1407,12 +1168,9 @@ final class ChatModel {
         return shown
     }
 
-    /// Long replies already cut into pieces, by row. See `ChatReplySplit`.
     @ObservationIgnored private let replySplitCache = ChatReplySplit.Cache()
     @ObservationIgnored private var replySplitOwner: UInt64?
 
-    /// Every group starts open (Expand all) or closed. A group in
-    /// `toggledGroups` is the other way, because a person opened or closed it.
     private(set) var groupsOpen = false
     private(set) var toggledGroups: Set<String> = []
 
@@ -1425,24 +1183,14 @@ final class ChatModel {
         toggledGroups = []
     }
 
-    /// Whether Expand all is in force or a group was opened by hand. Read
-    /// from the two flags rather than the rows, so the menus that ask do not
-    /// redraw on every streamed token.
     var anyGroupOpen: Bool { groupsOpen || !toggledGroups.isEmpty }
 
-    /// Whether the last page grew this row at its start. A piece of a long
-    /// reply that grew counts too: the new text lands in its first pieces,
-    /// and for a piece whose height did not change, holding its bottom edge
-    /// is the same as holding its top.
     func rowExtendedAtStart(_ id: String) -> Bool {
         if rowsExtendedAtStart.contains(id) { return true }
         guard let cut = id.range(of: "~") else { return false }
         return rowsExtendedAtStart.contains(String(id[..<cut.lowerBound]))
     }
 
-    /// The row that shows `id` now, after a page refolded the rows around it.
-    /// The row itself, the group it joined, the step a group was named after,
-    /// or the block that covers a text start. Nil when nothing does.
     func transcriptRow(holding id: String) -> String? {
         let rows = transcriptItems
         if rows.contains(where: { $0.id == id }) { return id }
@@ -1452,22 +1200,14 @@ final class ChatModel {
             if row.imageRowIDs.contains(member) { return row.id }
         }
         if rows.contains(where: { $0.id == member }) { return member }
-        // A reply a page completed at its start was, on screen, its own end.
-        // Grown long enough to be drawn as pieces, that end is its last
-        // piece, and the reader's place is the bottom of it.
         if rowsExtendedAtStart.contains(member), rows.contains(where: { $0.id == member + "~end" }) {
             return member + "~end"
         }
-        // A long reply is drawn as pieces (`ChatReplySplit`): its own id names
-        // the first piece, and a piece of a reply no longer split names it.
         if let piece = ChatReplySplit.rowID(for: member, in: rows) { return piece }
         if let cut = member.range(of: "~") {
             if rows.contains(where: { $0.id == member[..<cut.lowerBound] }) {
                 return String(member[..<cut.lowerBound])
             }
-            // A piece is named by the cut that ends it. A page that brings a
-            // reply's beginning can give the reply another id, but the cut
-            // that ended the piece is still there: find the piece ending at it.
             let end = member[cut.lowerBound...]
             if let piece = rows.first(where: { $0.part != nil && $0.id.hasSuffix(end) }) {
                 return piece.id
@@ -1476,9 +1216,6 @@ final class ChatModel {
         return ChatReadingAnchor.resolve(member, items: rows, events: events)
     }
 
-    /// The row to scroll to for `id`. A step folded into a closed group
-    /// opens that group, so a search hit or a kept reading place lands on
-    /// the step itself rather than on a line that hides it.
     @discardableResult
     func revealRow(_ id: String) -> String {
         if let owner = ChatTranscriptFold.owner(of: id, in: transcriptItems) { toggleGroup(owner) }
@@ -1487,9 +1224,6 @@ final class ChatModel {
         return ChatReplySplit.rowID(for: row, in: rows) ?? row
     }
 
-    /// Where a kept reading place lands. A mark taken on a closed group's
-    /// header is saved as that group's first step, so it comes back to the
-    /// header rather than opening a group the person left closed.
     func readingRow(_ id: String) -> String {
         let header = ChatTranscriptFold.groupID(firstMember: id)
         if ChatTranscriptFold.owner(of: id, in: transcriptItems) == header { return header }
@@ -1501,10 +1235,7 @@ final class ChatModel {
               reference.scope == WorkSessionContext.shared.scope,
               chats.contains(where: { $0.id == selected?.id }),
               let key = WorkReferenceKey.conversation(reference), !events.isEmpty else { return }
-        // Preserve every row kind and its identity, including reasoning,
-        // failures, tools and edits. No downloaded attachment bytes are held.
         let rows = Array(displayItems.suffix(ChatRecentMessages<ChatDisplayItem>.messageLimit))
-        // Nested tool output and patch strings count toward the budget.
         recentMessages.store(rows, for: key) { $0.estimatedBytes }
     }
 
@@ -1520,17 +1251,8 @@ final class ChatModel {
         if preview != recentMessagePreview { recentMessagePreview = preview }
     }
 
-    /// Adjacent conversation in sidebar order, looping inside the warm ten.
-    /// A held arrow key cycles those instead of stopping dead or walking
-    /// the archive; older chats live behind See-all. The sidebar draws the
-    /// same window, so every landing is already on screen.
-    /// Set by the window when its sidebar lists chats across folders. The
-    /// arrows then follow that list, which crosses folders, rather than
-    /// this model's one folder. Returns false to fall back to the folder.
     @ObservationIgnored var sidebarStep: ((Int) -> Bool)?
 
-    /// Steps the visible chat list one row, across folders when the sidebar
-    /// shows them that way. True when something was selected.
     func stepConversation(_ step: Int) -> Bool {
         if sidebarStep?(step) == true { return true }
         guard let target = adjacentConversation(step) else { return false }
@@ -1539,9 +1261,6 @@ final class ChatModel {
     }
 
     func adjacentConversation(_ step: Int) -> ChatConversation? {
-        // The rows the sidebar draws, in its order. Stepping over the list
-        // it hides landed on an empty chat that had no row to light, so the
-        // arrows looked as if they had selected nothing.
         let rows = folderID.map { folder in chats.filter { !isUntouched($0, in: folder) } } ?? chats
         guard !rows.isEmpty, step == -1 || step == 1 else { return nil }
         let current = rows.firstIndex(where: { $0.id == selected?.id })
@@ -1552,33 +1271,20 @@ final class ChatModel {
         return rows[next]
     }
 
-    /// Conversation lists read earlier this session, keyed by the folder id
-    /// the sidebar knows (`remote:<peer>:<id>` for a folder on another
-    /// machine). The model holds one folder's live list, while the cache lets
-    /// the sidebar keep every opened folder's chats on screen, so opening a
-    /// chat in one project does not collapse the one just left in another.
-    /// Small records only, never transcripts. Refreshed on every open, so a
-    /// stale entry lasts until its folder is opened again.
     private var chatListCache: [String: [ChatConversation]] = [:]
     private var sidebarListErrors: [String: (scope: WorkReference.Scope, message: String)] = [:]
     private static let chatListCacheCap = 30
-    /// The cross-project sidebar needs every registered folder's list at once.
     @ObservationIgnored private var sidebarWorkspaceIDs: Set<String> = []
 
-    /// Pins these folders' lists past the cache cap. An empty list releases
-    /// them, once no sidebar view needs every folder at once.
     func retainSidebarWorkspaceLists(_ ids: [String]) {
         sidebarWorkspaceIDs = Set(ids)
         trimChatListCache(keeping: nil)
     }
 
-    /// Whether a list for this folder has been read at least once.
     func hasSidebarList(for folderID: String) -> Bool {
         chatListCache[folderID] != nil
     }
 
-    /// Drops lists past the cap, never a pinned one and never `keeping`, the
-    /// list that was just stored.
     private func trimChatListCache(keeping: String?) {
         while chatListCache.count > Self.chatListCacheCap,
               let drop = chatListCache.keys.first(where: { $0 != keeping && !sidebarWorkspaceIDs.contains($0) }) {
@@ -1586,27 +1292,10 @@ final class ChatModel {
         }
     }
 
-    /// The conversations to draw under this folder in the sidebar. The live
-    /// list for the folder on screen, otherwise what its last load read, or
-    /// nothing when the folder has not been opened in this session.
-    /// A chat that was opened and never used: still the host's default
-    /// title, no message either way, nothing running and no unsent words.
-    ///
-    /// The sidebar leaves these out, so a row of "New chat" left behind by
-    /// every press of New chat does not bury the conversations that have
-    /// something in them. The one on screen always stays. All four tests
-    /// are needed: a host too old to send `lastMessageAtMs` still renames a
-    /// chat from its first prompt, so the title alone keeps its chats. The
-    /// draft is read without observing, so typing never lays the list out
-    /// again. Leaving the chat changes the selection, and that is when the
-    /// list asks.
     func isUntouched(_ conversation: ChatConversation, in folderID: String) -> Bool {
         conversation.id != selected?.id && isUnused(conversation, in: folderID)
     }
 
-    /// The same test without the exemption for the chat on screen, for
-    /// places that list work to go back to. An empty chat is nothing to
-    /// continue, even while it is still the selection.
     func isUnused(_ conversation: ChatConversation, in folderID: String) -> Bool {
         guard conversation.title == "New chat",
               conversation.lastMessageAtMs == nil,
@@ -1636,9 +1325,6 @@ final class ChatModel {
                             ? (scopedError ?? (self.folderID == folderID ? error : nil)) : nil)
     }
 
-    /// Written only when it changed. The cache is observed as one value, so
-    /// any write redraws every folder's rows in the sidebar, and a reload that
-    /// returns the same list is the usual case.
     private func storeChatListCache(_ list: [ChatConversation], folderID: String) {
         sidebarListErrors[folderID] = nil
         guard chatListCache[folderID] != list else { return }
@@ -1647,13 +1333,6 @@ final class ChatModel {
         noteRunningChats()
     }
 
-    /// Stamp newly running conversations, drop stopped ones. Reads every
-    /// list the model holds, because the sidebar draws cached folders the
-    /// live list does not currently cover, and a stamp must live exactly as
-    /// long as its row claims Working: both correct together on the next
-    /// read of that folder. Runs from `chats`'s didSet, which also fires for
-    /// element writes like the accepted-send path's `replace`, so no send
-    /// site stamps anything itself.
     private func noteRunningChats() {
         var running = Set<String>()
         for conversation in chats where conversation.running {
@@ -1674,19 +1353,12 @@ final class ChatModel {
         scheduleSidebarRunningRefresh()
     }
 
-    /// Folders whose sidebar cache still says a chat is working, but that
-    /// the live transcript poll is not covering. Without this, opening two
-    /// projects and leaving one keeps "Working" on chats that finished
-    /// minutes earlier.
     @ObservationIgnored private var sidebarRunningRefreshTask: Task<Void, Never>?
-    /// Bumped when a refresh pass is replaced or cancelled so a deferred
-    /// cleanup cannot clear a newer task's handle or start a second loop.
     @ObservationIgnored private var sidebarRunningRefreshGeneration: UInt64 = 0
 
     private func foldersNeedingRunningRefresh() -> [String] {
         chatListCache.compactMap { folderID, list in
             guard list.contains(where: \.running) else { return nil }
-            // The open folder's status poll already rewrites its cache.
             if folderID == self.folderID, pollingIdentity != nil { return nil }
             return folderID
         }
@@ -1710,15 +1382,9 @@ final class ChatModel {
                     guard let self else { return }
                     guard self.sidebarRunningRefreshGeneration == generation else { return }
                     self.sidebarRunningRefreshTask = nil
-                    // A finish that left another folder still working must
-                    // start a fresh pass, rather than wait for the next
-                    // unrelated cache write.
                     self.scheduleSidebarRunningRefresh()
                 }
             }
-            // A folder whose read fails keeps its stale "working" list, so it
-            // would be asked again every pass. A sleeping peer must not be
-            // dialled every two seconds: back off, doubling up to a minute.
             var backoff: [String: (wait: Duration, next: ContinuousClock.Instant)] = [:]
             while !Task.isCancelled {
                 guard let self else { return }
@@ -1750,17 +1416,10 @@ final class ChatModel {
     private var attemptedResponseAttachments: Set<String> = []
     @ObservationIgnored private var attachmentDescriptorRevision: UInt64?
     @ObservationIgnored private var attachmentDescriptors: [ChatAttachment] = []
-    /// How much of `events` the descriptors cover, named by the first and
-    /// last record scanned. A stream only appends, so a poll scans its new
-    /// records instead of every delta of a reply thousands of events long.
     @ObservationIgnored private var attachmentScan: (count: Int, first: UInt64?, last: UInt64?)?
     private(set) var loadingResponseAttachments: Set<String> = []
     private(set) var responseAttachmentErrors: [String: String] = [:]
 
-    /// Whether this model has answered for the folder on screen.
-    ///
-    /// Nothing may draw "no conversations here" before this is true: the
-    /// pane would promise an empty folder and then contradict itself.
     func isReady(for workspaceID: String) -> Bool {
         folderID == workspaceID && !isLoading
     }
@@ -1773,9 +1432,6 @@ final class ChatModel {
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
         let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
         let scope = WorkSessionContext.shared.scope
-        // Keep the conversation being left while the model still describes
-        // it. Once the list below is another project's, this chat is no
-        // longer in it and would not be kept, so coming back opened cold.
         if folderID != workspaceID || self.workspaceID != route.workspaceID
             || self.peer != route.peer || continuityScope != scope {
             rememberRecentMessages()
@@ -1802,8 +1458,6 @@ final class ChatModel {
             rememberedID = nil
         }
         if continuityScope != scope {
-            // A different account, rather than the first one arriving: these
-            // words belong to the account being left, where they were kept.
             if let previous = continuityScope, let scope, previous != scope {
                 loadDraft(for: nil, scope: nil, hostIdentity: nil, workspaceID: nil)
             }
@@ -1836,9 +1490,6 @@ final class ChatModel {
                 backends = []
                 backendRefreshError = nil
             }
-            // The folder is changing. Remember which conversation was open
-            // before the clear below drops it, or coming back can only ever
-            // find the first row.
             if let selected, let old = folderID {
                 rememberLastSelected(chatID: selected.id, folderID: old)
             }
@@ -1846,11 +1497,6 @@ final class ChatModel {
                 storeChatListCache(chats, folderID: old)
             }
             if selectFirst, let cached = chatListCache[workspaceID] {
-                // Opened before. Show its remembered conversation at once,
-                // from the cache, while the refresh below re-reads the list.
-                // Clicking the Chat row then opens the last chat rather than
-                // an empty loading state, and the transcript fetch runs once,
-                // after the list confirms what is still there.
                 if let pending = pendingRevealID,
                    (pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID),
                    let found = cached.first(where: { $0.id == pending }) {
@@ -1899,11 +1545,6 @@ final class ChatModel {
         adoptPeer(route.peer)
         if events.isEmpty { restoreRecentMessages() }
         loadQueue(for: selected?.id)
-        // The cached list already named the conversation to show. Open its
-        // transcript now, alongside the list read, instead of after it: the
-        // list is a full round trip to the host and the transcript used to
-        // wait for it on every switch into another folder. When the list
-        // answers it waits for this and then only checks for a newer tail.
         var earlyOpen: Task<Void, Never>?
         if primedFromCache, let early = selected, events.isEmpty, savedCopy == nil {
             let openGeneration = selectionGeneration
@@ -1926,23 +1567,14 @@ final class ChatModel {
         }
         let listRead = beginChatListRead(workspaceID: route.workspaceID, peer: route.peer, scope: scope)
         do {
-            // Catalog and persona failures must not hide a successful chat list.
             let loaded = try await Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
             probe.error("load answered gen=\(generation)/\(self.loadGeneration) scopeThen=\(String(describing: scope?.identity)) scopeNow=\(String(describing: WorkSessionContext.shared.scope?.identity)) chats=\(loaded.count)")
             guard generation == loadGeneration, scope == WorkSessionContext.shared.scope else {
-                // A superseded load must not touch the opening flag: load N+1
-                // may already have asserted opening=true in its folder-change
-                // block, and clearing it here would clobber the newer load.
                 return
             }
-            // Usually the same list the cache already showed. Writing an
-            // equal array still invalidated every sidebar row and the chat
-            // pane, which was the long turn at the end of a folder switch.
             let fresh = Self.uniqued(applyChatList(loaded, read: listRead, current: chats))
             if fresh != chats { chats = fresh }
             storeChatListCache(chats, folderID: workspaceID)
-            // One fetch at a time: the refresh below must see the rows the
-            // early open is bringing, or it would open them a second time.
             await earlyOpen?.value
             guard generation == loadGeneration else { return }
             if let owner = continuityOwner(folderID: workspaceID) {
@@ -1961,38 +1593,18 @@ final class ChatModel {
                         await select(found)
                     }
                 } else {
-                    // The host has just answered with the whole list and the
-                    // conversation a notification named is not in it, so it
-                    // was deleted and no later load will find it either.
-                    // Clearing the reveal is the point: it used to survive
-                    // this branch and re-run on every load of the folder,
-                    // blanking the pane for an id that is never coming back.
-                    //
-                    // Only this folder may say so. A reveal armed for another
-                    // one is waiting for its own load, and answering for it
-                    // here would drop the tap on the floor.
                     if pendingRevealFolderID == nil || pendingRevealFolderID == workspaceID {
                         pendingRevealID = nil
                         pendingRevealFolderID = nil
                     }
-                    // An explicit destination must never fall back to a different
-                    // conversation. Pins and notifications name one exact thread.
                     await select(nil)
                     error = L10n.text("apple.chatmodel.this_conversation_is_no_longer_available_i.d930b486")
                 }
             } else if let selected, let fresh = chats.first(where: { $0.id == selected.id }) {
-                // This conversation is already open. Re-selecting it would
-                // empty the transcript and read it back, which is a blank
-                // pane, a persona where the last turn was, and a lost scroll
-                // position every time somebody leaves this screen and comes
-                // back to it. Take the fresh record and keep the rows.
                 if fresh != selected { self.selected = fresh }
                 await refreshOpen(id: fresh.id)
             } else if selectFirst {
                 probe.error("selecting remembered=\(String(describing: rememberedID)) of \(self.chats.count)")
-                // No reveal named one and the old selection is gone with the
-                // folder change. Reopen this folder's own conversation when
-                // it is still here; the first row only when it is not.
                 if let remembered = rememberedID,
                    let found = chats.first(where: { $0.id == remembered }) {
                     await select(found)
@@ -2002,8 +1614,6 @@ final class ChatModel {
             } else {
                 await select(nil)
             }
-            // Prepare the project's ten recent conversations. Already warm
-            // ones are skipped without a read.
             if generation == loadGeneration {
                 warmRecentChats()
             }
@@ -2012,14 +1622,11 @@ final class ChatModel {
                 if !Task.isCancelled, !(error is CancellationError), scope == WorkSessionContext.shared.scope {
                     self.error = error.localizedDescription
                 }
-                // A primed folder otherwise keeps its opening state with
-                // nothing coming to clear it.
                 openingConversation = false
             }
         }
     }
 
-    /// Secondary menus have their own owner and cannot hold the transcript open.
     private func loadSetup(workspaceID: String, peer: String?, generation: UInt64,
                            scope: WorkReference.Scope?) async {
         async let catalog: Void = loadBackendCatalog(peer: peer, generation: generation, scope: scope)
@@ -2051,7 +1658,7 @@ final class ChatModel {
                   scope == WorkSessionContext.shared.scope else { return }
             personas = loaded.personas
             defaultPersonaID = loaded.defaultId.isEmpty ? nil : loaded.defaultId
-        } catch { /* Keep the last verified voices; a later open retries. */ }
+        } catch { }
     }
 
     private static func uniqued(_ chats: [ChatConversation]) -> [ChatConversation] {
@@ -2059,16 +1666,6 @@ final class ChatModel {
         return chats.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
     }
 
-    /// Open this conversation once its folder is loaded.
-    ///
-    /// A notification tap names a thread this model may not have read yet.
-    /// Stash the id so `load` selects it instead of the first row. Callers
-    /// that already hold the folder also select immediately.
-    /// Open this conversation on the next load that can see it.
-    ///
-    /// `folderID` is the folder it lives in, when the caller knows: a load of
-    /// any other folder then leaves the reveal alone rather than deciding on
-    /// a list that was never going to contain it.
     func reveal(id: String, in folderID: String? = nil) {
         guard !id.isEmpty else { return }
         pendingRevealID = id
@@ -2080,8 +1677,6 @@ final class ChatModel {
         if selected?.id == chat?.id { warmRecentChats() }
     }
 
-    /// Cold opening of an existing copy. No pairing, peer request or queue
-    /// reconciliation runs here. Only a fresh model may adopt this owner.
     func loadSavedConversation(_ reference: WorkReference) async -> Bool {
         guard folderID == nil, selected == nil,
               reference.scope == WorkSessionContext.shared.readingScope,
@@ -2119,8 +1714,6 @@ final class ChatModel {
         let openingStarted = ProcessInfo.processInfo.systemUptime
         #endif
         selected = chat
-        // Group ids are archive positions, which repeat from one chat to the
-        // next. A group opened here must not open its namesake elsewhere.
         groupsOpen = false
         toggledGroups = []
         if let chat, let folderID {
@@ -2158,13 +1751,6 @@ final class ChatModel {
             return
         }
         if fresh {
-            // Created a moment ago on this machine, so there is nothing to
-            // open: no rows, no earlier pages, no approvals, no sealed copy.
-            // Asking anyway put the wireframe over an empty screen for as
-            // long as the host took to answer "nothing", which is the jump a
-            // new chat used to open with. The state below is what an empty
-            // live page would have set, so the first poll picks the opening
-            // turn up exactly as it does after any other open.
             openingConversation = false
             liveWindowLoaded = true
             contextRevision = chat.sendRevision
@@ -2177,8 +1763,6 @@ final class ChatModel {
             historyTrimmed = false
             conversationUsage = nil
             usageThrough = nil
-            // Not awaited: the empty conversation is already on screen, and
-            // the inspector's disclosure can fill itself in behind it.
             Task { await loadInstructions(id: chat.id, generation: generation) }
             return
         }
@@ -2198,18 +1782,11 @@ final class ChatModel {
         }
         #endif
         if !openedLive, events.isEmpty, selectionMatches(id: chat.id, generation: generation) {
-            // The live open failed with nothing on screen. A sealed copy
-            // opens instead of an error, when one was kept.
             await openSavedCopy(id: chat.id, generation: generation)
         }
-        // The transcript is ready once its page lands. Secondary status
-        // requests must not hold the message preview over already-loaded rows.
         if selectionMatches(id: chat.id, generation: generation) {
             openingConversation = false
         }
-        // Approvals and instructions are live state. Against a saved copy
-        // they are refused rather than read stale: an approval resolved from
-        // old rows would act on a conversation that has moved on.
         if savedCopy == nil {
             await loadApprovals(id: chat.id, generation: generation)
             await loadInstructions(id: chat.id, generation: generation)
@@ -2228,19 +1805,10 @@ final class ChatModel {
         }
     }
 
-    /// Bring an already open conversation up to date without emptying it.
-    ///
-    /// The counterpart to `select`, for the case where the conversation on
-    /// screen is the one being asked for. Everything here adds to what is
-    /// held: no reset, so no row that is already drawn is drawn again.
     private func refreshOpen(id: String) async {
         let generation = selectionGeneration
         let wasSavedCopy = savedCopy != nil
         if wasSavedCopy {
-            // Live data arriving under a snapshot is a reopen, never a tail:
-            // the copy's byte offset belongs to an archive that may have
-            // compacted since it was kept, and only a reset open clears the
-            // read-only state that refuses sending, approvals and draining.
             savedCopy = nil
             events = []
             outgoing = []
@@ -2248,10 +1816,6 @@ final class ChatModel {
             forgetWindow()
         }
         if events.isEmpty {
-            // No rows held, so this is an opening whatever it is called from,
-            // and the transcript has to know: revealing an empty transcript
-            // and then filling it is the build-up the wireframe exists to
-            // cover.
             openingConversation = true
             defer {
                 if selectionGeneration == generation { openingConversation = false }
@@ -2293,20 +1857,12 @@ final class ChatModel {
     /// can be dropped: the newest page is exactly what is being asked for,
     /// and what is before it is a page away again.
     func reopenAtLatest() async {
-        // Send also jumps to the latest rows. Keep its captured selection
-        // alive through sign-in, attachment upload and acknowledgement.
         guard !Task.isCancelled, !openingConversation, !sending, !sendingNow, let selected else { return }
         advanceSelection("explicit-latest")
-        // Requests started in the previous generation cannot clear these
-        // flags when they finish, even if the newest-page read fails.
         earlierInFlight = false
         loadingEarlier = false
         discardSteerReservations()
         let generation = selectionGeneration
-        // Keep the current page and its cursors until a replacement has
-        // actually arrived. A failed or cancelled read must not turn an
-        // otherwise usable conversation into an empty transcript. Advancing
-        // the selection already fences reads started for the old window.
         openingConversation = true
         defer {
             if selectionGeneration == generation { openingConversation = false }
@@ -2314,17 +1870,12 @@ final class ChatModel {
         await openEvents(id: selected.id, generation: generation)
     }
 
-    /// One creation at a time: a second tap while the backend answers awaits
-    /// the same conversation instead of doubling the sidebar.
     private var createSingleflight = Singleflight<ChatConversation?>()
     private var createContext: UInt64?
     private var createTicket = UUID()
 
     @discardableResult
     func create() async -> ChatConversation? {
-        // A cancelled New-chat tap must not create in the background: the
-        // shared task does not inherit waiter cancellation, so check here
-        // where the waiter's flag is visible.
         guard !Task.isCancelled else { return nil }
         let context = loadGeneration
         if createContext != context {
@@ -2339,14 +1890,9 @@ final class ChatModel {
         return await flight.run { await self.performCreate(expectedGeneration: context) }
     }
 
-    /// True while a creation is reaching the backend. New-chat buttons read
-    /// this so the tap shows as busy instead of dead. Stored rather than
-    /// read off the singleflight, which nothing observes.
     private(set) var isCreating = false
 
     private func performCreate(expectedGeneration: UInt64) async -> ChatConversation? {
-        // The landing page sets this for one attempt. A later New chat on the
-        // same reader must use the saved launch choice, not this request.
         let requestedChoice = newChatChoice
         newChatChoice = nil
         guard !Task.isCancelled, expectedGeneration == loadGeneration, let workspaceID, let scope = continuityScope,
@@ -2385,9 +1931,6 @@ final class ChatModel {
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
-                // Execute unless this landing page explicitly chose Plan.
-                // A remembered prior conversation's mode is not an instruction
-                // for a new piece of work.
                 mode: requestedChoice?.mode ?? "execute",
                 autonomy: chosen?.gateTier == "bypassOnly"
                     ? "bypass"
@@ -2399,8 +1942,6 @@ final class ChatModel {
                 peer: targetPeer
             )
             guard !Task.isCancelled, context == loadGeneration, scope == WorkSessionContext.shared.scope else {
-                // This result belongs to the route captured before create.
-                // The model may already point at another folder or computer.
                 if scope == WorkSessionContext.shared.scope {
                     try await Bridge.removeChat(id: chat.id, peer: targetPeer)
                 }
@@ -2418,19 +1959,6 @@ final class ChatModel {
         }
     }
 
-    /// Take the backend list again when the one in hand looks like a daemon
-    /// that had not finished probing.
-    ///
-    /// The host answers immediately and fills its model lists on a background
-    /// thread, so the first request after it starts is served from curated
-    /// fallbacks. A client that asks once, at launch, and keeps the answer
-    /// forever is holding that half-filled list for the life of the window,
-    /// which is how a Codex chat ended up with no model picker on a machine
-    /// whose host could list six models a second later.
-    ///
-    /// Unforced: this is the ordinary cached read, arriving late enough to be
-    /// the real one. Refresh in the picker is the other call, for a list that
-    /// is complete but out of date.
     func refillBackendsIfIncomplete() async {
         guard savedCopy == nil else { return }
         guard let chosen = backends.first(where: { $0.id == selected?.backend }) else { return }
@@ -2441,13 +1969,6 @@ final class ChatModel {
         backends = loaded
     }
 
-    /// Ask this conversation's host to read the agent CLIs' model lists again.
-    ///
-    /// The host caches them for ten minutes, which is right for a picker that
-    /// opens on every screen and wrong the moment somebody adds an API key to
-    /// a CLI and comes straight here looking for the models it just gained.
-    /// Keep the previous choices on failure and explain the failed check
-    /// inline, so a disconnected host never looks like an empty installation.
     func reloadBackends(refreshModels: Bool = true) async {
         let context = loadGeneration
         do {
@@ -2464,8 +1985,6 @@ final class ChatModel {
     @discardableResult
     func checkSignIn(_ backend: ChatBackend) async -> AgentSetupStatus? {
         guard let id = backend.launcherID, backend.installed != false, savedCopy == nil else { return nil }
-        // An older host only has its file evidence. Rereading the list for it
-        // must not re-enumerate every agent's models on each chat open.
         guard backend.canCheckSignIn else { await reloadBackends(refreshModels: false); return nil }
         let context = loadGeneration
         let owner = peer
@@ -2508,12 +2027,8 @@ final class ChatModel {
         }
     }
 
-    /// A question about reading the whole conversation again, waiting for
-    /// the chat view to ask it. See `ChatPromptCacheRule`.
     var cacheWarning: ChatCacheWarning?
 
-    /// An agent update offered before a send, waiting for the chat view to
-    /// ask it. See `AgentUpdatePrompt`.
     var agentUpdatePrompt: AgentUpdatePrompt?
 
     static var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
@@ -2528,8 +2043,6 @@ final class ChatModel {
         set { AgentUpdateNotice.shared.severity = newValue }
     }
 
-    /// Update one agent on this chat's host and say how it went. Nil when an
-    /// update is already running or the request never got an answer.
     @discardableResult
     func updateAgent(id: String, label: String) async -> AgentUpdateResult? {
         guard updatingAgentID == nil else { return nil }
@@ -2565,8 +2078,6 @@ final class ChatModel {
         }
     }
 
-    /// Change the model, asking first when the conversation is cached for
-    /// the current one and big enough that reading it again costs something.
     func requestModelChange(_ next: String) async {
         guard landingDraft == nil, let selected,
               !ChatPromptCacheRule.isSuppressed(ChatPromptCacheRule.modelSuppressedKey),
@@ -2585,9 +2096,6 @@ final class ChatModel {
         }
     }
 
-    /// Start a chat that continues `conversation`, put it in the sidebar and
-    /// open it. Nil when it could not be made, or the folder or account
-    /// changed while it was being made.
     func continueInNew(_ conversation: ChatConversation, expectedDraft: String, profileID: String? = nil) async -> ChatConversation? {
         guard let folderID else { return nil }
         let scope = WorkSessionContext.shared.scope
@@ -2647,9 +2155,6 @@ final class ChatModel {
             contextRevision = ChatSendContext.afterOwnEdit(contextRevision,
                 previous: selected.sendRevision, updated: updated.sendRevision)
             replace(updated)
-            // The backend decides whether the rules travel on a flag or ahead
-            // of the turn, and the brief is half of what they say. Either
-            // moving means the shown text is stale.
             if backend != nil || systemPrompt != nil || personaID != nil {
                 await loadInstructions(id: selected.id, generation: generation)
             }
@@ -2660,12 +2165,6 @@ final class ChatModel {
         }
     }
 
-    /// Give this conversation a voice, and change nothing else.
-    ///
-    /// A persona no longer picks the agent, the model, the mode or the
-    /// autonomy: those belong to the conversation and the person adjusts them
-    /// there. That is what lets one persona be used with any agent, and what
-    /// lets it survive a chat being handed from one to another.
     func applyPersona(_ persona: ChatPersona?) async {
         guard let persona else {
             await update(personaID: "", systemPrompt: "")
@@ -2674,8 +2173,6 @@ final class ChatModel {
         await update(personaID: persona.id, systemPrompt: persona.systemPrompt)
     }
 
-    /// Ask an agent for a starting point, from a sentence about what the
-    /// persona should be good at. Returns a draft for a form, never a save.
     func draftPersona(brief: String, backend: String, name: String? = nil,
                       owner: PersonaContext) async throws -> ChatPersonaDraft {
         try requirePersonaContext(owner)
@@ -2686,7 +2183,6 @@ final class ChatModel {
         return result
     }
 
-    /// Sidebar mutations route through the row's project, including unopened projects.
     func rename(_ conversation: ChatConversation, in folderID: String, to title: String, peer: String? = nil) async throws {
         let scope = WorkSessionContext.shared.scope
         let generation = selectionGeneration
@@ -2744,8 +2240,6 @@ final class ChatModel {
         await remove(chat, in: folderID)
     }
 
-    /// A sibling mobile reader already completed the host deletion. Retire
-    /// this copy without sending another mutation or choosing another chat.
     func forgetRemovedConversation(_ id: String) async {
         previewCacheEpoch &+= 1
         if let folderID, let owner = continuityOwner(folderID: folderID) {
@@ -2766,12 +2260,6 @@ final class ChatModel {
         publishSidebarConversation(chat, in: folderID)
     }
 
-    /// Delete one conversation shown in the sidebar.
-    ///
-    /// A row under another folder cannot use the live peer, which is the
-    /// folder on screen and not the conversation's host. Routing by folder id
-    /// deletes from the owning host and drops the row from the cache, leaving
-    /// the open transcript alone.
     @discardableResult
     func remove(_ chat: ChatConversation, in folderID: String?) async -> Bool {
         let targetPeer = WorkDestinationResolver.deletionPeer(folderID: folderID, currentFolderID: self.folderID, currentPeer: peer)
@@ -2830,13 +2318,8 @@ final class ChatModel {
         let context = loadGeneration
         var remaining = sidebarChats(in: folderID).filter { $0.teamShare != nil }
         do {
-            // `folderID` may encode a different remote peer than the chat
-            // currently loaded in this model. Let the bridge route the folder
-            // itself instead of borrowing the current conversation's peer.
             _ = try await Bridge.removeAllChats(workspaceID: folderID, peer: peer)
             guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
-            // The host preserves shared sources. Keep them visible and use
-            // its current list when a conversion raced this action.
             if let current = try? await Bridge.chats(workspaceID: folderID, peer: peer) { remaining = current }
             guard context == loadGeneration, scope == WorkSessionContext.shared.scope else { return }
             previewCacheEpoch &+= 1
@@ -2856,44 +2339,20 @@ final class ChatModel {
         }
     }
 
-    /// A send is in flight. Set synchronously on entry (the main actor runs
-    /// one task at a time, so a second tap cannot slip between the check and
-    /// the set) and cleared when the bridge answers. The composer disables
-    /// Send on this; without it a double-tap re-sent the same attachments,
-    /// which image-only sends made reachable.
     private(set) var sending = false
-    /// Distinguishes the send that reserved the composer from one a delivery
-    /// started inside it. A newer send must not be cleared by the older one.
     @ObservationIgnored private var sendToken: UInt64 = 0
     @ObservationIgnored private var composerSendToken: UInt64?
-    /// The reservation `beginBusyNote` made, released by `finishBusyNote`.
     @ObservationIgnored private var busyNoteToken: UInt64?
     @ObservationIgnored private var busyNoteSubmission: ChatDraftSubmission?
-    /// One probe per busy stretch. A miss stays unknown until the turn ends,
-    /// so a dropped packet is not remembered as an older host.
     @ObservationIgnored private var steerProbeStarted = false
     @ObservationIgnored private var steerProbeTicket: UUID?
     @ObservationIgnored private var steerProbeOwner: PollOwner?
-    /// Set before any await so a poll and a queue drain cannot both send.
     @ObservationIgnored private var deliveringSteer: ChatSteerContext?
     @ObservationIgnored private var deliveringSteerToken: UInt64?
     @ObservationIgnored private var clearingSteer: ChatSteerContext?
     @ObservationIgnored private var clearingSteerToken: UInt64?
-    /// Messages waiting for the open turn to finish. Kept per conversation so
-    /// leaving the thread and coming back still has them.
     private(set) var queued: [ChatQueuedMessage] = []
-    /// The message the composer is delivering on its first attempt.
-    ///
-    /// The outbox is written before the host is asked, because an
-    /// acknowledgement that never arrives must not take the words with it.
-    /// That record is not news to the person who just pressed Send: on a
-    /// healthy send it exists for one round trip, and drawing it made the
-    /// pending strip open and shut on every message.
     private var deliveringFromComposer: String?
-    /// What the pending strip draws: everything genuinely waiting, which is
-    /// to say everything except the send that is in flight right now. A
-    /// refused or unconfirmed send clears this on its way out, so it appears
-    /// the moment it really is pending.
     var pendingQueue: [ChatQueuedMessage] {
         let signInID = signInQueuedMessage?.id
         return queued.filter { $0.id != deliveringFromComposer && $0.id != signInID }
@@ -2901,9 +2360,6 @@ final class ChatModel {
     private var queuedReference: WorkReference?
     @ObservationIgnored private var sendingNow = false
     private var authorizedQueueItems: Set<String> = []
-    /// The message the queue sends next. One held for another agent's
-    /// sign-in waits in its place, for the person to switch back or remove
-    /// it, and does not hold up the messages behind it for this agent.
     private var queueHead: ChatQueuedMessage? {
         queued.first { item in
             guard let held = item.signInBackend else { return true }
@@ -2973,11 +2429,6 @@ final class ChatModel {
                 guard let index = items.firstIndex(where: { $0.id == item.id }), items[index].hasSameWriting(as: item),
                       items[index].canEdit else { throw ChatOutboxStore.Failure.conflict }
                 guard items[index].text != text else { return }
-                // The row keeps its id while it is edited: re-identifying it
-                // rebuilds the field and drops the caret on the first
-                // keystroke. An edit after an attempt still goes out under a
-                // fresh delivery id, so `attemptedAt` stays as the mark the
-                // send path rotates; the stale authorization goes with it.
                 if items[index].attemptedAt != nil {
                     items[index].firstAttemptAt = nil
                     items[index].delivery = .waiting
@@ -3076,8 +2527,6 @@ final class ChatModel {
     }
 
     func drainQueue() async {
-        // A parked note owns the next send. Delivering it and draining the
-        // queue in the same breath would start two turns.
         if deliveringSteer != nil || clearingSteer != nil { return }
         if let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
             return
@@ -3088,14 +2537,10 @@ final class ChatModel {
         }
     }
 
-    /// A refusal with no words looks like a dead button: the message stays
-    /// queued, the draft comes back, and nothing says why.
     private func busyTurnError() {
         error = L10n.text("apple.chatmodel.this_conversation_is_still_finishing_its_p.01b9e26a")
     }
 
-    /// Acceptance updates the captured owner's disk record even if navigation
-    /// changes. Nothing leaves the outbox before the host's acknowledgement.
     private func deliverQueued(_ candidate: ChatQueuedMessage, stopCurrent: Bool, reserved: Bool = false, steerCurrent: Bool = false, retryUnavailableSteer: Bool = true) async -> Bool {
         guard !isSharedSource, candidate.signInBackend == nil, savedCopy == nil, ownsQueue, (!sending || reserved), let reference = queuedReference,
               WorkCacheAccess.canSave(reference), let conversationID = reference.itemID,
@@ -3175,10 +2620,6 @@ final class ChatModel {
                 if current() { busyTurnError() }
                 return false
             }
-            // Setup's background probe can still be in flight on a newly
-            // opened chat, and a catalog refresh replaces its local evidence.
-            // Check before sending, so a CLI that signs in automatically in
-            // exec mode cannot park a browser challenge inside the chat.
             if !steerCurrent, let backend = backend(for: selected?.backend ?? ""),
                backend.canCheckSignIn, backend.signInFlow?.supported == true {
                 let status = await checkSignIn(backend)
@@ -3200,10 +2641,6 @@ final class ChatModel {
                 if current() { busyTurnError() }
                 return false
             }
-            // An edit after an attempt marks its row by leaving `attemptedAt`
-            // in place. The words changed, so the delivery id does too: the
-            // old one may already have a receipt on the host. It is minted
-            // here, at the send, never while the field is being typed into.
             let rotatesDelivery = item.attemptedAt != nil && item.delivery == .waiting
             var deliveryItem = item
             if rotatesDelivery {
@@ -3245,9 +2682,6 @@ final class ChatModel {
                 return true
             } catch {
                 if current() { dropOutgoing(staged) }
-                // The host returns this before accepting any input or
-                // writing a receipt. Keep the person's send authorized when
-                // the CLI ends before the phone learns the turn is over.
                 if !accepted, steerCurrent,
                    case BridgeError.core(code: "steer_unavailable", message: _) = error {
                     publish(try ChatOutboxStore.shared.update(reference) { items in
@@ -3316,8 +2750,6 @@ final class ChatModel {
     }
 
     private func resolveDraftAttachments(_ files: [ChatAttachment], reference: WorkReference, peer: String?) async throws -> [ChatAttachment] {
-        // A text-only send has no transfer to own or cancel. In particular,
-        // it must not fail because another file is being downloaded.
         if files.isEmpty {
             try Task.checkCancellation()
             guard reference.itemID != nil, currentReference == reference,
@@ -3407,8 +2839,6 @@ final class ChatModel {
         await attach(item, to: reference)
     }
 
-    /// Imports retain the conversation chosen before file preparation begins.
-    /// Later files in a batch must not follow navigation to another draft.
     func attach(_ item: ChatInboxItem, to reference: WorkReference) async {
         if let landingDraft { await stageLandingAttachment(item, reference: reference, state: landingDraft); return }
         defer { if let file = item.file { try? FileManager.default.removeItem(at: file) } }
@@ -3438,8 +2868,6 @@ final class ChatModel {
             }
             let preview = try? await Self.draftPreview(attachment, reference: reference)
             guard currentReference == reference, WorkCacheAccess.canRead(reference) else {
-                // Keep an import that completed after navigation in its own
-                // draft, alongside any writing saved while it was loading.
                 let original = ChatDraftStore.shared.draft(for: reference)
                 ChatDraftStore.shared.save(text: original?.text ?? "", attachments: (original?.attachments ?? []) + [attachment], for: reference)
                 return
@@ -3478,8 +2906,6 @@ final class ChatModel {
     }
 
     func stop() async {
-        // Nothing live to stop from a snapshot, and a stop that lands on a
-        // changed conversation stops the wrong turn.
         guard savedCopy == nil else { return }
         guard let selected else { return }
         let generation = selectionGeneration
@@ -3500,10 +2926,6 @@ final class ChatModel {
             let answer = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             guard selectionMatches(id: selected.id, generation: generation) else { return }
             let latest = applyChatList(answer, read: listRead, current: chats)
-            // Only when it actually moved. Observation notifies on the write,
-            // not on the difference, and this runs four hundred milliseconds
-            // at a time: an unconditional assignment redraws every open
-            // transcript twice a second for nothing.
             if chats != latest {
                 chats = latest
                 if let folderID { storeChatListCache(chats, folderID: folderID) }
@@ -3511,8 +2933,6 @@ final class ChatModel {
             if let current = latest.first(where: { $0.id == selected.id }),
                current != self.selected {
                 self.selected = current
-                // Muse flushes counters to its saved session when a turn ends.
-                // Ask for the host's complete fold after that transition too.
                 if selected.running && !current.running {
                     await refreshUsage(id: selected.id, generation: generation)
                     guard selectionMatches(id: selected.id, generation: generation) else { return }
@@ -3529,9 +2949,6 @@ final class ChatModel {
     }
 
     func resolve(_ approval: ChatApproval, choice: String, owner: WorkReference?) async {
-        // An approval resolved from old rows acts on a conversation that has
-        // moved on. The snapshot shows pending approvals as text, never as
-        // live controls.
         guard !Task.isCancelled, savedCopy == nil, let owner,
               owner.scope == WorkSessionContext.shared.scope,
               currentReference == owner, owner.itemID == approval.conversationID,
@@ -3553,19 +2970,12 @@ final class ChatModel {
         }
     }
 
-    /// Whether an approval record is still a question waiting for an answer.
-    ///
-    /// The live list is authoritative. A transcript record with an unexpired
-    /// deadline can already have been answered on another device. Until the
-    /// list answers, and while viewing a saved copy, rows stay read-only.
     func approvalIsPending(_ approval: ChatApproval) -> Bool {
         guard !isSharedSource, savedCopy == nil, !approval.readOnly, approval.decision == nil else { return false }
         guard approvalsLoaded else { return false }
         return approvals.contains { $0.id == approval.id }
     }
 
-    /// Workspace ownership does not require a selected conversation: personas
-    /// can also be managed before the first chat is created.
     struct PersonaContext: Equatable {
         let generation: UInt64
         let scope: WorkReference.Scope
@@ -3605,7 +3015,6 @@ final class ChatModel {
         personas.removeAll { $0.id == persona.id }
     }
 
-    /// Nil explicitly persists "no persona" for new chats in this workspace.
     func setDefaultPersona(_ persona: ChatPersona?, owner: PersonaContext) async throws {
         try requirePersonaContext(owner)
         let saved = try await Bridge.setDefaultChatPersona(
@@ -3673,12 +3082,8 @@ final class ChatModel {
         usageThrough = page?.events.compactMap(\.seq).max() ?? events.compactMap(\.seq).max()
     }
 
-    /// Questions whose answer is on its way to the host, so a card does not
-    /// offer the same choice twice while it waits.
     private(set) var answeringQuestions: Set<String> = []
 
-    /// Answer one of the agent's questions. The answer is recorded on the
-    /// host and reaches every device from there, so nothing is kept here.
     func answerQuestion(_ question: ChatQuestion, answer: String) async {
         let answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSharedSource, !answer.isEmpty, savedCopy == nil, let id = selected?.id,
@@ -3698,9 +3103,6 @@ final class ChatModel {
         }
     }
 
-    /// Events, approvals and status share bounded independent producers.
-    /// Explicit refreshes await their reads. Live ticks start shared reads
-    /// without waiting, keeping metadata and attachment clocks responsive.
     func poll(forceStatus: Bool = true) async {
         guard !Task.isCancelled, !openingConversation, let owner = pollingIdentity else { return }
         if cadenceOwner != owner { cadenceOwner = owner; pollCadence = ChatPollCadence() }
@@ -3737,8 +3139,6 @@ final class ChatModel {
             self.pollCadence.note(success: success, changed: self.eventsRevision != revision,
                                   now: ProcessInfo.processInfo.systemUptime)
         }
-        // A held event read must not hold the watcher's metadata clock.
-        // The lane keeps that read bounded while later ticks share it.
         if forceStatus {
             await events?.value
             guard pollIsCurrent(owner) else { return }
@@ -3772,10 +3172,6 @@ final class ChatModel {
             let answer = try await Bridge.chats(workspaceID: owner.reference.workspaceID, peer: peer)
             guard pollIsCurrent(owner) && permitsPublication() else { return }
             let latest = applyChatList(answer, read: listRead, current: chats)
-            // A poll that found nothing new must not write anything back.
-            // Same rule as the event chunk below: the write is what redraws
-            // the transcript, and most polls of a running turn arrive with
-            // an unchanged list.
             if chats != latest {
                 chats = latest
                 if let folderID { storeChatListCache(chats, folderID: folderID) }
@@ -3807,8 +3203,6 @@ final class ChatModel {
                 finishSteerDelivery(claimed, token: token)
             }
         } else if pollIsCurrent(owner), permitsPublication(), !busy {
-            // A message queued behind a parked Muse note must drain once the
-            // note is gone and the follow-up turn has ended.
             await drainQueue()
         }
     }
@@ -3817,11 +3211,6 @@ final class ChatModel {
         selected?.running == true
     }
 
-    /// What a message typed during a turn will do.
-    ///
-    /// Local hosts are always current. A remote one only promises a note
-    /// after a probe or a successful steer. Until then the placeholder stays
-    /// the queue, and the send itself may still try.
     var nativeSteerAcceptsAttachments: Bool {
         selected?.nativeSteer == true && selected?.nativeSteerAttachments == true
     }
@@ -3842,7 +3231,6 @@ final class ChatModel {
         return ["claude", "codex", "cursor", "muse"].contains(selected?.backend ?? "")
     }
 
-    /// Muse can take a note on any autonomy. The others only while they ask first.
     private var steerAutonomy: Bool {
         if selected?.nativeSteer == true { return true }
         if selected?.backend == "muse" { return true }
@@ -3851,9 +3239,6 @@ final class ChatModel {
 
     enum BusyNoteStart { case steering(UInt64), queue }
 
-    /// Decide before the first await. `.queue` is the path the composer
-    /// already had. `.steering` reserves Send so a second tap cannot also
-    /// enqueue the same words.
     func beginBusyNote(_ text: String) -> BusyNoteStart {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if isSharedSource || (trimmed.isEmpty && attachments.isEmpty) || (!attachments.isEmpty && !nativeSteerAcceptsAttachments) || savedCopy != nil
@@ -3868,8 +3253,6 @@ final class ChatModel {
               reference.scope == WorkSessionContext.shared.scope else { return .queue }
         saveDraftNow()
         let draftID = draftMessageID
-        // An uncertain send owns these words. The queue path reports that
-        // hold rather than reserving a second delivery of them.
         guard !queuedDeliveries(forDraft: draftID).contains(where: \.needsReceipt) else { return .queue }
         busyNoteSubmission = ChatDraftSubmission(
             conversationID: selected.id, peer: peer, scope: reference.scope,
@@ -3883,8 +3266,6 @@ final class ChatModel {
         return .steering(token)
     }
 
-    /// Park the note, or hand it back to the queue when this turn cannot
-    /// carry one. A refusal that is about the words themselves keeps the draft.
     func finishBusyNote(_ token: UInt64) async {
         guard busyNoteToken == token else { return }
         defer {
@@ -3916,9 +3297,6 @@ final class ChatModel {
             return
         }
         do {
-            // A poll can retire a native run after its payload was reserved.
-            // The legacy hook accepts text only, so keep attached messages
-            // intact in the outbox when that capability disappears.
             if selected?.nativeSteer == true || !submission.attachments.isEmpty {
                 let native = selected?.nativeSteer == true
                     && ChatCommandRules.canSteer(submission.text, attachments: !submission.attachments.isEmpty,
@@ -3959,8 +3337,6 @@ final class ChatModel {
         }
     }
 
-    /// Queue the reserved payload. Words edited during the request become a
-    /// separate draft, with their own delivery identity.
     private func queueBusyNote(_ submission: ChatDraftSubmission, deliverAsSteer: Bool = false) {
         guard let reference = submission.reference, let messageID = submission.messageID,
               submission.owns(reference: reference, conversationID: submission.conversationID,
@@ -4011,7 +3387,6 @@ final class ChatModel {
         }
     }
 
-    /// Send a parked steer as the next message once the turn has finished.
     func deliverParkedSteerNow() async {
         guard savedCopy == nil, !isSharedSource else { return }
         if busy {
@@ -4024,8 +3399,6 @@ final class ChatModel {
         await drainQueue()
     }
 
-    /// Keep the executable note visible until the host acknowledges removal.
-    /// While that request runs, neither the queue nor a follow-up may start.
     func clearSteer() {
         guard savedCopy == nil, !sending, clearingSteer == nil,
               let selected, let note = selected.pendingSteer,
@@ -4074,8 +3447,6 @@ final class ChatModel {
         }
     }
 
-    /// Navigation releases the old selection's reservations immediately.
-    /// Late completions still hold their context and cannot release a newer one.
     private func discardSteerReservations() {
         deliveringSteer = nil
         if let token = deliveringSteerToken { noteSendFinished(token) }
@@ -4110,8 +3481,6 @@ final class ChatModel {
         return error.localizedDescription
     }
 
-    /// Reassign the whole value. Writing one field of an optional struct does
-    /// not publish, and writing the same note twice would redraw for nothing.
     private func parkLocalSteer(_ note: String) {
         guard let current = selected, current.pendingSteer != note else { return }
         var chat = current
@@ -4131,7 +3500,6 @@ final class ChatModel {
         }
     }
 
-    /// Claim before any await. While the flag is set, the queue stays put.
     private func claimSteerDelivery() -> ChatSteerContext? {
         if isSharedSource || deliveringSteer != nil || clearingSteer != nil || sending || sendingNow || savedCopy != nil || busy { return nil }
         let note = selected?.pendingSteer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -4152,8 +3520,6 @@ final class ChatModel {
         noteSendFinished(token)
     }
 
-    /// Learn whether the current busy reader's remote host can carry a note.
-    /// Failed or canceled probes leave the next tick free to retry.
     private func noteSteerAvailability(permitsPublication: () -> Bool = { true }) async {
         if !busy {
             steerProbeStarted = false
@@ -4182,8 +3548,6 @@ final class ChatModel {
         }
     }
 
-    /// Send a note the turn ended without taking. The queue runs only when
-    /// that note is gone and this conversation is still the one on screen.
     private func performSteerDelivery(_ context: ChatSteerContext) async {
         guard deliveringSteer == context, let token = deliveringSteerToken,
               let id = context.reference.itemID else { return }
@@ -4207,9 +3571,6 @@ final class ChatModel {
             }
             _ = await reloadOpenChats()
             guard current() else { return }
-            // The refresh is host truth, including a newer note another
-            // client parked while this delivery was in flight. Never clear a
-            // note just because it differs from the one this attempt used.
         } catch {
             guard current() else { return }
             let message = hostMessage(error)
@@ -4234,13 +3595,10 @@ final class ChatModel {
         if !busy { await drainQueue() }
     }
 
-    /// Recovery never retargets a different reader or consumes its private draft.
     func refreshSharingSource(reference: WorkReference, generation: UInt64, notice: String? = nil) async {
         guard currentReference == reference, selectionGeneration == generation else { return }
         let refreshed = await reloadOpenChats()
         guard currentReference == reference, selectionGeneration == generation else { return }
-        // Read the recovered context before the next private manual send.
-        // refreshOpen also drains queued work; recovery must not do that.
         if refreshed, !isSharedSource, let id = reference.itemID {
             if events.isEmpty { _ = await openEvents(id: id, generation: generation, quiet: true) }
             else { _ = await loadEvents(id: id, reset: false, generation: generation, quiet: true) }
@@ -4249,8 +3607,6 @@ final class ChatModel {
         sharingRecoveryNotice = notice
     }
 
-    /// Refresh the open list without drawing an unchanged one. False when the
-    /// read failed or the reader has moved on.
     private func reloadOpenChats() async -> Bool {
         guard let selected else { return false }
         let generation = selectionGeneration
@@ -4280,9 +3636,6 @@ final class ChatModel {
     }
 
     var hasRunningTool: Bool {
-        // Memoized via the same DisplayKey as displayItems itself: scanning
-        // displayItems on every poll (400ms) and on every onChange was the
-        // second per-frame cost after coalescing.
         _ = displayRevision
         return hasRunningToolCache(for: displayKey) ?? computeHasRunningTool()
     }
@@ -4312,25 +3665,10 @@ final class ChatModel {
         !loadingResponseAttachments.isEmpty
     }
 
-    /// The face of the conversation on screen.
-    ///
-    /// Its persona's, when it has one, so the same character follows a persona
-    /// between chats. Otherwise the chat's own, derived from its id, because
-    /// every conversation should have a face whether or not anybody has made a
-    /// persona yet.
     var faceSeed: UInt64 {
         selected.map(faceSeed(for:)) ?? personaSeed(for: "chat")
     }
 
-    /// The face for a chat that does not exist yet.
-    ///
-    /// The workspace's default persona, because that is the character the next
-    /// conversation in this folder will actually have. An empty screen showing
-    /// some other creature would be introducing somebody who never turns up.
-    ///
-    /// Falls back to the first persona there is, and then to a face derived
-    /// from the workspace itself, so a folder whose personas have not loaded
-    /// yet still has a character rather than a gap.
     var defaultFaceSeed: UInt64 {
         if let defaultPersonaID,
            let persona = personas.first(where: { $0.id == defaultPersonaID }) {
@@ -4342,8 +3680,6 @@ final class ChatModel {
         return personaSeed(for: workspaceID ?? folderID ?? "chat")
     }
 
-    /// The face a conversation carries when it is shown somewhere other than
-    /// the open transcript, such as the workspace launcher.
     func faceSeed(for chat: ChatConversation) -> UInt64 {
         if let personaID = chat.personaID,
            let persona = personas.first(where: { $0.id == personaID }) {
@@ -4352,12 +3688,10 @@ final class ChatModel {
         return personaSeed(for: chat.id)
     }
 
-    /// The conversation worth returning to, independent of list ordering.
     var mostRecent: ChatConversation? {
         chats.max { lhs, rhs in lhs.updatedAtMs < rhs.updatedAtMs }
     }
 
-    /// True while a tool is actually running, as opposed to the agent thinking.
     var isRunningTool: Bool {
         displayItems.contains { item in
             switch item.kind {
@@ -4372,15 +3706,7 @@ final class ChatModel {
         backends.first { $0.id == id }
     }
 
-    /// What this conversation has spent.
-    ///
-    /// The host's figure where there is one, because it covers the whole
-    /// archive and this model only holds a window of it. Folding what is
-    /// resident would make the meter climb as somebody read backwards.
     var turnUsage: ChatUsageSummary {
-        // Read on every draw of the meter, which redraws on every poll.
-        // Folding the whole window that often is what made a long running
-        // chat re-scan thousands of records 2.5x a second.
         let key = UsageKey(
             epoch: eventsEpoch,
             count: events.count,
@@ -4398,9 +3724,6 @@ final class ChatModel {
         }
         for timeline in events {
             guard let event = timeline.event, event.kind == "usage" else { continue }
-            // With a host figure in hand, only what has been written since it
-            // was counted. Without one, this host reads whole conversations,
-            // so everything held is everything there is.
             if conversationUsage != nil, let usageThrough, (timeline.seq ?? 0) <= usageThrough { continue }
             guard totals.add(ChatUsageTotals(input: event.input ?? 0, output: event.output ?? 0,
                 cacheRead: event.cacheRead ?? 0, cacheWrite: event.cacheWrite ?? 0,
@@ -4416,8 +3739,6 @@ final class ChatModel {
         return answer
     }
 
-    /// What a cached usage fold was folded from. Same window identity as the
-    /// row cache, plus what the fold itself filters on.
     private struct UsageKey: Equatable {
         var epoch: UInt64
         var count: Int
@@ -4434,16 +3755,6 @@ final class ChatModel {
         !events.isEmpty || selected?.resumeToken != nil
     }
 
-    /// Consecutive text and thinking deltas become one block each, and a
-    /// ToolEnd lands on the ToolStart it belongs to so the row can show
-    /// running, duration and failure without a second line.
-    ///
-    /// Answered from the last result while the records behind it are the same
-    /// ones. Every view of a conversation reads this several times per draw
-    /// (the rows themselves, whether a tool is running, what the live seat is
-    /// doing, which rows to measure), and folding a window of several hundred
-    /// records into rows that many times per frame is what made a long chat
-    /// impossible to scroll.
     var displayItems: [ChatDisplayItem] {
         let pending = outgoing
         let coalesced = coalescedItems
@@ -4451,12 +3762,7 @@ final class ChatModel {
         return coalesced + pending
     }
 
-    /// `displayItems` without the prompts still being sent.
-    /// Rows the last page extended at their start: a page brought
-    /// earlier deltas of a reply already on screen. Read by the transcript
-    /// when it puts the reader back, never drawn.
     @ObservationIgnored private(set) var rowsExtendedAtStart: Set<String> = []
-    /// The selection the display cache was last published for.
     @ObservationIgnored private var displayOwner: UInt64?
 
     private var coalescedItems: [ChatDisplayItem] {
@@ -4464,9 +3770,6 @@ final class ChatModel {
         return displayCache
     }
 
-    /// Build against a snapshot, then publish the records and rows together.
-    /// A prepend and a tail read can overlap: if either moved the window while
-    /// CPU work ran, rebuild against that window rather than losing its records.
     @discardableResult
     private func publishEvents(id: String, generation: UInt64,
                                canPublish: () -> Bool = { true },
@@ -4502,13 +3805,10 @@ final class ChatModel {
     }
 
     private func commitDisplay(_ projected: [ChatDisplayItem]) {
-        // Only within one conversation: archive row ids repeat across them.
         let sameReader = displayOwner == selectionGeneration
         displayOwner = selectionGeneration
         let carried = ChatRowContinuity.carrying(projected, from: sameReader ? displayCache : [])
         let rows = carried.rows
-        // Kept until the next page: polls publish between a page landing and
-        // the transcript putting the reader back, and must not erase it.
         if !carried.extendedAtStart.isEmpty { rowsExtendedAtStart = carried.extendedAtStart }
         let nextKey = DisplayKey(epoch: eventsRevision, count: events.count,
             firstSeq: events.first?.seq, lastSeq: events.last?.seq,
@@ -4517,7 +3817,6 @@ final class ChatModel {
         displayKey = nextKey
         foldKey = nil
         hasRunningToolCacheKey = nil
-        // Equal rows do not invalidate a visible transcript on metadata polls.
         if displayCache != rows { displayCache = rows }
     }
 
@@ -4531,14 +3830,6 @@ final class ChatModel {
         }
     }
 
-    /// Parse the prose in the rows now, off the main thread.
-    ///
-    /// Called when a page of a conversation lands, never while one is
-    /// streaming. A row that scrolls into view would otherwise parse its own
-    /// markdown inside `init`, on the main thread, in the middle of a layout
-    /// pass, which is a stall on exactly the frame a reader is scrolling back
-    /// through history. A message that is still being written is a different
-    /// string on every token and is not worth warming.
     func warmMarkdown() {
         Self.warmMarkdown(displayItems)
     }
@@ -4556,8 +3847,6 @@ final class ChatModel {
         })
     }
 
-    /// What the cached rows were folded from. Cheap to build, and every way
-    /// the window can change moves at least one field of it.
     private struct DisplayKey: Equatable {
         var epoch: UInt64
         var count: Int
@@ -4574,8 +3863,6 @@ final class ChatModel {
     @ObservationIgnored private var displayMetadataTask: Task<Void, Never>?
     @ObservationIgnored private var displayKey: DisplayKey?
 
-    /// The folded rows, held for the same reason as `displayCache`: a
-    /// transcript asks for them several times per draw.
     private struct FoldKey: Equatable {
         var display: DisplayKey?
         var detail: ChatDetail
@@ -4584,12 +3871,10 @@ final class ChatModel {
     }
 
     @ObservationIgnored private var foldCache: [ChatDisplayItem] = []
-    /// Group and gallery ids across folds. See `ChatFoldContinuity`.
     @ObservationIgnored private let foldContinuity = ChatFoldContinuity()
     @ObservationIgnored private var foldContinuityOwner: UInt64?
     @ObservationIgnored private var foldKey: FoldKey?
 
-    /// Show the prompt in the transcript the moment Send is pressed.
     @discardableResult
     private func stageOutgoing(_ text: String, steer: Bool = false) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4606,19 +3891,8 @@ final class ChatModel {
         outgoingWatermark.removeValue(forKey: id)
     }
 
-    /// Newest archive seq seen when each prompt was staged, by staged id.
-    /// A text match only counts when it is newer than the send: without this
-    /// a repeated prompt ("hi" twice) is dropped by the older copy, and a
-    /// host that echoes the text in another form would leave a ghost bubble
-    /// that never matches. Hosts without seq fall back to text matching.
     @ObservationIgnored private var outgoingWatermark: [String: UInt64?] = [:]
 
-    /// Drop staged prompts the archive has now given back.
-    ///
-    /// The stored text can grow a suffix (attachment names), so a prefix
-    /// match still counts as the same send. A newer user record also drops
-    /// the bubble even when the text matches nothing: the host moved past
-    /// this send, so whatever it stored is this prompt under some form.
     private func reconcileOutgoing() {
         guard !outgoing.isEmpty else { return }
         let userSeqs: [UInt64?] = events.lazy
@@ -4633,12 +3907,9 @@ final class ChatModel {
             let matched = events.contains { event in
                 guard event.kind == "user", let held = event.text else { return false }
                 guard held == text || held.hasPrefix(text) else { return false }
-                // Same text sent before is not this send arriving.
                 if let seq = event.seq, let watermark { return seq > watermark }
                 return true
             }
-            // The host stored something newer from this person. Sends are
-            // serialized, so that record is this send under another form.
             let movedPast = userSeqs.contains { seq in
                 guard let seq, let watermark else { return false }
                 return seq > watermark
@@ -4648,9 +3919,6 @@ final class ChatModel {
         }
     }
 
-    /// Bumped whenever the window is replaced rather than grown. A host older
-    /// than `seq` gives its records no identity of their own, and two
-    /// different windows of the same size would otherwise look like one.
     @ObservationIgnored private var eventsEpoch: UInt64 = 0
     @ObservationIgnored private var windowReplacementTicket: UUID?
     @ObservationIgnored private var liveWindowLoaded = false
@@ -4669,10 +3937,7 @@ final class ChatModel {
         if windowReplacementTicket == ticket { windowReplacementTicket = nil }
     }
 
-    /// Everything a window of the timeline is, forgotten in one place.
     private func forgetWindow() {
-        // Folder loads can prime a cached selection without going through
-        // select(_:). Its revision belongs to the discarded transcript too.
         contextRevision = nil
         liveWindowLoaded = false
         windowReplacementTicket = nil
@@ -4690,15 +3955,6 @@ final class ChatModel {
         historyTrimmed = false
     }
 
-    /// Open a conversation on its newest page rather than on its beginning.
-    ///
-    /// A conversation is read from the end because that is where a person
-    /// starts reading it. What comes before is fetched a page at a time as
-    /// they scroll back, so opening a long chat costs one bounded read
-    /// whatever is behind it.
-    ///
-    /// One latest page on ordinary open. Older pages are requested only by
-    /// scrolling back or following an explicit reading/search destination.
     @discardableResult
     private func openEvents(id: String, generation: UInt64, quiet: Bool = false) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
@@ -4729,7 +3985,6 @@ final class ChatModel {
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
             guard await publishEvents(id: id, generation: generation,
                 canPublish: { requestedEpoch == self.eventsEpoch }, rebasesWindow: false, transform: { _ in page.events }) else { return false }
-            // A live page is the conversation again, not a copy of it.
             savedCopy = nil
             reconcileOutgoing()
             offset = page.nextOffset
@@ -4740,9 +3995,6 @@ final class ChatModel {
             historyTrimmed = page.historyTrimmed
             conversationUsage = page.usage
             usageThrough = page.events.compactMap(\.seq).max()
-            // Opened where the archive begins, with content on screen: say
-            // so. Otherwise a fully loaded conversation is indistinguishable
-            // from one stuck mid-history. Empty chats stay quiet.
             reachedStart = !page.hasEarlier && !page.events.isEmpty
             liveWindowLoaded = true
             finishWindowReplacement(replacement)
@@ -4755,22 +4007,13 @@ final class ChatModel {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation),
                   requestedEpoch == eventsEpoch else { return false }
             if isUnknownMethod(error) { pagingUnavailable = true }
-            // Whatever went wrong, the conversation still has to appear. The
-            // whole-timeline read is the behaviour every host has had.
             return await loadEvents(id: id, reset: true, generation: generation, quiet: quiet)
         }
     }
 
-    /// Pull the page before the oldest one held, and put it in front.
-    ///
-    /// Called by the transcript as the top comes near, so the page is usually
-    /// already there by the time somebody reaches it. Returns whether a
-    /// regular page was consumed, so callers can continue past an empty page.
     @discardableResult
     func loadEarlier(waitToPrepend: (() async -> Bool)? = nil, beforePrepend: (() -> Void)? = nil,
                      afterPrepend: (() -> Void)? = nil) async -> Bool {
-        // The copy holds no earlier pages, and fetching them would mix live
-        // rows into a snapshot the banner describes as saved.
         guard savedCopy == nil, !openingConversation, let selected else { return false }
         return await loadEarlier(id: selected.id, generation: selectionGeneration, quiet: false,
                           waitToPrepend: waitToPrepend, beforePrepend: beforePrepend, afterPrepend: afterPrepend)
@@ -4810,10 +4053,6 @@ final class ChatModel {
             defer { TranscriptHoldTrace.note("after page window=\(events.count) first=\(events.first?.seq ?? 0) last=\(events.last?.seq ?? 0) rows=\(displayItems.count)") }
             #endif
             if page.reset {
-                // The archive was trimmed while this was in flight, so the
-                // offsets under the cursor no longer mean anything. This page
-                // is the newest one: take it as the whole window rather than
-                // putting it in front of records it now sits after.
                 let replacement = beginWindowReplacement()
                 let replacementEpoch = eventsEpoch
                 defer { finishWindowReplacement(replacement) }
@@ -4825,9 +4064,6 @@ final class ChatModel {
                 usageThrough = page.events.compactMap(\.seq).max()
                 warmMarkdown()
             } else {
-                // Pages do not overlap, but a trim or a retry could still put
-                // a record in two answers. Identity is the record's place in
-                // the archive, so a repeat is cheap to spot.
                 rowsExtendedAtStart = []
                 guard await publishEvents(id: id, generation: generation, canPublish: {
                     requestedEpoch == self.eventsEpoch && cursor == self.earlierCursor
@@ -4839,10 +4075,6 @@ final class ChatModel {
                 }) else { return false }
                 warmMarkdown()
             }
-            // Always, even for a page that carried nothing this window can
-            // use. The cursor is how the walk moves: keeping the old one
-            // means asking the same question on every frame of every scroll
-            // and never reaching the beginning.
             earlierCursor = page.cursor
             hasPagedBack = !page.reset
             hasEarlier = ChatPaging.hasEarlier(page.hasEarlier, cursor: page.cursor, after: cursor)
@@ -4865,11 +4097,6 @@ final class ChatModel {
         }
     }
 
-    /// Whether this host is simply older than the method that was called.
-    ///
-    /// A coded answer where the host has one, and the sentence where it does
-    /// not: a build that predates the code still has to be recognised, and it
-    /// is the only reason this fallback exists at all.
     private func isUnknownMethod(_ error: Error) -> Bool {
         if case let BridgeError.core(code, message) = error {
             return code == "unknown_method" || message.hasPrefix("unknown ")
@@ -4883,8 +4110,6 @@ final class ChatModel {
                             onMoreEvents: ((Bool) -> Void)? = nil) async -> Bool {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return false }
         if !reset, !liveWindowLoaded {
-            // An interrupted first open has no valid tail cursor. Retry the
-            // bounded newest page instead of treating an unread chat as empty.
             openingConversation = true
             defer { if selectionGeneration == generation { openingConversation = false } }
             return await openEvents(id: id, generation: generation, quiet: quiet)
@@ -4902,16 +4127,10 @@ final class ChatModel {
             guard reset || (requestedOffset == offset && requestedCursor == tailCursor) else { return false }
             if chunk.reset {
                 #if os(macOS)
-                // A full read already dropped its cursor. Finish this failed
-                // fallback so the next poll can retry, rather than awaiting
-                // the shared opening task that is waiting for this read.
                 guard !reset else { return false }
                 #endif
                 let opened = await openEvents(id: id, generation: generation, quiet: quiet)
                 if opened, selectionMatches(id: id, generation: generation) {
-                    // A replacement can move the current row or leave it in
-                    // an older page. Restore the reader after the new window
-                    // lands, just as on a deliberate return to this chat.
                     if let reference = currentReference, let mark = ChatReadingStore.shared.mark(for: reference) {
                         ChatReadingStore.shared.request(mark, for: reference)
                     }
@@ -4920,9 +4139,6 @@ final class ChatModel {
                 return opened
             }
             if let requestedRevision { contextRevision = max(contextRevision ?? 0, requestedRevision) }
-            // A poll that found nothing new must not write anything back. The
-            // write is what redraws the transcript, and most polls of a
-            // running turn arrive between records rather than on one.
             if !reset, chunk.events.isEmpty, chunk.nextOffset == offset {
                 tailCursor = chunk.tailCursor
                 scheduleResponseAttachments(id: id, generation: generation)
@@ -4959,8 +4175,6 @@ final class ChatModel {
             scheduleResponseAttachments(id: id, generation: generation)
             return true
         } catch {
-            // Background polls must not pop an error banner on an idle
-            // screen; user-initiated loads still surface.
             if !Task.isCancelled, !quiet, selectionMatches(id: id, generation: generation),
                requestedEpoch == eventsEpoch {
                 self.error = error.localizedDescription
@@ -4969,12 +4183,6 @@ final class ChatModel {
         }
     }
 
-    /// Keep an encrypted copy of what just opened, for airplane mode.
-    ///
-    /// Fire and forget: a copy that cannot be sealed simply does not exist,
-    /// and the live conversation is unaffected. Only the newest page is kept;
-    /// earlier pages stay on the host, and the copy says so through the
-    /// page's own `hasEarlier` flag.
     private func keepOfflineCopy(id: String, title: String?, page: ChatEventPage, sendRevision: UInt64?) {
         guard let reference = currentReference, reference.itemID == id,
               !page.events.isEmpty || selected?.lastMessageAtMs == nil else { return }
@@ -4985,11 +4193,6 @@ final class ChatModel {
         }
     }
 
-    /// Open the sealed copy when the machine cannot be reached.
-    ///
-    /// Only with nothing on screen: a live conversation is never replaced by
-    /// an older copy of itself. The copy's rows are read-only state, and the
-    /// banner says when they were saved and what they do not contain.
     private func openSavedCopy(id: String, generation: UInt64) async {
         guard selectionMatches(id: id, generation: generation),
               let reference = currentReference, reference.itemID == id,
@@ -5019,9 +4222,6 @@ final class ChatModel {
         error = nil
         savedCopy = SavedCopyInfo(title: copy.title, savedAt: copy.savedAt,
                                   hasEarlier: copy.page.hasEarlier, revision: copy.revision)
-        // A snapshot never reads instructions: the read is already settled,
-        // and the disclosure says so instead of waiting on a host that is
-        // not answering.
         instructionsLoaded = true
         warmMarkdown()
         settleNotifications()
@@ -5031,8 +4231,6 @@ final class ChatModel {
         }
     }
 
-    /// Ask the machine again from the saved-copy banner. A live answer
-    /// replaces the copy; another failure keeps it, with its saved time.
     func checkSavedCopyForUpdates(prepareConnection: (() async throws -> Void)? = nil, quiet: Bool = false) async {
         guard savedCopy != nil, !checkingSavedCopy, let chat = selected,
               let workspaceID, let reference = currentReference else { return }
@@ -5091,7 +4289,6 @@ final class ChatModel {
         attachmentPreviews = [:]
         loadingResponseAttachments = []
         responseAttachmentErrors = [:]
-        // Also stop the remainder of a background page's download queue.
         attemptedResponseAttachments.formUnion(events.compactMap { timeline in
             guard timeline.event?.kind == "attachment" else { return nil }
             return timeline.event?.id
@@ -5099,8 +4296,6 @@ final class ChatModel {
     }
 
     func downloadResponseAttachment(_ attachment: ChatAttachment) async {
-        // Saved previews load locally with the page. A missing preview never
-        // starts a live download against a saved conversation.
         guard savedCopy == nil, let selected else { return }
         await loadResponseAttachment(
             attachment, id: selected.id, generation: selectionGeneration, userInitiated: true
@@ -5122,8 +4317,6 @@ final class ChatModel {
         }
     }
 
-    /// Unchanged polls never walk the transcript again. Descriptors retain
-    /// attempted files so cancellation can retry without rebuilding the index.
     private var responseAttachmentDescriptors: [ChatAttachment] {
         if attachmentDescriptorRevision != eventsRevision {
             func descriptor(_ timeline: ChatTimelineEvent) -> ChatAttachment? {
@@ -5147,8 +4340,6 @@ final class ChatModel {
     private func loadResponseAttachments(id: String, generation: UInt64) async {
         guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
         let descriptors = responseAttachmentDescriptors.filter { !attemptedResponseAttachments.contains($0.id) }
-        // Keep background downloads bounded instead of fetching a whole page
-        // of files concurrently. Navigation stops the remaining queue.
         for descriptor in descriptors {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation) else { return }
             await loadResponseAttachment(descriptor, id: id, generation: generation, userInitiated: false)
@@ -5164,8 +4355,6 @@ final class ChatModel {
               userInitiated || !attemptedResponseAttachments.contains(attachment.id)
         else { return }
         guard let previewReference = currentReference, WorkCacheAccess.canRead(previewReference) else { return }
-        // Automatic previews have their own task and must not borrow an
-        // upload's progress, busy or cancellation state.
         guard !userInitiated || !fileTransferInFlight else { return }
         let targetPeer = peer
         let memoryGeneration = attachmentCacheGeneration
@@ -5233,8 +4422,6 @@ final class ChatModel {
                     })
                 defer { try? FileManager.default.removeItem(at: url) }
                 guard !Task.isCancelled, selectionMatches(id: id, generation: generation), currentReference == previewReference, WorkCacheAccess.canSave(previewReference), memoryGeneration == attachmentCacheGeneration else { return }
-                // Archive metadata can omit or understate a file's size.
-                // Use the completed file before deciding to read it into RAM.
                 let downloadedSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
                 guard let downloadedSize, downloadedSize > 0 else { throw CocoaError(.fileReadCorruptFile) }
                 if downloadedSize > ChatInbox.maxBytes {
@@ -5260,8 +4447,6 @@ final class ChatModel {
                 await WorkSavedPreview.save(reference: previewReference, attachment: attachment, data: data)
             }
         } catch is CancellationError {
-            // Navigation, Cancel and declined relay consent are not broken
-            // files. Keep the card available for an explicit download.
         } catch {
             guard !Task.isCancelled, selectionMatches(id: id, generation: generation), memoryGeneration == attachmentCacheGeneration,
                   currentReference == previewReference, WorkCacheAccess.canRead(previewReference) else { return }
@@ -5273,12 +4458,6 @@ final class ChatModel {
         }
     }
 
-    /// What the card says when a file does not arrive.
-    ///
-    /// A retry is only worth offering when trying again could work. The host
-    /// refuses a file over its transfer cap and one it can no longer find,
-    /// and both of those answers are the same every time they are asked, so
-    /// they are reported as they are rather than as "Tap to retry".
     private static func downloadFailure(_ error: Error) -> String {
         let reason = error.localizedDescription
         if reason.contains("quota_exceeded") {
@@ -5293,9 +4472,6 @@ final class ChatModel {
         return L10n.text("apple.chatmodel.download_failed_tap_to_retry.c38f779d")
     }
 
-    /// The brief and the one rule tokenstat adds. Reloaded whenever either
-    /// could have moved: a different conversation, a new backend (which changes
-    /// how the text travels), or an edited brief.
     private func loadInstructions(id: String, generation: UInt64) async {
         guard !Task.isCancelled, savedCopy == nil,
               selectionMatches(id: id, generation: generation) else { return }
@@ -5305,12 +4481,8 @@ final class ChatModel {
             guard selectionMatches(id: id, generation: generation) else { return }
             instructions = loaded
         } catch {
-            // Not worth an alert. The inspector simply shows nothing rather
-            // than interrupting a conversation over a disclosure nobody opened.
             if selectionMatches(id: id, generation: generation) { instructions = nil }
         }
-        // Settled either way: a nil answer after this is "not available",
-        // not a read still in flight.
         if selectionMatches(id: id, generation: generation) { instructionsLoaded = true }
     }
 
@@ -5321,14 +4493,10 @@ final class ChatModel {
         do {
             let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
             guard !Task.isCancelled, permitsPublication(), selectionMatches(id: id, generation: generation) else { return }
-            // Unchanged approvals must not write back: the write redraws the
-            // transcript, and this runs on every poll of a running turn.
             if approvals != loaded { approvals = loaded }
             approvalsLoaded = true
             settleNotifications()
         } catch {
-            // A background poll must not pop an alert over an idle screen;
-            // the rows keep the answers they already had.
             if !Task.isCancelled, permitsPublication(), !quiet, selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
             }
@@ -5395,20 +4563,6 @@ final class ChatModel {
         #endif
     }
 
-    /// The persona a new chat should start with, or nil to take the
-    /// workspace default.
-    ///
-    /// Every other setup control is carried over from the last conversation.
-    /// The persona was not, so choosing no persona and then pressing plus
-    /// handed you a persona again, and the choice looked like it had not
-    /// saved.
-    ///
-    /// The remembered id is checked against this workspace's list before it is
-    /// used. One choice is stored for the app rather than one per folder, and
-    /// a persona belonging to another folder is not available here, so an
-    /// unrecognised id falls back to this folder's own answer. "No persona"
-    /// needs no such check: it is a choice about this person, not about a
-    /// folder, and it travels.
     private func rememberedPersonaID(_ saved: LaunchChoice?) -> String? {
         guard let remembered = saved?.personaID else { return nil }
         if remembered.isEmpty { return "" }
@@ -5431,8 +4585,6 @@ final class ChatModel {
             authorizedQueueItems = Set(queued.filter { $0.whenConnected && $0.delivery == .waiting }.map(\.id))
         }
         catch { self.error = L10n.text("apple.chatmodel.saved_pending_messages_could_not_be_opened.8bc6ad06") }
-        // Legacy conversation-only queues have no provable host/account owner.
-        // Recovery is explicit; opening this conversation never adopts them.
     }
 
     private func saveLaunchChoice(from chat: ChatConversation) {
@@ -5442,8 +4594,6 @@ final class ChatModel {
             effort: chat.effort,
             mode: chat.mode,
             autonomy: chat.autonomy,
-            // Empty, not nil: a conversation with no persona is a choice worth
-            // carrying, and nil already means "nothing recorded".
             personaID: chat.personaID ?? ""
         )
         guard let data = try? JSONEncoder().encode(choice) else { return }
@@ -5479,9 +4629,6 @@ enum ChatGateCopy {
     }
 }
 
-/// The notice for an agent update, wherever in the app it was started. One
-/// for the whole app because every chat surface has its own `ChatModel`,
-/// and the notice belongs at the window's bottom right with the others.
 @MainActor @Observable
 final class AgentUpdateNotice {
     static let shared = AgentUpdateNotice()

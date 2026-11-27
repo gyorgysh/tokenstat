@@ -107,8 +107,6 @@ internal static class Chrome
             Opacity = 0.55,
         });
         var figures = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceXs };
-        // A headline number in Manrope with tabular figures, matching the Mac
-        // stat tile (26 semibold). Not the terminal face: this is a headline.
         var number = Fonts.Numeric(value);
         if (accent) number.Foreground = Theme.AccentBrush;
         figures.Children.Add(number);
@@ -160,12 +158,6 @@ internal static class Chrome
         };
     }
 
-    /// <summary>
-    /// An empty state: the mark from the one vocabulary, then the headline
-    /// naming what is missing and the line saying what the thing is for. Same
-    /// anatomy as EmptyState.View, which owns the shared sizes: the one with
-    /// the drawn scene and this one with the glyph must not drift apart.
-    /// </summary>
     public static StackPanel Empty(string title, string message, ActionIcon icon, UIElement? action = null)
     {
         var stack = new StackPanel
@@ -225,10 +217,6 @@ internal static class Chrome
         };
     }
 
-    /// <summary>
-    /// Show a dialog owned by a page. Returns <see cref="ContentDialogResult.None"/>
-    /// when the page is not in the tree yet, rather than throwing.
-    /// </summary>
     public static async Task<ContentDialogResult> ShowDialog(UIElement owner, ContentDialog dialog)
     {
         var root = owner.XamlRoot;
@@ -258,11 +246,6 @@ internal static class Chrome
         }
     }
 
-    /// <summary>
-    /// Uppercase group label with an optional count. Mirrors the Apple
-    /// SectionLabel: the text is tertiary, the count is a quiet tabular
-    /// number pinned right.
-    /// </summary>
     public static Grid SectionLabel(string text, int? count = null)
     {
         var grid = new Grid();
@@ -291,11 +274,6 @@ internal static class Chrome
         return grid;
     }
 
-    /// <summary>
-    /// Names the folder a scoped screen is showing. Accent-soft rather than
-    /// grey, mirroring the Apple ScopeChip: it answers whose cards these are,
-    /// and the same accent already marks the folder in the sidebar.
-    /// </summary>
     public static Border ScopeChip(string label, Symbol symbol = Symbol.Folder)
     {
         var row = new StackPanel
@@ -336,11 +314,6 @@ internal static class Chrome
         return chip;
     }
 
-    /// <summary>
-    /// The account tier, as a small uppercase pill. Mirrors the Apple
-    /// TierBadge: uppercase and tracked out, because a tier is a label and
-    /// not a word in a sentence.
-    /// </summary>
     public static Border TierBadge(string tier)
     {
         var label = new TextBlock
@@ -350,7 +323,6 @@ internal static class Chrome
             FontWeight = Microsoft.UI.Text.FontWeights.Bold,
             Foreground = Theme.AccentBrush,
         };
-        // Tracking 0.6 on the Apple badge, in thousandths of an em.
         label.CharacterSpacing = 60;
         return new Border
         {
@@ -364,23 +336,12 @@ internal static class Chrome
         };
     }
 
-    /// <summary>
-    /// A banner by severity instead of by explicit tint. Tints match the
-    /// Apple Banner.Severity, which is the source of truth: info is the
-    /// secondary accent, success is the success colour, warning and danger
-    /// are their own. Glyphs are WinUI Symbols approximating the SF Symbols.
-    /// </summary>
     public static Border Banner(string text, BannerSeverity severity)
     {
         var (tint, symbol) = SeverityLook(severity);
         return Banner(text, tint, symbol);
     }
 
-    /// <summary>
-    /// A primary action in content, in the accent capsule family. Same look
-    /// as <see cref="ActionIconGlyph.Button"/>, plus the dense variant for
-    /// rows and card accessories that the Apple AccentButtonStyle carries.
-    /// </summary>
     public static Button AccentButton(
         string title,
         ActionIcon icon,
@@ -396,11 +357,6 @@ internal static class Chrome
         return button;
     }
 
-    /// <summary>
-    /// The secondary action: the same capsule family as the accent button,
-    /// but neutral, panel fill with a hairline border and primary text.
-    /// Mirrors the Apple SecondaryButtonStyle.
-    /// </summary>
     public static Button SecondaryButton(
         string title,
         ActionIcon icon,
@@ -419,11 +375,6 @@ internal static class Chrome
         return button;
     }
 
-    /// <summary>
-    /// One option in a mutually exclusive set, same capsule as the brand
-    /// toggle. Mirrors the Apple ChoiceChip: selected is the accent capsule,
-    /// the rest are secondary.
-    /// </summary>
     public static Button ChoiceChip(string title, bool isSelected, Func<Task> onTap)
     {
         var chip = new Button
@@ -455,11 +406,6 @@ internal static class Chrome
         return chip;
     }
 
-    /// <summary>
-    /// A branded on/off chip. Mirrors the Apple BrandToggleChip: a system
-    /// switch next to the accent capsules is a different language on the
-    /// same row, so a toggle here is a chip that is accent when on.
-    /// </summary>
     public static Button ToggleChip(string title, bool isOn, Func<bool, Task> onFlip) =>
         ChoiceChip(title, isOn, () => onFlip(!isOn));
 
@@ -484,12 +430,6 @@ internal static class Chrome
         return row;
     }
 
-    /// <summary>
-    /// A mutually exclusive set in one capsule. Mirrors the Apple
-    /// SegmentedCapsulePicker: the strip is panel with a hairline border,
-    /// the selected segment is the accent capsule. Tapping the selected
-    /// segment does nothing.
-    /// </summary>
     public static Border Segmented(
         IList<(string Value, string Label)> options,
         string selected,
@@ -523,12 +463,6 @@ internal static class Chrome
         };
     }
 
-    /// <summary>
-    /// A short-lived confirmation that does not push content down. Mirrors
-    /// the Apple TransientToast: a capsule in the severity tint with an
-    /// optional way to the thing the message is about, arriving with the
-    /// toast motion. The dismiss button lifts the toast out of its parent.
-    /// </summary>
     public static Border Toast(
         string message,
         BannerSeverity severity = BannerSeverity.Success,
@@ -617,10 +551,6 @@ internal static class Chrome
         return toast;
     }
 
-    /// <summary>
-    /// The app's own search box: interface face at body size with a prompt.
-    /// Reports every keystroke; the caller decides what a search means.
-    /// </summary>
     public static TextBox SearchField(string placeholder, Action<string> onChange)
     {
         var box = new TextBox
@@ -633,11 +563,6 @@ internal static class Chrome
         return box;
     }
 
-    /// <summary>
-    /// Unsaved, Saving, Saved, or Not saved next to Save and Cancel. Mirrors
-    /// the Apple FieldSaveBar status: a card must never look finished after
-    /// a keystroke and revert later.
-    /// </summary>
     public static UIElement SaveStatus(FieldSaveState state) => state switch
     {
         FieldSaveState.Dirty => SaveText(L10n.Text("windows.chrome.unsaved.6250d572"), Theme.Warning),
@@ -689,11 +614,6 @@ internal static class Chrome
         return row;
     }
 
-    /// <summary>
-    /// Minutes as a choice, with the field kept for anything else. Mirrors
-    /// the Apple TimeLimitChips: these are the values a person actually
-    /// picks, and a custom number in the field selects none of them.
-    /// </summary>
     public static StackPanel TimeLimitChips(
         string minutesText,
         bool noLimit,
@@ -722,11 +642,6 @@ internal static class Chrome
         return row;
     }
 
-    /// <summary>
-    /// How many jobs may run at once, same chips as the time limit. Mirrors
-    /// the Apple ConcurrentChips: 0 is a real host value meaning no cap, so
-    /// the chip says that in words and a custom number selects none.
-    /// </summary>
     public static StackPanel ConcurrentChips(string countText, Func<string, Task> onPick)
     {
         static uint? Parse(string text) =>
@@ -754,17 +669,6 @@ internal static class Chrome
         return row;
     }
 
-    /// <summary>
-    /// A schedule as a shape rather than a sentence. Mirrors the Apple
-    /// CadenceGlyph, which is the source of truth: once is a play mark, an
-    /// interval is a cycle, and the weekly kinds are seven dots around a
-    /// ring with Monday on top running clockwise. The bitmask matches the
-    /// host ScheduleSpec, Monday is bit 0. A paused job draws idle.
-    /// </summary>
-    /// <param name="kind">The schedule kind: once, interval, daily, weekdays, weekly, custom.</param>
-    /// <param name="weekdays">The multi-day bitset the host sends.</param>
-    /// <param name="weekday">The single weekday for a weekly schedule without a bitset.</param>
-    /// <param name="summary">The words this replaces, for the tooltip and the screen reader.</param>
     public static FrameworkElement CadenceGlyph(
         string kind,
         long weekdays,
@@ -786,14 +690,6 @@ internal static class Chrome
         return glyph;
     }
 
-    /// <summary>
-    /// How much of the wait until the next run is already spent. Mirrors the
-    /// Apple CountdownRing: a ring that is nearly closed says soon with no
-    /// arithmetic. Without a start the ring cannot show progress, so it
-    /// draws empty.
-    /// </summary>
-    /// <param name="startMs">Usually the last run, as unix milliseconds.</param>
-    /// <param name="endMs">The next run, as unix milliseconds.</param>
     public static FrameworkElement CountdownRing(
         long? startMs,
         long endMs,
@@ -835,8 +731,6 @@ internal static class Chrome
                 StrokeThickness = lineWidth,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
-                // XAML dash lengths are multiples of the stroke thickness,
-                // not pixels. Both rings share the same centerline diameter.
                 StrokeDashArray = new DoubleCollection
                 {
                     fraction * circumference / lineWidth,
@@ -970,9 +864,6 @@ internal static class Chrome
     {
         "daily" => true,
         "weekdays" => day < 5,
-        // The host accepts a weekly schedule either way and sends both, so
-        // prefer the bitset when it carries days, matching the Mac glyph and
-        // the summary beside it.
         "weekly" => (weekdays & 0x7F) != 0
             ? (weekdays & (1L << day)) != 0
             : day == weekday,
@@ -984,10 +875,6 @@ internal static class Chrome
         Color.FromArgb((byte)(255 * alpha), color.R, color.G, color.B);
 }
 
-/// <summary>
-/// How serious a banner is. Tints mirror the Apple Banner.Severity, which is
-/// the source of truth.
-/// </summary>
 internal enum BannerSeverity
 {
     Info,
@@ -996,10 +883,6 @@ internal enum BannerSeverity
     Danger,
 }
 
-/// <summary>
-/// Whether an edited value has reached the host. Mirrors the Apple
-/// FieldSaveState.
-/// </summary>
 internal enum FieldSaveState
 {
     Idle,

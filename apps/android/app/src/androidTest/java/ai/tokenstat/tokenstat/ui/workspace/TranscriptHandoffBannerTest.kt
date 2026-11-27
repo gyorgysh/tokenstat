@@ -32,8 +32,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/// The handoff banner in both themes: the agent it went to, the summary
-/// behind its disclosure, and a picture of each state for review.
 @RunWith(AndroidJUnit4::class)
 class TranscriptHandoffBannerTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()

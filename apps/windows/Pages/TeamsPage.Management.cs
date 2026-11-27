@@ -24,8 +24,6 @@ internal sealed partial class TeamsPage
         if (detail is not null) { var line = TeamText(detail); line.Opacity = 0.7; line.FontSize = 12; panel.Children.Add(line); }
         return panel;
     }
-    /// Sections as the segmented control Devices uses. Each chip is named,
-    /// so a screen reader and the UI tests reach it by its label.
     private static Border TeamTabs(IList<(string Value, string Label)> tabs, string selected, Func<string, Task> select)
     {
         var bar = Chrome.Segmented(tabs, selected, select);
@@ -63,8 +61,6 @@ internal sealed partial class TeamsPage
         }));
     }
 
-    // Editors are native page content, so long access reviews scroll with the
-    // page and text scaling does not hide the final explicit action.
     private void TeamEditor(string title, StackPanel fields, string submit, Func<bool> ready, Func<Task<JsonNode>> save,
         Func<Task> back, Func<JsonNode, Task> done, bool confirmation = false, bool invitationLink = false, TeamDirectoryClient? client = null)
     {
@@ -203,7 +199,6 @@ internal sealed partial class TeamsPage
                 actions.Add(Badge(TeamRole(Text(row, "role"))));
                 if (model.Active && (model.Manager || Text(row, "role") == "maintainer"))
                     actions.Add(Buttons.Secondary(L10n.Text("common.teams.repository_access"), ActionIcon.Security, async (_, _) => { if (Alive()) await ShowTeamAccessAsync(client, model, row); }, small: true));
-                // The server refuses while any computer still shares it, so a live checkout is never cut off from here.
                 if (_canArchiveRepositories && model.Active && model.Manager && !Shared(row))
                     actions.Add(Buttons.Destructive(L10n.Text("common.teams.remove_project"), ActionIcon.Delete, (_, _) => {
                         if (Alive()) TeamEditor(L10n.Text("common.teams.remove_project_title", Text(row, "name")), TeamCard(Text(row, "name"), L10n.Text("common.teams.remove_project_detail")), L10n.Text("common.teams.remove_project"), () => model.Manager,

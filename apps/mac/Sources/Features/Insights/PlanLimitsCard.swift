@@ -6,24 +6,7 @@
 
 import SwiftUI
 
-/// What is left of each plan, as the vendor reports it, one panel per vendor.
-///
-/// A different question from the rest of Insights, which prices what was spent.
-/// These are quota windows, and the numbers are the vendor's own. Nothing here
-/// is derived from the archive: a percentage we worked out would be a guess
-/// wearing a number's clothes, and someone deciding whether to start another
-/// session needs the real one.
-///
-/// One card per vendor rather than one card listing all of them. The old single
-/// card put five unrelated tools in one column, so a machine with everything
-/// installed had a card taller than the window while a machine with one tool had
-/// a card with a single row rattling around in it. A vendor with nothing to say
-/// is left out entirely: the panels a person sees are the tools they actually
-/// have.
 enum PlanLimits {
-    /// Vendors worth a panel: anything that reported numbers, plus anything
-    /// whose failure is worth reading. A tool that is simply not installed is
-    /// not a failure and does not get one.
     static func visible(_ providers: [ProviderLimits]) -> [ProviderLimits] {
         providers.filter { provider in
             if provider.hasWindows { return true }
@@ -32,8 +15,6 @@ enum PlanLimits {
         }
     }
 
-    /// Do not turn an absent tool into an error card. Once a tool is present,
-    /// authentication, network, and rate-limit failures remain visible.
     static func isAbsent(_ note: String) -> Bool {
         [
             "not found",
@@ -50,7 +31,6 @@ enum PlanLimits {
     }
 }
 
-/// One vendor's quota, in its own panel.
 struct PlanLimitPanel: View {
     let provider: ProviderLimits
     let isLoading: Bool
@@ -72,18 +52,12 @@ struct PlanLimitPanel: View {
                         WindowBar(window: window)
                     }
                     if provider.isStale, let note = provider.note {
-                        // Why the numbers stopped moving, under the numbers
-                        // themselves. A refresh that fails is not a reason to
-                        // hide what was true an hour ago, and it is not a reason
-                        // to pass that off as current either.
                         Text(note)
                             .font(Theme.font(11))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else if let note = provider.note {
-                    // Words, not a zero bar. "We could not look" and "nothing
-                    // used" are different answers and must not look the same.
                     Text(note)
                         .font(Theme.font(12))
                         .foregroundStyle(.secondary)
@@ -93,9 +67,6 @@ struct PlanLimitPanel: View {
         }
     }
 
-    /// The plan name when the vendor gave one, and always how old the reading
-    /// is. "As of" rather than a bare timestamp, because with a stale panel the
-    /// age is the point.
     private var subtitle: String? {
         var parts: [String] = []
         if let plan = provider.plan, !plan.isEmpty {
@@ -149,9 +120,6 @@ private struct WindowBar: View {
                     .font(Theme.numeric(12, weight: .medium))
                     .foregroundStyle(window.severity.tint)
                 if let resets = window.resetsAt {
-                    // The shared tick, not `format: .relative`. One live time
-                    // source per quota window kept the whole window in a
-                    // layout pass every frame. See `RelativeClock`.
                     Text(L10n.text("apple.planlimitscard.resets_0.7a4480e9", "\(RelativeClock.phrase(for: resets))"))
                         .font(Theme.font(11))
                         .foregroundStyle(.tertiary)

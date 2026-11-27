@@ -73,12 +73,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// What is uncommitted in this folder, as the host last reported it.
-///
-/// Ports `ClientWorkspaceChangesView`: tapping a file opens its diff,
-/// selection stays local until the reviewed content is submitted, the footer
-/// counts "N of M selected", and push rides below the fold. The file list
-/// itself is a fresh read, so a file written while it is open shows up here.
 @Composable
 fun ChangesSection(
     model: AppViewModel,
@@ -153,8 +147,6 @@ fun ChangesSection(
         return
     }
 
-    // The bar floats over this screen, so the docked rows reserve its height
-    // rather than sliding under it. The list takes what is left.
     Column(
         modifier.padding(bottom = TabBarChrome.contentBottomInset),
         verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -209,12 +201,6 @@ fun ChangesSection(
                 folderName = folderName,
                 hostLabel = hostLabel,
             )
-            // Weighted, so the selection count, Review and commit, and Push
-            // sit on the bottom edge the way the iPhone docks them. Unweighted
-            // the list took its natural height and pushed all three past the
-            // end of a ninety-six file scroll: the doc comment above called
-            // that "push rides below the fold", which is a bug with a
-            // sentence in front of it.
             LazyColumn(
                 Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = Space.xs),
@@ -223,9 +209,6 @@ fun ChangesSection(
                 items(files, key = { it.str("path") ?: it.hashCode().toString() }) { file ->
                     val path = file.str("path") ?: return@items
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // A bare disc: the file row carries the name, and the
-                        // disc carries its own touch target because tapping
-                        // the row opens the diff instead.
                         val picked = state.selection.contains(path)
                         Box(
                             Modifier
@@ -396,9 +379,6 @@ private fun ChangedFileRow(file: JsonObject, modifier: Modifier = Modifier, onOp
     }
 }
 
-/// One file's current working-copy diff as a full page, read from the owning
-/// machine. Renders hunk rows (one gutter, marker carries the side) like
-/// `ClientDiffView`; binary and empty states use Apple's words.
 @Composable
 fun FileDiffPage(
     model: AppViewModel,
@@ -470,9 +450,6 @@ fun FileDiffPage(
     }
 }
 
-/// Hunk rows from a host `FileDiff`: hunk headers, then numbered lines with
-/// the `+`/`−` marker carrying which side the line is on. Caps at 2000
-/// lines like the Apple diff, saying so out loud.
 @Composable
 fun HunkDiffView(diff: JsonObject, maxLines: Int = 2000) {
     val colors = LocalTsColors.current

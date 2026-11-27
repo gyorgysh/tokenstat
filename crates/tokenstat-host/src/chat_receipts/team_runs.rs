@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Durable run metadata beside the canonical transcript. This ledger grants
-//! no permission to execute: callers prove current authority, exclusive run
-//! ownership and process outcomes before recording transitions. Loading or
-//! looking up a receipt never starts, resumes or retries an agent.
-
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
@@ -63,8 +57,6 @@ impl Source {
         id(&self.conversation)
             && !self.workspace.is_empty()
             && self.workspace.len() <= 4096
-            // Workspace identities are local paths. Whitespace and Unicode
-            // remain exact; they are not cloud resource identifiers.
             && !self.workspace.contains('\0')
             && self.created_at_ms >= 0
     }
@@ -450,8 +442,7 @@ impl Ledger {
             updated_at_ms: at_ms,
         };
         self.records.insert(key.clone(), record);
-        // Leave room for the active receipt's canonical proof and longest
-        // state/time representation before another admission can enter.
+
         if let Err(error) = self.encoded().and_then(|bytes| {
             if bytes.len() <= MAX_BYTES - 512 {
                 Ok(())

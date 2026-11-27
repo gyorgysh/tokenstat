@@ -40,8 +40,6 @@ enum ClientRecentChatsRanking {
         return head + Array(rest.prefix(moreByPriority))
     }
 
-    /// Host-owned approvals first, then this device's unread replies, active
-    /// work, and finally ordinary recency.
     static func priority(of chat: Item) -> Int {
         if chat.needsAttention { return 3 }
         if chat.unread { return 2 }

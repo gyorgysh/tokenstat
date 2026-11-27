@@ -10,10 +10,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Install;
 
-/// <summary>
-/// The restart question, kept out of <see cref="AppUpdateModel"/> so the
-/// install tests can compile that model without the UI stack.
-/// </summary>
 internal static class UpdateRestart
 {
     public static Task AskAsync(AppUpdateModel update, XamlRoot? root) =>

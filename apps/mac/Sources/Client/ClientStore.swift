@@ -159,9 +159,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
 /// one level depends on whether the duration changes.
 enum ClientPlanChange {
     case current
-    /// Charged now, with the time already paid for refunded prorated.
     case immediate
-    /// Takes effect on the renewal date. Nothing is charged today.
     case atRenewal
 }
 
@@ -182,7 +180,6 @@ final class ClientStore {
     var showManageSheet = false
     /// StoreKit's current product in the `tokenstat.plans` group.
     var currentProductID: String?
-    /// What will renew next. Lower than current means a queued downgrade.
     var autoRenewProductID: String?
     var willAutoRenew = true
     var expirationDate: Date?
@@ -191,8 +188,6 @@ final class ClientStore {
     /// paywall must not present the second as the first.
     private(set) var renewalStatusKnown = false
 
-    /// Written by the root so a successful purchase updates the same account
-    /// model the rest of the app is already reading.
     @ObservationIgnored var onAccountChange: ((Account) -> Void)?
     /// Current signed-in account, if any. A product-page tap has to attach
     /// this account's `appAccountToken` or the receipt has no owner.
@@ -231,8 +226,6 @@ final class ClientStore {
         guard let current else { return .immediate }
         guard current != item else { return .current }
         guard let from = product(for: current), let to = product(for: item) else {
-            // Prices have not arrived. A climb at the same duration is the one
-            // case the ladder alone answers correctly; everything else waits.
             return item.rank > current.rank && item.interval == current.interval
                 ? .immediate
                 : .atRenewal

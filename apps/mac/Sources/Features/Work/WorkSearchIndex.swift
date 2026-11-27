@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A disposable index. The caller supplies current access, never a filter
-/// inferred from previously cached records. No text is written to disk.
 actor WorkSearchIndex {
     struct Folder: Hashable, Sendable {
         let hostIdentity: String
@@ -42,8 +40,6 @@ actor WorkSearchIndex {
         let nextCursor: Cursor?
     }
 
-    /// Local cursors cannot be forged from a row offset or reused for a
-    /// different query, filter, index instance or content generation.
     struct Cursor: Sendable {
         fileprivate let generation: UUID
         fileprivate let query: WorkSearchQuery
@@ -54,8 +50,6 @@ actor WorkSearchIndex {
 
     enum PageError: Error { case staleCursor }
 
-    /// Capture before decrypting a cache record. Removal, replacement or an
-    /// access change invalidates an in-flight load, including a late success.
     struct Load: Sendable {
         fileprivate let reference: WorkReference
         fileprivate let token: UUID
@@ -164,9 +158,6 @@ actor WorkSearchIndex {
             guard (kinds.isEmpty || kinds.contains(reference.kind)),
                   (hosts.isEmpty || hosts.contains(reference.hostIdentity)) else { continue }
             try Task.checkCancellation()
-            // Records are already in date/identity tie order. Once a record
-            // reaches the highest score any title in this conversation can
-            // attain, no older record can replace it as the destination.
             let ceiling = records.reduce(0) { highest, entry in
                 max(highest, terms.reduce(0) { $0 + (entry.title.contains($1) ? 12 : 4) })
             }
@@ -197,8 +188,6 @@ actor WorkSearchIndex {
             }
             return $0.entry.key < $1.entry.key
         }
-        // Each conversation contributes its best exact anchor. Title-only
-        // ties retain the unanchored metadata document's stable ordering.
         let offset = cursor?.offset ?? 0
         let end = min(matches.count, 200, offset + max(1, min(50, limit)))
         let hits = matches[offset..<end].map { match in

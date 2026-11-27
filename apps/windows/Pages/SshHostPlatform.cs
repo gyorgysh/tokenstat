@@ -7,7 +7,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Verified SSH platform hints, scoped to the saved endpoint and host keys.</summary>
 internal static class SshHostPlatform
 {
     private sealed record Entry(string Endpoint, string Label, string Name, long CheckedAt);
@@ -46,7 +45,6 @@ internal static class SshHostPlatform
     }
     private static string? Distro(string? platform)
     {
-        // Whole words only, so "aarch64" is not Arch Linux.
         var words = new string((platform ?? "").ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
             .Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0) return null;
@@ -65,8 +63,6 @@ internal static class SshHostPlatform
         Checking.Add(id);
         try
         {
-            // Only after a successful, host-key-verified connection. No keys or
-            // passwords enter the cache, and polling never starts another check.
             var result = await AppServices.Host.CallAsync("ssh.provision.check", connection, TimeSpan.FromSeconds(20));
             var label = Format.Text(result, "distro");
             if (string.IsNullOrWhiteSpace(label)) label = Format.Text(result, "os");
@@ -74,7 +70,7 @@ internal static class SshHostPlatform
             if (label.Length == 0) return false;
             Cache[id] = new Entry(endpoint, label[..Math.Min(label.Length, 80)], Format.Text(host, "label", L10n.Text("windows.sshhostplatform.ssh_session.25493005")), now);
             foreach (var old in Cache.OrderByDescending(pair => pair.Value.CheckedAt).Skip(128).Select(pair => pair.Key).ToArray()) Cache.Remove(old);
-            try { Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath + ".tmp", JsonSerializer.Serialize(Cache)); File.Move(CachePath + ".tmp", CachePath, true); } catch { /* Memory cache remains useful if the disk is unavailable. */ }
+            try { Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!); File.WriteAllText(CachePath + ".tmp", JsonSerializer.Serialize(Cache)); File.Move(CachePath + ".tmp", CachePath, true); } catch { }
             return true;
         }
         catch { return false; }

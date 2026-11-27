@@ -6,11 +6,6 @@
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// Everything that is not the creature: a thought, a ball, sparks, notes,
-/// z's, a drip. Written into a buffer the engine owns, so a frame of motion
-/// allocates nothing.
-/// </summary>
 internal static class PersonaMoodMotes
 {
     public static void Motes(
@@ -96,10 +91,6 @@ internal static class PersonaMoodMotes
                 double showing = Math.Max(1 - job.Sunk * 0.78, 0.12);
                 var head = new PPoint(nail.X, PersonaStage.Floor - 0.10 * showing);
                 motes.Add(new PersonaMote(PersonaMote.Kind.Nail, nail, showing));
-                // The swing is aimed rather than posed: the angle is worked
-                // out from where the hammer is held to where the nail head
-                // currently is, so the blow lands on it, and keeps landing on
-                // it as the nail goes in.
                 var grip = new PPoint(anchors.Hands.X + 0.01, anchors.Hands.Y - 0.02);
                 double aim = Math.Atan2(head.Y - grip.Y, Math.Max(head.X - grip.X, 0.01));
                 motes.Add(new PersonaMote(
@@ -192,9 +183,6 @@ internal static class PersonaMoodMotes
                         PersonaMote.Kind.Note,
                         new PPoint(
                             Math.Clamp(crown.X + side * (0.13 + Math.Sin(life * Math.PI * 1.5) * 0.04), 0.14, 0.86),
-                            // The note itself has a tall stem. Leave it room
-                            // at the top, rather than merely keeping its
-                            // centre in.
                             Math.Max(0.16, crown.Y - 0.01 - life * 0.18)),
                         0.8 + life * 0.3,
                         (1 - life) * 0.9,
@@ -275,9 +263,6 @@ internal static class PersonaMoodMotes
 
             case PersonaMood.Reading:
             {
-                // One sheet, held, drifting. The interesting part of somebody
-                // reading is that they are absorbed and barely moving. What is
-                // on the page is the event.
                 var gag = PersonaMoodTiming.ReadingGag(clock);
                 double sway = Math.Sin(clock * 2 * Math.PI / 5.3);
                 motes.Add(new PersonaMote(
@@ -303,9 +288,6 @@ internal static class PersonaMoodMotes
             case PersonaMood.Gaming:
             {
                 var round = PersonaMoodTiming.GamingRound(clock);
-                // The screen faces him, so what reaches us is the light off
-                // it. Drawn under the face rather than over the body, which is
-                // what makes it read as a screen rather than a lamp.
                 motes.Add(new PersonaMote(
                     PersonaMote.Kind.Glow,
                     new PPoint(anchors.Hands.X, anchors.Hands.Y - 0.03),
@@ -316,8 +298,6 @@ internal static class PersonaMoodMotes
                     anchors.Hands,
                     1,
                     1,
-                    // Three rates: a rock, a lean, and the small fast jitter
-                    // of somebody actually working the buttons.
                     Math.Sin(clock * 2 * Math.PI * 1.15) * 0.15
                         + Math.Sin(clock * 2 * Math.PI * 0.43) * 0.10
                         + Math.Sin(clock * 2 * Math.PI * 6.3) * 0.028

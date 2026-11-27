@@ -2,8 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A device-local library, reached explicitly when account verification failed.
-/// Listing and opening call only the local cache, never a workspace host.
 struct ClientSavedWorkView: View {
     let owner: SavedWorkOwner
     @Environment(\.dismiss) private var dismiss

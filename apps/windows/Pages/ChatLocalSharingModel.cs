@@ -4,8 +4,6 @@ using System.Text.RegularExpressions;
 
 namespace Tokenstat.Pages;
 
-/// Local-only recovery deliberately has no account receipt or peer routing.
-/// The host owns the final sharing revision and proof that a run has ended.
 internal sealed class ChatLocalSharingModel(string workspace, string chat, string expectedShare, bool held,
     Func<bool> current, Func<string, JsonObject, Task<JsonNode>> call)
 {
@@ -84,7 +82,7 @@ internal sealed class ChatLocalSharingModel(string workspace, string chat, strin
         {
             var input = Target(); input["confirmRecovery"] = true;
             var reply = await Call("chat.sharing.recoverRun", input);
-            _ = Flag(reply, "recovered"); // false is a harmless already-recovered run.
+            _ = Flag(reply, "recovered");
             held = false;
         }
         catch (OperationCanceledException) { }

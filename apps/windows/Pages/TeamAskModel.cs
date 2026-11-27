@@ -5,7 +5,6 @@ using System.Text.Json.Nodes;
 namespace Tokenstat.Pages;
 
 internal sealed class TeamAskNotAccepted(string message) : Exception(message);
-/// <summary>The sharing computer is holding the request until its owner answers.</summary>
 internal sealed class TeamAskAwaitingApproval() : Exception("agent_waiting_approval");
 
 internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarget target, string label,
@@ -18,9 +17,6 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
     internal JsonObject? Fence { get; private set; }
     internal string? Error { get; private set; }
     private TeamAskRecoveryStore.Snapshot? _saved;
-    /// The sharing computer holds this request until its owner answers. The
-    /// same request is sent again until it starts, is declined, or the
-    /// owner's window to answer has passed.
     internal bool AwaitingApproval { get; private set; }
     private DateTimeOffset? _approvalSince;
     internal bool Pending => _saved is not null && Fence is null;
@@ -64,8 +60,6 @@ internal sealed class TeamAskModel(TeamAskRecoveryStore storage, TeamCommentTarg
             if (response["state"] is JsonValue state && state.TryGetValue<string>(out var name) && name == "running" && TeamAskRecord.ValidFence(response["fence"]))
             {
                 Fence = (JsonObject)response["fence"]!.DeepClone();
-                // Keep Stop if the reply cannot be saved. The original durable
-                // attempt can recover this same fence after restarting.
                 await ReplaceAsync(original.Record with { Fence = Fence }); Text = "";
             }
             else if (original.Record.Terminal(response, target.Share)) { await ReplaceAsync(null); Text = ""; }

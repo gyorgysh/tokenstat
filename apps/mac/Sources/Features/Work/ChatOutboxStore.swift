@@ -8,18 +8,12 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     var text: String
     var attachments: [ChatAttachment]
     var delivery: Delivery = .waiting
-    /// Fixed at the first attempt, including retries of a refused send.
     var firstAttemptAt: Date? = nil
     var attemptedAt: Date? = nil
-    /// Captured at user intent. Missing legacy context requires explicit review.
     var expectedRevision: UInt64? = nil
     var whenConnected = false
     var sourceDraftText: String? = nil
-    /// Original composer identity when an edited pending message receives a
-    /// new delivery id. Keep the link durable for receipt recovery.
     var sourceDraftMessageID: String? = nil
-    /// Held until the person explicitly continues with this same agent.
-    /// Optional so existing outbox records remain readable.
     var signInBackend: String? = nil
 
     var needsReceipt: Bool { delivery == .sending || delivery == .deliveryUnknown }
@@ -35,9 +29,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
-/// Queued messages are durable user writing, separate from reconstructible
-/// caches. Each mutation merges into the current file while holding a process
-/// lock; a window cannot publish its stale snapshot over another window's work.
 @MainActor final class ChatOutboxStore {
     static let shared = ChatOutboxStore()
     static let capacity = 20
@@ -66,9 +57,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
         self.byteLimit = min(max(1, byteLimit), 8 * 1024 * 1024)
     }
 
-    /// Advance only untouched successors of this exact accepted context.
-    /// Receipt recovery does not call this: its current host revision might
-    /// include somebody else's later work.
     func accept(_ item: ChatQueuedMessage, revision: UInt64?, for reference: WorkReference) throws -> [ChatQueuedMessage] {
         try update(reference) { items in
             items.removeAll { $0.id == item.id }
@@ -86,8 +74,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
         return try locked { try read().queues[key]?.items ?? [] }
     }
 
-    /// An explicit send with current context changes delivery metadata, never
-    /// the writing. A receipt hold discovered since the view was drawn wins.
     func prepare(_ expected: ChatQueuedMessage, revision: UInt64, for reference: WorkReference) throws -> ChatQueuedMessage {
         let items = try update(reference) { items in
             guard let index = items.firstIndex(where: { $0.id == expected.id }),
@@ -141,8 +127,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
         }
     }
 
-    /// Move only visible slots, using the live payloads from disk. A second
-    /// window's text edits or delivery updates must survive a stale row drag.
     func reorder(_ reference: WorkReference, expectedIDs: [String], visibleOrder: [String]) throws -> [ChatQueuedMessage] {
         try update(reference) { items in
             guard items.map(\.id) == expectedIDs else { throw Failure.conflict }
@@ -157,8 +141,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
         }
     }
 
-    /// One active send per conversation across this process's windows. The
-    /// persisted sending state survives a process exit and needs a receipt.
     func beginDelivery(_ reference: WorkReference) -> Bool {
         guard let key = WorkReferenceKey.conversation(reference) else { return false }
         return active.insert(key).inserted
@@ -194,7 +176,6 @@ struct ChatQueuedMessage: Identifiable, Equatable, Codable, Sendable {
         region.l_type = Int16(F_WRLCK)
         region.l_whence = Int16(SEEK_SET)
         guard Darwin.fcntl(lock, F_SETLKW, &region) != -1 else { throw Failure.unavailable }
-        // Closing this descriptor releases the advisory write lock.
         return try work()
     }
 }

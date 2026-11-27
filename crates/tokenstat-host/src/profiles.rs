@@ -1,20 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-//! Profiles: more than one login for the same coding agent.
-//!
-//! The default profile is the machine itself: every agent reads whatever the
-//! person is signed in to in Terminal, exactly as before profiles existed. A
-//! named profile (Work, Personal) gives chosen agents a login of their own,
-//! kept in a private folder the agent's own relocation variable points at.
-//! Everything else the agent reads (instructions, skills, settings) is linked
-//! in from the person's own folders, so a profile changes who is signed in and
-//! nothing else.
-//!
-//! tokenstat never reads or writes a login here. The agent's own sign-in
-//! fills the folder. This module only decides which folder an agent sees.
-//!
-//! Profiles are local to the machine. Their names and folders never leave it.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -25,8 +10,6 @@ use serde_json::{Value, json};
 /// The machine's own logins. Never stored, never deleted.
 pub(crate) const SYSTEM: &str = "system";
 
-/// Agents a profile can give a login of their own, and the variable each one
-/// reads its whole home from.
 const AGENTS: &[(&str, &str)] = &[
     ("claude_code", "CLAUDE_CONFIG_DIR"),
     ("codex", "CODEX_HOME"),
@@ -36,8 +19,6 @@ const AGENTS: &[(&str, &str)] = &[
     ("opencode2", "XDG_DATA_HOME"),
 ];
 
-/// Personal Claude Code files a profile shares with the person's own folder.
-/// `.claude.json` is deliberately absent: it names the signed-in account.
 const SHARED_CLAUDE: &[&str] = &[
     "CLAUDE.md",
     "agents",
@@ -66,15 +47,11 @@ struct Store {
 struct Profile {
     id: String,
     name: String,
-    /// Agents with a login of their own here. Every other agent is the same
-    /// as on the machine.
     #[serde(default)]
     own: Vec<String>,
     created_at_ms: i64,
 }
 
-/// One writer at a time inside this process. The file is replaced
-/// atomically, so a reader never sees half of it.
 static LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
@@ -506,9 +483,6 @@ fn agent_folder(id: &str, agent: &str) -> Result<PathBuf, String> {
     Ok(root()?.join(id).join(agent))
 }
 
-/// Create the folder, private to the person, and share their own settings
-/// into it. Runs before every use, so a skill added today reaches a profile
-/// made last month.
 fn prepare(agent: &str, folder: &Path) -> Result<(), String> {
     std::fs::create_dir_all(folder).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -521,8 +495,6 @@ fn prepare(agent: &str, folder: &Path) -> Result<(), String> {
     match agent {
         "claude_code" => {
             if let Some(source) = user_claude_dir().filter(|source| source != folder) {
-                // Previous builds linked the machine's settings, which can
-                // supply credential helpers and override the selected login.
                 let settings = folder.join("settings.json");
                 if std::fs::read_link(&settings)
                     .is_ok_and(|path| path == source.join("settings.json"))
@@ -629,7 +601,7 @@ mod tests {
             assert!(folder.starts_with(data) && folder.is_dir());
             assert!(environment(Some(&id), "codex").unwrap().is_empty());
             assert!(set_agent(&id, "cursor_agent", true).is_err());
-            // Sharing again keeps the folder for next time.
+
             set_agent(&id, "claude_code", false).unwrap();
             assert!(environment(Some(&id), "claude_code").unwrap().is_empty());
             assert!(folder.is_dir());

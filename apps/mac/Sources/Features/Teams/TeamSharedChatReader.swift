@@ -35,8 +35,6 @@ struct TeamSharedChatReader: View {
 
     private var canComment: Bool { summary?.allowsComments == true }
     private var canAsk: Bool { summary?.allowsAgentRuns == true }
-    /// A comment waiting on delivery keeps the composer on comments until it
-    /// lands. Otherwise the composer follows what this chat allows.
     private var activeMode: TeamComposerMode {
         if pendingComment || !canAsk { return .comment }
         if !canComment { return .ask }
@@ -90,8 +88,6 @@ struct TeamSharedChatReader: View {
         }
         .task { await load(earlier: false) }
         .task(id: share.id) {
-            // Reading only: new comments and agent output appear while the
-            // chat is open. Paused while someone is writing or paging back.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
                 guard !Task.isCancelled, isCurrent, !loading, !editingComment, !pendingComment, !loadedEarlier else { continue }
@@ -100,8 +96,6 @@ struct TeamSharedChatReader: View {
         }
         .onDisappear { loadId = UUID(); loading = false; reloadAfterRead = false }
     }
-    /// The same dock the main chat uses: one well in the reading lane, on
-    /// the page ground, under a hairline.
     private var composer: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if canComment && canAsk && !pendingComment {
@@ -140,8 +134,6 @@ struct TeamSharedChatReader: View {
         .background(Theme.background)
         .overlay(alignment: .top) { ThemeRule() }
     }
-    /// Nothing to write into until the chat has said what it allows, so no
-    /// empty well while it loads. A comment waiting on delivery still shows.
     private var showsWell: Bool { summary != nil || pendingComment }
     private var compactTouch: Bool {
         #if os(iOS)
@@ -208,8 +200,6 @@ struct TeamSharedChatReader: View {
             if earlier, let cursor { params["cursor"] = .string(cursor) }
             let page: TeamChatEvents = try await store.read(.connectionCall, fields: fields("team.chat.events",params:params), context: context)
             guard isCurrent, loadId == id, details.chat.id == share.id, details.chat.checkoutId == checkout.id, page.shareId == share.id else { throw CancellationError() }
-            // Keep a bounded window. Refresh returns to the latest page; a
-            // long archive cannot grow this view's memory without a limit.
             let combined = earlier ? page.events + events : page.events
             let bounded = try await Task.detached(priority: .userInitiated) {
                 var size = 0, kept: [JSONValue] = []

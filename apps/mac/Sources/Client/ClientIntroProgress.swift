@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Observation
 
-/// Retained by the scene root; responsive presentations only borrow it.
 @MainActor @Observable
 final class ClientIntroProgress {
     static let pageCount = 6

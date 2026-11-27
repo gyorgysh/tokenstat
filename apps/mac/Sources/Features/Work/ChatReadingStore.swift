@@ -1,28 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Where somebody had got to in a conversation they were not at the end of.
-///
-/// A row and how far down the viewport it sat, never a pixel offset into the
-/// content: the same conversation is a different height on a phone, at a
-/// larger text size, or with an older page loaded above it. The row is the
-/// host's own name for that record, so it means the same thing tomorrow.
 struct ChatReadingMark: Codable, Equatable, Sendable {
-    /// The row that was at the top of the viewport.
     var eventID: String
-    /// Its top edge, as a fraction of the viewport's height. Zero is a row
-    /// resting against the top edge.
     var offset: Double
-    /// How far down the row itself the reader was, as a fraction of the
-    /// row's height. Zero is the row's top edge showing. Above zero means
-    /// the row's top had scrolled past the viewport's top edge: a long
-    /// message the reader is halfway down reopens in its middle rather
-    /// than at its first line. A fraction, not points, because the same
-    /// row is a different height on a phone or at a larger text size.
-    /// Older records carry no value and read as zero.
     var within: Double
     var updatedAt: Date
-    /// Explicit search hits open a folded step, including the group's first one.
     var revealTarget: Bool
 
     init(eventID: String, offset: Double, updatedAt: Date, within: Double = 0, revealTarget: Bool = false) {
@@ -56,13 +39,6 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
         if revealTarget { try values.encode(true, forKey: .revealTarget) }
     }
 
-    /// Whether a row's name will still mean this row after a relaunch.
-    ///
-    /// The host names a record by where it starts in the archive, which is
-    /// fixed for that record's life. A row the host did not name falls back
-    /// to its position in the page that was loaded, and the next launch pages
-    /// differently, so remembering one of those would send somebody back to
-    /// a place that is no longer there.
     static func isStable(eventID: String) -> Bool {
         let parts = eventID.split(separator: "-", omittingEmptySubsequences: false)
         let stamp: Substring
@@ -80,19 +56,11 @@ struct ChatReadingMark: Codable, Equatable, Sendable {
     }
 }
 
-/// The reading position of every conversation this device has been left in
-/// the middle of.
-///
-/// Device-local and identifiers only. Being at the end of a conversation is
-/// the ordinary case and is stored as nothing at all: a record exists exactly
-/// when reopening should land somewhere other than the latest turn.
 @MainActor
 final class ChatReadingStore {
     static let shared = ChatReadingStore()
     private let defaults: UserDefaults
     private let key = "chat.reading.v1"
-    /// Enough conversations that a week of reading fits, small enough that
-    /// the record stays a preference rather than a database.
     private let capacity = 300
 
     private struct Envelope: Codable {
@@ -102,8 +70,6 @@ final class ChatReadingStore {
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
-    /// One explicit navigation request, separate from passive reading history.
-    /// Ordinary conversation selection always starts at the latest page.
     private var requested: (key: String, mark: ChatReadingMark)?
 
     func request(_ mark: ChatReadingMark, for reference: WorkReference) {
@@ -129,8 +95,6 @@ final class ChatReadingStore {
         return read()[key]
     }
 
-    /// Remember where the reading is. A row whose name will not survive a
-    /// relaunch is not remembered at all.
     func remember(_ mark: ChatReadingMark, for reference: WorkReference) {
         guard let key = WorkReferenceKey.conversation(reference),
               ChatReadingMark.isStable(eventID: mark.eventID) else { return }
@@ -140,7 +104,6 @@ final class ChatReadingStore {
         write(marks)
     }
 
-    /// Back with the latest turn, which is where a conversation opens anyway.
     func forget(for reference: WorkReference) {
         guard let key = WorkReferenceKey.conversation(reference) else { return }
         var marks = read()
@@ -148,8 +111,6 @@ final class ChatReadingStore {
         write(marks)
     }
 
-    /// Everything under one folder, for a conversation list that has lost its
-    /// folder, and one account's worth for a sign-out.
     func remove(scope: WorkReference.Scope, hostIdentity: String, workspaceID: String) {
         let prefix = WorkReferenceKey.folder(scope: scope, hostIdentity: hostIdentity,
                                              workspaceID: workspaceID)
@@ -165,8 +126,6 @@ final class ChatReadingStore {
         write(read().filter { !$0.key.hasPrefix(prefix) })
     }
 
-    /// Reread on every write, so two windows reading two conversations do not
-    /// overwrite each other's places.
     private func read() -> [String: ChatReadingMark] {
         guard let data = defaults.data(forKey: key), data.count <= 512 * 1024,
               let stored = try? JSONDecoder().decode(Envelope.self, from: data),

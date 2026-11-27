@@ -4,22 +4,12 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
-//! Dispatch methods for this machine's identity and the peers it trusts.
-//!
-//! Sessionless, and not because of speed. The Machines screen has to work on a
-//! machine whose archive will not open: "who am I and who may connect" is the
-//! screen somebody goes to *when* something is wrong, and putting it behind the
-//! archive would take it away exactly then.
-
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokenstat_identity::{MachineIdentity, PeerStore, Trust, fingerprint, public_key_from_hex};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct KeyParams {
-    /// Public key as hex. Never a fingerprint: a fingerprint is a hash and
-    /// cannot be turned back into the key it names.
     #[serde(default)]
     key: String,
     #[serde(default)]
@@ -38,8 +28,7 @@ pub(crate) fn now() -> String {
 pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(match method {
         "machine.identity" => identity(),
-        // The peer list carries every machine's address. Local only, the same
-        // as the trust settings whose screen displays it.
+
         "machine.peers" => local_trust(peers),
         "machine.rename" => local_trust(|| rename(params)),
         "machine.pair" => local_trust(|| pair(params)),
@@ -55,30 +44,19 @@ fn local_trust(work: impl FnOnce() -> Result<Value, String>) -> Result<Value, St
     work()
 }
 
-/// Who this machine is.
-///
-/// Creates the keypair on first call, which means simply opening the Machines
-/// screen is enough to have an identity to show somebody. There is nothing to
-/// generate, no button, and no state where the screen says "not set up yet".
 fn identity() -> Result<Value, String> {
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     Ok(json!({
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
-        // Three words over a hex fingerprint, because that is the comparison a
-        // person performs instead of skims. Both are sent: the screen leads
-        // with the words and keeps the fingerprint for whoever wants it.
+
+
         "words": tokenstat_identity::key_words(&identity.public_key()),
         "label": tokenstat_identity::machine_label(),
         "labelIsChosen": tokenstat_identity::machine_label_is_chosen(),
     }))
 }
 
-/// Call this machine something.
-///
-/// The name travels to a paired machine and nowhere else, so this is not a
-/// setting with consequences beyond how a peer list reads. An empty name is a
-/// reset rather than an error: the field is the undo.
 fn rename(params: &str) -> Result<Value, String> {
     #[derive(Deserialize)]
     struct NameParams {
@@ -91,37 +69,13 @@ fn rename(params: &str) -> Result<Value, String> {
     identity()
 }
 
-/// Tell the account this machine's new name.
-///
-/// **Never in a test build.** This is one HTTP call against the real account
-/// with this machine's real credentials, and `TOKENSTAT_IDENTITY_DIR` does not
-/// redirect it: it moves the identity file, not the account. A unit test for
-/// renaming therefore renamed the developer's own machine on the website, and
-/// because the push runs on a detached thread that the process outlives by
-/// nothing, the test's own undo often never landed. The name it happened to
-/// use sat on the account afterwards.
-///
-/// The guard is `cfg!(test)` rather than an environment variable, because a
-/// person may legitimately set any variable and none of them should mean
-/// "do not update my account".
 fn push_name_to_account(name: &str) {
     if cfg!(test) {
         return;
     }
-    // With remote reach on, the account directory shows this name on the
-    // other screens, so it is refreshed rather than waiting for a reconnect.
+
     crate::remote::register_if_tunnel_enabled();
-    // And with remote reach off, the account still has a device list with this
-    // machine in it. Renaming the computer here and leaving the website on the
-    // old name is one name too many.
-    //
-    // Clearing is handled there too: `rename_machine` drops the choice and
-    // then says this machine's own name, so "use the computer's name" leaves
-    // the account showing that name rather than showing none.
-    //
-    // On its own thread: this is one HTTP round trip, and a rename must not
-    // sit there waiting for it on a machine that is offline. Best effort: no
-    // account, no call, no complaint.
+
     let named = name.to_string();
     std::thread::spawn(move || {
         if let Ok(machine_id) = tokenstat_sync::config::ensure_machine_id() {
@@ -153,28 +107,15 @@ fn peer_json(peer: &tokenstat_identity::Peer) -> Value {
     })
 }
 
-/// Pair with a machine whose key somebody entered.
-///
-/// Approved outright: typing a key in *is* the approval, and asking again on
-/// the next screen would train people to click through the question that
-/// matters. This is also the path that needs no hosted service at all, which is
-/// what makes the privacy claim checkable rather than promised.
 fn pair(params: &str) -> Result<Value, String> {
     let p: KeyParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let key = public_key_from_hex(&p.key).map_err(|e| e.to_string())?;
 
-    // Pinning your own key is never a connection: it is a loop somebody can
-    // only click by accident, and the Machines screen now filters the machine
-    // out of its own discovery list. Refuse here as well so a pasted or
-    // account-supplied self-key gets the same answer from every path.
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     if identity.public_key() == key {
         return Err("that is this machine's own key, not another machine".into());
     }
 
-    // An empty name is "no name", not a machine called "". The stored fallback
-    // is the fingerprint, so a row added by key alone still identifies the
-    // peer until somebody names it; the screen leads with the word pair anyway.
     let label = p
         .label
         .as_deref()
@@ -182,8 +123,7 @@ fn pair(params: &str) -> Result<Value, String> {
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| fingerprint(&key));
-    // An empty address is the same as none: this machine may connect *to* the
-    // peer through the tunnel, but there is nothing to dial directly.
+
     let address = p
         .address
         .as_deref()
@@ -197,26 +137,12 @@ fn pair(params: &str) -> Result<Value, String> {
         )
     })
     .map_err(|e| e.to_string())?;
-    // Pairing by code is a person saying yes to one device by name, in front
-    // of the machine, which is exactly the consent workspace access asks for.
-    // Appearing on the account is not, and that path grants nothing.
+
     grant_work(&key, true);
     Ok(peer_json(&peer))
 }
 
-/// Move the workspace grant with the trust that carries it.
-///
-/// Best effort on purpose. Trust is already written by the time this runs, and
-/// neither direction is dangerous if the file will not take it: a grant that
-/// did not land means the device asks, and a removal that did not land is held
-/// by a peer this machine now refuses outright. Failing the whole call would
-/// report a pairing that actually happened as an error.
 fn grant_work(key: &tokenstat_identity::PublicKey, allow: bool) {
-    // The canonical hex, not what a caller typed: the policy file is keyed by
-    // the form `remote_peer` hands out. No account fetch for the audit label:
-    // pairing runs on every phone connect, and a stalled directory fetch
-    // would stall the connect on it. The locked helper falls back to the
-    // cache-only lookup, which is all an audit line needs.
     let hex = tokenstat_identity::hex(key);
     if let Err(error) = crate::workspace_policy::set_allowed_by_with_label(
         &hex,
@@ -241,22 +167,13 @@ fn set_trust(params: &str, trust: Trust) -> Result<Value, String> {
         (changed, changed)
     })
     .map_err(|e| e.to_string())?;
-    // Approving in Devices is the same yes as typing a pairing code, and
-    // revoking has to take the work back with it: a device nobody trusts
-    // enough to reach this machine must not keep a grant waiting for it.
-    //
-    // Granting only on a real change, because approving a peer that was
-    // already approved must not quietly hand back a grant its owner turned off
-    // with the toggle in Devices. Revoking runs either way: taking access back
-    // from a device that already had none costs nothing, and a stale grant is
-    // exactly what this is for.
+
     match trust {
         Trust::Approved if changed => grant_work(&key, true),
         Trust::Revoked => grant_work(&key, false),
         _ => {}
     }
-    // False rather than an error: approving a peer that just went away is not
-    // a failure the user did anything about, and it is racy by nature.
+
     Ok(json!({"changed": changed}))
 }
 
@@ -269,8 +186,7 @@ fn forget(params: &str) -> Result<Value, String> {
         (forgotten, forgotten)
     })
     .map_err(|e| e.to_string())?;
-    // A device this machine has forgotten must not come back to a grant it
-    // was left holding.
+
     grant_work(&key, false);
     Ok(json!({"forgotten": forgotten}))
 }

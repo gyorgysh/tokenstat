@@ -7,13 +7,6 @@
 import SwiftUI
 
 
-/// A workflow drawn as named steps: mark, label, arrow, next step.
-///
-/// The compact `MiniGraph` is right in a list of workflows you already know,
-/// where the shape distinguishes one row from another. It is wrong for an
-/// example, which is being read for the first time by somebody deciding what
-/// the thing does: four unlabelled tiles and a `+2` is a shape with no
-/// meaning yet. This spells the steps out and still fits on a line or two.
 struct WorkflowStepStrip: View {
     var nodes: [WorkflowNode]
     var edges: [WorkflowEdge] = []
@@ -24,9 +17,6 @@ struct WorkflowStepStrip: View {
     }
 
     var body: some View {
-        // Wraps rather than truncating: an example is worth two lines, and a
-        // pipeline that ends in "+2" hides exactly the step somebody wanted to
-        // know about.
         FlowLayout(spacing: 6, rowSpacing: 6) {
             ForEach(Array(steps.enumerated()), id: \.element.id) { index, node in
                 HStack(spacing: 5) {
@@ -58,19 +48,11 @@ struct WorkflowStepStrip: View {
     }
 }
 
-/// A workflow drawn small: node marks in columns, joined by connectors.
-///
-/// Pass `steps` and `currentNodeID` from a run and the same strip becomes a
-/// progress read-out, so a library row shows where a live run has got to
-/// without anybody opening the editor.
 struct MiniGraph: View {
     var nodes: [WorkflowNode]
     var edges: [WorkflowEdge] = []
-    /// Per-node outcomes from a run. Empty means "not running", which draws
-    /// every node in the quiet resting tint.
     var steps: [WorkflowStep] = []
     var currentNodeID: String?
-    /// Columns drawn before the rest collapses into a `+n` pill.
     var maxColumns: Int = 5
     var dot: CGFloat = 22
 
@@ -80,8 +62,6 @@ struct MiniGraph: View {
 
     var body: some View {
         let all = columns
-        // A caller can hand this a zero or negative column cap; `prefix` of a
-        // negative length traps, so the limit is clamped first.
         let cap = max(0, maxColumns)
         let shown = Array(all.prefix(max(0, all.count > cap ? cap - 1 : cap)))
         let hidden = all.dropFirst(shown.count).reduce(0) { $0 + $1.count }
@@ -128,12 +108,6 @@ struct MiniGraph: View {
             .help(L10n.text("apple.minigraph.0_more_steps.af5b37ef", "\(count)"))
     }
 
-    /// Resting, or coloured by what the run did with this node.
-    ///
-    /// Note the tuple is read once per render into `MiniGraphNode`, which owns
-    /// the pulse. A run usually starts while the library is already on screen,
-    /// so "began breathing" has to be a change the node itself sees rather
-    /// than something the strip sets up once when it appears.
     private func state(of node: WorkflowNode) -> (tint: Color, emphatic: Bool, live: Bool) {
         if node.id == currentNodeID {
             return (Theme.stateWorking, true, true)
@@ -146,12 +120,6 @@ struct MiniGraph: View {
     }
 }
 
-/// One tile in the strip, and the only thing here that moves.
-///
-/// Its own view because the pulse has to start when the node goes live, not
-/// when the strip appears: the interesting case is a run beginning under a list
-/// that is already on screen, and an animation keyed to the parent's `onAppear`
-/// would leave that node dimmed and still.
 private struct MiniGraphNode: View {
     var node: WorkflowNode
     var tint: Color
@@ -175,10 +143,6 @@ private struct MiniGraphNode: View {
             }
         }
         .frame(width: dot, height: dot)
-        // Only the node a run is sitting on breathes. A whole strip of moving
-        // tiles says nothing about where the work is.
-        // Scoped to the opacity: a forever animation on the whole view also
-        // swings its position when the layout around it moves.
         .animation(
             dimmed
                 ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)

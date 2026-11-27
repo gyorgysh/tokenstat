@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Ask the publishing computer's agent about a shared chat. The host reviews
-/// the chat first and starts the agent only for that reviewed state. While it
-/// runs, the reader refreshes and anyone allowed can stop it.
 struct TeamAskBar: View {
     @State private var model: TeamAskModel
     let computer: String
     let allowsAgentRuns: Bool
-    /// False while the composer shows comments. A running agent still
-    /// reports here, because stopping it should never be a tab away.
     let visible: Bool
     let refresh: () -> Void
 

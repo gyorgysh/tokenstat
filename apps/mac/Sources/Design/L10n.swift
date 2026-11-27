@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// App-owned copy is resolved separately from identifiers and user content.
 enum L10n {
     private static let catalog = LanguageCatalog(
         directory: (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("localization"),

@@ -3,8 +3,6 @@ import Foundation
 import CryptoKit
 import Darwin
 
-/// Original draft files are user writing. Cache eviction and sign-out never
-/// remove them. Each file belongs to one complete conversation reference.
 actor ChatLocalAttachmentStore {
     static let shared = ChatLocalAttachmentStore()
     static let maximumBytes = 12 * 1024 * 1024
@@ -51,8 +49,6 @@ actor ChatLocalAttachmentStore {
     func stage(data: Data, name: String, mediaType: String?, reference: WorkReference) throws -> ChatAttachment {
         guard !data.isEmpty, UInt64(data.count) <= ChatFileIO.maximumBytes else { throw Failure.invalid }
         if data.count > Self.maximumBytes {
-            // Pasteboard bytes use the same file-backed storage and chunked
-            // upload as large file imports, without base64 JSON expansion.
             _ = try originalAccess.get()
             let temporary = directory.appendingPathComponent("import-" + UUID().uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -83,7 +79,6 @@ actor ChatLocalAttachmentStore {
         try Self.synchronizeDirectory(directory)
         return attachment
     }
-    /// Originals larger than the inline limit use a private binary sidecar.
     func stage(file: URL, name: String, mediaType: String?, reference: WorkReference) throws -> ChatAttachment {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
@@ -105,8 +100,6 @@ actor ChatLocalAttachmentStore {
         defer { withExtendedLifetime(activity) {} }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let bytes = url.appendingPathExtension("bytes")
-        // Copy refuses an existing destination. Only clean up bytes this
-        // invocation created, never an original retained by an earlier import.
         try ChatFileIO.copy(file, to: bytes)
         do {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bytes.path)
@@ -167,8 +160,6 @@ actor ChatLocalAttachmentStore {
         uploads[url] = Upload(id: id, task: task)
         return try await waitForUpload(url)
     }
-    /// Keep an explicitly imported host file under the same descriptor. It
-    /// remains usable offline, and sharing it again needs no second upload.
     func keep(_ attachment: ChatAttachment, data: Data, reference: WorkReference) throws {
         guard !Self.isLocal(attachment), !data.isEmpty, data.count <= Self.maximumBytes,
               UInt64(data.count) == attachment.size else { throw Failure.invalid }
@@ -227,9 +218,6 @@ actor ChatLocalAttachmentStore {
         return try await waitForUpload(url)
     }
 
-    /// A dismissed caller leaves a shared upload running only while another
-    /// caller still needs it. Keep its entry until actual completion so file
-    /// removal cannot race an upload that is still stopping.
     private func waitForUpload(_ url: URL) async throws -> ChatAttachment {
         guard let upload = uploads[url] else { throw Failure.invalid }
         let waiter = UUID()
@@ -290,8 +278,6 @@ actor ChatLocalAttachmentStore {
         result.files.sort { $0.attachment.name.localizedStandardCompare($1.attachment.name) == .orderedAscending }
         return result
     }
-    /// Check live draft references and unlink in one main-actor operation.
-    /// Reserving the file first keeps an upload from starting during the hop.
     func remove(_ retained: RetainedFile,
                 ifUnused check: @escaping @MainActor @Sendable () throws -> Bool) async throws {
         let url = try location(retained.attachment.id, reference: retained.reference)
@@ -302,8 +288,6 @@ actor ChatLocalAttachmentStore {
         try await MainActor.run {
             try OriginalFileCoordination.whileSoleParticipant(participant, removing: url) {
                 guard try check() else { throw Failure.inUse }
-                // No await after checking the references. Every live window writes
-                // draft/outbox intent on this same actor, including unsaved drafts.
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }
                 let encoded = try handle.read(upToCount: 17 * 1024 * 1024) ?? Data()
@@ -328,8 +312,6 @@ actor ChatLocalAttachmentStore {
         guard file.external != true else { throw Failure.invalid }
         return file.data
     }
-    /// Render on the store actor while the original is protected from removal.
-    /// Large files stay on disk; previewing never exports a second full copy.
     func preview(_ attachment: ChatAttachment, reference: WorkReference,
                  render: @Sendable (Data?, URL?) -> Data?) throws -> Data? {
         let metadata = try location(attachment.id, reference: reference)

@@ -2,12 +2,7 @@
 //
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
-
 //! Discovery for model servers listening on this machine's loopback.
-//!
-//! This is deliberately in the host crate. Local provider discovery is a host
-//! feature, not archive parsing, and must never add a network dependency to
-//! `tokenstat-core`.
 
 use std::io::Read;
 use std::time::Duration;
@@ -84,7 +79,6 @@ pub(crate) const CHAT_PREFIX: &str = "local:";
 /// compatible endpoint, which LM Studio and recent Ollama builds serve.
 pub(crate) fn chat_providers(backend: &str) -> &'static [&'static str] {
     match backend {
-        // Ollama only where it answers Anthropic's API: see `anthropic`.
         "claude" | "codex" | "opencode" | "opencode2" => &["lmstudio", "ollama"],
         _ => &[],
     }
@@ -174,8 +168,7 @@ pub(crate) fn api_base_url(provider: &str) -> Result<String, String> {
 /// Probe the supported local model servers without contacting the internet.
 pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
     let providers = probe()?;
-    // Reports price these at zero. Best effort: a failed write only means a
-    // local model may borrow a similar cloud model's list rate.
+
     let _ = tokenstat_core::pricing::local_models::remember(
         providers
             .iter()
@@ -265,7 +258,6 @@ pub(crate) fn context_window(provider: &str, model: &str) -> Option<u64> {
     let port = configured_port(provider).ok()?;
     match provider {
         "ollama" => {
-            // The loaded window can be much smaller than the model's maximum.
             if let Some(tokens) = get_json(port, "/api/ps")
                 .ok()
                 .as_ref()
@@ -297,7 +289,6 @@ pub(crate) fn context_window(provider: &str, model: &str) -> Option<u64> {
     .filter(|tokens| *tokens > 0)
 }
 
-/// A model id as one path segment. LM Studio ids carry a slash.
 fn ollama_loaded_context(value: &Value, model: &str) -> Option<u64> {
     value
         .get("models")?
@@ -325,9 +316,6 @@ fn url_segment(id: &str) -> String {
         .collect()
 }
 
-/// Whether the server knows Anthropic's `/v1/messages` route. An empty body
-/// is refused as a bad request where the route exists and as not found where
-/// it does not, so nothing is generated and no model is loaded to answer.
 fn has_messages_route(port: u16) -> bool {
     let Ok(client) = tokenstat_sync::http::client_builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -351,9 +339,6 @@ fn get_json(port: u16, path: &str) -> Result<Value, String> {
 }
 
 fn request_json(port: u16, path: &str, body: Option<Value>) -> Result<Value, String> {
-    // A real HTTP decoder handles chunked responses and Content-Length without
-    // waiting for a server to close a reusable connection. The total deadline
-    // also bounds a server that continually trickles a few bytes.
     let client = tokenstat_sync::http::client_builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(READ_TIMEOUT)
@@ -627,10 +612,6 @@ mod tests {
 
     #[test]
     fn the_wire_shape_is_camel_case() {
-        // Pinned because a client decodes these names literally. `baseUrl`
-        // spelled `baseURL` on the other side failed every response, and the
-        // failure surfaced as "no local models discovered" rather than as a
-        // decoding error.
         let value = serde_json::to_value(LocalProvider {
             id: "lmstudio".into(),
             name: "LM Studio".into(),

@@ -7,12 +7,6 @@
 import Foundation
 import Observation
 
-/// One block of the connected-host Workspaces surface.
-///
-/// Hosts and the security note stay outside this list: they are how you get
-/// here, not cards to rearrange. Only Folders, Recent chats and All sessions
-/// move, because that is the work someone opens the tab for once a machine
-/// is already on the line.
 enum WorkspacesSection: String, CaseIterable, Identifiable, Codable, Sendable {
     case folders
     case recentChats = "recent_chats"
@@ -71,11 +65,6 @@ enum WorkspacesPreset: String, CaseIterable, Identifiable, Codable, Sendable {
     var hidden: Set<WorkspacesSection> { [] }
 }
 
-/// How this device arranges Folders / Recent chats / All sessions within each
-/// connected host.
-///
-/// Device furniture, same idea as Home: a phone and an iPad keep their own
-/// order. The same section order applies to each host's group.
 @MainActor @Observable
 final class WorkspacesLayout {
     static let shared = WorkspacesLayout()
@@ -88,9 +77,6 @@ final class WorkspacesLayout {
     private(set) var order: [WorkspacesSection]
     private(set) var hidden: Set<WorkspacesSection>
     private(set) var preset: WorkspacesPreset?
-    /// The host-wide task board link above the sections. Off unless asked:
-    /// the per-folder boards already cover daily work, and the sidebar link
-    /// duplicated every folder's own board one tap away.
     private(set) var allTasksVisible: Bool
 
     var sections: [WorkspacesSection] { order.filter { !hidden.contains($0) } }
@@ -115,8 +101,6 @@ final class WorkspacesLayout {
             : defaults.bool(forKey: Self.allTasksKey)
     }
 
-    /// Show or hide the host-wide task board link. Kept apart from the
-    /// section order: it is one card above the sections, not one of them.
     func setAllTasksVisible(_ visible: Bool) {
         allTasksVisible = visible
         defaults.set(visible, forKey: Self.allTasksKey)

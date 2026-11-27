@@ -7,9 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The panel over a forty-model list: word-wise matching, first-seen
-/// sections, and a Done key that takes what was typed rather than what the
-/// typing happens to substring-match.
 class TsPickerTest {
     private fun choice(label: String, section: String = "", detail: String? = null) =
         PickerChoice(label, label, detail, section)
@@ -74,8 +71,6 @@ class TsPickerTest {
         assertEquals("codex-mini", pickerSubmitTarget(choices, "codex-mini", ""))
     }
 
-    /// The combined panel's Agent rows shadow model ids: typing "codex" must
-    /// not select the agent when a model matches too.
     @Test
     fun `done prefers a non-agent row when no section is picked`() {
         val choices = listOf(

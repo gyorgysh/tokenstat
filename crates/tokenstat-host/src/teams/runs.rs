@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Team runs that are still going on this host.
-//!
-//! A guardian stops when its control pipe closes, so the pipe has to live
-//! somewhere after the Ask request returns. It lives here, in the host
-//! process, next to who may stop the run. A reader thread follows the
-//! guardian's events and forgets the run once it has finished. When the host
-//! exits, every pipe closes and every run stops.
-
 use super::AuthorizedTeamPrincipal;
 use crate::{chat_receipts::team_runs::Fence, error::DispatchError, team_process};
 use serde_json::{Value, json};
@@ -19,7 +10,6 @@ use std::{
 };
 use tokenstat_sync::teams::RepositoryRole;
 
-/// More runs than this on one computer is a mistake, not a workload.
 const LIMIT: usize = 16;
 
 struct Run {
@@ -29,7 +19,6 @@ struct Run {
     control: ChildStdin,
 }
 
-/// Where a run belongs. Stop is checked against all of it.
 #[derive(Clone, PartialEq, Eq)]
 struct Scope {
     issuer: String,
@@ -81,7 +70,6 @@ pub(super) fn register(
         let mut guard = runs();
         let table = guard.get_or_insert_with(HashMap::new);
         if table.len() >= LIMIT || table.contains_key(&id) {
-            // Dropping the pipe stops this guardian; the reader still reaps it.
             drop(control);
             follow(None, child, output);
             return Err(busy());
@@ -100,7 +88,6 @@ pub(super) fn register(
     Ok(())
 }
 
-/// Read events until the guardian finishes, then reap it and forget the run.
 fn follow(id: Option<String>, mut child: Child, mut output: BufReader<ChildStdout>) {
     let key = id.clone();
     let worker = move || {
@@ -109,9 +96,7 @@ fn follow(id: Option<String>, mut child: Child, mut output: BufReader<ChildStdou
                 break;
             }
         }
-        // A finished frame can precede the guardian's final drops. Keep the
-        // run visible until it exits, so a subsequent Ask/Land cannot race
-        // its writer cleanup.
+
         let _ = child.wait();
         if let Some(id) = &key
             && let Some(table) = runs().as_mut()
@@ -126,14 +111,10 @@ fn follow(id: Option<String>, mut child: Child, mut output: BufReader<ChildStdou
         && let Some(id) = id
         && let Some(table) = runs().as_mut()
     {
-        // No reader means nobody would forget this run. Closing its pipe
-        // stops the guardian now rather than leaving it unstoppable.
         table.remove(&id);
     }
 }
 
-/// Who may stop a run: the person who asked, a repository maintainer, or the
-/// publisher of this checkout. Everyone else sees the run but cannot end it.
 fn may_stop(principal: &AuthorizedTeamPrincipal, scope: &Scope, initiator: &str) -> bool {
     let value = principal.value();
     Scope::of(principal) == *scope
@@ -194,7 +175,6 @@ pub(super) fn stop(
     principal: &AuthorizedTeamPrincipal,
     params: &str,
 ) -> Result<Value, DispatchError> {
-    // Stop needs the same verified Run proof as Review and Send.
     principal.run_ticket()?;
     let input = input(params)?;
     let mut guard = runs();
@@ -203,7 +183,6 @@ pub(super) fn stop(
         .and_then(|table| table.get_mut(input.fence.run_id()))
         .filter(|run| run.fence == input.fence)
     else {
-        // Finished, never started here, or already gone: nothing to stop.
         return Ok(json!({"stopping":false}));
     };
     if !may_stop(principal, &run.scope, &run.initiator) {
@@ -300,7 +279,7 @@ mod tests {
     fn stop_needs_a_run_proof_and_status_reports_unknown_runs() {
         let share = format!("share_{}", "a".repeat(32));
         let fence = json!({"runId":format!("run_{}", "c".repeat(32)),"incarnation":"d".repeat(64)});
-        // Without a verified Run proof, Stop is refused before any lookup.
+
         assert!(
             stop(
                 &principal("asker", "viewer", &share),

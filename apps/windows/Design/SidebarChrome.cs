@@ -9,7 +9,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Design;
 
-/// <summary>Shared sidebar and rail metrics, independent of native template defaults.</summary>
 internal static class SidebarChrome
 {
     private sealed class ProjectAlignment { internal bool Pending; }
@@ -38,8 +37,6 @@ internal static class SidebarChrome
             if (ActionBindings.TryGetValue(fresh, out var actions))
             {
                 var controls = actions.Actions;
-                // Queued focus callbacks on the discarded candidate must not
-                // repaint controls now owned by the retained native row.
                 actions.Actions = [];
                 RevealActions(retained, controls);
             }
@@ -66,10 +63,8 @@ internal static class SidebarChrome
         AlignProject(row);
     }
 
-    // The app supplies the sink so shared control fixtures need no app entry point.
     internal static Action<string>? ThresholdFailure { get; set; }
 
-    /// <summary>Update app-owned pane content after the native transition returns.</summary>
     public static void FollowPaneState(NavigationView view, Action update)
     {
         var pending = false;
@@ -77,8 +72,6 @@ internal static class SidebarChrome
         {
             if (pending) return;
             pending = true;
-            // Header/footer replacement and hierarchy expansion can rebuild the
-            // pane. They must not reenter SplitView's property transition.
             if (!view.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 pending = false;
@@ -87,12 +80,8 @@ internal static class SidebarChrome
         });
     }
 
-    /// <summary>Keep adaptive navigation between expanded and minimal modes.</summary>
     public static void SetAdaptiveThreshold(NavigationView view, double width)
     {
-        // The shell has no icon-only pane. Updating Expanded first while
-        // growing briefly enters Compact before the second setter runs.
-        // Overlap the thresholds during the update, then leave them equal.
         var expanded = double.NaN;
         var compact = double.NaN;
         var stage = "read thresholds";
@@ -153,8 +142,6 @@ internal static class SidebarChrome
             Background = Theme.ClearBrush,
         };
         AutomationProperties.SetName(expand, L10n.Text("windows.mainwindow_xaml.expand_collapse"));
-        // Content can move to a reused native container. Resolve its current
-        // owner rather than capturing the discarded, unmounted candidate.
         expand.Click += (_, _) =>
         {
             for (DependencyObject? owner = grid; owner is not null; owner = VisualTreeHelper.GetParent(owner))
@@ -169,10 +156,6 @@ internal static class SidebarChrome
         grid.Children.Add(folder);
         Grid.SetColumn((FrameworkElement)label, 2);
         grid.Children.Add(label);
-        // As on the Mac: the change counts sit against the right edge, and the
-        // hover actions take that same seat rather than columns of their own,
-        // which left the counts stranded mid-row. The counts slot is held at
-        // the actions' width so the name never moves when they appear.
         const double spacing = 4;
         var seat = new StackPanel { Orientation = Orientation.Horizontal, Spacing = spacing,
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
@@ -204,8 +187,6 @@ internal static class SidebarChrome
         var alignment = ProjectAlignments.GetValue(row, static _ => new ProjectAlignment());
         if (alignment.Pending) return;
         alignment.Pending = true;
-        // Native item state changes can replace the presenter style. Do not
-        // force its template, or edit its parts, inside that transition.
         if (!row.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             alignment.Pending = false;
@@ -259,7 +240,6 @@ internal static class SidebarChrome
             HorizontalContentAlignment = HorizontalAlignment.Stretch };
     }
 
-    /// <summary>Keep row actions visible while the pointer or keyboard focus is inside.</summary>
     public static void RevealActions(Control row, params Control[] actions)
     {
         var state = ActionBindings.GetValue(row, owner =>

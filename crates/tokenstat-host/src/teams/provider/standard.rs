@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Native CLI adapters whose existing chat gate is a lifecycle hook. The
-//! private settings expose only the guardian's MCP, never the personal host.
-
 use super::{Path, PathBuf, Program, RunHome, fs, io, json, write_new};
 
 const GROK_AUTH: &[&str] = &[
@@ -100,8 +96,6 @@ pub(super) fn prepare(
 }
 
 fn grok_machine_settings(cli_home: &Path) -> [PathBuf; 2] {
-    // Native Grok documents these exact system layers. A rooted Windows path
-    // uses the CLI cwd's drive, so anchor that drive rather than the daemon's.
     #[cfg(windows)]
     let directory = cli_home
         .ancestors()
@@ -170,9 +164,7 @@ fn prepare_native(
                 &source.join("auth.json"),
                 native_folder,
             );
-            // Native AuthManager independently selects this path for its
-            // existing login/refresh. Keep the real store, not a disposable
-            // credential alias whose atomic publication could detach it.
+
             program
                 .env
                 .insert("GROK_AUTH_PATH".into(), auth_path.display().to_string());
@@ -222,7 +214,7 @@ fn prepare_native(
                 config["mcp_servers"][super::SERVER]["env"][key] =
                     toml_edit::value(value.as_str().expect("environment string"));
             }
-            // Grok expands whole-value references, without writing run tokens.
+
             for key in super::SDK_VARS {
                 config["mcp_servers"][super::SERVER]["env"][key] =
                     toml_edit::value(format!("${{{key}}}"));
@@ -340,8 +332,7 @@ fn prepare_native(
                     &native_home.join(".config/gcloud/application_default_credentials.json"),
                     native_folder,
                 );
-                // Native ADC accepts a credential-file selector; it does not
-                // need the person's gcloud settings or executable callbacks.
+
                 program.env.insert(
                     "GOOGLE_APPLICATION_CREDENTIALS".into(),
                     source.display().to_string(),
@@ -431,9 +422,6 @@ pub(super) fn command(
     backend: &str,
     prompt: &str,
 ) -> io::Result<Vec<String>> {
-    // Grok exposes MCP through search/use gateways rather than direct model
-    // functions. Give it the scoped schemas so search_tool can stay denied;
-    // the guardian authorizes only use_tool's exact qualified MCP target.
     let prompt = if backend == "grok" {
         format!(
             "Grok MCP transport: call use_tool with tool_name tokenstat_team__<tool> and an inline tool_input object using these schemas. Do not call search_tool or use file/tool_input_file arguments. File tools are available only when this run has a lane. Scoped schemas: {}\n\n{prompt}",
@@ -483,10 +471,7 @@ pub(super) fn command(
         "grok" => {
             argv[at - 1] = "--prompt-file".into();
             argv[at] = program.input.display().to_string();
-            // Empty or unknown Grok allowlists fall back to every builtin.
-            // Select one real builtin, then exclude it: only MCP transport
-            // gateways remain. Read-deny also blocks use_tool's file-argument
-            // forms before native code opens a file, ahead of the MCP hook.
+
             argv.extend([
                 "--tools".into(),
                 "read_file".into(),
@@ -509,9 +494,6 @@ pub(super) fn command(
             write_new(&program.input, prompt.as_bytes())?;
         }
         "agy" => {
-            // Agy's stream input runs one user message per line. Keep the
-            // mandatory --print value empty and carry the complete turn as
-            // NDJSON, including Unicode and conflict lists of any argv size.
             argv[at] = "".into();
             argv.extend([
                 "--input-format".into(),
@@ -730,7 +712,7 @@ mod tests {
                     let settings =
                         fs::read_to_string(home.file("home/.gemini/antigravity-cli/settings.json"))
                             .unwrap();
-                    // A Gemini key in the shell must not switch an OAuth CLI.
+
                     assert_eq!(settings, "{}");
                     assert_eq!(
                         Path::new(&program.env["GOOGLE_APPLICATION_CREDENTIALS"]),

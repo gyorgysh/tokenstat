@@ -8,22 +8,10 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Which of your computers is awake right now, on the screen that opens.
-///
-/// Account plane only: names, dots and last-seen words come from the account
-/// list, so this draws with every laptop shut. Tapping a row opens that
-/// machine's work a level beyond its device page, which stays one tap away
-/// under Devices for the readings and the rename.
 struct ClientHomeMachinesSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
 
-    /// Awake hosts on this account, minus this phone. Asleep ones stay off
-    /// this screen: the list is a jumping-off point, not an inventory, and
-    /// Devices already inventories everything. Old records predate the kind
-    /// field and read as hosts, so the phone is excluded by id, the same way
-    /// the Workspaces list does it. Rows without an id cannot be opened, so
-    /// they are not rows.
     private var hosts: [Machine] {
         let thisID = account.account?.thisMachineID
         return (account.account?.machines ?? []).filter { machine in
@@ -55,10 +43,6 @@ struct ClientHomeMachinesSection: View {
                 .padding(.horizontal, 2)
                 VStack(spacing: 0) {
                     ForEach(hosts) { machine in
-                        // Past the device page, straight to the work. The key
-                        // is missing only on records from before it existed;
-                        // those still open the device page, which shows what
-                        // there is.
                         if let key = machine.publicIdentity, !key.isEmpty {
                             NavigationLink {
                                 ClientHostWorkspacesView(peerKey: key, hostName: machine.displayName)

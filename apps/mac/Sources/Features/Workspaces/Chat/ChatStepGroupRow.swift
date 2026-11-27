@@ -2,17 +2,8 @@
 
 import SwiftUI
 
-/// A header standing in for folded transcript steps, with a few recent
-/// actions visible while Minimal work runs. Tapping anywhere shows the
-/// steps below it as rows of their own, and tapping again folds them away.
-///
-/// Shared by the Mac and the phone. The whole line is the control: it is
-/// one short row, and a separate Show button on it would be a smaller
-/// target saying the same thing.
 struct ChatStepGroupRow: View {
     let group: ChatStepGroup
-    /// Whether this row carries the transcript's spinner. See
-    /// `TranscriptFollow.spinningRow`.
     var animatesRunning = true
     let toggle: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -110,7 +101,6 @@ struct ChatStepGroupRow: View {
         }
     }
 
-    /// A path becomes its file name. A command keeps its first line.
     static func shortSubject(verb: String?, _ subject: String) -> String {
         let line = String(subject.prefix(while: { !$0.isNewline }))
         let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -291,8 +281,6 @@ struct ChatStepGroupRow: View {
     }
 }
 
-/// A group's step, shown below its open header: inset, with a rule down the
-/// left so the steps read as belonging to the line above them.
 struct ChatGroupStepInset: ViewModifier {
     let nested: Bool
 

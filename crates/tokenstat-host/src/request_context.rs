@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Identity attached to the request currently entering dispatch.
-//!
-//! Unix-socket and in-process calls have no remote peer. The encrypted remote
-//! transport installs its authenticated static key for exactly the duration of
-//! one dispatch call, so authorization code never trusts a peer id from JSON.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -144,8 +139,7 @@ fn validate_desktop_app(value: &str) -> Result<String, String> {
     if !path.join("Contents/MacOS/Tokenstat").is_file() {
         return Err(invalid());
     }
-    // Read both XML and binary bundle plists with the system reader. This is
-    // an argv-only call to a fixed system executable, never a shell command.
+
     let identity = std::process::Command::new("/usr/libexec/PlistBuddy")
         .args(["-c", "Print:CFBundleIdentifier"])
         .arg(path.join("Contents/Info.plist"))

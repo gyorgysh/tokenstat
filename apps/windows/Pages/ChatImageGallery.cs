@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>Gallery layout and explicit tool provenance, independent of WinUI.</summary>
 internal static class ChatImageGallery
 {
     internal const int VisibleLimit = 4;
@@ -24,8 +23,6 @@ internal static class ChatImageGallery
             else if (image.Kind == ChatPage.ItemKind.Group && image.Group is { Open: false } group)
                 foreach (var member in group.Members) Remember(member);
             if (!IsImage(image) || string.IsNullOrEmpty(image.ToolCallId)) continue;
-            // Provenance can identify only a preceding step. Reused call IDs
-            // belong to their most recent preceding start, including folded starts.
             if (!owners.TryGetValue((image.AttachmentScope, image.ToolCallId), out var owner)) continue;
             if (!linked.TryGetValue(owner, out var images)) linked[owner] = images = [];
             if (!images.Any(prior => prior.Id == image.Id)) images.Add(image);

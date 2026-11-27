@@ -2,11 +2,6 @@
 
 import SwiftUI
 
-/// The tuning bench for persona motion.
-///
-/// Three questions, one window. Does a mood read at a glance? Does it still
-/// read at 18pt, which is the size most of them are actually seen at? And what
-/// does a screen full of them cost?
 struct LabView: View {
     @State private var mood: PersonaMood = .idle
     @State private var seed: UInt64 = 0x51ED_2764_A11C_0001
@@ -47,7 +42,6 @@ struct LabView: View {
         }
     }
 
-    // MARK: - Stage
 
     private var stage: some View {
         VStack(spacing: 20) {
@@ -117,7 +111,6 @@ struct LabView: View {
         }
     }
 
-    // MARK: - Gallery
 
     private var moodGallery: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -165,7 +158,6 @@ struct LabView: View {
         }
     }
 
-    // MARK: - Cost
 
     private var stress: some View {
         VStack(alignment: .leading, spacing: 14) {

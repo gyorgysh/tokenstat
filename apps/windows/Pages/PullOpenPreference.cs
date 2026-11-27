@@ -28,7 +28,6 @@ internal static class PullOpenPreference
             }
             catch
             {
-                // Remembering is a courtesy. This session keeps the choice.
             }
         }
     }
@@ -47,7 +46,6 @@ internal static class PullOpenPreference
         _ => PullOpenChoice.Ask,
     };
 
-    /// <summary>For tests, which read the file again the way a launch does.</summary>
     internal static void Forget() => _choice = null;
 
     private static PullOpenChoice Load()

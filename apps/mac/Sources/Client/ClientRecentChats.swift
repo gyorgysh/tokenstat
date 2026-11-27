@@ -7,13 +7,6 @@ import SwiftUI
 #if !os(macOS)
 import UIKit
 
-/// What this particular phone or iPad has opened.
-///
-/// Read state is device furniture, not host data. Reading a conversation on
-/// an iPad must not silently clear the dot on a phone somebody has not looked
-/// at yet, and no transcript or receipt needs to leave either device. It is
-/// keyed by the signed-in scope as well, so one account's receipts are never
-/// read under another after a sign-out on the same device.
 @MainActor @Observable
 final class ClientChatReadState {
     static let shared = ClientChatReadState()
@@ -29,8 +22,6 @@ final class ClientChatReadState {
             ?? [:]
     }
 
-    /// The account this device is reading under, folded into every key. A
-    /// sign-out leaves the old entries on disk but nothing can address them.
     private var namespace: String {
         guard let scope = WorkSessionContext.shared.scope else { return "none" }
         return [scope.kind.rawValue, scope.origin, scope.identity]
@@ -81,11 +72,6 @@ final class ClientChatReadState {
         }
     }
 
-    /// There is no server receipt to migrate when a scope first appears.
-    /// Treating every older agent reply as unseen would pin years of history in
-    /// Recents, so a scope's first use is the honest unread baseline. Stored
-    /// per scope, because two accounts on one device must not share a baseline
-    /// either.
     private func trackingStarted(for namespace: String) -> Int64 {
         let key = "\(Self.trackingStartedKey).\(namespace)"
         if let stored = UserDefaults.standard.object(forKey: key) as? NSNumber,
@@ -102,22 +88,14 @@ final class ClientChatReadState {
     }
 }
 
-/// The short path back into work, shown below folders on a connected host.
-///
-/// Five newest fit without pushing sessions off screen; the rest wait behind
-/// "Show more" rather than making the page an archive.
 struct ClientRecentChatsSection: View {
     let peer: String
     let hostName: String
     let folders: [WorkspaceFolder]
     let chats: [ChatRecentConversation]
-    /// When set and there is a folder to start in, a "New chat" button sits
-    /// beside the title. Chats live inside folders, so starting one means
-    /// picking the folder first; the caller owns that sheet.
     var onNewChat: (() -> Void)? = nil
     var grouped = false
 
-    /// How many rows show before "Show more".
     private static let collapsedLimit = 5
 
     @State private var expanded = false
@@ -286,8 +264,6 @@ private struct ClientRecentChatRow: View {
     }
 }
 
-/// Owns the folder model but presents the exact selected thread, so Back
-/// returns to Workspaces rather than stopping at the folder's chat list.
 struct ClientRecentChatView: View {
     let peer: String
     let workspaceID: String
@@ -389,8 +365,6 @@ private struct ClientRecentChatContent: View {
         let saved: Bool
     }
 
-    /// Shown when there is no account scope to open a conversation under,
-    /// which is what a signed-in account with no handle has.
     private static let noAccountScopeMessage =
         L10n.text("apple.clientrecentchats.this_conversation_cannot_open_until_the_ac.75c921ed")
 
@@ -432,7 +406,6 @@ private struct ClientRecentChatContent: View {
             } else if needsSavedCopy, machine != nil, account.signedIn {
                 thread
             } else if model.savedCopy != nil, machine != nil, account.signedIn {
-                // Reconnecting does not replace the reader or send its draft.
                 thread
             } else {
                 ClientPlaceAvailability(peer: peer, hostName: hostName) {
@@ -701,8 +674,6 @@ private struct ClientRecentChatContent: View {
 
     private func loadSaved() async {
         let generation = loadGeneration
-        // Same as the live read: a scope the account cannot build (no handle)
-        // must not leave the skeleton up.
         guard WorkSessionContext.shared.scope?.kind == .account else {
             model.error = Self.noAccountScopeMessage
             loaded = true
@@ -712,8 +683,6 @@ private struct ClientRecentChatContent: View {
               model.savedCopy == nil, model.selected == nil, !savedUnavailable,
               let reference = navigation.reference(peer: peer, workspaceID: workspaceID, chatID: chatID)
         else { return }
-        // A pending live list has already adopted its folder. Load the copy
-        // into a fresh reader so that request cannot overwrite offline work.
         let reader = ChatModel()
         let opened = await reader.loadSavedConversation(reference)
         guard visible, generation == loadGeneration, !Task.isCancelled,
@@ -733,9 +702,6 @@ private struct ClientRecentChatContent: View {
             loaded = true
             return
         }
-        // An account without a handle has no scope to key the live read on.
-        // That is an answer, not a pending one: say so instead of leaving the
-        // skeleton up forever.
         guard let scope = WorkSessionContext.shared.scope, scope.kind == .account else {
             model.error = Self.noAccountScopeMessage
             loaded = true
@@ -786,16 +752,9 @@ private struct ClientRecentChatContent: View {
     }
 }
 
-/// Pick one of a host's folders to start something in.
-///
-/// Chats and sessions live inside folders, so a host-level "New chat" or
-/// "New terminal" button cannot act until it knows which folder. This sheet is
-/// that question, shared by both host screens. The caller navigates into the
-/// folder's section, where the launch tiles and the chat composer already are.
 struct ClientFolderChooserSheet: View {
     let hostName: String
     let folders: [WorkspaceFolder]
-    /// What starting means once a folder is picked, in the sheet's own words.
     let title: String
     let onChoose: (WorkspaceFolder) -> Void
 

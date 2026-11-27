@@ -3,8 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Auto commit on Changes. Distinct from selected-file Commit: the agent
-/// inspects the folder and commits. Checkboxes do not choose its files.
 struct ClientAutoCommitCard: View {
     @Bindable var session: AutoCommitSession
     var onOpen: (AutoCommitRunRoute) -> Void

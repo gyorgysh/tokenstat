@@ -9,19 +9,17 @@
 /// Lives outside the phone key bar because the same fold is applied on the
 /// shared typing path (`SSHLiveTerminal.send`), which compiles for macOS too.
 enum TerminalControlCode {
-    /// The C0 code for a printable byte, or nil when there is none.
     static func fold(_ byte: UInt8) -> UInt8? {
         switch byte {
-        case 0x61...0x7A: return byte - 0x60  // a–z
-        case 0x41...0x5A: return byte - 0x40  // A–Z
-        case 0x5B...0x5F: return byte - 0x40  // [ \\ ] ^ _
+        case 0x61...0x7A: return byte - 0x60
+        case 0x41...0x5A: return byte - 0x40
+        case 0x5B...0x5F: return byte - 0x40
         case 0x20: return 0
         default: return nil
         }
     }
 }
 
-/// Xterm cursor sequences retain modifiers even in application-cursor mode.
 enum TerminalArrowCode {
     static func encode(_ direction: UInt8, shift: Bool = false, option: Bool = false,
                        control: Bool = false, applicationCursor: Bool = false) -> [UInt8] {
@@ -36,55 +34,21 @@ enum TerminalArrowCode {
 import SwiftUI
 import UIKit
 
-/// The keys a phone keyboard does not have, above a live terminal.
-///
-/// SwiftTerm ships its own accessory, and it is missing the one chord an agent
-/// session actually needs: **Shift+Tab**, which is how every harness rotates
-/// its mode. There is no Shift key on that bar and no back-tab anywhere, so on
-/// a phone the mode could be read and never changed.
-///
-/// A back-tab is not a shifted tab byte, it is `ESC [ Z`. That is why a generic
-/// Shift key alone would not have been enough: Shift here arms the *next* key
-/// and each key decides what its shifted form is, which for Tab is CSI Z.
-///
-/// Bytes go to the same closure the terminal view writes on, so this adds no
-/// transport and cannot get out of step with what typing does.
 struct ClientTerminalKeys: View {
     let send: ([UInt8]) -> Void
     let toggleKeyboard: () -> Void
-    /// Whether a drag scrolls the buffer instead of reaching the program.
     @Binding var scrolls: Bool
-    /// The armed Ctrl state, when the session that receives typed keys owns it.
-    ///
-    /// Control only means something for a key that reaches the program, and the
-    /// bar has no letter keys: the letters arrive through the terminal's own
-    /// input path. So the session holds the flag and folds the next typed byte,
-    /// and this bar only arms it. Nil on a screen whose session does not take
-    /// the flag; that screen keeps the arming local to the bar.
     var control: Binding<Bool>? = nil
     var readingOutput = false
     var followOutput: (() -> Void)? = nil
-    /// Keys this session has that others do not, at the head of the bar.
-    ///
-    /// An SSH session has saved snippets and an agent session does not. Rather
-    /// than a second bar, or a copy of this one with one key added, the caller
-    /// hands over what is specific to it and everything else stays shared.
     var leading: AnyView?
 
-    /// Armed for the next key only, like a real modifier tapped once. Sticky
-    /// on purpose: a phone cannot hold one key while pressing another.
     @State private var shift = false
     @State private var localControl = false
-    /// Whether the soft keyboard is up. Read from the system rather than from
-    /// what this bar last did, so a tap on the terminal keeps the key honest.
     @State private var keyboardUp = true
 
-    /// Where the armed Ctrl flag lives: the session when it supplied one, this
-    /// bar otherwise.
     private var controlArmed: Binding<Bool> { control ?? $localControl }
 
-    /// Whether this iPad has a keyboard plugged into it. Optional lookup: this
-    /// bar is also drawn on a phone, where nothing installs the model.
     @Environment(PointerKeyboardModel.self) private var input: PointerKeyboardModel?
 
     /// iPadOS will not show the on-screen keyboard while a hardware one is
@@ -101,7 +65,6 @@ struct ClientTerminalKeys: View {
     private enum Key {
         static let escape: [UInt8] = [0x1B]
         static let tab: [UInt8] = [0x09]
-        /// CSI Z. Back-tab, and the reason this bar exists.
         static let backTab: [UInt8] = [0x1B, 0x5B, 0x5A]
     }
 
@@ -112,11 +75,6 @@ struct ClientTerminalKeys: View {
                     leading
                     ThemeRule.vertical.frame(height: 20)
                 }
-                // Reading is half of what a phone does with a terminal, and
-                // the keyboard covers half the screen. This is the way out of
-                // it, and the way back: one key, both directions, because the
-                // way back used to be a tap on the terminal that nothing on
-                // screen mentioned.
                 if canToggleKeyboard {
                     iconKey(
                         keyboardUp ? "keyboard.chevron.compact.down" : "keyboard",
@@ -125,10 +83,6 @@ struct ClientTerminalKeys: View {
                         toggleKeyboard()
                     }
                 }
-                // An agent holds mouse reporting on, which turns a drag into
-                // an event for the program rather than a scroll, so the view
-                // is pinned to the bottom. This is the toggle SwiftTerm's own
-                // bar carried and ours dropped.
                 modifier("scroll", isOn: scrolls) { scrolls.toggle() }
                 if readingOutput, let followOutput {
                     iconKey("arrow.down", label: L10n.text("apple.transcriptfollow.jump_to_latest.86752458"), action: followOutput)
@@ -136,9 +90,6 @@ struct ClientTerminalKeys: View {
                 modifier("esc", isOn: false) { fire(Key.escape) }
                 modifier("ctrl", isOn: controlArmed.wrappedValue) { controlArmed.wrappedValue.toggle() }
                 modifier("shift", isOn: shift) { shift.toggle() }
-                // One key, two meanings, and the label says which one is
-                // armed. Shift+Tab as a separate button would have been a
-                // chord nobody would look for under a keyboard.
                 key(shift ? "⇧⇥" : "⇥") { fire(shift ? Key.backTab : Key.tab) }
                 key("↑") { arrow(0x41) }
                 key("↓") { arrow(0x42) }
@@ -151,13 +102,8 @@ struct ClientTerminalKeys: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, 6)
         }
-        // A horizontal scroll view otherwise shares the terminal's flexible
-        // height and changes that split as keyboard layout is recalculated.
         .fixedSize(horizontal: false, vertical: true)
         .scrollIndicators(.hidden)
-        // The keys stay above the home indicator, the terminal surface
-        // carries on past it. Container only: when the keyboard is up this
-        // bar rides on top of it and has nothing left to fill.
         .background {
             Rectangle()
                 .fill(TerminalPalette.surface)
@@ -175,14 +121,6 @@ struct ClientTerminalKeys: View {
         }
     }
 
-    /// Send one key, applying and then clearing whatever was armed.
-    ///
-    /// Control folds a printable byte to its C0 code the way a keyboard does:
-    /// `ctrl` then `c` is 0x03. The bar's own keys are symbols and escape
-    /// sequences, so the fold that matters for letters happens where the
-    /// letters arrive: `ClientTerminalSession.send(source:data:)` reads the
-    /// same armed flag. Shift is consumed by the key that read it, so it is
-    /// cleared here whether or not that key did anything with it.
     private func fire(_ bytes: [UInt8]) {
         var out = bytes
         if controlArmed.wrappedValue, out.count == 1, let folded = Self.controlCode(out[0]) {
@@ -197,12 +135,10 @@ struct ClientTerminalKeys: View {
         fire(TerminalArrowCode.encode(direction, shift: shift, control: controlArmed.wrappedValue))
     }
 
-    /// The C0 code for a printable byte, or nil when there is none.
     static func controlCode(_ byte: UInt8) -> UInt8? {
         TerminalControlCode.fold(byte)
     }
 
-    /// A key whose face is a symbol rather than what it types.
     private func iconKey(
         _ symbol: String,
         label: String,

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use std::time::Instant;
 use tokenstat_workspace::writer::Lease;

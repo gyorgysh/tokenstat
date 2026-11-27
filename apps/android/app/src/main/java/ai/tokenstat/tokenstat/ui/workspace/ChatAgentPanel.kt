@@ -62,22 +62,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Agent, model and effort in one panel you can type into. Port of
-/// `ChatAgentChoices` and `ChatAgentPanel` in `ChatSetupHeader.swift`.
-///
-/// This was three dropdowns, each holding one setting and nothing else: no
-/// filter over a forty-model list, no way to tell a saved model id from one
-/// the host still lists, and no way to ask the host to look again after an API
-/// key was added a minute ago. One panel, three sections, one filter that runs
-/// across all of them.
 
-/// One row of the panel. Three kinds of choice share a list, so they share a
-/// value: the section a row came from is what says which of the three the
-/// person just changed.
 sealed interface ChatAgentChoice {
     data class Agent(val id: String) : ChatAgentChoice
 
-    /// Empty is the agent's own default.
     data class Model(val id: String) : ChatAgentChoice
 
     data class Effort(val id: String) : ChatAgentChoice
@@ -90,13 +78,9 @@ private val SECTION_EFFORT = L10n.text("android.chatagentpanel.effort.4387e5d3")
 internal fun backendOf(backends: List<JsonObject>, id: String?): JsonObject? =
     backends.firstOrNull { it.str("id") == id }
 
-/// `installed` is a tri-state: true, false, or absent when the catalog has no
-/// profile for this agent. Absent is not "not installed", so only an explicit
-/// false hides a row or empties a model list.
 internal fun backendNotInstalled(backend: JsonObject?): Boolean =
     (backend?.get("installed") as? JsonPrimitive)?.booleanOrNull == false
 
-/// Every row, in the order the sections have always been read in.
 internal fun chatAgentChoices(
     backends: List<JsonObject>,
     chat: JsonObject?,
@@ -160,14 +144,9 @@ internal fun chatAgentChoices(
     return rows
 }
 
-/// Only offer filters that have choices for the selected agent. An agent with
-/// no effort control should not advertise one.
 internal fun chatAgentSections(choices: List<PickerChoice<ChatAgentChoice>>): List<String> =
     choices.map { it.section }.distinct().filter { it.isNotEmpty() }
 
-/// What each section is set to, for its heading. The panel is three settings,
-/// and a heading that only names the group leaves somebody scrolling to find
-/// which row carries the mark.
 internal fun chatAgentSectionValue(
     section: String,
     backends: List<JsonObject>,
@@ -180,7 +159,6 @@ internal fun chatAgentSectionValue(
     else -> null
 }
 
-/// The search prompt for one step of the panel.
 internal fun chatAgentSearchPrompt(section: String): String = when (section) {
     SECTION_AGENT -> L10n.text("android.chatagentpanel.search_agents.212fd04a")
     SECTION_MODEL -> L10n.text("android.chatagentpanel.search_models.10421935")
@@ -188,32 +166,23 @@ internal fun chatAgentSearchPrompt(section: String): String = when (section) {
     else -> L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da")
 }
 
-/// Three marks in one list, one per section, each reading the conversation's
-/// own setting.
 internal fun chatAgentIsSelected(choice: ChatAgentChoice, chat: JsonObject?): Boolean = when (choice) {
     is ChatAgentChoice.Agent -> choice.id == (chat?.str("backend") ?: "")
     is ChatAgentChoice.Model -> choice.id == (chat?.str("model") ?: "")
     is ChatAgentChoice.Effort -> choice.id == (chat?.str("effort") ?: "")
 }
 
-/// Which field of `chat.update` a row writes.
 internal fun chatAgentField(choice: ChatAgentChoice): Pair<String, String> = when (choice) {
     is ChatAgentChoice.Agent -> "backend" to choice.id
     is ChatAgentChoice.Model -> "model" to choice.id
     is ChatAgentChoice.Effort -> "effort" to choice.id
 }
 
-/// Whether picking this agent also forces Bypass, because it has no approval
-/// protocol of its own to ask through.
 internal fun chatAgentForcesBypass(backends: List<JsonObject>, id: String): Boolean =
     backendOf(backends, id)?.str("gateTier") == "bypassOnly"
 
-/// A model on a local server, stored by the host as `local:<provider>/<model>`,
-/// reads as the server and the model. Port of `LocalChatModel.title`.
-/// Below this an agent's own instructions crowd out the conversation.
 internal const val LOCAL_ROOMY_CONTEXT = 65_536L
 
-/// Tokens a local model holds, when the host's server said.
 internal fun localModelContext(backend: JsonObject?, id: String): Long? =
     (backend?.get("localModels") as? JsonArray)?.filterIsInstance<JsonObject>()
         ?.firstOrNull { it.str("id") == id }?.get("contextLength")
@@ -234,7 +203,6 @@ internal fun localChatModelTitle(id: String): String {
     return "$name: $model"
 }
 
-/// Prefer the host's label, including custom agents, before the built-in name.
 internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): String {
     val id = chat?.str("backend").orEmpty()
     val backend = backendOf(backends, id)
@@ -243,9 +211,7 @@ internal fun chatAgentLabel(backends: List<JsonObject>, chat: JsonObject?): Stri
         ?: L10n.text("common.chat.select_agent")
 }
 
-/// The backend mark supplies the name; keep the selected model and effort visible.
 internal fun chatAgentCompactSummary(backends: List<JsonObject>, chat: JsonObject?): String {
-    // The agent's mark sits beside this, so a local model needs only its name.
     val parts = mutableListOf(chat?.str("model")?.takeIf { it.isNotBlank() }?.let { localChatModelName(it) ?: it } ?: chatAgentLabel(backends, chat))
     val effort = chat?.str("effort")?.takeIf { it.isNotBlank() }
     if (stringList(backendOf(backends, chat?.str("backend")), "efforts").isNotEmpty() && effort != null) {
@@ -254,7 +220,6 @@ internal fun chatAgentCompactSummary(backends: List<JsonObject>, chat: JsonObjec
     return parts.joinToString(" · ")
 }
 
-/// Include selected model and effort; the picker also shows unset defaults.
 internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): String {
     val agent = chatAgentLabel(backends, chat)
     val backend = backendOf(backends, chat?.str("backend").orEmpty())
@@ -267,12 +232,6 @@ internal fun chatAgentSummary(backends: List<JsonObject>, chat: JsonObject?): St
     return parts.joinToString(" · ")
 }
 
-/// The bottom sheet: the three settings, the model list's own status, and the
-/// way to install an agent that is not here yet.
-///
-/// The Refresh lives here, not in the app's settings, because this is where
-/// somebody notices the list is short: they added an API key to a CLI a minute
-/// ago and the provider it unlocked is not in the list yet.
 @Composable
 internal fun ChatAgentSheet(
     model: AppViewModel,
@@ -282,8 +241,6 @@ internal fun ChatAgentSheet(
     hostLabel: String,
     protocol: Long?,
     locked: Boolean,
-    /// Held by the screen, because the composer's summary line reads the same
-    /// list to say which agent is answering and whether it has an effort.
     backends: List<JsonObject>,
     onBackends: (List<JsonObject>) -> Unit,
     onChanged: suspend (JsonObject) -> Unit,
@@ -302,8 +259,6 @@ internal fun ChatAgentSheet(
     var showingSetup by remember { mutableStateOf(false) }
     var installing by remember { mutableStateOf<String?>(null) }
     var updating by remember { mutableStateOf(false) }
-    // Installed agent versions keyed by launcher id, and what a check or an
-    // update said. The vendor is asked only by Check for updates.
     val supportsUpdates = HostContracts.supportsAgentUpdates(protocol)
     var versions by remember(peer) { mutableStateOf<Map<String, JsonObject>>(emptyMap()) }
     var checkingUpdates by remember(peer) { mutableStateOf(false) }
@@ -350,8 +305,6 @@ internal fun ChatAgentSheet(
     DisposableEffect(chatId) { onDispose { cacheAnswer?.complete(ChatCacheAnswer.CANCEL) } }
     cacheQuestion?.let { question -> ChatCacheDialog(question, context) { cacheAnswer?.complete(it) } }
 
-    /// The conversation is cached for the current model and big enough that
-    /// reading it again on another one costs something. Ask first.
     suspend fun confirmModelSwitch(next: String): Boolean {
         if (ChatCacheSuppression.model(context) || !ChatCacheRules.switching(chat, next, System.currentTimeMillis())) return true
         if (cacheAnswer != null) return false
@@ -404,8 +357,6 @@ internal fun ChatAgentSheet(
         }
     }
 
-    /// Runs on the view model, so it carries on and toasts in the chat after
-    /// this sheet closes. The note here is for whoever is still looking.
     fun updateAgent(id: String, label: String) {
         if (updatingAgent != null) return
         updateNotes = updateNotes - id
@@ -643,8 +594,6 @@ internal fun ChatAgentSheet(
                     icon = ActionIcon.Refresh.vector,
                     small = true,
                     enabled = installing == null && !locked,
-                    // A plain reload on an old host, a refresh where the host
-                    // knows how: the same gate the inline Refresh keeps.
                     onClick = { scope.launch { load(refresh = HostContracts.supportsModelRefresh(protocol)) } },
                 )
             }
@@ -652,8 +601,6 @@ internal fun ChatAgentSheet(
     }
 }
 
-/// Every agent's quota for its row: the app's own readings for this device,
-/// one read of the host's for a remote one.
 @Composable
 internal fun rememberAgentQuotaReadings(model: AppViewModel, peer: String): JsonArray {
     val appState by model.state.collectAsStateWithLifecycle()
@@ -666,9 +613,6 @@ internal fun rememberAgentQuotaReadings(model: AppViewModel, peer: String): Json
     return if (peer.isBlank()) appState.limits else remoteQuota ?: JsonArray(emptyList())
 }
 
-/// The end of an agent row: an update button when the host's daily check
-/// found a newer version, then the agent's 5-hour and weekly limits. Shared
-/// by an open chat's picker and the new chat page's.
 @Composable
 internal fun ChatAgentRowExtras(
     value: ChatAgentChoice,
@@ -704,13 +648,10 @@ internal fun ChatAgentRowExtras(
     ChatQuotaLine(chatQuotaReading(quotaReadings, agent.id, profileId = quotaProfile))
 }
 
-/// The agent's brand mark at the start of its row in the picker.
 @Composable
 internal fun ChatAgentRowMark(value: ChatAgentChoice) {
     when (value) {
         is ChatAgentChoice.Agent -> HarnessMark(value.id, 26.dp)
-        // Where the model runs, at a glance: the provider's cloud, or a
-        // server on the machine.
         is ChatAgentChoice.Model -> if (value.id.isNotEmpty()) {
             val colors = LocalTsColors.current
             val local = localChatProvider(value.id) != null
@@ -724,7 +665,6 @@ internal fun ChatAgentRowMark(value: ChatAgentChoice) {
     }
 }
 
-/// "Version 2.1.318 · 2.1.322 available", from one `launcher.updates` row.
 internal fun agentVersionLine(row: JsonObject, checked: Boolean): String = listOfNotNull(
     row.str("version")?.let { L10n.text("common.agent_updates.version", it) },
     row.str("latest")?.takeIf { row.bol("updateAvailable") }?.let { L10n.text("common.agent_updates.available", it) },
@@ -733,7 +673,5 @@ internal fun agentVersionLine(row: JsonObject, checked: Boolean): String = listO
     row.str("error")?.let { L10n.text("common.agent_updates.check_failed", it) },
 ).joinToString(" · ")
 
-/// An update is offered once a check found a newer version, or nothing to
-/// compare against.
 internal fun agentOffersUpdate(row: JsonObject, checked: Boolean): Boolean =
     row.bol("canUpdate") && (row.bol("updateAvailable") || (checked && !row.bol("canCheck")))

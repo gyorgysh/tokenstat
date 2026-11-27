@@ -91,17 +91,6 @@ private struct ComposerUtilityLayout: Layout {
     }
 }
 
-/// The bar under the transcript: message first, compact controls underneath.
-///
-/// The first row is an uninterrupted writing surface. Attach, agent options
-/// and send share one aligned utility row underneath, like a normal chat
-/// composer rather than a settings form sitting above a text field.
-/// Compared by what it shows, not by its closures. The chat pane passes new
-/// closures on every one of its updates, and a chat switch runs about nine
-/// of them, so the composer was rebuilt and measured nine times for one
-/// click. The closures only capture the chat, the model and state setters,
-/// which are either compared here or stable. Model reads inside the body
-/// are still observed, so typing and turn changes update it as before.
 extension ChatComposer: Equatable {
     nonisolated static func == (lhs: ChatComposer, rhs: ChatComposer) -> Bool {
         MainActor.assumeIsolated {
@@ -126,8 +115,6 @@ struct ChatComposer: View {
     var attachments: [ChatAttachment]
     var previews: [String: Data]
     var running: Bool
-    /// A message typed now is read on the agent's next step, rather than
-    /// waiting until the turn ends.
     var sendsAsNote: Bool = false
     var placeholder: String
     var onSend: () -> Void
@@ -201,8 +188,6 @@ struct ChatComposer: View {
             if !model.isSharedSource { ChatSlashMenu(model: model) }
             field
             if dictation.isActive {
-                // The bar opens out of the mic at the trailing end and folds
-                // back into it, instead of the row cross-fading in place.
                 ChatDictationBar(dictation: dictation, control: 28)
                     .transition(.scale(scale: 0.92, anchor: .trailing).combined(with: .opacity))
             } else {
@@ -214,8 +199,6 @@ struct ChatComposer: View {
                     ChatComposerControls(model: model, chat: chat, locked: setupLocked, compact: true, condensed: true)
                     HStack(spacing: Theme.Space.s) {
                         turnStatus
-                        // A local model spends no plan, so the plan's windows
-                        // would only suggest that it does.
                         if LocalChatModel.parse(chat.model) == nil {
                             ComposerLimitsBadge(backend: chat.backend, peer: model.peer, profileID: model.limitsProfileID(for: chat), compact: true, showUsage: {
                                 model.showingUsageStats = true
@@ -307,14 +290,6 @@ struct ChatComposer: View {
         .accessibilityLabel(L10n.text("apple.chatcomposer.attach.d406ade2"))
     }
 
-    /// How long this turn has been running, in a slot wide enough for its
-    /// longest reading.
-    ///
-    /// The slot is held whether or not a turn is running, and sits against
-    /// the row's flexible gap, so the space it keeps while nothing runs reads
-    /// as part of that gap rather than as a hole. Holding it is what stops
-    /// the quota badge and the buttons beside it being shoved sideways every
-    /// time a turn starts, ends, or the clock passes another digit.
     private var turnStatus: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: Theme.Space.s) {
@@ -332,9 +307,6 @@ struct ChatComposer: View {
                     if let since = model.turnStartedAt(for: chat.id) {
                         TurnElapsedText(since: since)
                     } else {
-                        // The stamp lands on the same write that reports running,
-                        // so this is a single frame at most: the word without the
-                        // clock beats no word at all.
                         Text(L10n.text("common.working"))
                             .accessibilityLabel(L10n.text("common.working"))
                     }
@@ -353,18 +325,6 @@ struct ChatComposer: View {
         return running ? Theme.accent.opacity(0.45) : Theme.border
     }
 
-    /// Stop and Send, over an invisible copy of the buttons on screen.
-    ///
-    /// Either can come and go on its own: Stop only while a turn runs, Send
-    /// only with something to send. The copy mirrors exactly what is drawn,
-    /// so the block hugs the visible buttons instead of holding the old
-    /// widest-pair width, which squashed the quota badge on a narrow well.
-    /// The frame below then reserves one small icon button's width, so a
-    /// single Stop or Send coming or going moves nothing beside it: typing
-    /// the first word, sending, a turn starting or ending all hold still.
-    /// Only the pair (a draft queued mid-turn) reflows the row. The copy
-    /// carries no shortcut, menu or action, so there is one of each in the
-    /// row.
     private var turnActions: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: Theme.Space.s) {
@@ -403,9 +363,6 @@ struct ChatComposer: View {
                         }
                 }
             }
-            // Stop and Send grow in and shrink out where they stand. The
-            // hidden copy above already holds the row still, so only the
-            // buttons themselves move.
             .animation(Motion.unless(reduceMotion, Motion.morph), value: running)
             .animation(Motion.unless(reduceMotion, Motion.morph), value: showsSend)
         }
@@ -459,17 +416,10 @@ struct ChatComposer: View {
         return running ? L10n.text("apple.chatcomposer.send_after_this_turn.012fc8c3") : L10n.text("apple.chatcomposer.send.f6f4688f")
     }
 
-    /// The field takes no typing while a message is on its way, so it takes
-    /// no dictation either.
     private var dictationBlocked: Bool { model.sending || model.landingDraft?.isSubmitting == true }
 
     private var setupLocked: Bool { model.isSharedSource || running || (model.landingDraft != nil && !model.landingCanSubmit) }
 
-    /// On the landing page Send stays on screen while it cannot be pressed,
-    /// so the disabled control can name the piece that is missing. A reader
-    /// opening the app for the first time otherwise has nothing to aim at,
-    /// and nothing telling them a repository is what Send is waiting for.
-    /// Inside a live chat it still comes and goes with something to send.
     private var landingBlocked: Bool { model.landingDraft != nil && model.landingBlockReason != nil }
 
     private var showsSend: Bool { !cannotSend || landingBlocked }
@@ -489,8 +439,6 @@ struct ChatComposer: View {
     private var cannotSend: Bool {
         if model.isSharedSource { return true }
         if let landing = model.landingDraft { return !model.landingCanSubmit || landing.isSubmitting || landing.stagingAttachments > 0 }
-        // A saved copy is read and drafted in, never sent from: the banner
-        // above says why, and the field stays editable for those drafts.
         if model.canHandleChatCommandLocally && !model.sending && model.stagingAttachments == 0 && model.unconfirmedSend == nil { return false }
         return model.selectedBackendMissing || model.savedCopy != nil
             || model.stagingAttachments > 0
@@ -517,7 +465,6 @@ struct ChatComposer: View {
     }
 }
 
-/// A 76-point tile: the picture itself for images, a typed seat for files.
 struct ChatAttachmentTile: View {
     let attachment: ChatAttachment
     var preview: Data?

@@ -6,31 +6,16 @@
 
 import Foundation
 
-/// Keeps embedded-pane geometry and the app's legacy input encoding policy.
-///
-/// SwiftTerm now supports Kitty keyboard negotiation, but our mobile key bar
-/// and app event monitors still send legacy key sequences. Suppress negotiation
-/// until all those input sources use the same encoder. A bare CSI u remains a
-/// cursor restore. Window resize requests are ignored because pane layout owns
-/// geometry; size queries and other terminal output pass through unchanged.
-/// Escape sequences may span transport reads, so filtering is stateful.
 struct TerminalOutputFilter {
     private enum State {
         case text
-        /// An `ESC` arrived and we do not know what it starts yet.
         case escape
-        /// Inside `ESC [`, collecting parameters until a final byte.
         case csi
     }
 
     private var state: State = .text
-    /// Bytes held back since the `ESC`. Emitted whole unless the sequence turns
-    /// out to be the one we drop.
     private var pending: [UInt8] = []
 
-    /// A sequence longer than this is not one of ours and is very likely not a
-    /// sequence at all. Emitted rather than held, so a program printing junk
-    /// cannot make output disappear.
     private static let sequenceLimit = 64
 
     private static let escape: UInt8 = 0x1B
@@ -38,8 +23,6 @@ struct TerminalOutputFilter {
     private static let finalU = UInt8(ascii: "u")
 
     mutating func filter(_ input: ArraySlice<UInt8>) -> [UInt8] {
-        // Ordinary log output needs no state-machine work. A pending escape
-        // still has to consume this chunk, even when it contains no ESC.
         if case .text = state, !input.contains(Self.escape) { return Array(input) }
         var out: [UInt8] = []
         out.reserveCapacity(input.count + pending.count)
@@ -59,7 +42,6 @@ struct TerminalOutputFilter {
                     pending.append(byte)
                     state = .csi
                 } else if byte == Self.escape {
-                    // `ESC ESC`: the first one was not the start of anything.
                     out.append(contentsOf: pending)
                     pending = [byte]
                 } else {
@@ -72,9 +54,6 @@ struct TerminalOutputFilter {
             case .csi:
                 pending.append(byte)
                 if byte < 0x20 {
-                    // A control character inside a sequence is executed where
-                    // it appears. Hand the lot over and let the emulator do
-                    // exactly what it would have done.
                     out.append(contentsOf: pending)
                     pending = []
                     state = .text
@@ -94,7 +73,6 @@ struct TerminalOutputFilter {
         return out
     }
 
-    /// Embedded applications may query size but cannot resize the app window.
     private func isWindowResize(_ sequence: [UInt8]) -> Bool {
         guard sequence.last == UInt8(ascii: "t"), sequence.count >= 7 else { return false }
         let body = sequence.dropFirst(2).dropLast()
@@ -103,11 +81,6 @@ struct TerminalOutputFilter {
         return parts.count == 3 && Int(parts[0]) == 8
     }
 
-    /// `CSI` + a private prefix + parameters + `u`.
-    ///
-    /// The prefix is what tells the two apart: `=` sets the kitty flags, `>`
-    /// pushes them and `<` pops them, while a bare `CSI u` with no prefix is
-    /// DECRC and has to keep working.
     private func isKittyKeyboard(_ sequence: [UInt8]) -> Bool {
         guard sequence.count >= 4, sequence.last == Self.finalU else { return false }
         let prefix = sequence[2]

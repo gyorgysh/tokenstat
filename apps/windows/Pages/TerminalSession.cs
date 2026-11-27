@@ -13,16 +13,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// One host pty session, owned outside any single page so navigating away
-/// and back reattaches to the same session instead of spawning another
-/// shell. The poll loop mirrors the Apple TerminalSession: output is read
-/// by offset, a focused page asks the host to hold the read briefly, a
-/// transport failure keeps the offset and retries with backoff, and
-/// liveness is repaired through pty.info with pty.list as the last word.
-/// Leaving a page detaches (giving up this viewer claim on the size) and
-/// never kills: the process survives navigation.
-/// </summary>
 internal sealed class TerminalSession
 {
     private static readonly ConcurrentDictionary<string, TerminalSession> ByWorkspace = new();
@@ -43,11 +33,6 @@ internal sealed class TerminalSession
 
     public bool Alive { get; private set; } = true;
 
-    /// <summary>
-    /// True after the first host output has arrived. Agent CLIs spend
-    /// seconds between spawn and their first paint, and the pane shows a
-    /// starting state for that gap rather than an empty terminal.
-    /// </summary>
     public bool HasOutput { get; private set; }
 
     public bool Closed { get; private set; }
@@ -87,11 +72,6 @@ internal sealed class TerminalSession
         _slot = Slot(workspaceId, sessionId);
     }
 
-    /// <summary>
-    /// The session for a workspace: the named one when navigation carries
-    /// an id, else the one this workspace already holds. A fresh object
-    /// spawns on first attach, never in this lookup.
-    /// </summary>
     public static TerminalSession For(string workspaceId, string? sessionId)
     {
         if (!string.IsNullOrEmpty(sessionId)
@@ -109,11 +89,6 @@ internal sealed class TerminalSession
     public static bool IsRemoteId(string id) =>
         id.StartsWith("remote:", StringComparison.Ordinal);
 
-    /// <summary>
-    /// Start showing this session: verify it is still there (spawning when
-    /// there is nothing to verify), then poll. Safe to call on every
-    /// navigation; a live loop is left alone.
-    /// </summary>
     public Task AttachAsync(int rows, int cols) => InLifecycleAsync(() => AttachCoreAsync(rows, cols));
 
     private async Task InLifecycleAsync(Func<Task> action)
@@ -162,8 +137,6 @@ internal sealed class TerminalSession
         {
             return;
         }
-        // A new terminal surface must replay retained output, including VT
-        // state, instead of starting blank at the previous view's offset.
         Offset = 0;
         Dropped = 0;
         HasOutput = false;
@@ -171,11 +144,6 @@ internal sealed class TerminalSession
         _ = PollAsync(_poll.Token);
     }
 
-    /// <summary>
-    /// Stop showing this session without stopping the process. The host
-    /// expires the viewer claim on its own, so the detach is a courtesy
-    /// that hands the remaining viewers their size back at once.
-    /// </summary>
     public Task DetachAsync() => InLifecycleAsync(DetachCoreAsync);
 
     private async Task DetachCoreAsync()
@@ -202,7 +170,6 @@ internal sealed class TerminalSession
         }
     }
 
-    /// <summary>Stop the process. Killing an already dead session is not an error.</summary>
     public Task KillAsync() => InLifecycleAsync(KillCoreAsync);
 
     private async Task KillCoreAsync()
@@ -223,10 +190,6 @@ internal sealed class TerminalSession
         await RefreshInfoAsync();
     }
 
-    /// <summary>
-    /// Kill and forget: the host buffer goes with it, and the workspace
-    /// holds no session until the next visit spawns one.
-    /// </summary>
     public Task CloseAsync() => InLifecycleAsync(CloseCoreAsync);
 
     private async Task CloseCoreAsync()
@@ -253,7 +216,6 @@ internal sealed class TerminalSession
         RaiseChanged();
     }
 
-    /// <summary>Start over in the same workspace after a close or an exit.</summary>
     public Task RespawnAsync(int rows, int cols) => InLifecycleAsync(() => RespawnCoreAsync(rows, cols));
 
     private async Task RespawnCoreAsync(int rows, int cols)
@@ -479,8 +441,6 @@ internal sealed class TerminalSession
             JsonNode chunk;
             try
             {
-                // Read the owning host's retained ring. The pushed cache is
-                // acknowledged destructively and cannot replay an existing TUI.
                 chunk = await RemoteWorkspaces.CallWorkspaceAsync(id,
                     "pty.read",
                     new JsonObject
@@ -549,10 +509,8 @@ internal sealed class TerminalSession
                 }
                 catch
                 {
-                    // Skip a malformed chunk rather than killing the session.
                 }
             }
-            // Older hosts may ignore waitMs. Bound their idle reads too.
             if (encoded.Length == 0)
             {
                 try { await Task.Delay(50, token); }
@@ -572,11 +530,6 @@ internal sealed class TerminalSession
         }
     }
 
-    /// <summary>
-    /// Sparse liveness probe after repeated read failures. An unavailable
-    /// list cannot distinguish a dead pty from an unavailable host, so only
-    /// a list that answers and lacks the id marks the session stopped.
-    /// </summary>
     private async Task<bool> StillThereAsync(string id, CancellationToken token)
     {
         try

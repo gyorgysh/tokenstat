@@ -51,8 +51,6 @@ class HeatmapTest {
 
     @Test
     fun heatRampMatchesIosStops() {
-        // `Theme.heat`, stop for stop from Sources/Design/Theme.swift, so a
-        // busy week on the phone is the same colour as on the site.
         assertEquals(
             listOf(
                 Color(0xFFECEAF2),
@@ -77,8 +75,6 @@ class HeatmapTest {
 
     @Test
     fun phoneHeatOverridesOnlyTheQuietStep() {
-        // `PhoneHeatmap.heatPalette`: only step zero changes, because the
-        // shared quiet step all but vanishes on a white card at arm's length.
         val light = phoneHeat(LightColors)
         assertEquals(Color(0xFFDEDAEA), light[0])
         assertEquals(LightColors.heat.drop(1), light.drop(1))
@@ -112,8 +108,6 @@ class HeatmapTest {
 
     @Test
     fun fallbackQuartilesMatchCoreRanks() {
-        // Nearest-rank, rank for rank with `Scale::from_days`: the ceiling
-        // of n*q, one-indexed into the ascending values.
         val scale = heatFallbackScale((1L..8L).toList())
         assertTrue(scale is HeatFallbackScale.Quartiles)
         assertEquals(listOf(2L, 4L, 6L), (scale as HeatFallbackScale.Quartiles).breaks)
@@ -123,9 +117,6 @@ class HeatmapTest {
 
     @Test
     fun fallbackOutlierCannotFlattenTheGrid() {
-        // The reported shape: $0.29 to $510 days with one $960 outlier. An
-        // outlier sets the ceiling under value/max and the whole grid lands
-        // on one shade; quartile breaks spread all four.
         val values = listOf(290_000L, 5_000_000L, 50_000_000L, 120_000_000L, 200_000_000L, 350_000_000L, 510_000_000L, 960_000_000L)
         val scale = heatFallbackScale(values)
         assertTrue(scale is HeatFallbackScale.Quartiles)
@@ -137,7 +128,6 @@ class HeatmapTest {
         assertEquals(listOf(1, 1, 2, 2, 3, 3, 4, 4), levels)
         assertEquals(setOf(1, 2, 3, 4), levels.toSet())
         assertEquals(4, fallbackLevel(960_000_000L, scale))
-        // Quiet days stay quiet and never move the breaks.
         val withQuiet = heatFallbackScale(values + listOf(0L, 0L, 0L))
         assertEquals(scale, withQuiet)
         assertEquals(0, fallbackLevel(0, scale))
@@ -145,8 +135,6 @@ class HeatmapTest {
 
     @Test
     fun fallbackUnderFourActiveDaysShadesByMaxRatio() {
-        // Fewer than four active days have no quartiles to take: the shade
-        // is the value's share of the largest day.
         val scale = heatFallbackScale(listOf(10L, 20L, 30L))
         assertEquals(HeatFallbackScale.MaxRatio(30L), scale)
         assertEquals(2, fallbackLevel(10, scale))

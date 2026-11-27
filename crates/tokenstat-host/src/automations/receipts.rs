@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Creation and launch receipts live in the same atomic file as the jobs.
-//! Keeping a creation receipt after deletion prevents a delayed retry from
-//! recreating deleted work. A launch receipt claims one run identity before
-//! any process starts, so a lost reply can only find that run.
-
 use super::{Automation, Store, is_auto_commit_name, now_ms, validate};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

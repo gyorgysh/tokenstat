@@ -1,13 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! A fresh home for one Team run.
-//!
-//! The backend process starts with an empty environment except the path it
-//! needs to find its own tools and the variables the scoped SDK adds later.
-//! Personal hooks, resume state and memory stay in the person's own home.
-//! Preparation imports none of them. The provider may subsequently route only
-//! its CLI's native sign-in, using the same credential routing as private chat.
-
 use std::{
     collections::BTreeMap,
     fs, io,
@@ -62,9 +53,7 @@ pub(super) fn prepare(scratch: &Path, cwd: &Path, program: &Program) -> io::Resu
         #[cfg(unix)]
         set_private(directory)?;
     }
-    // Native CLI discovery must stop inside this private cwd even when the
-    // scratch directory lives below a person's project or real home. Build
-    // a valid empty Git boundary directly: git-init could load user templates.
+
     for directory in [home.join(".git/objects"), home.join(".git/refs/heads")] {
         fs::create_dir_all(directory)?;
     }

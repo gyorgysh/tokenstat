@@ -159,9 +159,6 @@ internal sealed partial class ChatPage
     private async Task DrainQueueAsync(bool deliverNote = true, string? messageId = null, bool steerCurrent = false)
     {
         if (SharedSource) { _authorizedQueue.Clear(); return; }
-        // A parked note does not need the outbox key, and it goes out before
-        // any queued message. The flag is set by the delivery itself so a
-        // poll tick cannot start a second one.
         if (_sending || _deliveringSteer || _clearingSteer || _openId is not string chat || !IsLoaded) return;
         if (messageId is null && PendingSteerText(_openChat).Length > 0)
         {
@@ -212,8 +209,6 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
-            // The composer is already clear. A steer that missed the turn is
-            // still the person's message, so put it back and send it once.
             if (ex is HostException { Code: "steer_unavailable" } && steerCurrent)
             {
                 try

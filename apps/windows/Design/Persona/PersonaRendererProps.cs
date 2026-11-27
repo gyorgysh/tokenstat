@@ -9,19 +9,8 @@ using Windows.UI;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// The held things: newspaper, console, keyboard, mug, tools, and the small
-/// props. Props are drawn from the character's side of the picture, not ours:
-/// the newspaper is a blank back with the eyes over the top edge, and the game
-/// is a plain shell with the screen's light on the face.
-/// </summary>
 internal static class PersonaRendererProps
 {
-    /// <summary>
-    /// The newspaper, from our side of it. We are looking at the back: a wide
-    /// blank sheet held up, a fold down the middle, and two eyes over the top
-    /// edge. Column rules on our side would mean he was reading it backwards.
-    /// </summary>
     public static void DrawPaper(
         PersonaScene canvas, double px, double py, double unit, double tilt, double scale, Color hue)
     {
@@ -35,8 +24,6 @@ internal static class PersonaRendererProps
         double midY = py;
         PPoint T(double x, double y) => PersonaDraw.Rot(x, y, midX, midY, tilt);
 
-        // The top edge dips at the fold and lifts at the corners, because a
-        // sheet held at two points hangs, and a straight edge reads as card.
         var sheet = new PathGeometry();
         var outline = PersonaDraw.Figure(T(minX, minY + h * 0.06));
         PersonaDraw.Quad(outline, T(midX, minY + h * 0.16), T(minX + w * 0.26, minY));
@@ -73,17 +60,10 @@ internal static class PersonaRendererProps
                 PenLineCap.Round, PenLineJoin.Round, sheet);
         }
 
-        // The outline last, so nothing drawn on the sheet can sit on top of
-        // its own edge.
         canvas.Paint(
             sheet, null, PersonaDraw.Solid(hue, 0.95), Math.Max(1, unit * 0.024));
     }
 
-    /// <summary>
-    /// The light a screen throws back at whoever is looking into it. This is
-    /// how the game is shown: the screen faces the character, so the only
-    /// honest way to put it on our side is the glow on his face.
-    /// </summary>
     public static void DrawGlow(PersonaScene canvas, PersonaMote mote, double width, double height, double unit, Geometry clip)
     {
         double cx = mote.Position.X * width;
@@ -100,11 +80,6 @@ internal static class PersonaRendererProps
             clip: clip);
     }
 
-    /// <summary>
-    /// The back of something handheld. No screen and no buttons on this side:
-    /// they face the character. What we get is the shape, the tilt, and the
-    /// fact that it never stops moving.
-    /// </summary>
     public static void DrawConsole(PersonaScene canvas, double px, double py, double unit, double tilt, Color hue)
     {
         double w = unit * 0.34;
@@ -135,11 +110,6 @@ internal static class PersonaRendererProps
         PersonaDraw.Spin(seamShape, tilt, px, py);
     }
 
-    /// <summary>
-    /// A keyboard lying on the floor, seen from slightly above and in front.
-    /// Point is the middle of its front edge, and that edge sits exactly on
-    /// the floor line. A near edge, a narrower far edge and a front lip.
-    /// </summary>
     public static void DrawKeyboard(PersonaScene canvas, double px, double py, double unit, Color hue, double opacity)
     {
         double front = unit * 0.46;
@@ -149,8 +119,6 @@ internal static class PersonaRendererProps
         double topY = py - thickness;
         double backY = topY - depth;
 
-        // The lip. It is the only part with any height, and it is what says
-        // the thing is resting on something rather than floating over it.
         var lip = new PathGeometry();
         var lipFigure = PersonaDraw.Figure(new PPoint(px - front / 2, topY));
         PersonaDraw.Line(lipFigure, px + front / 2, topY);
@@ -195,10 +163,6 @@ internal static class PersonaRendererProps
         }
     }
 
-    /// <summary>
-    /// A sheet of paper lying on the floor, in the same shallow perspective as
-    /// the keyboard: near edge wide and on the floor line, far edge narrower.
-    /// </summary>
     public static void DrawSheet(
         PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
@@ -241,8 +205,6 @@ internal static class PersonaRendererProps
         PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
         double reach = unit * 0.13 * scale;
-        // A little mound of soil first. Without it a stem meeting the floor
-        // line reads as stuck onto the picture rather than growing out of it.
         DrawSoil(canvas, px, py, unit, reach * 1.5, opacity);
         var stem = new PathGeometry();
         var figure = PersonaDraw.Figure(new PPoint(px, py), false);
@@ -263,12 +225,6 @@ internal static class PersonaRendererProps
         }
     }
 
-    /// <summary>
-    /// A brush, held handle-up with the bristles down on the paper. Drawn
-    /// along +x, so the caller's angle points the working end. The bristles
-    /// are a splayed bundle of separate tapered hairs rather than one rounded
-    /// blob.
-    /// </summary>
     public static void DrawPaintBrush(
         PersonaScene canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
     {
@@ -290,8 +246,6 @@ internal static class PersonaRendererProps
         var ferruleShape = canvas.Paint(ferrule, PersonaDraw.Solid(PersonaDraw.White, 0.62 * opacity));
         PersonaDraw.Spin(ferruleShape, tilt, px, py);
 
-        // Five hairs, splayed and bent. They fan wider than the ferrule and
-        // each comes to a point.
         double root = handle * 0.34;
         double tip = handle * 0.62;
         for (int i = 0; i < 5; i++)
@@ -315,10 +269,6 @@ internal static class PersonaRendererProps
         }
     }
 
-    /// <summary>
-    /// What the sprout becomes. Five petals and a middle, because four reads
-    /// as a propeller and six reads as a snowflake.
-    /// </summary>
     public static void DrawFlower(
         PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
@@ -348,7 +298,6 @@ internal static class PersonaRendererProps
         canvas.Paint(middle, PersonaDraw.Solid(Theme.Warning, opacity));
     }
 
-    /// <summary>One piece of punctuation, floating. The only text this cast is allowed.</summary>
     public static void DrawMark(
         PersonaScene canvas, double px, double py, double unit, double scale,
         bool question, Color ink, double opacity)
@@ -382,10 +331,6 @@ internal static class PersonaRendererProps
         canvas.Paint(dot, PersonaDraw.Solid(ink, opacity));
     }
 
-    /// <summary>
-    /// The bead of sweat. It flies off the head rather than running down it,
-    /// which is the cartoon version and the one that reads at this size.
-    /// </summary>
     public static void DrawSweat(
         PersonaScene canvas, double px, double py, double unit, double scale, double tilt, double opacity)
     {
@@ -424,10 +369,6 @@ internal static class PersonaRendererProps
         PersonaDraw.Spin(shape, tilt, px, py);
     }
 
-    /// <summary>
-    /// A star with a tail behind it. Tilt is the direction it is travelling,
-    /// so the tail always trails rather than pointing wherever it was drawn.
-    /// </summary>
     public static void DrawShootingStar(
         PersonaScene canvas, double px, double py, double unit, double scale, double tilt, double opacity)
     {
@@ -473,10 +414,6 @@ internal static class PersonaRendererProps
         canvas.Paint(star, PersonaDraw.Solid(Theme.Warning, opacity));
     }
 
-    /// <summary>
-    /// One scrap, tumbling. Colour comes off the brand arc rather than the
-    /// party shop, so a celebration still looks like this app celebrating.
-    /// </summary>
     public static void DrawConfetti(
         PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
@@ -499,10 +436,6 @@ internal static class PersonaRendererProps
         shape.RenderTransform = group;
     }
 
-    /// <summary>
-    /// A wet stroke of paint. Fat in the middle and tapered at both ends,
-    /// because that is what a brush pressed and lifted leaves behind.
-    /// </summary>
     public static void DrawStroke(
         PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
@@ -520,10 +453,6 @@ internal static class PersonaRendererProps
         _ = hue;
     }
 
-    /// <summary>
-    /// A soap bubble: mostly nothing, with a rim and one highlight. It has to
-    /// be see-through or it is a ball, and a ball is a different mood entirely.
-    /// </summary>
     public static void DrawBubble(
         PersonaScene canvas, double px, double py, double unit, double scale, Color hue, double opacity)
     {
@@ -548,10 +477,6 @@ internal static class PersonaRendererProps
         _ = hue;
     }
 
-    /// <summary>
-    /// A biscuit, with bites taken out of it. Angle counts the bites, so the
-    /// same prop covers the whole snack from whole to nearly gone.
-    /// </summary>
     public static void DrawCookie(
         PersonaScene canvas, double px, double py, double unit, double scale,
         double tilt, Color hue, double opacity)
@@ -572,8 +497,6 @@ internal static class PersonaRendererProps
         canvas.Paint(
             biscuit, PersonaDraw.Solid(hue, 0.62 * opacity),
             PersonaDraw.Solid(hue, 0.95 * opacity), Math.Max(1, unit * 0.014));
-        // The chips. Fixed offsets rather than random ones, so a biscuit does
-        // not reshuffle itself every frame.
         foreach (var offset in new PPoint[] { new(-0.34, 0.18), new(0.22, 0.36), new(0.05, -0.30) })
         {
             var chip = new PathGeometry();
@@ -583,10 +506,6 @@ internal static class PersonaRendererProps
         }
     }
 
-    /// <summary>
-    /// The patch of ground a plant is in. Small, dark, and flat on the floor
-    /// line, which is all it takes for a stem to read as rooted.
-    /// </summary>
     public static void DrawSoil(PersonaScene canvas, double px, double py, double unit, double w, double opacity)
     {
         var mound = new PathGeometry();
@@ -597,11 +516,6 @@ internal static class PersonaRendererProps
         _ = unit;
     }
 
-    /// <summary>
-    /// The hammer, pivoting where the character holds it. Tilt is the swing,
-    /// so the head is drawn at the far end of a handle that rotates around the
-    /// grip. The head is deliberately heavy.
-    /// </summary>
     public static void DrawHammer(
         PersonaScene canvas, double px, double py, double unit, double tilt, Color hue, double opacity)
     {
@@ -630,10 +544,6 @@ internal static class PersonaRendererProps
         PersonaDraw.Spin(clawShape, tilt, px, py);
     }
 
-    /// <summary>
-    /// A nail in the floor, most of the way in by the end of a cycle. Showing
-    /// is how much of the shank is still above the boards.
-    /// </summary>
     public static void DrawNail(
         PersonaScene canvas, double px, double py, double unit, double showing, Color hue, double opacity)
     {

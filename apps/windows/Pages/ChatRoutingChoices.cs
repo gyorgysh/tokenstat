@@ -5,8 +5,6 @@ namespace Tokenstat.Pages;
 
 internal static class ChatRoutingChoices
 {
-    // A preferred destination can be saved independently of the fallback list.
-    // Keep that choice, and use the route instance when edits should follow it.
     public static List<JsonObject?> Preferred(IReadOnlyList<JsonObject> routes, JsonObject? preferred)
     {
         var choices = new List<JsonObject?> { null };

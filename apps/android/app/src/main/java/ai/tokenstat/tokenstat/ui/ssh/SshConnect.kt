@@ -49,7 +49,6 @@ import kotlinx.serialization.json.put
 fun JsonObject.sshString(key: String): String? =
     this[key]?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.jsonPrimitive?.contentOrNull
 
-/// Password or stored-key connect from a host row, then hand the session id up.
 @Composable
 fun SshConnectDialog(
     model: AppViewModel,
@@ -71,8 +70,6 @@ fun SshConnectDialog(
     val port = host["port"]?.jsonPrimitive?.content?.toIntOrNull() ?: 22
     val hostKeys = (host["hostKeys"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
     val savedKeys = remember(keys) { keys.filterIsInstance<JsonObject>() }
-    // The host's own choice first, like the iOS connect form. A key that is
-    // no longer in the library selects nothing rather than a missing id.
     val storedRef = host.sshString("credentialId") ?: host.sshString("keyId") ?: host.sshString("identity")
     var selectedKeyId by remember(host) {
         mutableStateOf(storedRef?.takeIf { ref -> savedKeys.any { it.sshString("id") == ref } } ?: "")
@@ -85,8 +82,6 @@ fun SshConnectDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text("$hostname:$port", color = colors.textSecondary)
-                // "Use": the password, or one of the saved keys. Passwords
-                // are used for this connection and are never saved.
                 Box {
                     OutlinedTextField(
                         value = if (selectedKeyId.isEmpty()) L10n.text("android.sshconnect.password.e7cf3ef4")
@@ -173,8 +168,6 @@ fun SshConnectDialog(
                                 val fingerprint = probe.sshString("fingerprint")
                                     ?: throw IllegalStateException(L10n.text("android.sshconnect.the_server_did_not_offer_a_host_key.3c1b0e56"))
                                 pendingFingerprint = fingerprint
-                                // Reading the key is not permission to trust it.
-                                // Wait for the person to compare and confirm.
                                 return@runCatching null
                             }
                             if (keysForOpen.isEmpty()) {
@@ -216,11 +209,6 @@ fun SshConnectDialog(
                                     put("rows", 24)
                                     put("cols", 80)
                                     put("auth", auth)
-                                    // Carried so `ssh.session.list` can name
-                                    // what it is holding. The host never dials
-                                    // with either: it reaches the server by
-                                    // hostname and username the way it always
-                                    // did.
                                     host.sshString("id")?.let { put("hostId", it) }
                                     put("label", host.sshString("label") ?: hostname)
                                 },
@@ -232,16 +220,10 @@ fun SshConnectDialog(
                 },
             )
         },
-        // Full size, like Connect beside it. A small Cancel next to a
-        // full-size primary reads broken, and it misses the 48dp touch
-        // minimum the capsule comment promises for actions.
         dismissButton = { TsSecondaryButton(label = L10n.text("common.cancel"), onClick = onDismiss) },
     )
 }
 
-/// Rename a saved key. The private half is never shown here: it lives in
-/// the device store under `secretRef`, and the fingerprint and public half
-/// are copied from the row menu instead.
 @Composable
 fun SshKeyRenameDialog(model: AppViewModel, key: JsonObject, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()

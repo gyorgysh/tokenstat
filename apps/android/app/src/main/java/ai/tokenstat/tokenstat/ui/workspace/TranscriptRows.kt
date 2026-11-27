@@ -107,9 +107,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
-/// One coalesced transcript row. Ported from ClientChatRows.swift
-/// `ClientChatEventRow`: user bubbles right, assistant prose in a panel with
-/// the agent name in accent, tools as ToolRow cards, edits as file cards.
 @Composable
 internal fun TranscriptItemRow(
     item: ChatDisplayItem,
@@ -118,12 +115,9 @@ internal fun TranscriptItemRow(
     chatId: String,
     hostLabel: String,
     defaultAgentName: String,
-    /// The Detailed level: tool output and diffs start open.
     expandsOutput: Boolean = false,
-    /// Opens or folds a step group, by the group's row id.
     onToggleGroup: (String) -> Unit = {},
     canAnswerQuestions: Boolean = true,
-    /// Opens the recorded turn's edits at the requested file.
     onReviewChanges: ((ChatDisplayItem.Changes, String?) -> Unit)? = null,
     toolImages: List<ChatDisplayItem.Attachment> = emptyList(),
     live: Boolean = false,
@@ -245,8 +239,6 @@ internal fun TranscriptItemRow(
                             put("text", answer)
                         })
                     }.onSuccess { error = null }.onFailure { error = it.message }
-                    // The answer comes back on the next poll of the transcript,
-                    // and the card turns answered then on every device.
                     sending = false
                 }
             }
@@ -360,10 +352,6 @@ private fun AssistantPanel(text: String, agentName: String, live: Boolean) {
     }
 }
 
-/// The point where a conversation changed hands, and what the incoming agent
-/// was told. A banner rather than a divider: people missed the thin caption,
-/// and a change of agent changes what every reply below it can know. The
-/// brand gradient marks it, the one place in a transcript that uses it.
 @Composable
 internal fun TranscriptHandoffBanner(to: String, brief: String) {
     val colors = LocalTsColors.current
@@ -427,10 +415,6 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
     val removed = state.snippet.count { ChatToolState.isDiffLine(displaySnippet(it)) && displaySnippet(it).startsWith("-") }
     val snippetIsOutput = state.snippet.any { it.startsWith("|") }
 
-    // Few-line edits open on their own; anything bigger stays a stat with
-    // the full diff one tap away. Never overrules a hand toggle.
-    // Detailed opens every finished output, and closes what it opened when
-    // it is switched off.
     LaunchedEffect(state.snippet, state.running, expandsOutput) {
         if (snippetToggled || state.running) return@LaunchedEffect
         showSnippet = when {
@@ -440,8 +424,6 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
         }
     }
 
-    // A failed step is marked rather than boxed: agents retry all the time,
-    // so a failed read is a step like any other.
     val tint = when {
         state.failed -> colors.textSecondary
         state.running -> colors.accent
@@ -449,9 +431,6 @@ private fun TranscriptToolRow(state: ChatToolState, expandsOutput: Boolean = fal
         else -> colors.accent
     }
     val border = if (state.running) colors.accent.copy(alpha = 0.45f) else colors.border
-    // One line shown while collapsed so a row is never just the verb. The
-    // header already shows the target; this is the first output line
-    // beneath it. Diffs skip this: their +/- stat lives in the header.
     val preview = if (!hasDiff) {
         state.snippet.firstNotNullOfOrNull { line ->
             val text = displaySnippet(line).trim()
@@ -581,8 +560,6 @@ private fun snippetColor(
     return secondary
 }
 
-/// A side with nothing in it is left out, so a new file reads "+22"
-/// rather than "+22 −0".
 @Composable
 private fun DiffStat(added: Long, removed: Long, style: TextStyle = TsType.mono(11, FontWeight.Medium)) {
     val colors = LocalTsColors.current
@@ -592,9 +569,6 @@ private fun DiffStat(added: Long, removed: Long, style: TextStyle = TsType.mono(
     }
 }
 
-/// What one step produced, below its open Compact line. The line above
-/// already says what the step was, so there is no card, no second header
-/// and no show button. Port of ChatStepDetail.swift.
 @Composable
 private fun PlainStepDetail(item: ChatDisplayItem) {
     val colors = LocalTsColors.current
@@ -646,8 +620,6 @@ private fun PlainStepDetail(item: ChatDisplayItem) {
     }
 }
 
-/// A finished tool call drawn as a Compact line, for transcripts that are
-/// not chats (automation runs). The output opens on tap.
 @Composable
 internal fun CompactToolLine(id: String, verb: String, target: String, snippet: List<String>) {
     PlainStepRow(ChatDisplayItem.Tool(id, ChatToolState(id, verb, target, false, false, null, 0, null, snippet)))
@@ -877,8 +849,6 @@ private fun AttachmentRow(
         val owner = fileOwner ?: return@LaunchedEffect
         val size = item.size ?: return@LaunchedEffect
         if (!isModel || size !in 1..1_048_576L) return@LaunchedEffect
-        // Small previews arrive quietly over a direct route. Relay transfers
-        // still wait for the explicit Preview action and its allowance prompt.
         repeat(5) {
             if (downloadedFile != null || busy) return@LaunchedEffect
             if (model.peerRoute(peer) == "direct") {
@@ -889,7 +859,7 @@ private fun AttachmentRow(
                         confirm = { false }, progress = {}, byteLimit = 1_048_576L)
                     if (ai.tokenstat.tokenstat.ui.logic.ProjectOwner.from(model.state.value.account, peer, chatId) == owner) downloadedFile = file
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (_: Exception) { /* Keep the manual Preview action available. */ }
+                catch (_: Exception) { }
                 finally { busy = false }
                 return@LaunchedEffect
             }
@@ -975,8 +945,6 @@ private val LocalLiveMarkdown = staticCompositionLocalOf { false }
 
 internal enum class MarkdownPresentation { Document, Chat, Aside }
 
-/// Lightweight chat markdown: fences, headers, bullets, quotes, inline
-/// code, bold, italic, links and tables, rendered directly in Compose.
 @Composable
 internal fun MarkdownText(
     text: String,
@@ -1092,8 +1060,6 @@ internal fun parseMarkdown(text: String): List<MdBlock> {
         val body = paragraph.toString().trim()
         if (body.isNotEmpty()) {
             blocks.add(MdBlock.Paragraph(body))
-            // A paragraph breaks a numbered list; an empty flush between
-            // two numbered lines must not restart its counter.
             number = 0
         }
         paragraph.clear()
@@ -1231,7 +1197,6 @@ private fun InlineMarkdown(
             }
         }
     }
-    // Links ride as LinkAnnotations, which Text opens itself.
     StreamingText(annotated, style = style, modifier = modifier, live = LocalLiveMarkdown.current)
 }
 
@@ -1251,8 +1216,6 @@ private fun AnnotatedString.Builder.parseInline(
                     append(text.drop(i))
                     return
                 }
-                // Parsed again inside, not appended raw: a link inside bold
-                // is a bold link, not the letters `[text](url)`.
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                     parseInline(text.substring(i + 2, end), accent, secondary, openLink)
                 }
@@ -1287,8 +1250,6 @@ private fun AnnotatedString.Builder.parseInline(
             }
             text[i] == '*' || text[i] == '_' -> {
                 val mark = text[i]
-                // An underscore inside a word is snake_case, not emphasis.
-                // An asterisk opens anywhere, like CommonMark.
                 val opens = mark == '*' || i == 0 || !text[i - 1].isLetterOrDigit()
                 val end = if (opens) text.indexOf(mark, i + 1) else -1
                 if (end < 0 || end == i + 1) {
@@ -1399,7 +1360,6 @@ private fun stepGroupSummary(group: ChatStepGroup): String? = when (group.style)
     ChatStepGroup.Style.Step -> group.subject?.let { shortStepSubject(group.verb, it) }
 }
 
-/// A path becomes its file name. A command keeps its first line.
 internal fun shortStepSubject(verb: String?, subject: String): String {
     val line = subject.lineSequence().firstOrNull()?.trim() ?: subject.trim()
     return when (verb) {
@@ -1473,9 +1433,6 @@ internal fun stepGroupFailureText(group: ChatStepGroup): String? = when {
     else -> L10n.text("android.chatdetail.failed_count", "${group.failures}")
 }
 
-/// The files a finished turn changed, under its last reply. Port of
-/// ChatTurnChangesCard.swift: the first four files, the rest one tap away,
-/// and Review opens the folder's changes.
 @Composable
 private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: ((ChatDisplayItem.Changes, String?) -> Unit)?) {
     val colors = LocalTsColors.current
@@ -1545,7 +1502,6 @@ private fun TurnChangesCard(changes: ChatDisplayItem.Changes, onReview: ((ChatDi
     }
 }
 
-/// "10s", "3m", "1h 5m", floored, the way the Apple client's turn timer reads.
 private fun stepGroupDuration(group: ChatStepGroup): String? {
     val start = group.startedAtMs ?: return null
     val end = group.endedAtMs ?: return null

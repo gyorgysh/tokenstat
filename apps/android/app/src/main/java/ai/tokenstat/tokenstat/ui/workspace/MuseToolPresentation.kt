@@ -10,7 +10,6 @@ import kotlinx.serialization.json.longOrNull
 
 internal data class MuseToolPresentation(val verb: String, val target: String)
 
-/** Older Muse starts omit input. Recover only explicit facts from their completed result. */
 internal fun refineMuseToolPresentation(
     backend: String?,
     verb: String,

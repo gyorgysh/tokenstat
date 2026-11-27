@@ -22,8 +22,6 @@ enum LocalProviderPreference {
     }
 }
 
-/// Local model servers are optional. A missing provider is a normal state, not
-/// an Account error, so this model keeps its own loading and probe result.
 @MainActor
 @Observable
 final class LocalModelsModel {
@@ -33,8 +31,6 @@ final class LocalModelsModel {
     private(set) var preferenceRevision = 0
 
     func isEnabled(_ providerID: String) -> Bool {
-        // Reading the revision makes a setEnabled bump observable, so the row
-        // redraws instead of sitting on the old switch position.
         _ = preferenceRevision
         return LocalProviderPreference.isEnabled(providerID)
     }

@@ -13,11 +13,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Native pull-request list and review surface. Network calls stay behind the
-/// host boundary; this page only asks because it loaded or a labelled control
-/// was pressed.
-/// </summary>
 internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _workspaceId;
@@ -58,9 +53,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _state.SelectedIndex = 0;
         _scope.SelectionChanged += async (_, _) => await LoadListAsync();
         _state.SelectionChanged += async (_, _) => await LoadListAsync();
-        // A scanned list takes the window, like the Mac ReadingRoom: no lane,
-        // leading, with the wide gutters. The lane that keeps prose readable
-        // is the lane that pushes rows into each other.
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceXl),
@@ -86,16 +78,12 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>Show one pull request, now or as soon as the page is on screen.</summary>
     public void Reveal(long number)
     {
         if (IsLoaded) _ = ShowDetailAsync(number);
         else _revealNumber = number;
     }
 
-    /// <summary>
-    /// The folder these pull requests belong to.
-    /// </summary>
     public UIElement? ToolbarScope =>
         Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.pullspage.pull_requests.d9e3f260") : _folderName);
 
@@ -123,11 +111,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// The inspector column content: the repository and connection, and the
-    /// open pull request when one is on screen. List and detail loads repaint
-    /// it, so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -182,14 +165,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         });
     }
 
-    /// <summary>
-    /// One workspace-scoped pulls method against this folder, local or
-    /// remote. A remote folder travels as remote.call with the peer's own
-    /// folder id, the way the desktop Mac routes every pulls read and write.
-    /// Params are copied, never mutated, so a retry cannot forward an already
-    /// rewritten id. The sign-in flow has no folder and always stays local,
-    /// matching the Mac.
-    /// </summary>
     private Task<JsonNode> CallPullsAsync(string method, JsonNode? parameters = null)
     {
         if (!RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
@@ -253,8 +228,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         _folderName = folderName;
         RaiseToolbarChanged();
         RenderInspector();
-        // The list page and mixed-state query are separate host capabilities.
-        // Keep older hosts on the original first-page method and omit All.
         if (_hostProtocol is null)
         {
             try
@@ -263,7 +236,7 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                     ? await RemoteFeatureGate.PeerProtocolAsync(peer)
                     : RemoteFeatureGate.ProtocolOf(await AppServices.Host.CallAsync("protocol"));
             }
-            catch { /* An unknown protocol takes the legacy path. */ }
+            catch { }
             if (generation != _loadGeneration || !IsLoaded) return;
             UpdateStateChoices();
         }
@@ -739,10 +712,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The device flow holds server state, so leaving it cancels the wait
-    /// rather than leaving a code the page forgot about.
-    /// </summary>
     private async Task CancelLoginAsync()
     {
         _loginPoll?.Cancel();
@@ -997,8 +966,6 @@ internal sealed class PullsPage : Page, IInspectorContent, IToolbarItems
                 holder.Children.Add(Chrome.Empty(L10n.Text("windows.pullspage.no_text_changes.08722a9e"), L10n.Text("windows.pullspage.this_pull_request_has_no_line_by_line_diff.680bf131"), ActionIcon.Compare));
                 return;
             }
-            // Only the chosen file is drawn. A large pull request has tens of
-            // thousands of lines, and drawing them all at once froze the page.
             var current = new ContentControl
             {
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,

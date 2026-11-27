@@ -12,8 +12,6 @@ enum ChatFileIO {
         case base64(String)
     }
 
-    /// Small attachments stay in memory; file-backed large transfers do not
-    /// use this path. Keep both file I/O and legacy decoding off the UI actor.
     static func data(from source: DataSource, maximum: Int) async throws -> Data {
         guard maximum > 0, maximum <= Int(maximumBytes) else { throw CocoaError(.fileReadTooLarge) }
         try Task.checkCancellation()
@@ -51,8 +49,6 @@ enum ChatFileIO {
         return result
     }
 
-    /// Validate the opened file, since URL metadata can outlive a rewrite.
-    /// Nonblocking open also lets us reject pipes without waiting for a writer.
     private static func openFile(_ url: URL, maximum: UInt64) throws -> (FileHandle, UInt64) {
         guard url.isFileURL else { throw CocoaError(.fileReadUnsupportedScheme) }
         try Task.checkCancellation()
@@ -76,12 +72,9 @@ enum ChatFileIO {
         }
     }
 
-    /// Copy into a new private file without allocating the whole original.
     static func copy(_ source: URL, to destination: URL) throws {
         let (input, expected) = try openFile(source, maximum: maximumBytes)
         defer { try? input.close() }
-        // The existence check and creation must be one operation: another
-        // store/process may retain this same original at the same time.
         let descriptor = Darwin.open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         let output = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)

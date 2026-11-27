@@ -3,8 +3,6 @@
 #if !os(macOS)
 import Foundation
 
-/// The job session owns selection and observation. Its service owns transport,
-/// allowing the same screens to be exercised without an account or live work.
 protocol ClientJobService: Sendable {
     func automations(peer: String) async throws -> [Automation]
     func automationRuns(peer: String) async throws -> [RunRecord]
@@ -167,8 +165,6 @@ struct ClientRemoteJobService: ClientJobService {
     }
 }
 
-/// Job sessions are folder-scoped. Queue settings are not, so the scheduler
-/// sheet talks to this adapter instead of the folder session.
 struct ClientJobQueueService: AutomationQueueService {
     let peer: String
     let jobs: any ClientJobService

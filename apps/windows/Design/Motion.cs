@@ -14,65 +14,30 @@ using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// Motion tokens and storyboard helpers, ported from the Apple clients and
-/// the Android TsMotion port. Timings are read from the sources, nothing here
-/// is invented: arrive 220ms with a 4pt rise (Skeleton smoothIn, TsMotion
-/// arriveMillis), door 280ms easeInOut between shell states (TsMotion
-/// doorMillis), toast 250ms snappy (Theme TransientToast), skeleton pulse
-/// 950ms easeInOut autoreverse (Skeleton Bar), breathe 1100ms easeInOut loop
-/// (MiniGraph live node, ClientEmptyArt scenes), and the staggered intro
-/// spring family from ClientOnboardingArt and ClientEmptyArt.
-/// Every helper respects the system animation setting: loops land on the
-/// resting frame, arrivals collapse to a fade.
-/// </summary>
 internal static class Motion
 {
-    /// <summary>Smooth arrival of loaded content: fade with a small rise.</summary>
     public const int ArriveMillis = 220;
 
-    /// <summary>The rise in a smooth arrival, in device independent pixels.</summary>
     public const double ArriveRiseDip = 4;
 
-    /// <summary>Root shell door transitions between shell states.</summary>
     public const int DoorMillis = 280;
 
-    /// <summary>Toast slide and fade.</summary>
     public const int ToastMillis = 250;
 
-    /// <summary>Skeleton pulse period.</summary>
     public const int PulseMillis = 950;
 
-    /// <summary>Breathing live indicators.</summary>
     public const int BreatheMillis = 1100;
 
-    /// <summary>
-    /// One spring of the staggered onboarding intro family: response in
-    /// seconds, damping fraction, and delay in seconds. From
-    /// ClientOnboardingArt (0.5/0.82 rows, 0.55/0.78 card, 0.7/0.78 bars)
-    /// and ClientEmptyArt (0.6/0.7 delayed 0.15 settle).
-    /// </summary>
-    /// <param name="Response">Spring response time in seconds.</param>
-    /// <param name="DampingFraction">Damping fraction, 0 is undamped.</param>
-    /// <param name="Delay">Start delay in seconds.</param>
     public readonly record struct IntroSpring(double Response, double DampingFraction, double Delay);
 
-    /// <summary>Staggered intro rows: spring 0.5, damping 0.82.</summary>
     public static readonly IntroSpring SpringRise = new(0.5, 0.82, 0);
 
-    /// <summary>Card arrival: spring 0.55, damping 0.78.</summary>
     public static readonly IntroSpring SpringCard = new(0.55, 0.78, 0);
 
-    /// <summary>Bars landing: spring 0.7, damping 0.78.</summary>
     public static readonly IntroSpring SpringBars = new(0.7, 0.78, 0);
 
-    /// <summary>Empty art settle: spring 0.6, damping 0.7, delayed 0.15.</summary>
     public static readonly IntroSpring SpringSettle = new(0.6, 0.7, 0.15);
 
-    /// <summary>
-    /// Whether the system wants motion. Loops land on the resting frame and
-    /// arrivals become fades when this is off. Same probe Marks uses.
-    /// </summary>
     public static bool AnimationsEnabled()
     {
         try
@@ -85,11 +50,6 @@ internal static class Motion
         }
     }
 
-    /// <summary>
-    /// The smoothIn arrival for loaded content replacing a skeleton: a short
-    /// fade with a small rise. Collapses to a plain fade when motion is off.
-    /// Plays once the element is in the tree.
-    /// </summary>
     public static void PlayArrival(UIElement element)
     {
         void Run()
@@ -131,10 +91,6 @@ internal static class Motion
         Run();
     }
 
-    /// <summary>
-    /// A shell door swap: 280ms easeInOut fade between shell states, such as
-    /// the host splash and the first page. No rise, doors do not rise.
-    /// </summary>
     public static void PlayDoor(UIElement element)
     {
         void Run()
@@ -167,10 +123,6 @@ internal static class Motion
         Run();
     }
 
-    /// <summary>
-    /// A toast arrival: 250ms slide and fade. Snappy on the way in, like the
-    /// Apple TransientToast.
-    /// </summary>
     public static void ToastIn(FrameworkElement element)
     {
         void Run()
@@ -214,14 +166,6 @@ internal static class Motion
         Run();
     }
 
-    /// <summary>
-    /// One grey bar standing in for a line of text or a number. A soft
-    /// opacity pulse keeps the layout alive without a shimmer that steals
-    /// attention from the data about to land. Motion off leaves the resting
-    /// frame: full opacity, no storyboard.
-    /// </summary>
-    /// <param name="widthDip">Bar width, or null to fill the space.</param>
-    /// <param name="phaseSecs">Phase offset so neighbours do not pulse in lockstep.</param>
     public static Border SkeletonBar(double? widthDip, double height = 12, double phaseSecs = 0)
     {
         var bar = new Border
@@ -258,12 +202,6 @@ internal static class Motion
         return bar;
     }
 
-    /// <summary>
-    /// A stack of rows, each a label bar and a value bar, like a list.
-    /// Widths vary down the stack so it reads as text rather than as a bar
-    /// chart. Deterministic, not random: a placeholder that reshuffles on
-    /// every redraw is a distraction of its own.
-    /// </summary>
     public static StackPanel SkeletonRows(int count = 5, bool showsValue = true)
     {
         double[] labelWidths = [128, 96, 152, 84, 116, 104];
@@ -286,10 +224,6 @@ internal static class Motion
         return stack;
     }
 
-    /// <summary>
-    /// A card-shaped placeholder: heading, subheading, and some rows. What a
-    /// page shows while the host has not answered yet, instead of a spinner.
-    /// </summary>
     public static Border SkeletonCard(int rows = 3)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM, Opacity = 0.75 };
@@ -315,7 +249,6 @@ internal static class Motion
     };
     private static readonly double[] TranscriptWidths = { 0.94, 0.86, 0.71, 0.9, 0.58, 0.8 };
 
-    /// <summary>Loading placeholder for a chat, newest turn at the bottom.</summary>
     public static StackPanel TranscriptSkeleton(int turns = 10, double lane = 640)
     {
         var stack = new StackPanel { Spacing = 22, Opacity = 0.7, Margin = new Thickness(0, Theme.SpaceL, 0, 0) };
@@ -348,10 +281,6 @@ internal static class Motion
         return stack;
     }
 
-    /// <summary>
-    /// A breathing opacity loop for a live indicator, 1100ms easeInOut. Only
-    /// the thing that is actually working breathes. Motion off parks it lit.
-    /// </summary>
     public static void Breathe(UIElement element, double low = 0.25, double high = 0.9)
     {
         if (!AnimationsEnabled())
@@ -376,10 +305,6 @@ internal static class Motion
         });
     }
 
-    /// <summary>
-    /// The "Working" line at the foot of a busy transcript. It breathes while
-    /// the turn runs, so a long wait does not read as frozen.
-    /// </summary>
     public static TextBlock WorkingLabel()
     {
         var label = new TextBlock
@@ -392,13 +317,6 @@ internal static class Motion
         return label;
     }
 
-    /// <summary>
-    /// One spring of the onboarding intro family: the element settles from a
-    /// small dip with the response and damping the Apple spring carries.
-    /// Period is the response, damping ratio is the damping fraction. Motion
-    /// off leaves the resting frame.
-    /// </summary>
-    /// <param name="fromDip">How far below resting the element starts, in pixels.</param>
     public static void SpringIn(FrameworkElement element, IntroSpring spring, double fromDip = 12)
     {
         void Run()
@@ -426,8 +344,6 @@ internal static class Motion
             }
             catch
             {
-                // The compositor is unavailable. The resting frame is already
-                // on screen, which is the correct fallback.
             }
         }
 
@@ -458,10 +374,6 @@ internal static class Motion
         return fade;
     }
 
-    /// <summary>
-    /// Start a looping storyboard when the element enters the tree, stop it
-    /// when it leaves. Loops never outlive their screen.
-    /// </summary>
     private static void LoopOnLoad(UIElement element, Func<DoubleAnimation> build)
     {
         Storyboard? board = null;

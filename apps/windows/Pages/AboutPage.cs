@@ -14,13 +14,6 @@ using Tokenstat.Install;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// What this is, who stands behind it, and how to reach them, over the
-/// licence line. Same order as the Mac About window: the mark and the name,
-/// the version, the one-sentence description, the author, the links, then
-/// the licence and the copyright. The tour entry and the install note are
-/// the Windows additions, kept below the line.
-/// </summary>
 internal sealed class AboutPage : Page
 {
     public AboutPage()

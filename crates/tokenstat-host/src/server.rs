@@ -1,33 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! Local socket transport for [`crate::dispatch`].
-//!
-//! Unix: a filesystem socket. Windows: a named pipe. Framing is the same.
-//!
-//! # Framing
-//!
-//! Line-delimited JSON, one request per line, one response per line:
-//!
-//! ```json
-//! {"id": 1, "method": "totals", "params": {}}
-//! {"id": 1, "ok": true, "result": {...}}
-//! ```
-//!
-//! `id` is echoed back untouched so a client can have several requests in
-//! flight. Everything else is exactly the envelope the in-process path returns,
-//! because it is the same function producing it.
-//!
-//! Newlines rather than a length prefix because `serde_json` never emits a bare
-//! newline inside a value, the frames are small, and a human can debug this
-//! with `nc`.
-//!
-//! # Concurrency
-//!
-//! One thread per connection, all sharing one [`Session`] behind a mutex. The
-//! archive is SQLite and a scan holds a write transaction for a long time, so
-//! requests serialize whatever this does. A thread per connection keeps a slow
-//! `scan` from blocking another client's connect, which is the part that would
-//! actually be felt.
 
 #[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
@@ -47,10 +20,7 @@ use serde_json::{Value, json};
 
 use crate::session::Session;
 
-/// Inbound request line budget. Editor saves can be multi-megabyte JSON.
-/// Matches the remote message scale without allowing multi-GB DoS lines.
 const MAX_REQUEST_LINE: usize = 32 * 1024 * 1024;
-/// Concurrent local clients. The Mac app caps itself at 16; leave headroom.
 const MAX_CONNECTIONS: usize = 64;
 
 #[cfg(windows)]
@@ -67,7 +37,6 @@ fn live_connections() -> &'static AtomicUsize {
 
 #[derive(Debug, Deserialize)]
 struct Request {
-    /// Echoed back. Any JSON value, so a client can use whatever it likes.
     #[serde(default)]
     id: Value,
     method: String,
@@ -122,9 +91,6 @@ pub fn default_socket_path() -> Result<PathBuf, String> {
 /// connection is treated as debris.
 #[cfg(unix)]
 pub fn bind(path: &Path) -> Result<UnixListener, String> {
-    // A unix socket address is a fixed-size struct, so the path has a hard
-    // limit of about 104 bytes on macOS and 108 on Linux. The kernel's own
-    // error for this says "SUN_LEN", which tells a user nothing.
     const MAX_SOCKET_PATH: usize = 100;
     if path.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(format!(
@@ -174,8 +140,6 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
 
     let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
 
-    // The archive holds a user's project names and usage. Nobody else on a
-    // shared machine gets to read it through this door.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -192,12 +156,8 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     let shared = Arc::new(Mutex::new(session));
     #[cfg(feature = "local-host")]
     {
-        // Before anybody asks for a terminal. Resolving the login shell's PATH
-        // costs a full startup file read, and paying it inside the first spawn
-        // means paying it while a person waits for a window to fill.
         tokenstat_pty::warm_login_env();
-        // Same head start for the shell pool: a started shell waits at a prompt
-        // so the first Shell click hands it over instead of starting one.
+
         tokenstat_pty::warm_shell_pool();
         crate::automations::start_scheduler();
         crate::workflows::start_scheduler();
@@ -206,12 +166,8 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         crate::agent_updates::start_schedule();
     }
 
-    // Policy first: if hosting is off, the pause flag is set before the
-    // tunnel thread can start, so a closed-lid or no-app start cannot
-    // accept a remote shell for a beat and then drop it.
     crate::host_policy::start_runtime();
-    // Only if the user turned it on. Binding a port is a decision, not a
-    // default: a remote client can spawn processes and write files.
+
     crate::remote::start_if_enabled(Arc::clone(&shared));
 
     for incoming in listener.incoming() {
@@ -221,22 +177,13 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
                 let prev = live.fetch_add(1, Ordering::AcqRel);
                 if prev >= MAX_CONNECTIONS {
                     live.fetch_sub(1, Ordering::AcqRel);
-                    // Refuse without a thread. Same-UID flood must not grow
-                    // forever. Say so first: a socket that accepts and then
-                    // closes without a word is indistinguishable from a daemon
-                    // that died, and the app answers that by reinstalling the
-                    // launch agent and restarting the daemon, which kills every
-                    // terminal it owns. Losing somebody's running agents to a
-                    // busy minute is not a trade worth making, so this refusal
-                    // is a real envelope the caller can read and retry.
+
                     let _ = refuse_busy(&stream);
                     drop(stream);
                     continue;
                 }
                 let session = Arc::clone(&shared);
-                // A client that hangs up mid-request must not take the daemon
-                // with it, so each connection is its own thread and its own
-                // failure.
+
                 std::thread::spawn(move || {
                     let _guard = ConnectionGuard;
                     if let Err(e) = handle(stream, &session) {
@@ -250,10 +197,6 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     Ok(())
 }
 
-/// Tell a client the daemon is full, in the shape every other answer takes.
-///
-/// Best effort by design: the point is that the caller hears something, and a
-/// client that has already gone away needs nothing.
 #[cfg(unix)]
 fn refuse_busy(stream: &UnixStream) -> std::io::Result<()> {
     let mut out = stream.try_clone()?;
@@ -283,11 +226,6 @@ impl Drop for ConnectionGuard {
     }
 }
 
-/// Read and discard the rest of an oversized line without holding it.
-///
-/// The line must be consumed to its newline, or the tail would be framed as
-/// the next request; and it must not be buffered, or the request cap above
-/// would mean nothing. So: chunk by chunk, discard, stop at the newline.
 #[cfg(unix)]
 fn discard_line(reader: &mut impl BufRead) -> std::io::Result<()> {
     loop {
@@ -316,7 +254,7 @@ fn handle(stream: UnixStream, session: &Mutex<Session>) -> Result<(), String> {
 
     loop {
         buf.clear();
-        // Cap each frame so a same-UID client cannot force multi-GB allocations.
+
         let n = reader
             .by_ref()
             .take(MAX_REQUEST_LINE as u64 + 1)
@@ -325,14 +263,10 @@ fn handle(stream: UnixStream, session: &Mutex<Session>) -> Result<(), String> {
         if n == 0 {
             return Ok(());
         }
-        // Cap hit mid-line when we filled MAX+1 without a newline, or the
-        // frame itself is larger than the budget.
+
         let oversize = buf.len() > MAX_REQUEST_LINE || !buf.ends_with(b"\n");
         if oversize {
             if !buf.ends_with(b"\n") {
-                // Consume the rest of the line, discarding it chunk by chunk:
-                // a tail left in the stream would be framed as the next
-                // request, and a tail buffered whole would defeat the cap.
                 let _ = discard_line(&mut reader);
             }
             let response = json!({
@@ -409,22 +343,13 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         other => other.to_string(),
     };
 
-    // Dispatch Team requests before archive-specific fast paths such as scan.
-    // Their closed method table always returns an answer without taking the
-    // personal session lock or opening a personal database.
     if crate::request_context::team_principal().is_some() {
         let envelope = crate::dispatch::call_sessionless(&request.method, &params)
             .unwrap_or_else(|| json!({"ok":false,"error":{"code":"team_method_required","message":"This action is not available through a Team connection."}}).to_string());
         return with_id(envelope, request.id);
     }
 
-    // Answered without the lock where the method allows it. Connections share
-    // one session, so a terminal polling for output would otherwise serialize
-    // against every other client's archive and git work.
     let envelope = if request.method == "scan" {
-        // Parse can take minutes on a large archive. Open a dedicated Engine so
-        // Home/Insights keep answering on the live session while this runs.
-        // WAL + busy timeout allow the concurrent readers.
         let opened = {
             let guard = session.lock().unwrap_or_else(PoisonError::into_inner);
             guard.engine().ok().map(|engine| {
@@ -434,8 +359,7 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
                 )
             })
         };
-        // No archive to scan. Hand it to the ordinary dispatch, which refuses
-        // in the one place that refusal is worded, and still gets its id.
+
         let Some((db_path, tz_name)) = opened else {
             let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
             let envelope = crate::dispatch::call(&mut guard, &request.method, &params);
@@ -470,8 +394,6 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         };
         let elapsed_ms = started.elapsed().as_millis();
         if elapsed_ms >= 2_000 {
-            // The scan has no request parameters in its public contract, but
-            // keep diagnostics just as strict as ordinary dispatch calls.
             eprintln!(
                 "perf: slow host call layer=dedicated_scan method=scan elapsed_ms={elapsed_ms}"
             );
@@ -481,9 +403,6 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         match crate::dispatch::call_sessionless(&request.method, &params) {
             Some(envelope) => envelope,
             None => {
-                // A poisoned lock means some earlier request panicked. The session
-                // itself is still a valid open archive, so carry on rather than
-                // refusing every request from here on.
                 let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
                 crate::dispatch::call(&mut guard, &request.method, &params)
             }
@@ -493,11 +412,6 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
     with_id(envelope, request.id)
 }
 
-/// Stamp a dispatch envelope with the request id this transport is tracking.
-///
-/// The envelope is already the right shape, and the id is the only thing this
-/// transport adds. Splicing it in rather than re-encoding keeps the two
-/// transports byte-identical in the parts they share.
 fn with_id(envelope: String, id: Value) -> String {
     match serde_json::from_str::<Value>(&envelope) {
         Ok(Value::Object(mut map)) => {
@@ -518,7 +432,6 @@ mod tests {
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir(tag: &str) -> PathBuf {
-        // PIDs can be reused while a prior test's socket still exists.
         loop {
             let dir = std::env::temp_dir().join(format!(
                 "tokenstat-server-{tag}-{}-{}",
@@ -624,20 +537,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_stale_socket_file_is_replaced_rather_than_fatal() {
-        // A daemon killed with SIGKILL leaves the socket file behind. Refusing
-        // to bind would mean it never restarts without manual cleanup.
         let dir = temp_dir("stale");
         let path = dir.join("host.sock");
-        // Never listen on this fixture. Another test can fork while a listener
-        // is open and retain its descriptor until exec, making a dropped
-        // listener briefly look live to the stale-socket probe.
+
         use std::os::fd::{FromRawFd, OwnedFd};
         use std::os::unix::ffi::OsStrExt;
         let raw = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
         assert!(raw >= 0, "{}", std::io::Error::last_os_error());
-        // SAFETY: socket returned a new descriptor and this is its sole owner.
+
         let socket = unsafe { OwnedFd::from_raw_fd(raw) };
-        // SAFETY: a zero-initialized sockaddr_un has a valid empty path.
+
         let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
         address.sun_family = libc::AF_UNIX as libc::sa_family_t;
         let bytes = path.as_os_str().as_bytes();
@@ -650,7 +559,7 @@ mod tests {
         {
             address.sun_len = length as u8;
         }
-        // SAFETY: address and length describe the initialized Unix address.
+
         let result = unsafe { libc::bind(raw, std::ptr::from_ref(&address).cast(), length) };
         assert_eq!(result, 0, "{}", std::io::Error::last_os_error());
         drop(socket);
@@ -681,8 +590,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_over_long_path_is_refused_with_a_readable_reason() {
-        // The kernel calls this "SUN_LEN", which tells a user nothing. A deep
-        // temp or sandbox directory hits it easily.
         let long = std::env::temp_dir().join("x".repeat(120)).join("host.sock");
         let e = bind(&long).expect_err("should refuse");
         assert!(e.contains("unix socket cannot exceed"), "{e}");

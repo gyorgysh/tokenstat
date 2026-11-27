@@ -35,8 +35,6 @@ extension EnvironmentValues {
     }
 }
 
-/// A bounded group of image previews, shared by desktop and mobile rows.
-/// Four cells are enough to recognize a set; the viewer retains every file.
 struct ChatImageGallery: View {
     let resources: [ChatImageResource]
     var compact = false
@@ -126,8 +124,6 @@ private struct ChatImageRowsLayout: Layout {
     }
 }
 
-/// Decode a bounded, alpha-preserving image away from the UI executor.
-/// The layout proposal bounds the preview; decoded pixels do not size it.
 struct ChatImageSurface: View {
     let resource: ChatImageResource
     var maxPixel: CGFloat = 3072
@@ -162,9 +158,6 @@ struct ChatImageSurface: View {
             .clipped()
         }
         .task(id: source) {
-            // Published attachment bytes/cache files stay immutable until the
-            // model resets their resource. Lazy reappearance still requests
-            // the cache again, which revalidates file identity before reuse.
             let requested = source
             let image = await ChatImageDecodeCache.shared.image(data: requested.data, file: requested.file, maxPixel: requested.maxPixel)
             guard !Task.isCancelled else { return }
@@ -181,7 +174,6 @@ private struct ChatImagePresentation: Identifiable {
     let selectedID: String
 }
 
-/// A chat owns the lightbox, so lazy row recycling cannot dismiss it.
 private struct ChatImageViewerHost: ViewModifier {
     @Bindable var model: ChatModel
     @State private var presentation: ChatImagePresentation?
@@ -371,9 +363,6 @@ private struct ChatImageViewer: View {
     }
     private func loadSelected() async {
         let selected = attachment
-        // A canceled predecessor or an automatic preview can still be
-        // settling. Wait for its transfer slot so Next opens the new image
-        // directly, including when the background read declined relay use.
         while model.fileTransferInFlight || model.loadingResponseAttachments.contains(selected.id) {
             guard !Task.isCancelled, model.currentReference == request.reference, attachment.id == selected.id else { return }
             do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
@@ -451,8 +440,6 @@ private struct ChatImageViewer: View {
             try await Task.detached(priority: .userInitiated) {
                 try FileManager.default.copyItem(at: source, to: temporary)
             }.value
-            // The slow copy never publishes a destination. Only this actor
-            // may finish it, after checking the owner and access again.
             guard !Task.isCancelled, model.currentReference == reference, WorkCacheAccess.canRead(reference) else { return }
             if FileManager.default.fileExists(atPath: destination.path) {
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)

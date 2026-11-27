@@ -112,8 +112,6 @@ fn request_mode(
     let Ok(executable) = std::env::current_exe() else {
         return unavailable();
     };
-    // Never relaunch an arbitrary GUI app embedding the FFI. Shipping macOS
-    // usage reads run in hostd; the CLI supports the same private entry point.
     if !matches!(
         executable.file_name().and_then(|s| s.to_str()),
         Some("tokenstat" | "tokenstat-hostd")
@@ -299,8 +297,6 @@ fn authorize_items(
             _ => denied.push(service),
         }
     }
-    // One explicit action may open at most one system prompt. Old Claude
-    // profiles can leave many items behind; never walk their permission dialogs.
     if let Some(service) = denied.first() {
         let reply = read(service, true);
         authorization_result(reply.status)?;

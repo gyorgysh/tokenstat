@@ -2,8 +2,6 @@
 
 import Foundation
 
-/// Measures the space owned by a job workspace, after surrounding sidebars.
-/// The selected job stays in its session when only this arrangement changes.
 struct ClientJobLayout: Equatable {
     enum Arrangement: Equatable {
         case compact
@@ -26,8 +24,6 @@ struct ClientJobLayout: Equatable {
     }
 }
 
-/// Navigation intent belongs above the compact/split branch. Hiding a pushed
-/// detail to make room for columns must not forget which job was open.
 struct ClientJobNavigation: Equatable {
     private(set) var showsDetail = false
 

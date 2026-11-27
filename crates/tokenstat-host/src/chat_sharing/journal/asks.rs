@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use crate::chat_receipts::team_runs as runs;
 
@@ -40,7 +39,6 @@ impl AskRecord {
         key_for(&a.scope, &a.actor.id, &a.client_message_id)
     }
     pub fn encoded(&self) -> Result<Vec<u8>, &'static str> {
-        // Keep the same bounded text/actor validation as ordinary Comments.
         Record::new(
             self.seq,
             self.text.clone(),
@@ -164,8 +162,7 @@ impl Journal {
             before_bytes: before.len() as u64,
             before_digest: digest(before),
         });
-        // Refuse before the canonical fence or text is written. Headroom is
-        // for replacing this temporary intent with its proof and state.
+
         if self.encoded()?.len() as u64 > MAX_JOURNAL_BYTES - 1024 {
             return Err("Run receipt storage is full");
         }
@@ -315,8 +312,7 @@ impl Journal {
     ) -> Result<runs::State, &'static str> {
         use runs::State;
         let ledger = self.runs.as_mut().ok_or("Run reservation is missing")?;
-        // A crash can follow the durable terminal write but precede release
-        // of the project claim or canonical fence. Finish that same cleanup.
+
         if let Some(record) = ledger
             .records()
             .find(|record| &record.binding().fence == fence)
@@ -369,10 +365,6 @@ impl Journal {
             return Err("This run still needs recovery");
         }
         if record.canonical().is_none() {
-            // An admission can stop after its reservation was made durable but
-            // before the human row was written. No backend can be born then.
-            // Retire only that exact unwritten prefix; never replay the Ask or
-            // require a nonexistent canonical row before releasing its fence.
             if record.state() != runs::State::NotStarted
                 || self.pending_agent.is_some()
                 || self.pending_segments.is_some()
@@ -397,8 +389,7 @@ impl Journal {
         self.observe_agent(bytes)?;
         self.observe_chain(chain)?;
         self.retire_unwritten_agent(&scope, fence.run_id(), bytes)?;
-        // Segment reservations are exclusive to the run behind the source
-        // fence. No later Ask can reserve output before this cleanup.
+
         self.retire_unwritten_segments(chain)
     }
     pub fn transition_run(

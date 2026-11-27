@@ -114,7 +114,6 @@ fn move_catch_up_collects_every_page_and_rejects_nonadvancing_cursors() {
             .1
             .ends_with(&format!("?after={last}"))
     );
-    // Older account servers omit the cursor on their single page.
     let (client, _) = fixture(
         response(json!({"moves": [{"repositoryId": first, "sequence": 1}]})),
         false,

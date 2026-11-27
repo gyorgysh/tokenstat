@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-/// One slash command the prompt can run or complete.
 pub(super) struct CommandDef {
     pub(super) name: &'static str,
     pub(super) aliases: &'static [&'static str],
@@ -8,9 +7,6 @@ pub(super) struct CommandDef {
 }
 
 pub(super) const COMMANDS: &[CommandDef] = &[
-    // Account and data lifecycle first. Tabs are reachable with the 1-9 keys
-    // and the arrow keys, so the palette's top rows belong to the commands a
-    // user comes looking for: linking, syncing, scanning, fetching.
     CommandDef {
         name: "setup",
         aliases: &["start", "onboard"],
@@ -56,7 +52,6 @@ pub(super) const COMMANDS: &[CommandDef] = &[
         aliases: &[],
         about: "Show list-rate budget status (set via tokenstat budget)",
     },
-    // Tabs. Keep the same order as the number keys so muscle memory carries.
     CommandDef {
         name: "summary",
         aliases: &["overview", "s"],

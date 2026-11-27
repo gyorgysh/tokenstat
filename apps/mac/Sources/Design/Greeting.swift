@@ -6,13 +6,7 @@
 
 import Foundation
 
-/// A short greeting that uses the device clock, not a server timezone.
-///
-/// The phrase is stable for the rest of the local day so a refresh does not
-/// swap "Hello" for "What's up". The website does the same pick after mount,
-/// for the same reason: UTC on the server is the wrong afternoon.
 enum HomeGreeting {
-    /// "Good afternoon, Gyorgy"
     static func line(
         name: String,
         hasHistory: Bool,
@@ -22,9 +16,6 @@ enum HomeGreeting {
         "\(line(hasHistory: hasHistory, now: now, calendar: calendar)), \(firstName(name))"
     }
 
-    /// "Good afternoon", with no name. A signed-in account that set
-    /// neither a display name nor a handle is still signed in, and the
-    /// greeting must not claim otherwise.
     static func line(
         hasHistory: Bool,
         now: Date = Date(),
@@ -51,8 +42,6 @@ enum HomeGreeting {
         case 17..<22: timed = L10n.text("apple.greeting.good_evening.15a421e4")
         default: timed = L10n.text("apple.greeting.hello.185f8db3")
         }
-        // Fixed length so a later hasHistory flip only changes the returning
-        // slots, not which index the day lands on.
         let pool = [
             timed,
             L10n.text("apple.greeting.hello.185f8db3"),

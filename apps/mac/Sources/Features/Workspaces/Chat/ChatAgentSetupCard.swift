@@ -9,8 +9,6 @@ import UIKit
 
 struct AgentSetupStatus: Decodable, Sendable {
     let readiness: String
-    /// True when the CLI itself answered. False or absent means the host fell
-    /// back to what its files say, which is not enough to stop a send.
     let checked: Bool?
     let email: String?
 
@@ -27,7 +25,6 @@ private struct AgentSetupAck: Decodable {}
 
 enum AgentSignInCheckOutcome { case signedIn, unconfirmed, needsSignIn, unavailable }
 
-/// Native vector art shares the persona's reduced-motion and visibility gates.
 struct AgentSignInArtwork: View {
     var seed: UInt64 = 0
     var ready = false
@@ -79,7 +76,6 @@ struct AgentSignInSteps: View {
     }
 }
 
-/// A single recovery card replaces the CLI refusal beside the saved message.
 struct ChatAgentSetupCard: View {
     @Bindable var model: ChatModel
     let backend: ChatBackend
@@ -154,15 +150,11 @@ struct ChatAgentSetupCard: View {
             readyFor = offered
             return .signedIn
         }
-        // Older CLIs cannot prove their status. An explicit acknowledgement
-        // can offer a retry, but automatic probes never claim a successful login.
         if explicit { confirmed = true; readyFor = offered }
         return .unconfirmed
     }
 }
 
-/// Kept independent of the model so every phase can be visually reviewed
-/// without launching a provider or sending a real message.
 struct AgentSignInPrompt: View {
     let agent: String
     var seed: UInt64 = 0
@@ -234,8 +226,6 @@ struct AgentSignInPrompt: View {
     }
 }
 
-/// The provider's real terminal handles browser links, device codes and code
-/// paste-back. Nothing is scraped into a chat message or a credential store.
 struct AgentSignInSheet: View {
     let backend: ChatBackend
     let peer: String?
@@ -248,8 +238,6 @@ struct AgentSignInSheet: View {
     @State private var checking = false
     @State private var deviceCode: AgentDeviceCode?
     @State private var codeCopied = false
-    /// Which copy the tick belongs to, so an older copy's timer cannot clear
-    /// the tick of a newer one.
     @State private var copyGeneration = 0
     @State private var info: PtySessionInfo?
     @State private var checkMessage: String?
@@ -334,9 +322,6 @@ struct AgentSignInSheet: View {
         .onDisappear { close() }
     }
 
-    /// The code the terminal printed, already on the clipboard, with the page
-    /// already open. The buttons are for a second try: a closed tab, or a
-    /// clipboard that something else has since replaced.
     private func deviceCodePanel(_ found: AgentDeviceCode) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L10n.text("apple.agentsetup.code_label")).font(Theme.caption).foregroundStyle(.secondary)
@@ -360,14 +345,8 @@ struct AgentSignInSheet: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.accent.opacity(0.20)))
     }
 
-    /// A device sign-in prints a page and a code, then waits. Read them off
-    /// the screen, copy the code and open the page, once, so the person only
-    /// has to paste. The terminal stays the sign-in either way, so a screen
-    /// this does not recognise loses nothing.
     private func watchForDeviceCode() async {
         guard backend.signInFlow?.kind == "deviceCode", info != nil, deviceCode == nil else { return }
-        // The code needs a round trip to the provider first. A minute covers
-        // a slow network, and after that the screen is not going to change.
         for _ in 0..<240 {
             try? await Task.sleep(for: .milliseconds(250))
             if Task.isCancelled { return }
@@ -379,9 +358,6 @@ struct AgentSignInSheet: View {
                 openInBrowser(found.url)
             }
             guard backend.id == "muse" else { return }
-            // The code can render before the launcher's optional browser
-            // prompt. Keep watching until it arrives, then skip it once so
-            // Muse starts polling for the person's browser approval now.
             if let reply = found.browserPromptReply(backend: backend.id, screen: screen),
                let terminal {
                 terminal.sendBytes(reply)
@@ -412,9 +388,6 @@ struct AgentSignInSheet: View {
         }
     }
 
-    /// Straight to the system's default browser. The environment's `openURL`
-    /// is the chat's link router on the Mac, which asks where to open a link
-    /// with a sheet of its own, and a sheet cannot open over this one.
     private func openInBrowser(_ url: URL) {
         #if os(macOS)
         NSWorkspace.shared.open(url)

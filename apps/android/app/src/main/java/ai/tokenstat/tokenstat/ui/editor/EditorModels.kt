@@ -20,9 +20,6 @@ internal fun JsonObject.optStr(key: String): String? =
 internal fun JsonObject.optInt(key: String): Int? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull
 
-/// One coloured run. `start` and `length` are UTF-16 code units, the same
-/// units this client's strings index by, so they drop straight into ranges
-/// with no conversion. Port of `SyntaxSpan`.
 data class SyntaxSpan(val start: Int, val length: Int, val kind: SyntaxKind) {
     companion object {
         fun parse(obj: JsonObject): SyntaxSpan = SyntaxSpan(
@@ -31,8 +28,6 @@ data class SyntaxSpan(val start: Int, val length: Int, val kind: SyntaxKind) {
             kind = syntaxKindOf(obj.optStr("kind")),
         )
 
-        /// A kind this build does not know decodes as Unknown and renders
-        /// as plain text, rather than refusing the whole file.
         fun syntaxKindOf(raw: String?): SyntaxKind = when (raw?.lowercase()) {
             "keyword" -> SyntaxKind.Keyword
             "string" -> SyntaxKind.String
@@ -51,7 +46,6 @@ data class SyntaxSpan(val start: Int, val length: Int, val kind: SyntaxKind) {
         }
     }
 
-    /// Clamp to the buffer so a stale answer cannot paint past the end.
     fun clamped(textLength: Int): SyntaxSpan? {
         val from = start.coerceIn(0, textLength)
         val to = (start + length).coerceIn(0, textLength)
@@ -60,13 +54,11 @@ data class SyntaxSpan(val start: Int, val length: Int, val kind: SyntaxKind) {
     }
 }
 
-/// How a language is commented and indented. Port of `SyntaxRules`.
 data class SyntaxRules(
     val lineComment: String? = null,
     val blockComment: List<String> = emptyList(),
     val indent: Int = 4,
 ) {
-    /// What pressing Tab inserts.
     val indentUnit: String get() = " ".repeat(maxOf(1, indent))
 
     companion object {
@@ -83,9 +75,6 @@ data class SyntaxRules(
     }
 }
 
-/// The answer to a highlight request. A file with no grammar and a file
-/// over the size limit both come back successful with empty spans and a
-/// note. Neither is an error. Port of `Highlighting`.
 data class Highlighting(
     val language: String? = null,
     val rules: SyntaxRules = SyntaxRules.FALLBACK,
@@ -102,10 +91,6 @@ data class Highlighting(
     }
 }
 
-/// Lines with changes against HEAD, one-based, for the gutter marks.
-/// Added lines only: a removed line has no number on the new side, so
-/// there is no row in the buffer to mark. Port of
-/// `EditorDocument.applyDiff`.
 fun changedLinesFromDiff(diff: JsonObject?): Set<Int> {
     if (diff == null) return emptySet()
     val lines = mutableSetOf<Int>()
@@ -121,8 +106,6 @@ fun changedLinesFromDiff(diff: JsonObject?): Set<Int> {
     return lines
 }
 
-/// One-based number of the first line where two texts differ, or null
-/// when they match. Port of `EditorDocument.firstDifference`.
 fun firstDifference(mine: String, other: String): Int? {
     if (mine == other) return null
     val mineLines = mine.split('\n')
@@ -133,12 +116,7 @@ fun firstDifference(mine: String, other: String): Int? {
     return minOf(mineLines.size, otherLines.size) + 1
 }
 
-/// Line math for the gutter. Everything is in UTF-16 units, the same
-/// units this client's strings index by. Wrapped lines share their
-/// paragraph's number: only paragraph starts are numbered.
-/// Port of `EditorGutterMap`.
 object EditorGutterMap {
-    /// UTF-16 offsets where each one-based line starts. Always starts with 0.
     fun lineStarts(text: String): List<Int> {
         val starts = mutableListOf(0)
         text.forEachIndexed { index, char ->
@@ -147,7 +125,6 @@ object EditorGutterMap {
         return starts
     }
 
-    /// One-based paragraph number for a UTF-16 character index.
     fun paragraph(index: Int, starts: List<Int>): Int {
         var line = 1
         var low = 0
@@ -165,13 +142,8 @@ object EditorGutterMap {
     }
 }
 
-/// Find and replace for one open file: literal, case-insensitive matches
-/// over the buffer, wrapping in both directions. Port of
-/// `EditorFindSession`. Observable state lets query and selection changes
-/// refresh the find bar and highlight even when the document is unchanged.
 class EditorFind {
     companion object {
-        /// Bounded so a pathological query cannot mint unbounded ranges.
         const val MATCH_LIMIT = 2000
     }
 
@@ -205,8 +177,6 @@ class EditorFind {
     val canNavigate: Boolean get() = hasQuery && matches.size > 1
     val canReplace: Boolean get() = hasQuery && matches.isNotEmpty()
 
-    /// Recompute matches against the buffer. Keeps the current position
-    /// when the same match is still there, otherwise clamps.
     fun refresh(text: String) {
         lastText = text
         val previous = current
@@ -236,8 +206,6 @@ class EditorFind {
         currentIndex = (currentIndex + matches.size - 1) % matches.size
     }
 
-    /// Replace the current match. Returns the new buffer, or null when
-    /// there is nothing to replace.
     fun replaceCurrent(text: String): String? {
         refresh(text)
         if (!canReplace) return null
@@ -245,13 +213,10 @@ class EditorFind {
         return text.substring(0, range.first) + replaceText + text.substring(range.last + 1)
     }
 
-    /// Replace every match. One undo, in this file only.
     fun replaceAll(text: String): String? {
         if (!hasQuery) return null
         val first = text.indexOf(query, ignoreCase = true)
         if (first < 0) return null
-        // Highlighting is capped, but an explicit Replace all must cover
-        // the whole document without allocating an unbounded range list.
         return buildString {
             var cursor = 0
             var found = first
@@ -273,7 +238,6 @@ class EditorFind {
         while (from < text.length) {
             val found = text.indexOf(query, from, ignoreCase = true)
             if (found < 0) break
-            // Empty query is excluded above; guard the advance anyway.
             val length = maxOf(query.length, 1)
             out.add(found until found + query.length)
             if (out.size >= MATCH_LIMIT) {

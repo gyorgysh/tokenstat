@@ -30,7 +30,6 @@ extension AutomationEditorService {
     func runningJobIDs() async throws -> [String] { [] }
 }
 
-/// One computer. Mobile always has a peer. Mac local uses the daemon.
 struct AutomationEditorTarget: Hashable, Sendable, AutomationEditorService {
     let peer: String?
 

@@ -11,12 +11,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The profile window, as on the Mac and the phones: the tokenstat.ai
-/// address, the handle with a live check, who can open the page, whether
-/// search engines may list it, and a way to see it. The account service
-/// decides every rule. This only asks and shows the answer.
-/// </summary>
 internal static class ProfileDialog
 {
     public static async Task ShowAsync(UIElement owner, JsonNode account, Func<Task> reload, bool offer = false)
@@ -37,8 +31,6 @@ internal static class ProfileDialog
 
         string Address(string name) => host.Split("://").Last().TrimEnd('/') + "/" + name;
 
-        // The handle: claimed, or claimable here, with the service's own
-        // answer while somebody types.
         var field = new TextBox
         {
             Header = L10n.Text("common.handle.field_label"),
@@ -95,8 +87,6 @@ internal static class ProfileDialog
         };
         body.Children.Add(address);
 
-        // Who can open it. Going public shows things to strangers, so it
-        // waits for its own button rather than happening on a tap.
         body.Children.Add(new TextBlock { Text = L10n.Text("common.profile.who_can_open"), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         var privateChoice = new RadioButton { GroupName = "profile-visibility", IsChecked = !isPublic, Content = Choice(L10n.Text("common.profile.private"), L10n.Text("common.profile.private_detail")) };
         var publicChoice = new RadioButton { GroupName = "profile-visibility", IsChecked = isPublic, IsEnabled = handle.Length > 0, Content = Choice(L10n.Text("common.profile.public"), L10n.Text("common.profile.public_detail")) };
@@ -106,7 +96,6 @@ internal static class ProfileDialog
         body.Children.Add(publicChoice);
         body.Children.Add(makePublic);
 
-        // Search listing, with what turning it off can and cannot do.
         bool saving = false;
         var listing = new CheckBox { Content = L10n.Text("common.profile.indexable"), IsChecked = indexable, IsEnabled = isPublic };
         var listingNote = new TextBlock { FontSize = 12, Opacity = 0.75, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(28, -6, 0, 0) };
@@ -208,7 +197,7 @@ internal static class ProfileDialog
                 await AppServices.Host.CallAsync("account.skipHandle", new JsonObject());
                 if (Current()) await reload();
             }
-            catch { /* The profile remains available from Account. */ }
+            catch { }
         }
     }
 

@@ -9,7 +9,6 @@ using Windows.ApplicationModel.DataTransfer;
 
 namespace Tokenstat.Pages;
 
-/// <summary>A local, bundled VT terminal. Terminal bytes are data, never HTML or script.</summary>
 internal sealed class TerminalSurface : Grid
 {
     private WebView2 _web = new();
@@ -39,8 +38,7 @@ internal sealed class TerminalSurface : Grid
 
     /// <summary>
     /// After <see cref="Close"/>, put a fresh WebView2 in the tree so a
-    /// cached page can come back. The PTY session is separate and survives.
-    /// Starts the new controller here: Grid.Loaded may already have fired
+    /// cached page can come back. Grid.Loaded may already have fired
     /// while this surface was closed.
     /// </summary>
     public void PrepareForReuse()
@@ -76,7 +74,7 @@ internal sealed class TerminalSurface : Grid
             await web.EnsureCoreWebView2Async(environment);
             if (_closed || generation != _generation || !ReferenceEquals(web, _web))
             {
-                try { web.Close(); } catch { /* Closed while the runtime was starting. */ }
+                try { web.Close(); } catch { }
                 return;
             }
             var core = web.CoreWebView2;
@@ -219,7 +217,7 @@ internal sealed class TerminalSurface : Grid
     {
         if (_closed) return;
         try { _web.Focus(FocusState.Programmatic); }
-        catch { /* The controller can already be gone on the way out. */ }
+        catch { }
         Send(new { type = "focus" });
     }
     private void SendTheme()
@@ -248,8 +246,8 @@ internal sealed class TerminalSurface : Grid
         _generation++;
         _ready.TrySetCanceled();
         try { _web.Close(); }
-        catch { /* A controller already torn down must not take the process with it. */ }
+        catch { }
         try { Children.Remove(_web); }
-        catch { /* The visual tree may already have dropped this control. */ }
+        catch { }
     }
 }

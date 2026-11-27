@@ -3,11 +3,6 @@ using System.Text;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Unsent text, one small file per conversation, so closing the app does not
-/// lose it. The key is the outbox's, which already separates accounts and
-/// computers. Attachments are not kept: their staged copies may be gone.
-/// </summary>
 internal sealed class ChatDraftStore(string directory)
 {
     public static readonly ChatDraftStore Shared = new(Path.Combine(
@@ -29,7 +24,6 @@ internal sealed class ChatDraftStore(string directory)
         catch { return ""; }
     }
 
-    /// <summary>Empty text removes the record. Failing to keep a draft never stops the typing.</summary>
     public void Write(string key, string text)
     {
         if (PathFor(key) is not { } path) return;

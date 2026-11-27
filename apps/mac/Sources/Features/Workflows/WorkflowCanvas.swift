@@ -6,7 +6,6 @@
 import SwiftUI
 import AppKit
 
-/// Content-space size of a node card. Positions in the IR are the top-left.
 enum WorkflowNodeMetrics {
     static let width: CGFloat = 228
     static let height: CGFloat = 120
@@ -14,7 +13,6 @@ enum WorkflowNodeMetrics {
     static let rowGap: CGFloat = 160
 }
 
-/// Pan, zoom, nodes, ports and edges. The IR stores `x`/`y`. The runner ignores them.
 struct WorkflowCanvas: View {
     @Bindable var model: WorkflowsModel
     var run: WorkflowRunRecord?
@@ -451,10 +449,6 @@ struct WorkflowCanvas: View {
         let maxY = CGFloat(graph.nodes.map { $0.y + Double(WorkflowNodeMetrics.height) }.max() ?? 120)
         let width = max(maxX - minX, 1) + pad * 2
         let height = max(maxY - minY, 1) + pad * 2
-        // Fit only ever zooms out. A blank draft is one card in a large window,
-        // so fitting it to the glass magnified it past 200% and opened the
-        // editor on a wall of one node. Anything that already fits is shown at
-        // its own size, which is what a canvas opening at "normal" means.
         let z = min(1, max(0.4, min(canvasSize.width / width, canvasSize.height / height)))
         zoom = z
         pan = CGSize(
@@ -476,7 +470,6 @@ private struct ArmedLink {
     var when: WorkflowEdgeWhen
 }
 
-/// Card on the canvas. Mark, title, subtitle, status when a run is live.
 struct WorkflowNodeCard: View {
     let node: WorkflowNode
     var selected: Bool
@@ -532,7 +525,6 @@ struct WorkflowNodeCard: View {
     }
 }
 
-/// Compact palette used by the + under a card.
 struct WorkflowAddMenu: View {
     @Bindable var model: WorkflowsModel
     var onPick: () -> Void

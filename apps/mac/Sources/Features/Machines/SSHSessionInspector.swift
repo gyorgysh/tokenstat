@@ -15,24 +15,13 @@ struct SSHSessionInspector: View {
     let hostID: String
     var onClose: () -> Void
 
-    /// The snippet whose placeholders are being filled in.
     @State private var asking: SSHSnippet?
-    /// The editor open over the list, and the way back out of it.
-    ///
-    /// Local rather than `model.selection`, which belongs to the library
-    /// screen's own inspector. Writing to that from here would move a
-    /// selection on a screen nobody is looking at and draw nothing on this
-    /// one.
     @State private var editing: SSHLibraryRoute?
-    /// The snippet whose deletion is waiting to be confirmed.
     @State private var deleting: SSHSnippet?
 
     private var host: SSHHost? { model.hosts.first { $0.id == hostID } }
     private var available: [SSHSnippet] { model.snippets(for: hostID) }
 
-    /// Where a snippet runs. Nil when the server has no session in front,
-    /// which is what disables the rows: a command sent into nothing looks
-    /// exactly like a command that ran and printed nothing.
     private var target: SSHLiveTerminal? {
         guard let active = sessions.activeSession(for: hostID), active.alive else { return nil }
         return active
@@ -61,9 +50,6 @@ struct SSHSessionInspector: View {
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in type(command) }
         }
-        // A different server's shells are a different set of snippets, and an
-        // editor left open over the old one belongs to a record this column is
-        // no longer about.
         .onChange(of: hostID) { _, _ in
             editing = nil
             asking = nil
@@ -112,14 +98,6 @@ struct SSHSessionInspector: View {
     @ViewBuilder
     private var list: some View {
         if available.isEmpty {
-            // The button is handed to the empty state rather than stacked
-            // under it. Stacked, it was wrapped in a `fixedSize` to stop the
-            // empty state's infinite maximum height from pushing it to the
-            // floor of the pane, and asking a view with an infinite maximum
-            // for its ideal height resolves to something enormous: the pane
-            // grew taller than the window, the window's content overflowed,
-            // and the tab strip, the sidebar's Home row and the account
-            // footer were all clipped off the edges.
             InspectorEmptyState(
                 systemImage: "text.append",
                 title: L10n.text("apple.sshsessioninspector.no_snippets_yet.6e213185"),
@@ -167,8 +145,6 @@ struct SSHSessionInspector: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 0)
-                    // A snippet scoped to this server, rather than one of the
-                    // general ones listed under it.
                     if snippet.hostIDs.contains(hostID) {
                         Text(L10n.text("apple.sshsessioninspector.this_server.98bf14a4"))
                             .font(Theme.font(10))
@@ -206,12 +182,6 @@ struct SSHSessionInspector: View {
         }
     }
 
-    /// Run a snippet, or ask for its placeholders first.
-    ///
-    /// The same rule the phone's key bar follows: a snippet with placeholders
-    /// goes through the sheet, where the filled command is on screen before it
-    /// is sent, and everything else runs. A snippet is a command somebody
-    /// saved in order to run it.
     private func run(_ snippet: SSHSnippet) {
         if SSHSnippet.placeholders(in: snippet.command).isEmpty {
             type(snippet.command)

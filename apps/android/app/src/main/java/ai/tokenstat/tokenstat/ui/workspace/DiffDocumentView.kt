@@ -54,8 +54,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 
-/// The fixed metadata and code have separate scroll coordinates. Only the
-/// bounded, lazy code pane can pan sideways, with one offset for every line.
 @Composable
 internal fun DiffDocumentView(
     diffs: List<JsonObject>,

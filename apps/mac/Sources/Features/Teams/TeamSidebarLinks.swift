@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Compact clients have one Team destination. Its sections live in the
-/// content's existing picker rather than duplicating them in the sidebar.
 struct TeamSidebarLinks: View {
     @Bindable var store: TeamStore
     let isTeamSelected: Bool

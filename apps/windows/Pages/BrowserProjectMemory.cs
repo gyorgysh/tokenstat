@@ -43,6 +43,6 @@ internal sealed record BrowserProjectMemory(string Owner, string AccountScope, l
             }
             return generation != AccountEpoch.Revision || host.Length == 0 || project.Length == 0 ? null : new(BrowserHistory.Key(scope, host, project), scope, generation);
         }
-        catch { return null; } // A failed identity read must not borrow another project's targets.
+        catch { return null; }
     }
 }

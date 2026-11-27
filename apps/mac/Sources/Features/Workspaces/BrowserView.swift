@@ -8,7 +8,6 @@
 import SwiftUI
 import WebKit
 
-/// A lightweight project browser, useful for local dev servers and previews.
 struct BrowserView: View {
     var initialURL: String
     var onURLChange: (String, BrowserNavigationEpoch.Completion) -> Bool
@@ -29,11 +28,7 @@ struct BrowserView: View {
     var onPageHistoryChange: ((BrowserPageHistoryMutation, [BrowserPageHistoryItem], UUID, Int) -> Bool)?
     var onPageHistoryTraverse: ((Int, Int) -> Bool)?
 
-    /// What the user is typing. Never what the page is: a half-typed URL must
-    /// not start loading, or the first keystroke throws a DNS error.
     @State private var text: String
-    /// The address the page actually shows, set only on a committed
-    /// navigation (Enter, a link, or the initial URL).
     @State private var loadedURL: String
     @State private var command: BrowserCommand = .none
     @State private var commandID = 0
@@ -41,7 +36,6 @@ struct BrowserView: View {
     @State private var canGoBack = false
     @State private var canGoForward = false
     @State private var loadError = ""
-    /// A non-loopback URL waiting for the user's go-ahead.
     @State private var remoteURL: RemoteNavigation?
 
     init(url: String, allowsExternalNavigation: Bool = false, isSurfaceVisible: Bool = true, navigationGeneration: Int = 0, loadRevision: Int = 0, displayURL: String? = nil,
@@ -230,8 +224,6 @@ struct BrowserView: View {
             return
         }
         if !candidate.contains("://") {
-            // Local dev servers are plain HTTP; anything else defaults to
-            // HTTPS so a mistyped or remote site is never sent in the clear.
             let probe = URL(string: "http://\(candidate)")
             candidate = (probe.map(isLoopbackHost) ?? true)
                 ? "http://\(candidate)"
@@ -243,8 +235,6 @@ struct BrowserView: View {
             return
         }
         if !allowsExternalNavigation && !isLoopbackHost(url) {
-            // The browser is for local dev servers. A remote site deserves an
-            // explicit go-ahead before it loads inside the app's chrome.
             remoteURL = RemoteNavigation(url: url)
             return
         }
@@ -268,14 +258,12 @@ struct BrowserView: View {
     }
 }
 
-/// A non-loopback URL the user has not approved yet.
 private struct RemoteNavigation: Identifiable {
     var id: String { url.absoluteString }
     let url: URL
 }
 
 private func isLoopbackHost(_ url: URL) -> Bool {
-    // Missing host is not loopback: fail closed so odd URLs get a confirm.
     guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
     return BrowserTarget.isLoopback(host)
 }
@@ -339,8 +327,6 @@ private struct WebBrowser: NSViewRepresentable {
         context.coordinator.pageHistory.install(in: configuration)
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isHidden = !isSurfaceVisible
-        // A deterministic, current Safari UA: some sites treat a bare WebKit
-        // UA as a bot and stall instead of answering.
         view.customUserAgent = Self.safariUserAgent
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
@@ -465,10 +451,6 @@ private struct WebBrowser: NSViewRepresentable {
             if (error as NSError).code != NSURLErrorCancelled { onError(error.localizedDescription) }
         }
 
-        /// Links inside a page can leave localhost; ask before letting them,
-        /// the same way a typed address is asked about. Navigations the page
-        /// itself starts through the current listener stay allowed. Unmapped
-        /// remote forms and frames cannot fall back to this computer.
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,

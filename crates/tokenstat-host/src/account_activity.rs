@@ -3,22 +3,7 @@
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
-
 //! The account's activity grid, across every machine that syncs.
-//!
-//! The local archive is one machine's logs, which is the whole design: the
-//! parser reads what is on this disk. "What did I spend everywhere" is a
-//! different question, and the only place that knows is the account the
-//! machines already upload to.
-//!
-//! What comes back is token counts at day × source × model. Pricing happens
-//! here, against the same local price book the local grid uses, so the two
-//! figures are computed the same way and can be compared. The service never
-//! prices anything, which is why it can hold aggregate counts and stay a place
-//! that holds no money.
-//!
-//! Cached, because this is drawn on the screen that opens first and a window
-//! that dials out on every visit is a window that dials out constantly.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -31,20 +16,8 @@ use tokenstat_core::pricing::{EquivalentValue, PriceTable};
 use tokenstat_core::store::DayPart;
 use tokenstat_sync::profile::{self, LockedDay, SeriesRow};
 
-/// How long a fetched series stays good.
-///
-/// Sync itself runs hourly at its fastest, so a grid younger than this cannot
-/// be missing anything the account knows. Long enough that moving between
-/// screens is free, short enough that a machine that just synced shows up
-/// while somebody is still looking.
 const FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
-/// How long to wait before asking again after a failure.
-///
-/// Being signed out is a failure that does not fix itself, and retrying it on
-/// every redraw is how a client earns a rate limit. The service allows sixty
-/// reads a minute; this keeps us nowhere near it even when everything is
-/// broken.
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 
 /// Why the account grid could not be built.
@@ -101,20 +74,13 @@ struct Cache {
     requested_from: String,
     requested_to: String,
     rows: Vec<SeriesRow>,
-    /// The oldest day the service actually covered. A plan's history span, not
-    /// what was asked for.
     covered_from: Option<String>,
     unlock_from: Option<String>,
     history_locked: bool,
     history_days: Option<u16>,
     locked: Vec<LockedDay>,
     fetched_at: Instant,
-    /// The same moment on the wall clock, which is the only one that survives
-    /// the process. `Instant` has no meaning across a restart, and on a phone a
-    /// restart is the normal case rather than the rare one.
     fetched_at_ms: i64,
-    /// Set when the last attempt failed, so the message can be shown without
-    /// asking again immediately.
     last_error: Option<(String, Instant)>,
 }
 
@@ -157,36 +123,20 @@ pub fn invalidate() {
         *guard = None;
         let _ = stored::remove();
     }
-    // The per-machine answers came from the same upload. Leaving them would
-    // show a device list that disagrees with the grid it sits under.
+
     if let Ok(mut guard) = machine_cache().lock() {
         *guard = None;
     }
 }
 
-/// The last good answer, kept on disk beside the archive.
-///
-/// A memory cache is close to no cache where the process dies constantly, which
-/// is every mobile app and, less often, a desktop one. Without this a cold
-/// launch shows an empty grid until the network answers, on the screen that
-/// opens first. With it the grid is the previous answer, dated, and it is
-/// replaced the moment a fetch lands.
-///
-/// It holds day, source, model and counts, which is what the account already
-/// holds. No project keys, no paths, nothing that is not already in the reply
-/// this file is a copy of.
 mod stored {
     use std::path::PathBuf;
 
     use serde::{Deserialize, Serialize};
     use tokenstat_sync::profile::SeriesRow;
 
-    /// Bump when the shape changes. An older file is dropped rather than
-    /// migrated: it is a cache, and the fix for a stale cache is a fetch.
     const VERSION: u32 = 2;
 
-    /// A file older than this is not worth opening on. Beyond a fortnight the
-    /// grid it would draw is mostly a picture of a fortnight ago.
     const KEEP_FOR_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 
     #[derive(Serialize, Deserialize)]
@@ -313,9 +263,6 @@ pub fn calendar(
         fetched.history_days,
     );
 
-    // Priced, then folded by day. Per model rather than per day, because a
-    // rate belongs to a model: summing tokens across models first and pricing
-    // the total would charge every model at whichever rate came last.
     let mut by_day: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     for row in &rows {
         let counters = Counters {
@@ -325,9 +272,7 @@ pub fn calendar(
             cache_write_1h: Some(row.cw1),
             output: Some(row.output),
         };
-        // Value at list rates, for plan usage as well as metered. That is what
-        // the local grid colours by, and a plan day that reads as empty here
-        // and full there is the two screens disagreeing.
+
         let model = tokenstat_core::pricing::display_usage_model_id(&row.model);
         let micros = EquivalentValue::price(prices, &model, &counters)
             .map(|v| v.micros().max(0) as u64)
@@ -337,9 +282,7 @@ pub fn calendar(
     }
 
     let mut days: Vec<(String, u64)> = by_day.into_iter().collect();
-    // Intensity stubs with no exact rows still need a year to sit on.
-    // A brand new Free account has a 30-day window and no stubs: that
-    // is empty, not a year of muted squares.
+
     if days.is_empty() && !fetched.locked.is_empty() {
         days.push((today.to_string(), 0));
     }
@@ -497,9 +440,6 @@ pub fn breakdown(
     let today = activity::today(tz);
     let fetched = series(weeks, today)?;
 
-    // Counters fold by key. Money folds by key × model, because pricing is
-    // per model and the two cannot be done in one pass without charging one
-    // model's tokens at another's rate.
     let mut order: Vec<String> = Vec::new();
     let mut totals: std::collections::HashMap<String, (Counters, u64)> =
         std::collections::HashMap::new();
@@ -554,15 +494,12 @@ pub fn breakdown(
                 value: EquivalentValue::from_micros(micros),
                 estimated,
                 unpriced_models: unpriced,
-                // The account plane carries synced totals, which never say
-                // where a model ran.
+
                 local: false,
             }
         })
         .collect();
 
-    // Days read best newest first, everything else biggest first. A date list
-    // sorted by size is a list nobody can scan.
     match dimension {
         Dimension::Day => rows.sort_by(|a, b| b.key.cmp(&a.key)),
         _ => rows.sort_by_key(|b| std::cmp::Reverse(b.value.micros())),
@@ -584,18 +521,8 @@ pub struct MachineUsage {
     pub active_days: usize,
 }
 
-/// How long a per-machine answer stays good. The same reasoning as the series
-/// cache, and it matters more here: this is one request per machine, so a
-/// screen that refetched on every appearance would multiply itself.
 const MACHINE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
-/// Most machines one call will ask the series endpoint about. One HTTP request
-/// per id, so an unbounded list is a way for one caller to multiply the work.
-///
-/// Truncation is silent by design: beyond 64 machines only the first 64 are
-/// counted, and the answer carries no flag saying so. Surfacing one would
-/// mean a new wire shape for a case no real account hits; the cap is a
-/// backstop against a runaway caller, not a limit anyone is expected to reach.
 const MAX_MACHINE_USAGE: usize = 64;
 
 struct MachineCache {
@@ -633,8 +560,7 @@ pub fn machine_usage(
     if machines.is_empty() {
         return Ok(Vec::new());
     }
-    // A caller with more devices than this sees the first of them rather than
-    // turning one call into that many HTTP requests.
+
     let owner = crate::account_session::current_or_capture().map_err(FetchError::new)?;
     let client = owner
         .client
@@ -669,24 +595,13 @@ pub fn machine_usage(
     }
 
     let today = activity::today(tz);
-    // Inclusive of both ends, so "30 days" covers thirty of them. Asking for
-    // `today - 30` returns thirty-one, and a device that reported on every one
-    // of them then reads as "31 active days" under a label saying 30.
-    //
-    // Cap is a decade, not a month: free accounts ask for 30, supporter for a
-    // year, patron for all-time, and the series endpoint already enforces the
-    // account's own history depth. Clamping to 400 used to silently truncate
-    // a patron year-and-change to a little over a year.
+
     let from = today
         .checked_add(jiff::Span::new().days(-(days.clamp(1, 3650) as i64 - 1)))
         .map_err(|e| FetchError::new(e.to_string()))?
         .to_string();
     let to = today.to_string();
 
-    // Parallel, bounded. One series call per machine used to run end-to-end
-    // in order; a patron window over several devices felt like a freeze on
-    // first open. Cap concurrency so a five-device account does not open five
-    // full decade series at once against a phone's radio.
     let results: Vec<Result<MachineUsage, String>> = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(machines.len());
         let from = from.as_str();
@@ -756,8 +671,6 @@ pub fn machine_usage(
         }
     }
 
-    // Every one of them failed, which is a different thing from a quiet month:
-    // report it rather than drawing five devices that all spent nothing.
     if out.is_empty() {
         return Err(FetchError::new(last_error.unwrap_or_else(|| {
             "the account did not answer for any device".to_string()
@@ -790,10 +703,6 @@ pub fn machine_usage(
     Ok(out)
 }
 
-/// Sum two counters, treating a missing field as zero.
-///
-/// The series rows always carry every field, so this is only needed while
-/// folding them by `model × source`.
 fn add_counters(a: Counters, b: Counters) -> Counters {
     Counters {
         input_fresh: Some(
@@ -820,15 +729,8 @@ fn add_counters(a: Counters, b: Counters) -> Counters {
     }
 }
 
-/// Display cap shared with the public profile: a year. Shorter than this
-/// is a locked past, not a shorter grid.
 const HISTORY_DISPLAY_CAP_DAYS: u16 = 365;
 
-/// Whether this series should draw a year with a locked past.
-///
-/// The service's `historyLocked` flag wins when the reply is new enough to
-/// carry it. Older replies (and a remembered cache) infer the same thing
-/// from the covered window: thirty days is Free, a year is not.
 fn history_lock(
     today: jiff::civil::Date,
     flagged: bool,
@@ -877,7 +779,6 @@ impl Fetched {
     }
 }
 
-/// Wall clock in milliseconds, or 0 if the clock is before the epoch.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -885,11 +786,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Adopt the answer left on disk by an earlier run of this process.
-///
-/// Deliberately adopted as already stale: it is good enough to draw, and not
-/// good enough to skip a fetch. The first call after launch therefore paints
-/// immediately and refreshes behind it.
 fn adopt_stored(guard: &mut Option<Cache>, account: &str) {
     if guard.is_some() {
         return;
@@ -899,7 +795,6 @@ fn adopt_stored(guard: &mut Option<Cache>, account: &str) {
     }
 }
 
-/// A stored answer, entered into the cache as already past its freshness.
 fn adopted(snapshot: stored::Snapshot) -> Cache {
     Cache {
         account: snapshot.account,
@@ -911,11 +806,7 @@ fn adopted(snapshot: stored::Snapshot) -> Cache {
         history_locked: snapshot.history_locked,
         history_days: snapshot.history_days,
         locked: snapshot.locked,
-        // `checked_sub` because a process younger than FRESH_FOR has no
-        // `Instant` that far back, and saturating at "now" would make an
-        // adopted answer look fresh on exactly the launches this exists for.
-        // Falling back to now is still correct there, only slower: the very
-        // first call refreshes rather than the second.
+
         fetched_at: Instant::now()
             .checked_sub(FRESH_FOR)
             .unwrap_or_else(Instant::now),
@@ -950,14 +841,10 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
             if c.fresh_for(&account, &from, &to) {
                 return Ok(c.fetched(false).within(&from, &to));
             }
-            // A recent failure is reported from here rather than by dialling
-            // again. Nothing about being signed out changes in a second.
+
             if let Some((message, at)) = &c.last_error
                 && at.elapsed() < RETRY_AFTER
             {
-                // Unless there is a real answer to serve. A remembered grid
-                // beats a blank one, and on a client there is no local
-                // archive to fall back to.
                 if !c.rows.is_empty() {
                     return Ok(c.fetched(true).within(&from, &to));
                 }
@@ -966,8 +853,6 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
         }
     }
 
-    // A whole column wider than the grid asks for, so the first partial week
-    // is complete rather than starting mid-week.
     let result = client.account_series(&from, &to, None);
     owner.ensure_current().map_err(FetchError::new)?;
     let mut guard = cache()
@@ -1017,9 +902,6 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
             let mut remembered = None;
             {
                 match guard.as_mut() {
-                    // Keep the rows that are already there. A grid that was
-                    // right ten minutes ago beats an empty one, as long as the
-                    // caller is told the refresh failed.
                     Some(c) => {
                         c.last_error = Some((message.clone(), Instant::now()));
                         if !c.rows.is_empty() {
@@ -1060,9 +942,6 @@ mod tests {
 
     #[test]
     fn a_breakdown_dimension_falls_back_to_models() {
-        // A front end asking for something this build has not got should get a
-        // report rather than an error dialog, and `project` is the one it will
-        // ask for: the Mac has that breakdown and the account cannot.
         assert_eq!(Dimension::from_wire("model"), Dimension::Model);
         assert_eq!(Dimension::from_wire("source"), Dimension::Source);
         assert_eq!(Dimension::from_wire("harness"), Dimension::Source);
@@ -1073,9 +952,6 @@ mod tests {
 
     #[test]
     fn an_auth_failure_is_expected_and_actionable() {
-        // A front end turns `Authentication` into a sign-in button rather than
-        // an error banner, so the two revoked-token strings must classify
-        // the same way whether they come from the keychain or the server.
         for message in [
             tokenstat_sync::profile::NOT_LOGGED_IN.to_string(),
             tokenstat_sync::profile::TOKEN_REVOKED.to_string(),
@@ -1118,9 +994,6 @@ mod tests {
 
     #[test]
     fn a_stored_answer_is_adopted_as_already_stale() {
-        // Good enough to draw on a cold launch, not good enough to skip the
-        // fetch. Both halves matter: the first is why the file exists, the
-        // second is why a phone still ends up showing this minute's numbers.
         let cache = adopted(stored::Snapshot {
             v: 2,
             account: "host:digest".into(),
@@ -1136,9 +1009,6 @@ mod tests {
         assert!(cache.last_error.is_none());
         assert!(
             cache.fetched_at.elapsed() >= FRESH_FOR
-                // A process younger than the freshness window cannot name an
-                // `Instant` that far back. Adopting as "now" there is still
-                // correct, it just refreshes one call later.
                 || Instant::now().checked_sub(FRESH_FOR).is_none(),
             "an adopted answer must not count as fresh"
         );
@@ -1171,8 +1041,6 @@ mod tests {
 
     #[test]
     fn a_snapshot_from_another_login_is_not_adopted() {
-        // Signing out or into another account must not serve the previous
-        // account's grid, however fresh the file is.
         assert!(stored::belongs_to("host:digest", Some("host:digest")));
         assert!(!stored::belongs_to("host:digest", Some("host:other")));
         assert!(!stored::belongs_to("host:digest", None));
@@ -1180,8 +1048,6 @@ mod tests {
 
     #[test]
     fn a_snapshot_survives_a_round_trip() {
-        // The cache file is the wire shape, so a change to `SeriesRow` that
-        // broke this would also have broken the fetch it is a copy of.
         let snapshot = stored::Snapshot {
             v: 2,
             account: "host:digest".into(),
@@ -1240,7 +1106,7 @@ mod tests {
         assert!(stored::worth_opening(now - day, now));
         assert!(stored::worth_opening(now - 14 * day, now));
         assert!(!stored::worth_opening(now - 15 * day, now));
-        // A clock that jumped backwards must not throw the answer away.
+
         assert!(stored::worth_opening(now + day, now));
     }
 }

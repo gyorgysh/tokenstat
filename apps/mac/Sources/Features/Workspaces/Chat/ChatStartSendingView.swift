@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// While the first message prepares, the grid's light runs into the brand
-/// mark and its three bars fill and settle in turn, like a level meter
-/// counting what arrives.
 struct ChatStartSendingView: View {
     let startedAt: Double
     let active: Bool
@@ -13,7 +10,6 @@ struct ChatStartSendingView: View {
 
     var body: some View {
         GeometryReader { pane in
-            // The field shader uses this same focus, so the waves arrive here.
             let focus = CGPoint(x: pane.size.width * 0.5, y: pane.size.height * 0.46)
             TimelineView(.animation(minimumInterval: 1 / 45, paused: !active || reduceMotion || dimFlashingLights)) { frame in
                 ChatStartMeter(elapsed: max(0, frame.date.timeIntervalSinceReferenceDate - startedAt),
@@ -34,16 +30,12 @@ struct ChatStartSendingView: View {
     }
 }
 
-/// The logo as three glass bars with a fill rising and falling in each, one
-/// after the other. Still, it shows the mark full, which is the brand.
 struct ChatStartMeter: View {
     let elapsed: Double
-    /// Reduce Motion: the mark is shown full and does not move.
     var still = false
     var opaque = false
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Seconds for one rise and fall, and how far behind each bar runs.
     private static let period = 1.5
     private static let stagger = 0.16
 
@@ -57,7 +49,6 @@ struct ChatStartMeter: View {
             let dark = colorScheme == .dark
             let radius = TokenstatLogoGeometry.cornerRadius * scale
 
-            // One soft pool of light under the mark, not a glow per bar.
             if !opaque {
                 var pool = context
                 pool.addFilter(.blur(radius: 26))
@@ -73,7 +64,6 @@ struct ChatStartMeter: View {
                 context.fill(face, with: .color(bar.color.opacity(dark ? 0.10 : 0.14)))
                 context.stroke(face, with: .color(bar.color.opacity(dark ? 0.45 : 0.55)), lineWidth: 0.8)
 
-                // The level, eased so it lingers at the top and the bottom.
                 let phase = (t / Self.period - Double(index) * Self.stagger) * 2 * .pi
                 let wave = 0.5 - 0.5 * cos(phase)
                 let level = still ? 1 : 0.28 + 0.72 * wave

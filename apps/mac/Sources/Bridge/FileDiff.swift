@@ -5,15 +5,12 @@ enum DiffLineKind: String, Codable, Sendable {
     case context, added, removed
 }
 
-/// One line of a diff, with the numbers each side shows in its gutter.
 struct DiffLine: Codable, Sendable, Hashable, Identifiable {
     var kind: DiffLineKind
     var oldLine: UInt32?
     var newLine: UInt32?
-    /// The line without its leading `+`, `-` or space.
     var text: String
 
-    /// Unique within a hunk: a line is one or the other, never neither.
     var id: String { "\(oldLine.map(String.init) ?? "")-\(newLine.map(String.init) ?? "")" }
 }
 
@@ -25,15 +22,10 @@ struct DiffHunk: Codable, Sendable, Hashable, Identifiable {
 }
 
 struct FileDiff: Codable, Sendable, Hashable {
-    /// One decoded snapshot. Layout tasks compare this small identity instead
-    /// of hashing megabytes of source text on the main actor.
     var renderRevision = UUID()
     var path: String
     var hunks: [DiffHunk]
-    /// True when git refused to diff it as text. Showing nothing without saying
-    /// why looks like an empty file.
     var binary: Bool
-    /// True when the file is not tracked, so every line reads as added.
     var untracked: Bool
 
     private enum CodingKeys: String, CodingKey { case path, hunks, binary, untracked }
@@ -51,11 +43,6 @@ struct FileDiff: Codable, Sendable, Hashable {
 
     var fileName: String { String(path.split(separator: "/").last ?? "") }
 
-    /// The first `limit` body lines of this diff, and how many were left out.
-    ///
-    /// For a card inside a transcript, which draws a diff beside hundreds of
-    /// other rows and has no viewport of its own to be lazy against. The file
-    /// viewer shows the whole thing and does not call this.
     func clipped(toLines limit: Int) -> (diff: FileDiff, cut: Int) {
         let total = hunks.reduce(0) { $0 + $1.lines.count }
         guard total > limit else { return (self, 0) }
@@ -76,11 +63,6 @@ struct FileDiff: Codable, Sendable, Hashable {
         return (out, total - limit)
     }
 
-    /// Build a diff from a chat Edit snippet (`- old` / `+ new` lines).
-    ///
-    /// Those previews are not unified diffs: they have no hunk header and no
-    /// line numbers. DiffBody still needs a FileDiff, so this invents a single
-    /// hunk and sequential gutters so the existing renderer can draw it.
     static func fromEditPatch(path: String, patch: String) -> FileDiff {
         var lines: [DiffLine] = []
         var oldLine: UInt32 = 1

@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Cheap / low defaults used by Design and by the example recipes.
-///
-/// Keep the markers in step with `tokenstat-host::agent_models`. The Mac
-/// cannot call that crate, so the same rules live here.
 enum WorkflowModelPick {
-    /// Prefer a fresh implementation agent, but never omit the build step
-    /// merely because the available backend also planned the work.
     static func buildAgent(from agents: [AgentBackend], used: [String]) -> AgentBackend? {
         let preferred = ["opencode", "opencode2", "cursor", "codex", "agy"]
             .compactMap { id in agents.first { $0.id == id } }

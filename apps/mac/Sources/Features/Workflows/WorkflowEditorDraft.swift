@@ -2,11 +2,6 @@
 
 import Foundation
 
-/// Graph metadata a phone or iPad can author.
-///
-/// Recipes fill nodes and edges locally. They do not call Design. A blank
-/// draft is a Start card. Folder stays the workspace this editor opened in.
-/// Step edits go through `WorkflowGraphDocument` and write back here.
 struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, JobBudgetEditing {
     enum Invalid: LocalizedError {
         case fields(String)
@@ -32,8 +27,6 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     var weeklyDays: Int
     var weeklyDayEdited: Bool
     var customDays: Int
-    // Preserve host seconds until the user edits the time limit. Optional for
-    // compatibility with drafts persisted before exact budgets were retained.
     var loadedBudgetSeconds: UInt64? = nil
     var budgetMinutes: String {
         didSet { if budgetMinutes != oldValue { loadedBudgetSeconds = nil } }
@@ -41,9 +34,6 @@ struct WorkflowEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, Jo
     var noTimeLimit: Bool {
         didSet { if noTimeLimit != oldValue { loadedBudgetSeconds = nil } }
     }
-    /// Graph-level fields the host sent that this client does not name.
-    /// Nodes and edges carry their own. Saved with the draft so a round
-    /// trip through this device cannot delete them.
     var graphExtraFields: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey {

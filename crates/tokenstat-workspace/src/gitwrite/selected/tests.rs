@@ -12,7 +12,6 @@ fn repo(initial: bool) -> tempfile::TempDir {
     )
     .unwrap();
     text(dir.path(), &["config", "commit.gpgSign", "false"]).unwrap();
-    // A developer's global hook configuration must not enter fixture tests.
     let hooks = dir.path().join(".git/hooks");
     text(
         dir.path(),
@@ -258,7 +257,6 @@ fn recovery_finishes_only_the_recorded_index_after_a_landed_commit() {
     let mut result = submit(dir, &["chosen"]);
     assert_eq!(result.state, "succeeded");
     let after = fs::read(&index).unwrap();
-    // Emulate a process ending after update-ref and before index publication.
     fs::write(index.with_extension("lock"), &after).unwrap();
     result.index_lock_identity =
         Some(lease::identity(&File::open(index.with_extension("lock")).unwrap()).unwrap());

@@ -13,138 +13,68 @@ import AppKit
 import UIKit
 #endif
 
-/// State for the Account screen, and the only place it talks to the bridge.
 @Observable
 @MainActor
 final class AccountModel {
-    /// Nil until the first load finishes, so the view can tell "unknown" from
-    /// "signed out". Showing a sign-in button before we have checked would
-    /// flash the wrong state on every launch.
     var account: Account? {
         didSet {
             let previous = WorkSessionContext.shared.scope
             WorkSessionContext.shared.update(account: account)
             EcosystemPublisher.verifyOwner(account: account)
-            // Nil is the unknown scope of a cold launch, not a different owner.
-            // Purging on the first load threw the cache away every time.
             if let previous, previous != WorkSessionContext.shared.scope {
                 WorkSearchHistory.invalidate(except: WorkSessionContext.shared.scope)
-                // Full downloaded files and OS preview copies are reconstructible.
-                // Clear them when ownership changes and invalidate in-flight writes.
                 Task { try? await ChatAttachmentCache.shared.purge() }
             }
         }
     }
-    /// Local host traffic. Independent of the signed-in account snapshot.
     var remoteStatus: RemoteStatus?
     var pendingLogin: DeviceLogin?
     var isLoading = false
     var isSyncing = false
     var isSigningOut = false
-    /// P2: post plan-limit readings after sync / limits refresh. Opt-in.
     var limitsSyncEnabled: Bool { PlanLimitsStore.shared.enabled }
-    /// Sources the user turned off. Still shown, not posted.
     var limitsSkip: [String] { PlanLimitsStore.shared.skip }
     var limitsProviders: [ProviderLimits] { PlanLimits.visible(PlanLimitsStore.shared.providers) }
     var isLoadingLimits = false
     #if os(macOS)
-    /// Nil until the host has answered. The switch must not flash the wrong default.
     var hostPolicy: HostPolicy?
     var isSavingHostPolicy = false
     #endif
     var errorMessage: String?
-    /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
-    /// Bumped once per successful sync, whoever started it.
-    ///
-    /// A counter rather than a callback, so this model never has to know that
-    /// Home or Insights exist. The shell watches it and re-reads the screens a
-    /// sync can have moved: before this, only the account card reloaded and the
-    /// heatmap, the hover popover and the inspector all sat on pre-sync numbers
-    /// until the host's ten-minute cache expired.
     private(set) var syncGeneration = 0
     var syncNotice: String?
     private(set) var syncNoticeDismissed = false
     var syncNoticeIsError = false
-    /// After any accepted sync, and after a real 429, the next manual press
-    /// would be refused. Used to disable the button. Not the same as a rate
-    /// limit: success also starts this clock.
     var syncCooldownUntil: Date?
-    /// True only when the last attempt was refused by the plan gate.
-    ///
-    /// A successful sync used to flip `isRateLimited` because it shared this
-    /// cooldown, so Account settings said "synced" while the sidebar footer
-    /// said "Rate limited" for the next five minutes.
     var lastSyncWasRateLimited = false
 
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
 
-    /// How the sign-in page is put in front of the user, when the platform has
-    /// a better answer than handing the URL to another app.
-    ///
-    /// The Mac opens a browser window, which is right where the browser is one
-    /// window away. The phone sets this to an authentication session that
-    /// presents over the app and closes itself on the callback, so nobody has to
-    /// leave, read a code and come back. Nil means "open a browser", which is
-    /// what every other front end wants.
     @ObservationIgnored var signInPresenter: ((URL) -> Void)?
 
-    /// How that presentation is taken away again, once there is nothing left to
-    /// approve.
-    ///
-    /// Called on confirmation, on cancel and on expiry. The website redirecting
-    /// into the app's own scheme also closes the sheet, and this exists because
-    /// that redirect is not the only way a sign-in can finish: somebody can
-    /// approve on a laptop, or be running against a build of the site that
-    /// predates the redirect. A window this app opened is a window this app
-    /// closes.
     @ObservationIgnored var signInDismisser: (() -> Void)?
 
-    /// Something worth saying while the poll is running, such as the network
-    /// having gone away. Not `errorMessage`: the sign-in has not failed, it is
-    /// waiting, and the two must not read the same.
     private(set) var signInNotice: String?
 
-    /// True only after a definitive account answer: signed in, or honestly
-    /// signed out (`account.status` returned `signedIn: false`).
-    ///
-    /// A network failure does **not** set this. Collapsing "could not check"
-    /// into "signed out" was the cold-start bug: a phone with a valid token
-    /// offline flashed the Sign in door and never recovered without a retry.
     private(set) var authChecked = false
 
-    /// Why the last check failed, when it was not a clean signed-out answer.
-    /// Nil while loading or after a successful check. The root uses this to
-    /// show a retry surface instead of the login door.
     private(set) var authCheckError: String?
 
-    /// Set when a check right after the deletion browser closes confirms the
-    /// account is gone, so the login door can say what happened. Cleared on
-    /// the next sign-in.
     private(set) var deletionConfirmed = false
 
     var signedIn: Bool { account?.signedIn == true }
 
-    /// First check still in flight, or waiting for the host. Splash territory.
     var authPending: Bool { !authChecked && authCheckError == nil }
 
-    /// First check failed (usually offline). Show retry, not Sign in.
     var authNeedsRetry: Bool { !authChecked && authCheckError != nil }
 
-    /// Whether the last sync was refused by the plan's rate gate, which is a
-    /// warning rather than a failure: the sync machinery works, the account
-    /// simply may not upload again yet.
-    ///
-    /// Only the last attempt's classification. The notice used to be scanned
-    /// as well, and "Sent 429 rows" from a success matched the bare "429".
     var isRateLimited: Bool { lastSyncWasRateLimited }
 
     private var accountLoadGeneration: UInt64 = 0
 
     func load(afterSignOut: Bool = false) async {
-        // A second load while one is in flight (connectivity restored + manual
-        // retry) would race two writes into `account`. One at a time.
         guard !isLoading, !isSigningOut || afterSignOut else { return }
         isLoading = true
         let generation = accountLoadGeneration
@@ -180,8 +110,6 @@ final class AccountModel {
             await Self.broadcastIfEntitlementChanged(from: previous, to: next)
         } catch {
             guard generation == accountLoadGeneration else { return }
-            // Keep any previous signed-in snapshot. A later offline refresh
-            // must not wipe a working session from the screen.
             authCheckError = error.localizedDescription
             if authChecked {
                 errorMessage = error.localizedDescription
@@ -192,8 +120,6 @@ final class AccountModel {
     }
 
     func loadTraffic() async {
-        // A failed refresh is not a host that reports no traffic. Keep the
-        // last answer rather than replacing it with nil.
         if let status = try? await Bridge.remoteStatus() {
             remoteStatus = status
         }
@@ -246,7 +172,6 @@ final class AccountModel {
         }
     }
 
-    /// Refresh while visible using the same reading as Home and composers.
     func loadLimitsIfNeeded() async {
         guard !isLoadingLimits else { return }
         isLoadingLimits = true
@@ -263,20 +188,7 @@ final class AccountModel {
     }
     #endif
 
-    /// Start the device flow, open the browser, then poll until confirmed.
-    ///
-    /// The browser is opened from here rather than from Rust so the app
-    /// controls window behaviour, and so a headless or remote client can
-    /// choose to do something else with the URL.
     func signIn() {
-        // A sign-in is already running. Do not start a second one: a second
-        // device code orphans the first, and the poll that is running belongs
-        // to the code the user is looking at. Put the page back in front of
-        // them instead, which is what tapping the button again means.
-        //
-        // It used to return silently here. On a phone that reads as a dead
-        // button: the browser sheet can be dismissed while the sign-in is still
-        // alive underneath, and every later tap did nothing at all.
         guard pollTask == nil else {
             presentSignInPage()
             return
@@ -306,12 +218,6 @@ final class AccountModel {
         }
     }
 
-    /// Put the approval page back in front of the user.
-    ///
-    /// Needed because the browser sheet can be dismissed while the sign-in it
-    /// started is still perfectly alive underneath. `signIn()` cannot do this:
-    /// it refuses while a poll is running, which is correct, since a second
-    /// device code would orphan the first.
     func presentSignInPage() {
         guard let pending = pendingLogin else { return }
         if let signInPresenter, let url = URL(string: pending.openURL) {
@@ -366,26 +272,14 @@ final class AccountModel {
             signInNotice = nil
 
             if poll.isConfirmed {
-                // Close the browser sheet ourselves rather than waiting for the
-                // site to redirect into the app's scheme. The redirect is the
-                // nice path, and it is one deploy, one old build of the website
-                // or one person who approved on a different device away from
-                // never arriving. This app knows the sign-in finished, so this
-                // app closes the window it opened.
                 signInDismisser?()
                 await load()
-                // A fresh login can relink a removed machine or replace a
-                // revoked credential even when the account's plan is unchanged.
                 _ = try? await Bridge.reconsiderPlan()
                 #if !os(macOS)
-                // One haptic for a real sign-in, not for discovering an
-                // existing session on cold launch.
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 #endif
                 return
             }
-            // The server can widen the interval when it wants less traffic.
-            // Honour that rather than keeping the original cadence.
             interval = poll.interval ?? interval
         }
 
@@ -411,8 +305,6 @@ final class AccountModel {
         }
     }
 
-    /// The core gives device polling its own codes. Host transport errors can
-    /// happen outside the core envelope, so those remain retryable too.
     private static func signInPollFailure(_ error: Error) -> SignInPollFailure {
         guard let bridge = error as? BridgeError,
               case let .core(code, _) = bridge else {
@@ -437,13 +329,6 @@ final class AccountModel {
         Task { await Bridge.cancelLogin() }
     }
 
-    /// Re-check the account after the deletion browser closes.
-    ///
-    /// The browser cannot report whether deletion finished, so the app asks
-    /// again the moment the sheet is gone. A deleted account answers with
-    /// `signedIn: false`, which drops the session (the root swaps to the
-    /// login door) and lets that door say why. A present account, meaning the
-    /// person closed the browser without deleting, changes nothing.
     func checkAfterAccountDeletion() async {
         await load()
         if account?.signedIn != true {
@@ -455,10 +340,6 @@ final class AccountModel {
         guard !isSigningOut else { return }
         isSigningOut = true
         defer { isSigningOut = false }
-        // The scope whose saved work leaves with it. Captured first: the
-        // snapshot below clears the identity this is built from. Same rule
-        // as the session scope, or a handleless account's work survives
-        // its sign-out and meets whoever signs in next.
         let purgeScope = account.flatMap { signed in
             WorkReference.Scope.accountIdentity(handle: signed.handle, id: signed.accountId)
                 .flatMap { WorkReference.Scope.account(origin: signed.host, handle: $0) }
@@ -476,9 +357,6 @@ final class AccountModel {
             errorMessage = nil
             authCheckError = nil
             clearSyncPacing()
-            // Drop the signed-in snapshot immediately so the client root can
-            // swap to the login door without waiting on a second network call.
-            // load() still runs to refresh host defaults and clear any cache.
             if let host = account?.host {
                 account = Account(
                     signedIn: false,
@@ -494,7 +372,6 @@ final class AccountModel {
                     billing: nil
                 )
             } else {
-                // Still mark checked signed-out so we do not re-enter splash.
                 authChecked = true
             }
             if let purgeScope { WorkAccessStore.shared.clear(scope: purgeScope) }
@@ -504,8 +381,6 @@ final class AccountModel {
             await load(afterSignOut: true)
         } catch {
             let failure = error.localizedDescription
-            // Resolve an uncertain reply without trusting a pre-sign-out
-            // account load. A fresh original-account answer preserves its cache.
             await load(afterSignOut: true)
             if signedIn { errorMessage = failure }
         }
@@ -525,8 +400,6 @@ final class AccountModel {
             syncGeneration += 1
             startSyncCooldown(fromRateLimit: false)
         } catch {
-            // Sync failures are action feedback, not account state. Keep them
-            // in the transient notice so a plan cooldown cannot pin the footer.
             errorMessage = nil
             let message = error.localizedDescription
             let rateLimited = Self.isRateLimitMessage(message)
@@ -557,13 +430,6 @@ final class AccountModel {
         }
     }
 
-    /// Seconds the Sync now button stays quiet.
-    ///
-    /// After a success this is only a debounce, capped at five minutes, so a
-    /// free-plan hour does not look like a stuck button. After a real 429 the
-    /// remaining wait in the gate message is used, capped at the plan
-    /// interval, so a press four minutes into a five-minute window is not
-    /// held for another full five.
     private func syncCooldownSeconds(fromRateLimit: Bool, message: String? = nil) -> TimeInterval {
         let plan: TimeInterval
         if let secs = account?.syncInterval, secs > 0 {
@@ -600,10 +466,6 @@ final class AccountModel {
         lastSyncWasRateLimited = false
     }
 
-    /// The words the host uses when the plan gate refuses, plus the usual
-    /// HTTP phrasings a proxy puts in front of the same answer.
-    ///
-    /// A bare "429" is not enough: a success toast is "Sent 429 rows for …".
     static func isRateLimitMessage(_ raw: String) -> Bool {
         let lower = raw.lowercased()
         return lower.contains("may sync once every")
@@ -614,14 +476,6 @@ final class AccountModel {
             || lower.contains("status 429")
     }
 
-    /// Tell the rest of the app (and hostd) when `/me` shows a new plan.
-    ///
-    /// A purchase on the phone, or a Paddle checkout in the browser, lands
-    /// here on the next `account.status`. Home's ten-minute series cache and
-    /// hostd's `not_on_this_plan` stop must not outlive that answer.
-    ///
-    /// The first snapshot after launch is not a plan change. Remint then
-    /// only if the tunnel is still sitting on a plan refusal.
     private static func broadcastIfEntitlementChanged(from previous: Account?, to next: Account) async {
         guard next.signedIn else { return }
         let nowAllowed = remoteAllowed(next)
@@ -654,7 +508,6 @@ final class AccountModel {
         return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
-    /// Remaining wait from "Try again in N minute(s).", or nil.
     static func retryAfterSeconds(from raw: String) -> TimeInterval? {
         let lower = raw.lowercased()
         guard let regex = try? NSRegularExpression(
@@ -673,26 +526,20 @@ final class AccountModel {
     }
 }
 
-// MARK: - Handle and profile
 
 extension AccountModel {
-    /// The one-time offer is still open: an account with no handle that nobody
-    /// has answered for, on this device or any other.
     var handleOfferDue: Bool {
         guard let account, account.signedIn, (account.handle ?? "").isEmpty,
               account.profile?.handlePrompted == false else { return false }
         return !UserDefaults.standard.bool(forKey: Self.offerKey(account))
     }
 
-    /// True for the one window that gets to show it.
     func beginHandleOffer() -> Bool {
         guard handleOfferDue, !Self.offeringHandle else { return false }
         Self.offeringHandle = true
         return true
     }
 
-    /// The offer closed. Remembered here first, so an account service that
-    /// cannot be reached does not turn "not now" into being asked every launch.
     func answerHandleOffer() async {
         Self.offeringHandle = false
         guard let account, account.signedIn else { return }
@@ -709,9 +556,6 @@ extension AccountModel {
         try await adopt { try await Bridge.setProfile(public: isPublic, indexable: indexable) }
     }
 
-    /// Take the account a change answered with, unless the sign-in it belonged
-    /// to is gone. A status read that started before the change would put the
-    /// old answer back, so it is retired.
     private func adopt(_ change: () async throws -> Account) async throws {
         let generation = accountLoadGeneration
         let scope = WorkSessionContext.shared.scope

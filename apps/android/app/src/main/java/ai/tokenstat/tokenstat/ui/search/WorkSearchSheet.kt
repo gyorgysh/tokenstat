@@ -56,12 +56,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/// The one way into search. Ported from `ClientWorkSearch.swift`.
-///
-/// Screens and settings are searchable either way; folders come from pins,
-/// recent places, and one folder list per machine when search opens rather
-/// than once per keystroke. Saved conversation text is searched when the
-/// signed-in account has a local encryption key.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkSearchSheet(
@@ -137,8 +131,6 @@ fun WorkSearchSheet(
                         known += SearchFolder(place.id.peer, id, displayNames[place.id.peer] ?: id, folderId, place.workspaceName, null)
                     }
                 }
-                // Then one folder list per machine, once when search opens
-                // rather than once per keystroke.
                 val live = mutableListOf<SearchFolder>()
                 var missed = 0
                 for (host in hosts) {
@@ -207,18 +199,12 @@ fun WorkSearchSheet(
         }
     }
 
-    // Full height: this is a search, so the keyboard takes the bottom half
-    // the moment you type. Opening half way left three results visible.
     TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.background,
     ) {
         Column(
-            // Fills the sheet, not just its width: `skipPartiallyExpanded`
-            // stops the half-height drag state but a short column still
-            // wraps, so an empty search opened as a strip at the bottom and
-            // the first typed letter pushed it about under the keyboard.
             Modifier.fillMaxWidth().fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = Space.m).padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {

@@ -8,16 +8,6 @@
 
 import SwiftUI
 
-/// A device is waiting on an answer, in the corner where the app already says
-/// what is going on.
-///
-/// The same slot and the same language as the update, sync and offline cards:
-/// above the account row, in the sidebar, in the app's own colours. It was a
-/// toast in the opposite corner first, which was wrong twice over. A toast
-/// takes itself away after a few seconds, and somebody who looked up to read it
-/// had already missed the only chance to answer. And a question about who may
-/// open your work is not a passing notice, it is a thing that stays until it is
-/// dealt with.
 struct DeviceAccessCard: View {
     var model: DeviceAccessRequests
 

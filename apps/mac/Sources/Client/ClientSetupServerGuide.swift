@@ -8,15 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// For somebody who does not have a server yet.
-///
-/// The other doors all assume a machine exists. This one is the honest answer
-/// to the person who read "runs on a machine that stays on" and has none: what
-/// it has to be, who takes the money, and where to go and get one.
-///
-/// tokenstat does not create servers and does not bill for them. Renting one is
-/// something that happens at a provider, in their account, on their card, and
-/// saying so before somebody leaves is the whole point of this screen.
 struct ClientSetupServerGuide: View {
     @Binding var path: [SetupStep]
 
@@ -137,12 +128,6 @@ struct ClientSetupServerGuide: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Leaves the app on purpose.
-    ///
-    /// Renting a server means an account, a card and a console, and all three
-    /// belong in the browser where somebody's saved details already are. An
-    /// in-app view of somebody's provider login is a worse place to type a
-    /// password, not a better one.
     private func provider(_ name: String, _ address: String) -> some View {
         Button(name, .external) {
             if let url = URL(string: address) { openURL(url) }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>UI-thread draft ownership and serialized writes for each note.</summary>
 internal sealed class NoteDraftStore
 {
     internal sealed record Text(string Title, string Notes);
@@ -66,8 +65,6 @@ internal sealed class NoteDraftStore
                 if (entry.Value == submitted) entry.Value = normalized;
                 entry.Saved = normalized;
                 entry.HasSaved = true;
-                // Lists already in flight can still carry the previous body.
-                // Only a read begun after this acknowledgement may replace it.
                 entry.SavedAfterRead = _reads;
             }
         }

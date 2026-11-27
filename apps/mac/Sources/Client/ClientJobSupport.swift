@@ -7,7 +7,6 @@
 #if !os(macOS)
 import Foundation
 
-/// JSON object encoding for a `remote.call` params bag.
 enum ClientJSON {
     enum Error: Swift.Error {
         case notObject
@@ -21,11 +20,6 @@ enum ClientJSON {
     }
 }
 
-/// Confirm copy for starting or stopping work on another machine.
-///
-/// One helper so Workflows and Automations cannot word the same threat
-/// differently. A phone or tablet in somebody else's hand is the model, and
-/// peer approval is the only gate below this.
 enum ClientJobCopy {
     static func run(_ name: String, folder: String, host: String) -> String {
         L10n.text("apple.clientjobsupport.starts_0_in_1_on_2.c720825d", "\(name)", "\(folder)", "\(host)")
@@ -56,7 +50,6 @@ enum ClientJobCopy {
         return L10n.text("apple.clientjobsupport.last_0.857c540b", "\(RelativeClock.phrase(for: date, style: .abbreviated))")
     }
 
-    /// Fact-row value. The label is already "Last", so no prefix.
     @MainActor
     static func lastRunWhen(_ date: Date?) -> String {
         guard let date else { return L10n.text("apple.clientjobsupport.never_run.3d40a69d") }

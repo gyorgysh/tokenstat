@@ -5,15 +5,6 @@
 import Observation
 import SwiftUI
 
-/// Everything the SSH library holds, and the one place that writes it.
-///
-/// Every editor used to save its own record and then mirror it into the vault
-/// itself, which meant four copies of the same three lines and one of them
-/// forgetting the vault. Saving goes through here now: the record store and the
-/// encrypted vault move together or not at all.
-///
-/// Secrets are not in this model. A key record points at the platform vault
-/// through `SSHSecretStore`, and the private bytes never enter `connections.json`.
 @MainActor
 @Observable
 final class SSHLibraryModel {
@@ -31,8 +22,6 @@ final class SSHLibraryModel {
         vault = SSHVaultModel(ownerScope: ownerScope)
     }
 
-    /// The producer belongs to the retained library, so a folding view may
-    /// cancel its own wait without canceling the library's initial load.
     func ensureLoaded(vaultTier: String?) async {
         guard let owner = ownership.claim() else { return }
         self.vaultTier = vaultTier
@@ -79,61 +68,27 @@ final class SSHLibraryModel {
     var snippets: [SSHSnippet] = []
     var knownHosts: [SSHKnownHost] = []
     var error: String?
-    /// A write that landed locally but could not be mirrored to the vault.
-    ///
-    /// Separate from `error` on purpose. The local record store is the source
-    /// of truth on this machine and the vault is a copy of it for other
-    /// devices, so a vault that is unreachable is a sync problem and not a
-    /// save that did not happen. Reporting it as `error` is what made adding
-    /// and deleting look broken while both were actually working.
     var vaultError: String?
-    /// True while a sync is running, so a screen can say so rather than
-    /// leaving somebody pressing a button that appears to do nothing.
     private(set) var vaultSyncing = false
-    /// When the last sync finished, whatever it found to do.
     private(set) var vaultSyncedAt: Date?
     var search = ""
 
-    /// What the inspector column is showing, on the Mac shell where the list
-    /// and the editor are two columns rather than one pushed screen.
-    ///
-    /// On the model rather than in a view, because the two columns are drawn
-    /// by different views and a selection that lives in one of them is a
-    /// selection the other has to be handed.
     var selection: SSHLibraryRoute? {
         didSet {
             if oldValue != selection, let oldValue { drafts.remove(oldValue) }
         }
     }
 
-    /// A server somebody has asked to connect to.
-    ///
-    /// On the model rather than in the list view, because on the Mac the list
-    /// and the inspector are two columns and the inspector is where the
-    /// primary Connect button belongs. A request set in either one is picked
-    /// up by the one screen that presents the connect sheet.
     var connectRequest: SSHHost?
 
-    /// The tier that may write to the vault, or nil when this device can only
-    /// read from it.
     private(set) var vaultTier: String?
 
-    /// The account's tier, filtered down to the ones that may write the vault.
-    ///
-    /// One place rather than one per caller: the sidebar and the library screen
-    /// both have to decide it, and two copies of a plan list is a copy that
-    /// disagrees the first time a plan is renamed.
     static func paidTier(for tier: String?) -> String? {
         guard let tier = tier?.lowercased(),
               ["supporter", "patron", "legend"].contains(tier) else { return nil }
         return tier
     }
 
-    /// True once a load has finished, however empty the result was.
-    ///
-    /// "No hosts" and "not loaded yet" look identical from the outside, and
-    /// telling somebody with forty saved servers that they have none is worse
-    /// than showing them nothing at all.
     private(set) var loaded = false
 
     private var loadGeneration: UInt64 = 0
@@ -166,9 +121,6 @@ final class SSHLibraryModel {
         }
     }
 
-    /// Re-read every list without touching which tier may write to the vault.
-    /// `load(vaultTier:)` sets that, so calling it to refresh would quietly
-    /// turn vault mirroring off for the rest of the session.
     func reload() async {
         guard let owner = ownership.claim() else { return }
         loadGeneration &+= 1
@@ -188,11 +140,6 @@ final class SSHLibraryModel {
         dropMissingSelection()
     }
 
-    /// Let go of a selection whose record is gone.
-    ///
-    /// Deleting the selected server left the inspector rendering an editor for
-    /// a record that no longer exists, with the deleted name still in the
-    /// chrome bar and a Save button that would put it back.
     private func dropMissingSelection() {
         let stillThere: Bool
         switch selection {
@@ -208,7 +155,6 @@ final class SSHLibraryModel {
         if !stillThere { selection = nil }
     }
 
-    // MARK: - Writing
 
     func save(host: SSHHost) async -> SSHHost? {
         guard let owner = ownership.claim() else { return nil }
@@ -261,20 +207,12 @@ final class SSHLibraryModel {
         }
     }
 
-    /// Keys are the one record with two halves: the description here, and the
-    /// private bytes in the platform vault. The encrypted vault carries both,
-    /// because a key that syncs without its private half is a row, not a key.
     func save(key: SSHKeyRecord, privateKey: String?, onLocalFailure: () -> Void = {}) async -> SSHKeyRecord? {
         guard let owner = ownership.claim() else { onLocalFailure(); return nil }
         do {
             let saved = try await Bridge.saveSSHKey(key)
             guard ownership.permits(owner) else { return nil }
             if vaultTier != nil && !SSHSecretStore.requiresBiometrics(saved.secretRef) {
-                // An edit that carries no key material is still an edit the
-                // other devices need. Renaming used to skip the vault, which
-                // left them holding the old name and pushing it back over the
-                // new one on the next pull. The private half is read back from
-                // this device's vault for exactly this case.
                 let material = privateKey ?? (try? SSHSecretStore.load(reference: saved.secretRef))
                 if let material {
                     let synced = SSHVaultSyncedKey(
@@ -290,9 +228,6 @@ final class SSHLibraryModel {
             guard ownership.permits(owner) else { return nil }
             return saved
         } catch {
-            // An explicit helper refusal means no local key record landed.
-            // A transport/decode failure is ambiguous, so retain its exact
-            // private half rather than deleting a possibly committed key.
             if case let BridgeError.core(code, _) = error,
                ["call_failed", "invalid_params", "method_not_found"].contains(code) { onLocalFailure() }
             guard ownership.permits(owner) else { return nil }
@@ -301,17 +236,6 @@ final class SSHLibraryModel {
         }
     }
 
-    /// Put everything on this device into a vault that has just been made.
-    ///
-    /// The other half of deleting a vault nobody can open. Deleting used to be
-    /// the end of the road: the account lost its vault and the person was left
-    /// on a screen offering to create an empty one, with their forty saved
-    /// servers sitting in `connections.json` a foot away. Those records are
-    /// not secrets, they are still here, and this is what carries them across.
-    ///
-    /// Keys come too when this device still holds the private half. One that
-    /// only ever existed in the deleted vault cannot be recovered by anybody,
-    /// which is said before the delete rather than discovered after it.
     func seedVaultFromThisDevice(tier: String) async {
         guard let owner = ownership.claim() else { return }
         vaultTier = tier
@@ -321,10 +245,6 @@ final class SSHLibraryModel {
         vaultSyncedAt = Date()
     }
 
-    /// Keys whose private half is not on this device.
-    ///
-    /// Named before a vault is deleted, because these are the ones nothing can
-    /// bring back: the row is here, the material was only in the vault.
     var keysOnlyInTheVault: [SSHKeyRecord] {
         keys.filter {
             !$0.secretRef.hasPrefix("agent:") && !SSHSecretStore.requiresBiometrics($0.secretRef)
@@ -385,8 +305,6 @@ final class SSHLibraryModel {
         } catch { if ownership.permits(owner) { self.error = error.localizedDescription } }
     }
 
-    /// Only the trusted identity changes. Pending verification cannot write
-    /// an old copy of a host over edits made while the server was answering.
     func trust(host: SSHHost, fingerprint: String, expectedJump: SSHHost? = nil) async -> SSHHost? {
         guard let owner = ownership.claim() else { return nil }
         do {
@@ -403,15 +321,6 @@ final class SSHLibraryModel {
         }
     }
 
-    /// Record that somebody actually used this host, so the list can lead with
-    /// what they reach for. Never fails loudly: a bookkeeping write must not
-    /// take a working connection away from anybody.
-    ///
-    /// Written without moving the merge stamp, and not mirrored. Connecting is
-    /// not an edit to the record: stamping it would make this device the
-    /// newest writer of a host somebody had just renamed elsewhere, and the
-    /// rename would lose to a connection nobody thinks of as a change. Which
-    /// server you reached for last is local recency and stays local.
     func noteConnection(_ host: SSHHost) async {
         guard let owner = ownership.claim() else { return }
         _ = try? await Bridge.noteSSHConnection(expected: host)
@@ -420,8 +329,6 @@ final class SSHLibraryModel {
         guard ownership.permits(owner) else { return }
     }
 
-    /// Bookkeeping belongs to the library and does not delay presenting a
-    /// connected terminal or keep its authentication payload alive.
     func recordConnection(_ host: SSHHost) {
         guard let owner = ownership.claim() else { return }
         let token = UUID()
@@ -432,13 +339,6 @@ final class SSHLibraryModel {
         }
     }
 
-    /// Delete locally, then forget it in the vault.
-    ///
-    /// This order is the whole point. The vault delete used to run first,
-    /// under the same `try`, so a vault that answered with an error stopped
-    /// the local delete from ever running: the record stayed, the screen
-    /// showed a server sentence, and deleting appeared to be broken while
-    /// nothing had been attempted.
     private func remove(vaultID: String, _ work: () async throws -> Void) async {
         guard let owner = ownership.claim() else { return }
         do {
@@ -459,12 +359,6 @@ final class SSHLibraryModel {
         guard ownership.permits(owner) else { return }
     }
 
-    /// Copy a record into the encrypted vault for the other devices.
-    ///
-    /// Cannot throw, deliberately. Every caller has already written the record
-    /// locally by the time this runs, so a failure here has to be reported as
-    /// what it is rather than turning a save that worked into a save that
-    /// looks like it did not.
     private func mirror(id: String, envelope: SSHVaultEnvelope) async {
         guard let owner = ownership.claim() else { return }
         guard owner.scope.kind == .account, let vaultTier else { return }
@@ -483,27 +377,7 @@ final class SSHLibraryModel {
         }
     }
 
-    // MARK: - Syncing
 
-    /// Both directions, in the one order that converges.
-    ///
-    /// The vault used to be brought up to date by the pull alone, and the pull
-    /// walks the records the vault already has. A record it has never heard of
-    /// is not in that walk, so everything saved before the vault existed
-    /// stayed on this device forever: somebody with forty servers made a vault,
-    /// watched it say "0 records", and had nothing to press. Only records
-    /// edited afterwards ever went in.
-    ///
-    /// So the pull answers with what the vault holds, and everything here that
-    /// is not in that answer is pushed. Newly created vault or not, the two
-    /// sides end up saying the same thing.
-    ///
-    /// `asked` separates a sync somebody pressed from the one every arrival at
-    /// the screen runs. A vault that cannot be read is worth a sentence when
-    /// the answer to a button press would otherwise be nothing at all, and is
-    /// not worth a banner on a screen somebody merely opened: a locked vault
-    /// already says "Locked" on its own row, and reporting it twice on every
-    /// load is how a normal state starts looking like a fault.
     func syncVault(tier: String, asked: Bool = false) async {
         guard let owner = ownership.claim() else { return }
         guard owner.scope.kind == .account, !vaultSyncing else { return }
@@ -521,22 +395,11 @@ final class SSHLibraryModel {
         guard ownership.permits(owner) else { return }
     }
 
-    /// Sync because somebody asked, rather than because a screen appeared.
-    ///
-    /// There was no way to ask at all. A vault that had missed something, for
-    /// any reason, stayed that way until the next edit to the same record, and
-    /// the screen offered nothing to press in the meantime.
     func syncNow() async {
         guard let vaultTier else { return }
         await syncVault(tier: vaultTier, asked: true)
     }
 
-    /// Put everything the vault has not got into it.
-    ///
-    /// Folders before the hosts that name them, for the same reason the pull
-    /// orders them: a client reading this back rejects a host whose folder it
-    /// has not seen. A key with no private half on this device is skipped, not
-    /// pushed as a row nothing can connect with.
     private func pushMissing(to tier: String, alreadyInVault known: Set<String>) async {
         guard let owner = ownership.claim() else { return }
         for folder in folders where !known.contains("folder:\(folder.id)") {
@@ -569,26 +432,7 @@ final class SSHLibraryModel {
         }
     }
 
-    // MARK: - Reading the vault back
 
-    /// Merge the vault into what is on this device.
-    ///
-    /// A merge and not an overwrite. This used to write every arriving record
-    /// straight over the local one, which meant the oldest copy on the account
-    /// won: a device that had not been opened in a week put every host back in
-    /// the top level, forgot its colour and forgot which key it used, on every
-    /// launch. Worse, a save whose mirror had failed was reverted by the very
-    /// next load, so the edit looked like it had never been made.
-    ///
-    /// `updatedMs` decides it now. Newer wins, and a local record that is
-    /// newer is pushed back, so the account converges instead of disagreeing
-    /// quietly.
-    ///
-    /// Answers with every vault id it saw, tombstones included, which is what
-    /// `pushMissing` needs to know what the vault has never been told about.
-    /// Nil where the vault could not be read at all: that is not an empty
-    /// vault, and treating it as one would push this device's whole library
-    /// at something that had just refused to answer.
     private func pullVault(tier: String, reporting: Bool = false) async -> Set<String>? {
         guard let owner = ownership.claim() else { return nil }
         let records: [SSHVaultRecord]
@@ -600,22 +444,11 @@ final class SSHLibraryModel {
             if reporting { vaultError = error.localizedDescription }
             return nil
         }
-        // Every id the vault holds, decodable or not, tombstones included: a
-        // record this build cannot read is still one the vault has, and
-        // pushing over it would replace what a newer client wrote.
         let known = Set(records.map(\.id))
         var changed = false
-        // Folders first, and shallow before deep. A host names the folder it
-        // belongs to and the host refuses a folder it has never heard of, so a
-        // pull that applied them in arrival order could drop a server for the
-        // rest of the session. Sub-folders have the same rule about parents.
         for record in ordered(records) {
             guard ownership.permits(owner) else { return nil }
             if record.deleted == true {
-                // A tombstone carries no timestamp, so there is nothing to
-                // compare it against. Deleting is explicit and re-creating is
-                // cheap, where ignoring a delete would leave a host somebody
-                // removed on their phone alive on every other device forever.
                 changed = await applyDeletion(record.id) || changed
                 guard ownership.permits(owner) else { return nil }
                 continue
@@ -677,21 +510,14 @@ final class SSHLibraryModel {
         return known
     }
 
-    /// A key is the one record where an equal stamp still means work: the row
-    /// can be here while the private half is not, which is what a freshly
-    /// enrolled device looks like.
     private func applyKey(_ key: SSHVaultSyncedKey) async -> Bool {
         guard let owner = ownership.claim() else { return false }
         let local = keys.first { $0.id == key.id }
-        // A synced record must never replace this device's access control.
         if let local, SSHSecretStore.requiresBiometrics(local.secretRef) { return false }
         let havePrivate = local.map { (try? SSHSecretStore.load(reference: $0.secretRef)) != nil } ?? false
         let take = verdict(remote: key.updatedMs, local: local?.updatedMs)
         if take == .takeRemote || (take == .same && !havePrivate) {
             do {
-                // Keep the previous key usable until its matching metadata is
-                // confirmed. Reusing key.id overwrites that secret even when
-                // the host refuses the update or its response is lost.
                 let reference = try SSHSecretStore.store(key.privateKey, id: "vault_\(key.id)_\(UUID().uuidString)")
                 _ = try await Bridge.applySSHKey(SSHKeyRecord(
                     id: key.id, label: key.label, algorithm: key.algorithm,
@@ -724,16 +550,11 @@ final class SSHLibraryModel {
     }
 
     enum MergeVerdict {
-        /// The vault's copy is newer, or this device has never seen the record.
         case takeRemote
-        /// This device's copy is newer, so the vault is the one that is behind.
         case pushLocal
         case same
     }
 
-    /// Newer wins. A record this device does not have is always taken, and a
-    /// record written by a build from before stamps existed reads as 0, which
-    /// loses to anything stamped and ties with anything else that never was.
     func verdict(remote: Int64, local: Int64?) -> MergeVerdict {
         guard let local else { return .takeRemote }
         if remote > local { return .takeRemote }
@@ -741,8 +562,6 @@ final class SSHLibraryModel {
         return .same
     }
 
-    /// Folder records first, each after its own parent, then the rest in the
-    /// order they arrived.
     private func ordered(_ records: [SSHVaultRecord]) -> [SSHVaultRecord] {
         var folders: [(SSHVaultRecord, SSHFolder)] = []
         var rest: [SSHVaultRecord] = []
@@ -759,9 +578,6 @@ final class SSHLibraryModel {
         }
         var placed: Set<String> = Set(self.folders.map(\.id))
         var sorted: [SSHVaultRecord] = []
-        // Repeat until nothing else can be placed. A folder whose parent is
-        // missing entirely still goes out, at the end: the host will reject it
-        // and say so, which beats dropping it silently.
         var remaining = folders
         while !remaining.isEmpty {
             let ready = remaining.filter { $0.1.parentID == nil || placed.contains($0.1.parentID ?? "") }
@@ -805,9 +621,7 @@ final class SSHLibraryModel {
         }
     }
 
-    // MARK: - Reading
 
-    /// Hosts in one folder, favourites first, then by position, then by name.
     func hosts(in folder: String?) -> [SSHHost] {
         matching(hosts) { host in
             [host.label, host.hostname, host.username] + host.tags
@@ -838,12 +652,6 @@ final class SSHLibraryModel {
         matching(snippets) { [$0.title, $0.command] + $0.tags }
     }
 
-    /// The snippets worth offering while connected to one server.
-    ///
-    /// Scoped ones first, then the ones that name no server at all. A snippet
-    /// scoped to a *different* server is left out: that scoping is somebody
-    /// saying where the command belongs, and a `systemctl restart` meant for
-    /// one machine has no business being one click away on another.
     func snippets(for hostID: String) -> [SSHSnippet] {
         let ordered = snippets.sorted {
             $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
@@ -852,22 +660,10 @@ final class SSHLibraryModel {
             + ordered.filter { $0.hostIDs.isEmpty }
     }
 
-    /// What should run by itself as soon as a shell on this server exists.
-    ///
-    /// Scoped snippets only: a general snippet is one somebody keeps for every
-    /// server, and firing all of those into every connection is not what the
-    /// checkbox on one record says.
     func startupSnippets(for hostID: String) -> [SSHSnippet] {
         snippets(for: hostID).filter { $0.runOnConnect && $0.hostIDs.contains(hostID) }
     }
 
-    /// The handful somebody actually returns to. Favourites first, then the
-    /// most recently used, because a list of forty servers is a list nobody
-    /// scans twice.
-    ///
-    /// Empty while every server fits on screen anyway. A short list shown
-    /// twice, once as Recent and once as All servers, reads as two servers
-    /// with the same name.
     var recentHosts: [SSHHost] {
         guard hosts.count > Self.recentShortcutThreshold else { return [] }
         return hosts
@@ -903,7 +699,6 @@ final class SSHLibraryModel {
     }
 }
 
-/// One vault record's payload. Exactly one of the four is set.
 struct SSHVaultEnvelope: Codable {
     var kind: String
     var host: SSHHost?

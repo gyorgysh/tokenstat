@@ -6,8 +6,6 @@
 
 import SwiftUI
 
-/// Account is three jobs, not one scrolling pile: who you are, vendor quota
-/// windows, and what this Mac itself does.
 #if os(macOS)
 private enum AccountSettingsPane: String, CaseIterable, Hashable {
     case account
@@ -39,7 +37,6 @@ struct AccountView: View {
     @Bindable var model: AccountModel
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-    /// Whether the third-party notices sheet is open.
     @State private var confirmSignOut = false
     @State private var showLicenses = false
     #if os(macOS)
@@ -63,8 +60,6 @@ struct AccountView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Mac detail chrome only. The phone sheet already has a navigation
-            // bar with Done, and Sync now is not offered there (no archive).
             #if os(macOS)
             DetailChromeBar(accessory: { settingsTabs }) {
                 if model.signedIn {
@@ -100,8 +95,6 @@ struct AccountView: View {
                     } else if model.account != nil {
                         signedOut
                     } else {
-                        // Neither state is known yet. Showing "sign in" here would
-                        // flash the wrong answer on every launch.
                         BusySpinner()
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Theme.Space.l)
@@ -224,7 +217,6 @@ struct AccountView: View {
         }
     }
 
-    /// Who you are, who can reach you, and the legal end of the account.
     @ViewBuilder
     private var accountPane: some View {
         if model.pendingLogin == nil {
@@ -314,9 +306,6 @@ struct AccountView: View {
     }
 
     private func syncCard(_ account: Account) -> some View {
-        // **Sync is a desktop act.** It uploads this machine's archive. A phone
-        // has no archive: it only reads what other devices published. Offering
-        // Sync now there is a button whose honest outcome is a refusal.
         Card(
             title: L10n.text("apple.accountview.sync.8d261a37"),
             subtitle: L10n.text("apple.accountview.only_aggregate_counters_are_eligible.141802f7"),
@@ -361,8 +350,6 @@ struct AccountView: View {
                 .disabled(model.isSyncing || model.isSigningOut)
                 .sheet(isPresented: $confirmSignOut) { WorkSignOutReview(model: model) }
                 #else
-                // Phone account UI lives in `ClientAccountSheet`. Keep a
-                // non-system control here if this view is ever shown on iOS.
                 Button {
                     Task { await model.signOut() }
                 } label: {
@@ -420,10 +407,6 @@ struct AccountView: View {
         }
     }
 
-    /// One machine. The one you are sitting at is marked.
-    ///
-    /// Without the mark the list is a set of opaque ids, and the only machine
-    /// anyone can actually act on is the one they cannot pick out.
     private func machineRow(_ machine: Machine, isThisMachine: Bool) -> some View {
         HStack(spacing: Theme.Space.m) {
             Image(systemName: machineIcon(machine, isThisMachine: isThisMachine))
@@ -432,9 +415,6 @@ struct AccountView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: Theme.Space.xs) {
-                    // A machine the user has never named shows its id. The id
-                    // is a public machine key, so it is shown plain and
-                    // selectable rather than blurred.
                     if let label = machine.label, !label.isEmpty {
                         Text(label)
                             .font(Theme.callout)
@@ -461,8 +441,6 @@ struct AccountView: View {
                             .background(Theme.accentSoft, in: Capsule())
                     }
                 }
-                // Only when the machine has a name, so the id is not printed
-                // twice on a row that is already showing it as its title.
                 if let subtitle = machine.subtitle {
                     Text(subtitle)
                         .font(Theme.mono(10))
@@ -496,11 +474,6 @@ struct AccountView: View {
     }
 
     #if os(macOS)
-    /// Opt-in posting of vendor quota windows, one switch per reading we have.
-    ///
-    /// The master switch is still the privacy gate (off by default). Each
-    /// row is a source the user can leave on this Mac, for an expired
-    /// subscription or a tool they do not want on the phone.
     private var planLimitsCard: some View {
         Card(
             title: L10n.text("apple.accountview.plan_limits.925788cd"),
@@ -544,8 +517,6 @@ struct AccountView: View {
         }
     }
 
-    /// Claude Code hands its limits to the host after every reply once this is
-    /// on. Off by default, because turning it on edits Claude Code's settings.
     private var claudeLiveFeedRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             toggleRow(
@@ -683,7 +654,6 @@ struct AccountView: View {
             mark: "mark_terminal"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                // These describe terminals, and a client has none.
                 #if os(macOS)
                 toggleRow(
                     L10n.text("apple.accountview.expose_terminal_output_to_voiceover.a2c1bd2f"),
@@ -1065,9 +1035,6 @@ struct AccountView: View {
     }
     #endif
 
-    /// Show phones as phones, tablets as tablets, on both the desktop account
-    /// card and the client. A host is a computer, with the current one using
-    /// the laptop variant when the name does not already say what it is.
     private func machineIcon(_ machine: Machine, isThisMachine: Bool) -> String {
         if isThisMachine, machine.isHost {
             let guessed = ClientDeviceIcon.symbol(for: machine)
@@ -1077,14 +1044,6 @@ struct AccountView: View {
         return ClientDeviceIcon.symbol(for: machine)
     }
 
-    /// Being told when a run or chat needs attention.
-    ///
-    /// Two different mechanisms behind one switch, because they are one
-    /// feature to the person using them. The Mac watches its own run list and
-    /// posts the notification itself, with no account and no network. A phone
-    /// with the app closed cannot watch anything, so it asks the account to
-    /// have Apple wake it, which is why that side needs signing in and this
-    /// one does not.
     private var notificationsCard: some View {
         Card(
             title: L10n.text("apple.accountview.notifications.78801183"),
@@ -1173,12 +1132,6 @@ struct AccountView: View {
         }
     }
 
-    /// Delete the account, from the website.
-    ///
-    /// The app deliberately has no delete of its own: deletion is immediate
-    /// and permanent on the server, and the website's data settings is the
-    /// only place that is confirmed. The button sends the user there, logged
-    /// in or to log in first.
     private var deleteAccountCard: some View {
         Card(
             title: L10n.text("apple.accountview.delete_this_account.5e78b966"),
@@ -1203,9 +1156,6 @@ struct AccountView: View {
         }
     }
 
-    /// Where deletion happens: `{host}/settings/data#delete` on the website.
-    /// The fragment jumps to the delete section once the page loads, so the
-    /// button lands on the section instead of the top of the page.
     private static var defaultDeletionURL: URL {
         URL(string: "https://tokenstat.ai/settings/data#delete")!
     }
@@ -1223,9 +1173,6 @@ struct AccountView: View {
         #endif
     }
 
-    /// Label on the left, the switch pinned to the row's trailing edge, so
-    /// every switch in the list sits in the same column whatever the label
-    /// length. The switch is the state; no redundant word beside it.
     private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
@@ -1278,8 +1225,6 @@ private struct LicensesSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     #endif
                 } else if loadFailed {
-                    // A development build that ran without the generating
-                    // build phase, or a bundle that lost the file.
                     Text(L10n.text("apple.accountview.the_third_party_notices_are_generated_at_b.4594fa7d"))
                         .font(Theme.callout)
                         .foregroundStyle(Theme.controlGlyph)
@@ -1305,9 +1250,6 @@ private struct LicensesSheet: View {
         }
     }
 
-    /// Read the generated notices file away from the main thread. The read
-    /// itself is small, but the file is assembled by a build phase and this
-    /// keeps the first open instant regardless of its size.
     private static func loadNotices() async -> String? {
         await Task.detached(priority: .userInitiated) {
             guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") else {

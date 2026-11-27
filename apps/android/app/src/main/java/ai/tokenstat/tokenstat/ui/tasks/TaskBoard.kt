@@ -82,13 +82,6 @@ private val BOARD_COLUMNS = listOf(
     Triple("done", L10n.text("common.done"), "done"),
 )
 
-/// The full task board behind the workspace Tasks tab: compact list,
-/// explicit Move, detail editor, archive/restore/delete, agent plus
-/// attention filters plus search, and run with receipts.
-///
-/// Ports `ClientTaskBoard` (phone stacked columns: the side-by-side board
-/// is the wide presentation). Drag reorder becomes explicit Move
-/// earlier/later, which is the same `todo.edit` order write.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TaskBoardDialog(
@@ -117,9 +110,6 @@ fun TaskBoardDialog(
     }
 }
 
-/// The task board as a full page on the app background. Creation, editing
-/// and run/result are full pages too, pushed over the board like the Apple
-/// client's full-screen covers.
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TaskBoardScreen(
@@ -133,8 +123,6 @@ fun TaskBoardScreen(
     onOpenSection: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    // The board has its own header, its own back and its own add. Two
-    // headers with two back arrows is what stacking them looked like.
     OwnSectionHeader()
     val scope = rememberCoroutineScope()
     val canEdit = HostContracts.supportsTaskEditing(protocol)
@@ -547,14 +535,7 @@ private fun TaskRow(
     val canEarlier = !newestFirst && !working && canEdit && index > 0
     val canLater = !newestFirst && !working && canEdit && index >= 0 && index < visibleInColumn.size - 1
     TsCard {
-        // `TsCard` already pads by `cardPaddingDp`; padding again inside it
-        // was a second margin on all four sides, which is most of why these
-        // cards stood so tall with so little in them.
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            // A clickable column, not a `TextButton`: the button imposes
-            // Material's 48dp minimum height and centres what is inside it,
-            // which left every card tall with its title floating in the
-            // middle and a band of empty space above and below.
             Column(
                 Modifier.fillMaxWidth().clickable(onClick = onEdit),
                 verticalArrangement = Arrangement.spacedBy(Space.xs),

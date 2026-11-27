@@ -36,10 +36,6 @@ impl PairingCode {
                     bail!("The pairing-code file is too long");
                 }
                 let code = Self::parse(&value)?;
-                // The SSH wizard owns this reserved staging file. Once read,
-                // keep the code in memory and retire the file even if enrollment
-                // fails later or the phone disconnects. Other input files belong
-                // to the caller and are left alone.
                 if let (Some(dirs), Some(opened)) = (directories::BaseDirs::new(), opened) {
                     remove_staged_file(path, dirs.home_dir(), &opened)?;
                 }
@@ -72,9 +68,6 @@ impl PairingCode {
 }
 
 fn remove_staged_file(path: &Path, home: &Path, opened: &std::fs::Metadata) -> Result<()> {
-    // Compare canonical forms: `./~/.tokenstat-pairing`, double slashes, or a
-    // hardlink spelling must still retire the wizard's file, and a symlink
-    // pointing at it must not delete through the link check below.
     let staged = home.join(".tokenstat-pairing");
     let canonical_same = path == staged
         || std::fs::canonicalize(path).ok().as_ref() == Some(&staged)
@@ -96,8 +89,6 @@ fn remove_staged_file(path: &Path, home: &Path, opened: &std::fs::Metadata) -> R
     #[cfg(not(unix))]
     let same = canonical_same;
     if same {
-        // Use the same lock as SSH staging/cleanup. Compare the file actually
-        // read, not the path reopened after a new attempt replaced it.
         let _guard = acquire_pairing_lock(&home.join(".tokenstat-pairing.lock"))?;
         let current = match std::fs::symlink_metadata(&staged) {
             Ok(current) if current.is_file() => current,
@@ -130,10 +121,6 @@ fn remove_staged_file(path: &Path, home: &Path, opened: &std::fs::Metadata) -> R
     Ok(())
 }
 
-/// Open the pairing file without following symlinks, then validate what was
-/// opened. `symlink_metadata` + `File::open` is a TOCTOU: a writer in the
-/// directory can swap file and link between the two calls. `O_NOFOLLOW` fails
-/// the open itself when the final component is a link.
 #[cfg(unix)]
 fn open_pairing_file(path: &Path) -> Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -193,8 +180,6 @@ fn acquire_pairing_lock(lock: &Path) -> Result<PairingLock> {
     anyhow::bail!("The pairing-code file is busy; retry setup")
 }
 
-/// Publish a nonempty reaper directory atomically, then quarantine the
-/// exact stale directory while that child prevents anyone from replacing it.
 fn reclaim_pairing_lock(lock: &Path) -> bool {
     let Ok(observed) = std::fs::symlink_metadata(lock) else {
         return false;
@@ -263,7 +248,6 @@ fn clean_dead_reaper(reap: &Path) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
-    // A new claimant is always nonempty, so competing cleaners cannot remove it.
     let _ = std::fs::remove_dir(reap);
 }
 
@@ -275,8 +259,6 @@ fn pairing_lock_stale(lock: &Path, observed: &std::fs::Metadata) -> bool {
     {
         return !process_alive(pid);
     }
-    // Creating/truncating the pid file precedes writing it. Give that live
-    // acquisition the same grace period as a directory with no pid file.
     observed
         .modified()
         .ok()
@@ -392,8 +374,6 @@ mod tests {
         std::fs::write(&staged, "WXYZ-1234").unwrap();
         std::fs::hard_link(&staged, &alias).unwrap();
         remove_staged_file(&alias, &home, &std::fs::metadata(&alias).unwrap()).unwrap();
-        // The reserved file is retired even when the read came through the
-        // hardlink; the caller's own alias path is not what gets removed.
         assert!(!staged.exists());
         assert!(alias.is_file());
         std::fs::remove_dir_all(home).unwrap();

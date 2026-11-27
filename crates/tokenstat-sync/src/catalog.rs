@@ -73,8 +73,6 @@ fn refresh_at(
 }
 
 fn refresh_catalog_at(url: &str, path: &Path) -> anyhow::Result<TrimmedCatalog> {
-    // 120s rather than the pricing feed's 60s: this response is several
-    // megabytes before it reaches us.
     match snapshot::fetch_conditional(url, path, 120)? {
         Fetched::NotModified => load_trimmed(path).ok_or_else(|| {
             anyhow::anyhow!("catalog API returned 304 but no local snapshot exists")
@@ -419,8 +417,6 @@ fn trim_offer(o: &WireOffer) -> TrimmedOffer {
         output: o.output.unwrap_or(0.0),
         cache_read: o.cache_read.unwrap_or(0.0),
         cw5: write_5m,
-        // Feeds that do not distinguish TTLs quote one cache-write rate. Reusing
-        // it for the 1h tier is closer than pricing that tier at zero.
         cw1h: o.cache_write_1h.unwrap_or(write_5m),
     }
 }
@@ -551,7 +547,6 @@ mod tests {
         let t = trimmed();
         let rates = t.models[1].rates.as_ref().expect("has rates");
         assert_eq!(rates.src, "openrouter");
-        // One quoted cache-write rate covers both TTL tiers.
         assert_eq!(rates.cw5, 3.5);
         assert_eq!(rates.cw1h, 3.5);
     }
@@ -616,7 +611,6 @@ mod tests {
         assert_eq!(parse_plans(good).unwrap().plans.len(), 1);
         assert!(parse_plans(r#"{"effective_from":"2026-08-03","plans":[]}"#).is_err());
         assert!(parse_plans("[]").is_err());
-        // Whatever we accept must round-trip into the type core reads.
         let stored = serde_json::to_string(&parse_plans(good).unwrap()).unwrap();
         assert_eq!(Plans::parse(&stored).unwrap().len(), 1);
     }

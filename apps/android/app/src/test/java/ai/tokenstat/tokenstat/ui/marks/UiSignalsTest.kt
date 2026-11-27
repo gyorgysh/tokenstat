@@ -4,9 +4,6 @@ package ai.tokenstat.tokenstat.ui.marks
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/// The refresh dip signal: every subscribed logo hears one refresh exactly
-/// once, and an unsubscribed logo hears nothing, so a recomposed wordmark
-/// cannot stack listeners and dip twice.
 class UiSignalsTest {
     @Test
     fun refreshListenerCanUnsubscribeItselfDuringDelivery() {

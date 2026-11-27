@@ -19,10 +19,6 @@ internal static class ChatDetailPreference
     private static string FilePath => InAppData("chat-detail-level.txt");
     private static string StreamingPath => InAppData("chat-smooth-streaming.txt");
 
-    /// <summary>
-    /// Where the level lived while "minimal" meant a line per step and
-    /// "compact" a line per stretch of work. Those two names swapped.
-    /// </summary>
     private static string PreviousFilePath => InAppData("chat-detail.txt");
 
     private static string InAppData(string name) => Path.Combine(
@@ -43,7 +39,6 @@ internal static class ChatDetailPreference
             }
             catch
             {
-                // Remembering is a courtesy. This session keeps the choice.
             }
         }
     }
@@ -88,15 +83,10 @@ internal static class ChatDetailPreference
         }
         catch
         {
-            // A damaged file only costs the remembered level.
         }
         return ChatDetail.Compact;
     }
 
-    /// <summary>
-    /// A choice stored in the previous file, by what it did rather than what
-    /// it was called, so nobody's transcript changes under them.
-    /// </summary>
     internal static ChatDetail? Renamed(string stored) => stored.Trim().ToLowerInvariant() switch
     {
         "minimal" => ChatDetail.Compact,

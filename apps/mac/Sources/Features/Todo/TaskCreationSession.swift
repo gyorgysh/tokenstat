@@ -10,8 +10,6 @@ struct SavedTaskCreation: Codable, Equatable, Sendable {
     var outcome: TaskCreationOutcome?
 }
 
-/// The submission is saved before it leaves the device. Receipt reads never
-/// create work, and an explicit retry always repeats the original operation.
 @MainActor @Observable
 final class TaskCreationSession {
     let target: TaskEditorTarget
@@ -144,8 +142,6 @@ final class TaskCreationSession {
         NotificationCenter.default.post(name: TaskEditorSession.didChange, object: target)
     }
 
-    /// Only an acknowledged outcome can clear a submission. An older window
-    /// cannot clear a newer operation or overwrite another window's draft.
     func finish(operationID: String) async -> Bool {
         guard !working, otherDraft == nil, saved.outcome?.operationID == operationID else { return false }
         working = true

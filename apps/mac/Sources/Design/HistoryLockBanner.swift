@@ -12,11 +12,6 @@ extension Notification.Name {
     /// The signed-in account just changed tier or remote entitlement.
     /// Home and Devices refetch instead of keeping a Free lock on screen.
     static let tokenstatEntitlementDidChange = Notification.Name("ai.tokenstat.entitlementDidChange")
-    /// A sync finished and the archive underneath the reporting screens moved.
-    ///
-    /// Posted by the in-process scheduler, which has no model to bump. A
-    /// pressed Sync now goes through `AccountModel.syncGeneration` instead, and
-    /// the shell answers both the same way.
     static let tokenstatDidSync = Notification.Name("ai.tokenstat.didSync")
 }
 
@@ -40,12 +35,7 @@ enum Plans {
     }
 }
 
-/// The same Free-year note the public profile puts under the heatmap.
-///
-/// Not a wall. The year is already on screen. This says why the older
-/// squares are muted and offers the page that unlocks them.
 struct HistoryLockBanner: View {
-    /// How many recent days stay exact. Free is 30.
     var days: Int = 30
 
 

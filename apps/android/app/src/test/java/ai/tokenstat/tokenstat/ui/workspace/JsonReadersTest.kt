@@ -13,10 +13,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/// The shared host-JSON readers must be total: the host answers with
-/// arrays and objects where older answers carried strings (pull detail
-/// `checks` arrived as an array and crashed the pulls page), and a reader
-/// that throws on those is a crash on any screen that uses it.
 class JsonReadersTest {
     private val obj = buildJsonObject {
         put("name", "tokenstat")

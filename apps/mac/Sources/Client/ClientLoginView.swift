@@ -6,17 +6,6 @@
 
 import SwiftUI
 
-/// The door. Nothing in the client is reachable until this is answered.
-///
-/// Every screen behind it answers a question about an account, so a signed-out
-/// phone with tabs is four empty screens carrying the same sign-in card. One
-/// door is both simpler and more honest about what the app is.
-///
-/// There is no separate "create account" button, and that is not an omission.
-/// The website has no registration: an account is created the first time
-/// somebody signs in with a provider they already have. A second button leading
-/// to the identical flow would be a fake choice, so the line under the button
-/// says what actually happens instead.
 #if !os(macOS)
 import UIKit
 
@@ -34,9 +23,6 @@ struct ClientLoginView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Mark, name, sentence. No "Sign in" heading: the button at the
-            // bottom of the same screen says it, and saying it twice made the
-            // product's own name look like a subtitle to the word above it.
             VStack(spacing: Theme.Space.m) {
                 Button {
                     if let enabled = developerUnlock.tap() {
@@ -78,9 +64,6 @@ struct ClientLoginView: View {
                         .background(Theme.accentSoft, in: .rect(cornerRadius: 12))
                         .multilineTextAlignment(.center)
                     }
-                    // The frame goes on the label, not on the button. A
-                    // prominent button keeps its intrinsic capsule width, so
-                    // stretching the button only stretched the space around it.
                     Button {
                         account.signIn()
                     } label: {
@@ -97,10 +80,6 @@ struct ClientLoginView: View {
                 }
 
                 if let message = account.errorMessage {
-                    // Signing in is the one screen where "could not reach the
-                    // account" is not a partial failure: nothing happened at
-                    // all, and saying which is what stops somebody trying a
-                    // password they never typed.
                     Text(connectivity?.isOffline == true
                         ? L10n.text("apple.clientloginview.this_device_is_offline_sign_in_once_it_is.cd1bb1f0")
                         : message)
@@ -109,18 +88,11 @@ struct ClientLoginView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                // A way back to the intro, for anyone who skipped it and then
-                // wondered what this is. Cheap, and it means Skip is not a
-                // one-way door.
                 Button(L10n.text("apple.clientloginview.what_is_tokenstat.b2e003ed"), .help) { hasOnboarded = false }
                     .font(ClientType.label)
                     .padding(.top, Theme.Space.xs)
 
-                // Signing in creates the account, so the two documents that
-                // govern it belong on this screen and not only in Settings.
                 VStack(spacing: Theme.Space.xs) {
-                    // Keep the gesture discoverable with the same quiet type
-                    // as the legal text; it only toggles the demo sign-in flag.
                     Text(L10n.text("apple.clientloginview.demo_login_instructions"))
                     HStack(spacing: 4) {
                         Text(L10n.text("apple.clientloginview.by_signing_in_you_accept_the.ba0bbbf2"))
@@ -140,10 +112,6 @@ struct ClientLoginView: View {
             .animation(.easeInOut(duration: 0.2), value: account.pendingLogin)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // The new chat page's grid, with its light and its inward waves on
-        // the mark. It pauses with Reduce Motion, in Low Power Mode and
-        // whenever the app is not in front, and is a plain floor with Reduce
-        // Transparency. It brightens a little while a sign-in is waiting.
         .background {
             ChatStartBackdrop(active: scenePhase == .active, lift: account.pendingLogin != nil,
                               pointer: pointer, focus: UnitPoint(x: 0.5, y: 0.34))
@@ -171,19 +139,11 @@ struct ClientLoginView: View {
         .foregroundStyle(Theme.accent)
     }
 
-    /// The approval is happening in the browser sheet.
-    ///
-    /// Shown for the same reason `ClientSignInCard` shows it: the sheet can be
-    /// dismissed while the sign-in is alive underneath, and without this the
-    /// screen would look exactly as it did before the tap.
     private func waiting(_ pending: DeviceLogin) -> some View {
         VStack(spacing: Theme.Space.s) {
             ProgressView()
             Text(L10n.text("apple.clientloginview.waiting_for_approval.10c5739b"))
                 .font(ClientType.screenTitle)
-            // The network notice replaces the instruction rather than stacking
-            // under it: while there is no connection, "approve on the website"
-            // is advice that cannot be followed.
             Text(account.signInNotice ?? L10n.text("apple.clientloginview.approve_this_device_on_tokenstat_ai_this_s.bad8690a"))
                 .font(ClientType.label)
                 .foregroundStyle(.secondary)

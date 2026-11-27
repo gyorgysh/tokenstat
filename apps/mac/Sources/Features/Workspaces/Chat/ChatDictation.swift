@@ -28,7 +28,6 @@ import UIKit
 final class ChatDictation {
     enum Phase: Equatable { case idle, starting, downloading, listening, finishing }
 
-    /// A reason dictation cannot run, worded for the person.
     struct Problem: Identifiable, Equatable {
         enum Fix: Equatable { case privacy, dictation }
         let id = UUID()
@@ -40,10 +39,7 @@ final class ChatDictation {
 
     private(set) var phase: Phase = .idle
     var problem: Problem?
-    /// A locale identifier the person picked, or nil to follow their
-    /// preferred languages.
     private(set) var chosenLocale: String?
-    /// Recent loudness, oldest first, each between 0 and 1.
     private(set) var levels = [Float](repeating: 0, count: ChatDictation.levelCount)
     private(set) var startedAt: Date?
     private(set) var download: Progress?
@@ -53,8 +49,6 @@ final class ChatDictation {
     private var transcript = ChatDictationTranscript()
     private var read: () -> String = { "" }
     private var write: (String) -> Void = { _ in }
-    /// Bumped by every start and stop, so a late reading from a finished
-    /// session cannot write into the draft.
     private var generation = 0
 
     private static let localeKey = "chat.dictation.locale"
@@ -67,8 +61,6 @@ final class ChatDictation {
 
     var locale: Locale { Self.resolve(chosenLocale) }
 
-    /// Switching language mid-sentence keeps what was said and listens on in
-    /// the new one.
     func choose(_ identifier: String?) {
         chosenLocale = identifier
         if let identifier { UserDefaults.standard.set(identifier, forKey: Self.localeKey) }
@@ -113,8 +105,6 @@ final class ChatDictation {
         }
     }
 
-    /// Stop listening and keep the words. Waits briefly for the recognizer
-    /// to settle the last of them.
     func finish() {
         guard phase == .listening, let session else { return stop() }
         let mine = generation
@@ -133,7 +123,6 @@ final class ChatDictation {
         }
     }
 
-    /// Stop at once. The words already in the draft stay there.
     func stop() {
         generation += 1
         tearDown()
@@ -144,10 +133,7 @@ final class ChatDictation {
         stop()
     }
 
-    // MARK: Sessions
 
-    /// What one listening session needs to stop: the microphone, the
-    /// recognizer, and a way to wait for its last words.
     private final class Session {
         let engine: AVAudioEngine
         let endInput: () -> Void
@@ -262,8 +248,6 @@ final class ChatDictation {
         recognize(mine, with: recognizer, into: feed)
     }
 
-    /// The earlier recognizer ends a task at a long pause or after about a
-    /// minute. While the person is still talking, a fresh one carries on.
     private func recognize(_ mine: Int, with recognizer: SFSpeechRecognizer, into feed: RequestFeed) {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -309,7 +293,6 @@ final class ChatDictation {
     private func failed(_ mine: Int, _ error: Error) {
         guard generation == mine, !Self.isQuietEnd(error), !(error is CancellationError) else { return }
         let nsError = error as NSError
-        // 1700 from the assistant domain: Siri and Dictation are both off.
         let off = nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1700
         fail(mine, Problem(
             message: off ? L10n.text("apple.chatdictation.unavailable") : L10n.text("apple.chatdictation.could_not_start", error.localizedDescription),
@@ -357,11 +340,7 @@ final class ChatDictation {
         phase = .idle
     }
 
-    // MARK: Off the main actor
 
-    /// The request the earlier recognizer is listening with right now. The
-    /// audio thread appends to it while the main actor swaps it for a fresh
-    /// one, so it sits behind a lock.
     private final class RequestFeed: @unchecked Sendable {
         private let lock = NSLock()
         private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -397,8 +376,6 @@ final class ChatDictation {
         }
     }
 
-    /// Taps run on the audio thread. Built outside the main actor so the
-    /// closures do not inherit an isolation they cannot satisfy there.
     nonisolated private static func feed(_ feed: RequestFeed, meter: @escaping @Sendable (Float) -> Void) -> AVAudioNodeTapBlock {
         { buffer, _ in
             feed.append(buffer)
@@ -436,8 +413,6 @@ final class ChatDictation {
         }
     }
 
-    /// Loudness on a scale a person reads as loudness: decibels from -50
-    /// (a quiet room) up to 0, mapped onto 0 to 1.
     nonisolated private static func level(of buffer: AVAudioPCMBuffer) -> Float {
         guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return 0 }
         let count = Int(buffer.frameLength)
@@ -457,8 +432,6 @@ final class ChatDictation {
         }
     }
 
-    /// Cancelling a task, or a stretch with nothing said, ends it with an
-    /// error that is not worth showing anybody.
     nonisolated private static func isQuietEnd(_ error: Error) -> Bool {
         let nsError = error as NSError
         if nsError.domain == "kAFAssistantErrorDomain", [203, 216, 301, 1110].contains(nsError.code) { return true }
@@ -501,17 +474,12 @@ final class ChatDictation {
         #endif
     }
 
-    // MARK: Languages
 
-    /// The person's own languages that the recognizer supports, in their
-    /// order of preference.
     static var preferredChoices: [String] {
         var seen = Set<String>()
         return Locale.preferredLanguages.compactMap(match).filter { seen.insert($0).inserted }
     }
 
-    /// Every language the recognizer supports, by its name in the person's
-    /// language, without the ones already offered first.
     static var otherChoices: [String] {
         let first = Set(preferredChoices)
         return SFSpeechRecognizer.supportedLocales()
@@ -524,7 +492,6 @@ final class ChatDictation {
         Locale.current.localizedString(forIdentifier: identifier) ?? identifier
     }
 
-    /// Two letters for the chip: EN, HU.
     static func code(of locale: Locale) -> String {
         (locale.language.languageCode?.identifier ?? locale.identifier).uppercased()
     }
@@ -535,9 +502,6 @@ final class ChatDictation {
         return Locale.current
     }
 
-    /// A supported locale for one preferred language: the same identifier if
-    /// there is one, otherwise the same language in the region the person
-    /// lives in, otherwise the first region the recognizer has for it.
     private static func match(_ preferred: String) -> String? {
         let supported = SFSpeechRecognizer.supportedLocales().map(\.identifier)
         let wanted = Locale(identifier: preferred)
@@ -565,9 +529,6 @@ final class ChatDictation {
     }
 }
 
-/// The mic at the trailing end of the composer. Tap to talk. Its menu picks
-/// the language to listen for. While dictation runs the recording bar takes
-/// over, so the mic itself steps aside.
 struct ChatDictationButton: View {
     @Bindable var dictation: ChatDictation
     @Binding var draft: String
@@ -593,11 +554,8 @@ struct ChatDictationButton: View {
     }
 }
 
-/// What replaces the composer's controls while dictation runs: the language,
-/// a live waveform, the time, and Cancel and Done.
 struct ChatDictationBar: View {
     @Bindable var dictation: ChatDictation
-    /// The size of the Cancel and Done targets.
     var control: CGFloat
 
     var body: some View {
@@ -669,8 +627,6 @@ struct ChatDictationBar: View {
     }
 }
 
-/// Bars scrolling in from the right, one per slice of audio. Quiet reads as
-/// a row of dots, speech as a band that rises and falls with the voice.
 struct ChatDictationWaveform: View {
     var levels: [Float]
     var live: Bool
@@ -683,7 +639,6 @@ struct ChatDictationWaveform: View {
             let shown = levels.suffix(fit)
             var x = size.width - CGFloat(shown.count) * (bar + gap) + gap
             for (index, level) in shown.enumerated() {
-                // A little gain so ordinary speech fills the band.
                 let lifted = CGFloat(min(1, pow(level, 1.4) * 1.6))
                 let height = max(bar, lifted * size.height)
                 let rect = CGRect(x: x, y: (size.height - height) / 2, width: bar, height: height)
@@ -696,7 +651,6 @@ struct ChatDictationWaveform: View {
     }
 }
 
-/// Automatic, the person's own languages, then every other one.
 struct ChatDictationLanguages: View {
     @Bindable var dictation: ChatDictation
 
@@ -722,9 +676,6 @@ struct ChatDictationLanguages: View {
     }
 }
 
-/// Applied by the composer that owns the dictation, so the explanation
-/// outlives whichever control was on screen when it failed. It also stops
-/// dictation when the composer goes away or starts sending.
 struct ChatDictationLifetime: ViewModifier {
     @Bindable var dictation: ChatDictation
     var blocked: Bool

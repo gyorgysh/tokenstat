@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// A scene's logical chat survives presentation teardown. The lease is
-/// acquired when the reader first appears, before a fold can remove it.
 @MainActor
 @Observable
 final class ClientChatLayoutHandoff {
@@ -38,8 +36,6 @@ final class ClientChatLayoutHandoff {
     private(set) var pending: Delivery?
     private(set) var intent: UInt64 = 0
 
-    /// Presentation changes cannot replace another logical reader. A real
-    /// navigation action clears that reader before its destination mounts.
     @discardableResult
     func show(session: ClientChatSession, key: ClientChatSessions.Key,
               reference: WorkReference, owner: UUID, folderName: String,
@@ -54,7 +50,6 @@ final class ClientChatLayoutHandoff {
             return false
         }
         if let pending, pending.id != handoffID || !isCurrent(pending, scope: reference.scope) { return false }
-        // Acquire the successor before acknowledging the old presentation.
         session.appear(owner)
         if reader == nil {
             let lease = UUID()
@@ -69,29 +64,22 @@ final class ClientChatLayoutHandoff {
         return true
     }
 
-    /// Called only for user/system navigation, never show/leave callbacks.
     func navigate() {
         intent &+= 1
         pending = nil
         let previous = reader
         reader = nil
         if let previous {
-            // The folder list can keep a session viewer after its thread is
-            // closed. Navigation retires the logical chat even in that case.
             previous.session.model.cancelFileTransferForDeparture()
             previous.session.disappear(previous.id)
         }
     }
 
-    /// Latest, a row jump, or disclosure supersedes restoration while
-    /// retaining the current chat as the logical destination.
     func chooseViewport(model: ChatModel) {
         guard reader?.session.model === model else { return }
         suspend()
     }
 
-    /// A cover preserves the chat underneath it while retiring an unfinished
-    /// layout delivery. Its reader has a separate session and cannot take over.
     func suspend() {
         intent &+= 1
         pending = nil
@@ -121,9 +109,6 @@ final class ClientChatLayoutHandoff {
                   reference.itemID == delivery.reader.reference.itemID else { return false }
         }
         let sameSelection = delivery.model.selectionGeneration == delivery.selection
-        // The first folder load, empty selection, and exact-chat opening each
-        // advance generation. Before any selection there is no old viewport
-        // to transfer; the same owner may finish that initial load sequence.
         let firstOpening = delivery.initiallyUnselected
             && (delivery.model.selected == nil || delivery.model.selected?.id == delivery.reader.reference.itemID)
         return (sameSelection || firstOpening)
@@ -153,14 +138,11 @@ extension EnvironmentValues {
     }
 }
 
-/// The root owns the destination snapshot after a row or lazy tile is gone.
 struct ClientOwnedPush: Identifiable {
     let id: UUID
     let content: AnyView
 }
 
-/// Register the destination on the stable navigation root, preserving system
-/// Back/swipe behavior without tying the presentation to a lazy tile or pin.
 struct ClientOwnedNavigationLink<Destination: View, Label: View>: View {
     @ViewBuilder let destination: () -> Destination
     @ViewBuilder let label: () -> Label
@@ -189,8 +171,6 @@ struct ClientOwnedPushDestination: ViewModifier {
         return content.navigationDestination(isPresented: Binding(
             get: { navigation.destination == tab && navigation.pushedChats.indices.contains(depth) },
             set: { shown in
-                // A newly mounted stack can report false before it has shown
-                // its destination; that callback is not a Back action.
                 if !shown, navigation.destination == tab,
                    navigation.pushedChats.indices.contains(depth),
                    presentedPush == navigation.pushedChats[depth].id {

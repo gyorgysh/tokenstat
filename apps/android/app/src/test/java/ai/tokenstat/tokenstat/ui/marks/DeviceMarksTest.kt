@@ -15,9 +15,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 
-/// The distro matcher must agree with `distroBrandID`: the same platform
-/// string wears the same mark on both clients, and short names match on
-/// token boundaries so `arch` inside another word claims nothing.
 class DeviceMarksTest {
     @Test
     fun distroNamesMapToBrands() {
@@ -41,7 +38,6 @@ class DeviceMarksTest {
 
     @Test
     fun shortNamesNeedTokenBoundaries() {
-        // "search" and "research" contain "arch" but name no distribution.
         assertNull(distroBrandId(null, "Research box"))
         assertNull(distroBrandId(null, "Darwin 25.1.0"))
         assertNull(distroBrandId(null, ""))

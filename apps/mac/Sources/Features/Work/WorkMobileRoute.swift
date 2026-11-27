@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Device-local navigation identifiers. No folder snapshots, commands, paths,
-/// conversation titles or draft text are serialized into navigation storage.
 struct WorkMobileRoute: Codable, Hashable, Identifiable, Sendable {
     var id: Self { self }
     let scope: WorkReference.Scope
@@ -67,9 +65,6 @@ final class WorkMobileRouteStore {
     func clear() { defaults.removeObject(forKey: key) }
 }
 
-/// A verified account may restore once, unless a person or notification has
-/// already chosen somewhere to go. Capturing a ticket before awaiting account
-/// verification prevents a late completion from replacing that newer choice.
 @MainActor
 final class WorkMobileRouteLaunch {
     private(set) var generation: UInt64 = 0

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// An exact, expiring request for the paired Watch, with any chat-only rule visible.
 struct EcosystemApproval: Codable, Equatable, Sendable, Identifiable {
     var id: String { peer + ":" + requestID }
     let requestID: String
@@ -33,7 +32,6 @@ struct EcosystemApproval: Codable, Equatable, Sendable, Identifiable {
             && (choice == "allow" || (choice == "allowAlways" && alwaysAllowScope != nil))))
     }
 
-    /// Keep the next expiring requests and retain a bounded hint for the rest.
     static func watchSelection(_ requests: [Self], at date: Date = Date()) -> (requests: [Self], omittedCount: Int) {
         var seen = Set<String>()
         let valid = requests.filter { $0.isValid && $0.expiresAt > date && seen.insert($0.id).inserted }
@@ -83,8 +81,6 @@ import CryptoKit
         let peers = try await Bridge.peers().filter { $0.trust == .approved && allowed.contains($0.key) }
         var requests: [EcosystemApproval] = []
         var successful = peers.isEmpty
-        // These are existing, approved connections. Never pair or grant a
-        // device access merely because the Watch asks to refresh.
         let results = await withTaskGroup(of: [EcosystemApproval]?.self) { group in
             for peer in peers.prefix(8) {
                 group.addTask {
@@ -124,7 +120,6 @@ import CryptoKit
               let current = live.first(where: { $0.id == viewed.requestID && $0.decision == nil }),
               request(current, peer: viewed.peer, host: viewed.host) == viewed,
               viewed.allows(choice) else { throw EcosystemIntentError.projectUnavailable }
-        // The host applies a persistent rule only within this conversation.
         revision = UUID()
         _ = try await Bridge.resolveChatApproval(id: viewed.requestID, choice: choice, peer: viewed.peer)
         guard EcosystemPublisher.isCurrent(lease) else { throw EcosystemIntentError.sessionChanged }

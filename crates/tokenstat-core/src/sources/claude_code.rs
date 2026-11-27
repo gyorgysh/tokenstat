@@ -59,11 +59,6 @@ pub fn shards(projects: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Recover the working directory from a `<cwd-slug>` directory name.
-///
-/// Ambiguous by nature, since the slug loses the difference between a `/` and a
-/// literal `-`. Only the trailing component is used, as a display label, so the
-/// ambiguity does not affect any number.
 fn project_label(path: &Path, projects_root: &Path) -> String {
     path.strip_prefix(projects_root)
         .ok()
@@ -98,12 +93,6 @@ struct Message<'a> {
     usage: Option<Usage>,
 }
 
-/// Wire shape of `message.usage`.
-///
-/// `cache_creation` splits cache writes by time-to-live, which matters because
-/// the two are billed at different multipliers. When it is absent we fall back
-/// to the flat `cache_creation_input_tokens` and attribute it to the 5 minute
-/// bucket, which is the default TTL.
 #[derive(Deserialize)]
 struct Usage {
     input_tokens: Option<u64>,
@@ -112,8 +101,6 @@ struct Usage {
     cache_creation_input_tokens: Option<u64>,
     cache_creation: Option<CacheCreation>,
     server_tool_use: Option<ServerToolUse>,
-    /// Present on some CLI versions. Each element restates the counters for one
-    /// inference pass within the same request.
     iterations: Option<Vec<IterationUsage>>,
 }
 
@@ -180,8 +167,6 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
         if line.is_empty() {
             continue;
         }
-        // Cheap reject before paying for a JSON parse. Most lines in a
-        // transcript are user turns and tool results with no usage at all.
         if !line.contains("\"usage\"") {
             continue;
         }
@@ -244,9 +229,6 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
 
         let counters = usage.counters();
 
-        // Where `iterations` is present it should restate the top-level
-        // counters. Verify rather than assume: if a future version makes the
-        // top level a partial figure, silently trusting it would undercount.
         if let Some(iters) = &usage.iterations
             && let Some(last) = iters.last()
         {
@@ -288,9 +270,6 @@ pub fn parse_file(path: &Path, projects_root: &Path, contents: &str) -> ParseOut
                     .as_ref()
                     .and_then(|s| s.web_fetch_requests),
             },
-            // Claude Code is normally used on a subscription. Reporting this as
-            // metered would present plan usage as money charged, which the
-            // product rules forbid.
             billing: BillingMode::Plan,
             confidence,
         });
@@ -345,7 +324,6 @@ mod tests {
 
     #[test]
     fn identical_requests_in_different_files_share_an_id() {
-        // The same request, rewritten into a resumed session with a new uuid.
         let a = r#"{"type":"assistant","requestId":"req_9","uuid":"u-aaa","sessionId":"s1","timestamp":"2026-07-28T10:00:00Z","message":{"id":"msg_9","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}"#;
         let b = r#"{"type":"assistant","requestId":"req_9","uuid":"u-bbb","sessionId":"s2","timestamp":"2026-07-28T10:00:00Z","message":{"id":"msg_9","model":"m","usage":{"input_tokens":1,"output_tokens":1}}}"#;
         let ea = parse_file(&file(), &root(), a);

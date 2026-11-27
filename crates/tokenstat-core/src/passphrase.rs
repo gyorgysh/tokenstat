@@ -40,8 +40,6 @@ pub const MIN_LENGTH: usize = 12;
 /// Empty means it is acceptable.
 pub fn password_problems(password: &str) -> Vec<PasswordProblem> {
     let mut out = Vec::new();
-    // Counted in characters rather than bytes, so a password written in a
-    // non-Latin script is measured the way its author would measure it.
     if password.chars().count() < MIN_LENGTH {
         out.push(PasswordProblem::TooShort);
     }
@@ -51,8 +49,6 @@ pub fn password_problems(password: &str) -> Vec<PasswordProblem> {
     if !password.chars().any(|c| c.is_ascii_digit()) {
         out.push(PasswordProblem::NeedsNumber);
     }
-    // Anything that is not a letter, a number or a space. Defining it by what
-    // it is not keeps punctuation from other keyboards in.
     if !password
         .chars()
         .any(|c| !c.is_alphanumeric() && !c.is_whitespace())
@@ -106,8 +102,6 @@ mod tests {
 
     #[test]
     fn everything_wrong_is_reported_at_once() {
-        // Not one rule at a time. Being told to add a number, then an
-        // uppercase, then a symbol is three rejections for one password.
         assert_eq!(password_problems("short").len(), 4);
         let message = password_error("short").unwrap();
         assert!(message.contains("12 characters"));
@@ -116,8 +110,6 @@ mod tests {
 
     #[test]
     fn length_is_counted_in_characters_not_bytes() {
-        // Twelve characters, more than twelve bytes. Byte length would have
-        // accepted this at nine characters.
         assert!(
             password_problems("Ünnepélyes1!")
                 .iter()

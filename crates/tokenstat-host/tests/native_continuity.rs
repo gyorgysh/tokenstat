@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Disposable host for the native continuity acceptance runner. It uses only
-//! synthetic records, a private socket and independently configured roots.
 #![cfg(all(feature = "local-host", unix))]
 use serde_json::{Value, json};
 use std::fs;
@@ -27,7 +25,7 @@ fn replace_fixture(data: &std::path::Path, path: &std::path::Path, bytes: &[u8])
         .mode(0o600)
         .open(data.join("transcript.lock"))
         .unwrap();
-    // Coordinate this synthetic fixture controller with production readers.
+
     assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
     let temporary = path.with_extension("fixture-next");
     fs::write(&temporary, bytes).unwrap();
@@ -92,8 +90,7 @@ fn serve_native_continuity_fixture() {
         if stage == 0 && output.join("trim").exists() {
             let next = tokenstat_host::work_transcript_identity::next_sequence(&bytes, 0).unwrap();
             bytes = tokenstat_host::work_transcript_identity::retained(&bytes, 90_000).unwrap();
-            // This controller changes synthetic disk state only between native
-            // requests. Production append/compaction has separate I/O tests.
+
             let row = json!({"seq":next,"kind":"agent","backend":"codex","at_ms":701,"event":{"kind":"usage","input":500,"output":50,"cache_read":0,"cache_write":0,"cost_usd":0.005}});
             serde_json::to_writer(&mut bytes, &row).unwrap();
             bytes.push(b'\n');

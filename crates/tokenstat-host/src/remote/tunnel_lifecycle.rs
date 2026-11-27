@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::tunnel_runtime::{Attempt, Live, Runtime, Scope};
 use super::*;
 use crate::account_session::{AccountSnapshot, current_or_capture, with_snapshot};
@@ -294,8 +293,7 @@ pub(super) fn ensure(
         }
         return Ok(None);
     }
-    // Installation and stop share this lock. A stop during a slow mint cannot
-    // resurrect the old lifetime, even when the next login uses the same key.
+
     let owned = {
         let mut held = runtime()
             .lock()
@@ -316,8 +314,7 @@ pub(super) fn ensure(
             owner: owner.clone(),
         }
     };
-    // Weak socket reference: the renewal callback must not retain its own
-    // socket forever, or keep an old tenant alive after retirement.
+
     let weak = Arc::downgrade(&owned.live.socket);
     let renewal_attempt = attempt.clone();
     let renewal_owner = owner.clone();
@@ -364,9 +361,7 @@ pub(super) fn ensure(
                 inbound_owned.live.socket.clone(),
                 channel,
             );
-            // Keep the account directory and the tunnel's control socket alive,
-            // but never accept a new metered work channel in direct-only mode.
-            // This also covers team channels, which are identified below.
+
             if !load_settings().relay_fallback {
                 drop(transport);
                 continue;
@@ -411,8 +406,6 @@ pub(super) fn ensure(
                         break;
                     }
                     if !settings.relay_fallback {
-                        // A preference change during the handshake must not
-                        // retire the shared account/control socket.
                         drop(connection);
                         continue;
                     }

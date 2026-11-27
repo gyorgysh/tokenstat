@@ -3,16 +3,7 @@
 import Foundation
 import Observation
 
-/// One block of Home, named so a person can move it or switch it off.
-///
-/// The greeting, the connection notice and anything about the account stay
-/// outside this list on purpose: they are not cards somebody arranges, they
-/// are the screen telling you something. Everything here is optional, and all
-/// of it can be off at once. A Home with nothing on it is a real answer for
-/// somebody who opens the app to go straight to a folder.
 enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
-    /// The work worth going back to. Under the two figures by default, and
-    /// the first thing anybody actually opens.
     case continueWork = "continue"
     case pinnedWork = "pinned"
     case machines
@@ -56,12 +47,6 @@ enum HomeSection: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
-/// A starting arrangement, not a mode.
-///
-/// Picking one changes the order of the cards and nothing else: no feature
-/// turns off, no number is counted differently, nothing is billed another
-/// way. That is why they are named after what is at the top rather than after
-/// a kind of person.
 enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case balanced
     case work
@@ -77,12 +62,6 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Every preset switches everything on, with one exception: Balanced on
-    /// the Mac leaves the figures off. A new Mac opens on the work, and the
-    /// figures live one click away in Insights; somebody who wants them on
-    /// Home switches them back on in Customize Home. Everywhere else a card
-    /// is switched off by the person holding the device, not by the
-    /// arrangement they picked.
     var hidden: Set<HomeSection> {
         switch self {
         case .balanced:
@@ -96,13 +75,6 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Balanced answers the two questions the app is opened for, in order:
-    /// what you were doing, and what it cost. On the Mac the work leads and
-    /// the figures sit out: Continue, the pinned shortcuts, the year grid,
-    /// the plan windows, the machines, with Today and this week switched off
-    /// to be turned back on. On the phone the two figures lead as before:
-    /// they are one line deep and read at a glance, so they answer without
-    /// pushing the work down a short screen.
     var order: [HomeSection] {
         switch self {
         case .balanced:
@@ -117,12 +89,6 @@ enum HomePreset: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
-/// How this device arranges Home.
-///
-/// Device furniture, like the tab bar and the layout preference, and kept the
-/// same way. A phone in a hand and a Mac on a desk are not the same screen,
-/// and an arrangement made on one has no business rearranging the other. Pins
-/// and the work itself belong to the account; the order of the cards does not.
 @MainActor @Observable
 final class HomeLayout {
     static let shared = HomeLayout()
@@ -133,11 +99,8 @@ final class HomeLayout {
 
     private(set) var order: [HomeSection]
     private(set) var hidden: Set<HomeSection>
-    /// The last preset applied, so the editor can show which one this is
-    /// still exactly. Cleared the moment anything is moved by hand.
     private(set) var preset: HomePreset?
 
-    /// What Home draws, in order. Empty is allowed and means what it says.
     var sections: [HomeSection] { order.filter { !hidden.contains($0) } }
 
     init(defaults: UserDefaults = .standard) {
@@ -152,8 +115,6 @@ final class HomeLayout {
         )
         order = resolved.order
         hidden = resolved.hidden
-        // A device nobody has arranged is balanced, and the editor should say
-        // so rather than showing three arrangements and none of them chosen.
         preset = stored == nil
             ? .balanced
             : defaults.string(forKey: Self.presetKey).flatMap(HomePreset.init(rawValue:))
@@ -161,12 +122,6 @@ final class HomeLayout {
 
     @ObservationIgnored private let defaults: UserDefaults
 
-    /// Make a stored arrangement usable whatever is in it.
-    ///
-    /// A build that adds a section must not disturb an order somebody chose,
-    /// so new ones join at the end. A name this build does not know is
-    /// dropped, a name twice is kept once, and hiding something that is not
-    /// in the order is not a thing.
     static func normalize(
         order stored: [HomeSection]?, hidden: [HomeSection]
     ) -> (order: [HomeSection], hidden: Set<HomeSection>) {
@@ -210,8 +165,6 @@ final class HomeLayout {
         return remaining
     }
 
-    /// Reorder the visible rows while retaining hidden cards in their saved
-    /// slots. List offsets refer to the visible group, not the full arrangement.
     static func movedVisible(
         _ order: [HomeSection], hidden: Set<HomeSection>, from offsets: IndexSet, to destination: Int
     ) -> [HomeSection] {
@@ -220,8 +173,6 @@ final class HomeLayout {
         return order.map { hidden.contains($0) ? $0 : moved.next() ?? $0 }
     }
 
-    /// Apply an arrangement made somewhere else, in one go, so Home changes
-    /// once rather than card by card.
     func apply(order: [HomeSection], hidden: Set<HomeSection>, preset: HomePreset?) {
         let resolved = Self.normalize(order: order, hidden: Array(hidden))
         self.order = resolved.order

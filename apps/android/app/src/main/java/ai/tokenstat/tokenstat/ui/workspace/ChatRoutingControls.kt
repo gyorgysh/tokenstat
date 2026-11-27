@@ -779,7 +779,6 @@ private fun RoutingLimitCard(
                     style = TsType.headline,
                     color = colors.textPrimary,
                 )
-                // Read through the composition, so a locale change redraws it.
                 val language = LocalConfiguration.current.locales[0].language
                 Text(
                     if (reset == null) L10n.text("common.chat_reset_unknown")
@@ -790,7 +789,6 @@ private fun RoutingLimitCard(
                         "common.chat_resets_in",
                         DateUtils.getRelativeTimeSpanString(reset, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
                             .toString()
-                            // "In 58 minutes" sits mid-sentence here.
                             .let { if (language == "en") it.replaceFirstChar { c -> c.lowercase() } else it },
                         DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(reset)),
                     ),

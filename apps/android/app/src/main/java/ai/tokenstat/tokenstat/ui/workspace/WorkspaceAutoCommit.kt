@@ -55,13 +55,6 @@ private const val AUTO_COMMIT_BUDGET_SECONDS = 900
 private fun autoCommitPrompt(workspaceName: String): String =
     L10n.text("android.workspaceautocommit.commit_the_pending_work_in_this_git_reposi.ab4eb7ed", "${workspaceName}")
 
-/// Auto commit on Changes. Distinct from selected-file Commit: the agent
-/// inspects the folder and commits. Checkboxes do not choose its files.
-///
-/// Only mounted when the host answers `automation.backends`; a host without
-/// the automation methods keeps no card. Ports `ClientAutoCommitCard` with
-/// the `AutoCommitJob` prompt, budget, and backend rules (shell stays out,
-/// a backend needs models, haiku preferred).
 @Composable
 fun AutoCommitCard(
     model: AppViewModel,
@@ -145,8 +138,6 @@ fun AutoCommitCard(
         error = null
     }
 
-    // Returning to Changes must not offer another start while the existing
-    // auto-commit run is still using this working tree.
     ForegroundEffect(peer, workspace, jobId) {
         val currentJob = jobId ?: return@ForegroundEffect
         while (true) {
@@ -186,8 +177,6 @@ fun AutoCommitCard(
                 }
             }.getOrNull()
             if (saved == null) {
-                // A failed save must never run an older job whose agent or
-                // prompt differs from the settings just reviewed.
                 error = TunnelCopy.display(L10n.text("android.workspaceautocommit.the_request_failed.db4fb447"), hostLabel)
                 working = false
                 return@launch

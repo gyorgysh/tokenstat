@@ -1,25 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Which devices may reach the work on this machine.
-//!
-//! Being approved is not the same as being let in. Any device on the account
-//! is auto-approved on first contact with the tunnel: `remote::serve_peer`
-//! hands `authorize_with` an `auto_approve` hook that says yes to anything the
-//! account directory knows. That was fine while a peer could only read
-//! aggregate numbers. It is not fine now, because an approved peer can read
-//! and write every file in a registered folder, commit and push it, spawn a
-//! shell with `pty.spawn`, run every automation and workflow, and open a
-//! socket to this machine's own loopback.
-//!
-//! So there is a second, explicit grant, and nothing is grandfathered into it.
-//! Typing a pairing code is a person saying yes to one device by name, and
-//! that still grants this. Appearing on the account does not.
-//!
-//! Deliberately the same shape as `screen_policy`: a per-device grant, a
-//! request that arrives over the tunnel carrying the peer from the transport,
-//! and an answer given by whoever is at the machine. The two share the request
-//! record, its staleness window and its pruning, so one person answering two
-//! kinds of question answers them the same way.
 
 use std::collections::HashSet;
 use std::fs;
@@ -36,43 +16,26 @@ use serde_json::{Value, json};
 use crate::access_audit::{self, Authority};
 use crate::screen_policy::{PENDING_TTL, PendingRequest, now_secs, prune_pending};
 
-/// Pending requests this machine will hold at once.
-///
-/// A compromised account device can call `workspace.access.ask` on every host
-/// the account owns. Without a cap that is a way to fill somebody's disk and
-/// their notification list from a device that has no grant at all.
 const MAX_PENDING: usize = 32;
 const MAX_ASKS_PER_HOUR: u32 = 5;
-/// Codes one device may try in an hour, whatever it does to a single code.
 const MAX_REDEEMS_PER_HOUR: u32 = 10;
-/// Wrong guesses that retire the live code.
-///
-/// Eight characters from a 32-symbol alphabet is 40 bits, which is plenty
-/// against five guesses and nothing at all against a million. The lockout is
-/// what carries the security here, not the length.
 const MAX_INVITE_ATTEMPTS: u32 = 5;
 const HOUR: u64 = 60 * 60;
 
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
-    /// Peer keys, as hex, that may reach the work here.
     #[serde(default)]
     allowed: Vec<String>,
     #[serde(default)]
     pending: Vec<PendingRequest>,
-    /// The one live invite, or none. Minting a second retires the first, so a
-    /// code left on a screen an hour ago cannot be the one that works.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     invite: Option<Invite>,
-    /// Recent asks and redemption attempts, per device, for the rate limits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attempts: Vec<Attempt>,
 }
 
 #[derive(Deserialize, Serialize)]
 struct Invite {
-    /// SHA-256 of the code, hex. The code itself is shown once, at the console
-    /// that minted it, and is never written down anywhere.
     hash: String,
     expires_at: u64,
     #[serde(default)]
@@ -158,14 +121,12 @@ impl Store {
     }
 }
 
-/// Crockford's alphabet: no I, L, O or U, so nothing in a code can be misread
-/// as something else when it is copied off one screen and typed into another.
 const CODE_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 fn mint_code() -> Result<String, String> {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
-    // 32 divides 256, so the mask is uniform and there is nothing to reject.
+
     let code: String = bytes
         .iter()
         .map(|byte| CODE_ALPHABET[(byte & 0x1f) as usize] as char)
@@ -173,14 +134,11 @@ fn mint_code() -> Result<String, String> {
     Ok(format!("{}-{}", &code[..4], &code[4..]))
 }
 
-/// Accept the code as a person would type it, and no more than that.
 fn normalize_code(value: &str) -> Result<String, String> {
     let code: String = value
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '-')
         .map(|c| match c.to_ascii_uppercase() {
-            // The four letters the alphabet leaves out, folded back onto the
-            // symbols they are mistaken for.
             'I' | 'L' => '1',
             'O' => '0',
             'U' => 'V',
@@ -199,7 +157,6 @@ fn hash_code(code: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Equal without telling a caller how far it got.
 fn same_hash(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
@@ -250,8 +207,7 @@ pub(crate) fn require_current_access() -> Result<(), crate::error::DispatchError
             "This computer no longer approves this device.",
         ));
     }
-    // Read the file even when its timestamp matches a cached grant. Another
-    // process may have revoked access within the same filesystem clock tick.
+
     if !load().is_ok_and(|store| store.allowed.contains(&peer)) {
         return Err(crate::error::DispatchError::new(
             "workspace_not_allowed",
@@ -261,9 +217,6 @@ pub(crate) fn require_current_access() -> Result<(), crate::error::DispatchError
     Ok(())
 }
 
-/// A cross-process revocation is invisible to this process's cache, so the
-/// cached set is also bounded by age: same-stamp-same-size edits on a coarse
-/// filesystem still take effect within this window.
 const ALLOWED_CACHE_MAX_AGE: Duration = Duration::from_secs(2);
 
 type AllowedCached = Mutex<
@@ -280,9 +233,6 @@ fn allowed_cache() -> &'static AllowedCached {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-/// Drop the cached grant set, so a revocation in the same mtime tick is still
-/// seen. `save` calls this on every write; mtime granularity alone cannot be
-/// trusted on coarse filesystems.
 fn invalidate_allowed_cache() {
     if let Ok(mut guard) = allowed_cache().lock() {
         ALLOWED_GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -295,8 +245,7 @@ fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
     let generation = ALLOWED_GENERATION.load(Ordering::Acquire);
 
     let path = path().ok()?;
-    // A file that is not there yet has no grants in it, and a clock that will
-    // not answer means re-reading, which is correct and merely slower.
+
     let (stamp, len) = match fs::metadata(&path) {
         Ok(meta) => (meta.modified().ok(), meta.len()),
         Err(_) => (None, 0),
@@ -343,8 +292,6 @@ pub(crate) fn set_allowed_by_with_label(
     set_allowed_locked_with_label(peer_id, allow, by, label)
 }
 
-/// Same as below, but with a label resolved outside the
-/// mutation lock. Network I/O must never run while `MUTATION` is held.
 fn set_allowed_locked_with_label(
     peer_id: &str,
     allow: bool,
@@ -357,13 +304,10 @@ fn set_allowed_locked_with_label(
     if allow {
         store.allowed.push(peer_id.to_string());
     }
-    // Answered either way. A device told no does not keep standing in the
-    // queue, and one told yes has nothing left to ask.
+
     store.pending.retain(|request| request.peer_id != peer_id);
     save(&store)?;
     if already != allow {
-        // Best-effort label: fall back to the cache-only lookup if the caller
-        // did not resolve one outside the lock.
         let owned;
         let resolved = match label {
             Some(label) => Some(label),
@@ -399,29 +343,23 @@ pub(crate) fn counts() -> Result<(usize, usize), String> {
 /// the product is for, it is aggregate, and gating it would make a phone that
 /// cannot open a folder also unable to draw a heatmap.
 pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
-    // A device that cannot get in still has to be able to ask.
     if method.starts_with("workspace.access.") {
         return false;
     }
     match method {
         m if m.starts_with("workspace.") => true,
-        // Browsing a machine's directories and making a folder on it are the
-        // work, exactly like opening a file in one.
+
         m if m.starts_with("fs.") => true,
-        // What is set up here, and why it is unhappy. Both name this machine's
-        // own folders and log lines, so both need the grant.
+
         "host.provisionStatus" | "host.logs" => true,
-        // Replacing this machine's binaries and restarting its daemon is
-        // host management, not reading. An approved device that was never
-        // let in must not drive it.
+
         "host.updateCheck" | "host.updateApply" | "host.liveWork" => true,
         m if m.starts_with("pulls.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("automation.") => true,
         m if m.starts_with("chat.") => true,
-        // A watching claim suppresses the push for one conversation, so only a
-        // device that could have that conversation on screen may place one.
+
         "app.watching" => true,
         "work.overview"
         | "work.search"
@@ -433,9 +371,7 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         "profiles.list" => true,
         m if m.starts_with("harness.") => true,
         m if m.starts_with("proxy.") => true,
-        // The screen has its own grant, and a screen stream must not need this
-        // one as well: watching a desktop and opening its files are different
-        // questions with different answers.
+
         "stream.open" => matches!(stream_kind, Some("pty.subscribe" | "proxy")),
         _ => false,
     }
@@ -474,7 +410,6 @@ pub(crate) fn refuse_unpermitted(line: &str, peer: &str) -> Option<String> {
 struct SetParams {
     peer_id: String,
     allow: bool,
-    /// Which door a local caller used, for the record. See `Authority`.
     #[serde(default)]
     via: Option<String>,
 }
@@ -494,15 +429,8 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("workspace.access.") {
         return None;
     }
-    // Read-only methods never take the mutation lock. Holding it across a
-    // network fetch (account directory) stalled every other access call for
-    // the HTTP timeout, and reads do not mutate.
+
     match method {
-        // Asked before anything is loaded, so a device that is not allowed can
-        // draw the screen that says so and offer to ask. The alternative was
-        // reading it off a failure, and `remote.call` flattens a peer's error
-        // to its message and drops the code, so that would have meant matching
-        // on a sentence.
         "workspace.access.check" => {
             let peer = match crate::request_context::remote_peer() {
                 Some(peer) => peer,
@@ -522,8 +450,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 serde_json::to_value(load()?.allowed).map_err(|e| e.to_string())
             })());
         }
-        // The record, for the console and for the machine's page in the app.
-        // Local only: it names every device that was ever let in here.
+
         "workspace.access.log" => {
             return Some((|| {
                 crate::request_context::refuse_remote("the workspace access log")?;
@@ -536,28 +463,19 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         _ => {}
     }
     Some((|| match method {
-        // Over the tunnel the device is already on, with the peer taken from
-        // the connection rather than from the params. A device naming somebody
-        // else would be a device asking on their behalf.
         "workspace.access.ask" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a request must arrive from the device asking")?;
-            // Resolve outside the mutation lock: this may fetch the account
-            // directory over HTTP, and holding MUTATION across that stalls
-            // every other access call for the timeout.
+
             let label = crate::remote::account_peer_label_hex(&peer);
             let review_demo = crate::screen_policy::signed_into_review_demo();
             let _guard = mutation_lock()?;
-            // Nothing to read. Workspace access is one grant with no half to
-            // ask for, and the peer comes from the connection, so a device has
-            // nothing it could usefully say here.
+
             let mut store = load()?;
             if store.allowed.iter().any(|held| held == &peer) {
                 return Ok(json!({"pending": false, "granted": true}));
             }
-            // A second tap while the owner is deciding is the same question.
-            // Replacing it changes the sheet's request timestamp and spends
-            // another rate-limit slot without giving the owner new information.
+
             if store.pending.iter().any(|request| request.peer_id == peer) {
                 if review_demo {
                     drop(store);
@@ -567,9 +485,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 return Ok(json!({"pending": true}));
             }
             let asked_at = now_secs();
-            // A device that has already asked five times this hour is told to
-            // wait. It keeps whatever request it has standing, so this costs
-            // it nothing it had not already got.
+
             if store.recent(&peer, "ask") >= MAX_ASKS_PER_HOUR {
                 return Err(
                     "This device has asked several times already. Wait an hour, or let it in from the machine."
@@ -587,9 +503,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             store.pending.push(PendingRequest {
                 label: label.clone(),
                 peer_id: peer.clone(),
-                // Workspace access is one grant. There is no half of it to
-                // ask for, so the field the screen request uses for mouse and
-                // keyboard is always false here.
+
                 control: false,
                 asked_at,
                 expires_at: asked_at + PENDING_TTL,
@@ -603,23 +517,6 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 Authority::Console,
             );
 
-            // The same exception the screen carries, and for the same reason:
-            // App Review signs into the website's demo account on a fresh
-            // iPhone and presses Connect, and nobody at Apple has the Mac it
-            // is asking. A request that can never be answered is a feature
-            // that cannot be tested.
-            //
-            // Recorded first and upgraded after. The demo check above ran
-            // outside the lock because it can hit the network; a device whose
-            // ask was lost to a hung lookup has no way to know it should ask
-            // again, so the request is stored before this branch.
-            //
-            // Four things have to hold and a user can set none of them: the
-            // account is `REVIEW_DEMO_ACCOUNT_ID`, compiled in rather than
-            // taken from the answer; the server says the round is open; the
-            // device is already approved, which `serve_peer` checks before
-            // dispatch is reached; and the grant is an ordinary row, listed
-            // and revocable in Devices and gone the moment the round closes.
             if review_demo {
                 let _guard = mutation_lock()?;
                 set_allowed_locked_with_label(&peer, true, Authority::Console, label)?;
@@ -627,25 +524,18 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             Ok(json!({"pending": true}))
         }
-        // Answering a request and moving the toggle in Devices are the same
-        // act, so they are the same method.
+
         "workspace.access.set" => {
             crate::request_context::refuse_remote("workspace access settings")?;
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let by = Authority::parse(p.via.as_deref())?;
-            // Resolve outside the lock; the audit label is best-effort.
+
             let label = crate::remote::account_peer_label_hex(&p.peer_id);
             let _guard = mutation_lock()?;
             set_allowed_locked_with_label(&p.peer_id, p.allow, by, label)?;
             Ok(json!({"saved": true}))
         }
 
-        // Mint the code that lets a device this machine has never seen in.
-        //
-        // Local only, because the code *is* the authority: whoever can run
-        // this could read the folders with `cat` regardless. It never touches
-        // tokenstat.ai, which is what keeps the server unable to let itself
-        // in: only the hash is stored, and the redemption is checked here.
         "workspace.access.invite" => {
             crate::request_context::refuse_remote("workspace access invites")?;
             let code = mint_code()?;
@@ -667,20 +557,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             Ok(json!({"code": code, "expiresAt": expires_at, "expiresIn": PENDING_TTL}))
         }
 
-        // The other end of that code, and the only method a device which is
-        // not allowed can call to change anything. Everything protecting it is
-        // here: it must arrive from a device, that device must already be on
-        // the account, the code is single use, five wrong guesses retire it,
-        // and a device may only try so many in an hour.
         "workspace.access.redeem" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a code is redeemed by the device being let in")?;
             let p: RedeemParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let code = normalize_code(&p.code);
-            // The code lets a device you own in. It does not let a stranger
-            // in, so the redeeming device has to be one the account knows.
-            // Resolved before the lock: this is the network fetch that must
-            // never run while MUTATION is held.
+
             let label = crate::remote::account_peer_label_hex(&peer);
             let now = now_secs();
             let _guard = mutation_lock()?;
@@ -709,8 +591,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             let Some(invite) = store.invite.as_mut() else {
                 save(&store)?;
-                // Expired and wrong have to read differently, or somebody
-                // retypes a code that was right until a moment ago, forever.
+
                 return Err(
                     "There is no code waiting on this machine. Run `tokenstat host access invite` on it for a new one."
                         .into(),
@@ -740,19 +621,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 }
                 return Err("That code is not right. Check it and try again.".into());
             }
-            // Consumed on the first success, whether or not this device was
-            // already allowed, so a code cannot be used twice. Consuming under
-            // the lock is what makes concurrent redemptions single-use. Keep
-            // it through the grant so a later revocation cannot be overwritten
-            // by the second half of this redemption.
+
             store.invite = None;
             let already = store.allowed.contains(&peer);
             if !already {
                 store.allowed.push(peer.clone());
             }
             store.pending.retain(|request| request.peer_id != peer);
-            // Consume the invite and grant access in one durable replacement.
-            // A failed write must leave the code available for retry.
+
             save(&store)?;
             if !already {
                 access_audit::record("granted", Some(&peer), label.as_deref(), Authority::Invite);
@@ -776,7 +652,7 @@ mod tests {
     #[test]
     fn independent_processes_preserve_grants_and_audit_records() {
         let root = tempfile::tempdir().unwrap();
-        // The first new record triggers compaction while other writers append.
+
         let log = root.path().join("workspace-access.log");
         let history = (0..4000)
             .map(|n| format!("{{\"event\":\"old-{n}\"}}\n"))
@@ -861,7 +737,6 @@ mod tests {
         }
     }
 
-    /// Isolate process-global host roots and singletons from every other test.
     #[cfg(feature = "local-host")]
     #[test]
     fn handoff_obeys_authenticated_author_and_revoked_access() {
@@ -921,8 +796,7 @@ mod tests {
             remote(&phone, "work.continuity.put", request.clone())["ok"],
             false
         );
-        // Fixture grants use the real persisted policy writer, without account
-        // directory lookup or any network. Remote callers cannot write policy.
+
         super::save(&super::Store {
             allowed: vec![phone.clone(), tablet.clone()],
             ..Default::default()
@@ -978,10 +852,6 @@ mod tests {
             .to_owned()
     }
 
-    /// Seed the directory before every redemption that has to reach the code.
-    ///
-    /// A lookup that misses refetches once, and on a machine that is really
-    /// signed in that fetch replaces the seeded directory with the real one.
     fn account_holds(peer: &str, label: &str) {
         crate::remote::seed_account_directory(vec![
             json!({"public_identity": peer, "label": label}),
@@ -1052,7 +922,7 @@ mod tests {
         assert_eq!(&code[4..5], "-");
         let plain = code.replace('-', "");
         assert_eq!(normalize_code(&code).unwrap(), plain);
-        // Lower case, spaces and the four letters the alphabet leaves out.
+
         assert_eq!(
             normalize_code("io1l 23-45").unwrap(),
             normalize_code("101123 45").unwrap()
@@ -1092,8 +962,6 @@ mod tests {
             account_holds(&mine, "iPhone");
             let code = invite_code();
 
-            // A device the account does not know never reaches the code, so it
-            // cannot burn somebody else's attempts either.
             let refused = redeem(&stranger, &code).unwrap_err();
             assert!(refused.contains("not on the account"), "{refused}");
             assert!(load().unwrap().invite.is_some(), "the code must survive");
@@ -1166,8 +1034,7 @@ mod tests {
         crate::test_identity::isolated(|| {
             let mine = peer_key("34");
             account_holds(&mine, "Phone");
-            // Each mint gives it five more guesses, and the per-device ceiling
-            // is what stops it walking through code after code.
+
             for _ in 0..MAX_REDEEMS_PER_HOUR {
                 let _ = invite_code();
                 account_holds(&mine, "Phone");
@@ -1188,8 +1055,7 @@ mod tests {
                     .unwrap())
                     .is_ok()
                 );
-                // An answered or expired question is a new request. Repeated
-                // taps on the standing one do not spend the hourly budget.
+
                 let mut store = load().unwrap();
                 store.pending.clear();
                 save(&store).unwrap();
@@ -1334,9 +1200,7 @@ mod tests {
         ] {
             assert!(!needs_access(method, None), "{method} must stay open");
         }
-        // The screen carries its own grant. Needing both would mean somebody
-        // who allowed a phone to watch this desktop had also, silently, to
-        // allow it to open every file.
+
         assert!(!needs_access("stream.open", Some("screen.video")));
     }
 
@@ -1369,26 +1233,18 @@ mod tests {
 
     #[test]
     fn an_ordinary_account_never_reaches_the_automatic_grant() {
-        // The exception is the website's demo account during an open review
-        // round, and the test environment is signed into no account at all.
-        // A lookup that cannot answer has to read as "not the demo account"
-        // rather than as a yes: this is the one path that hands a device the
-        // work on a machine without a person saying so.
         assert!(!crate::screen_policy::signed_into_review_demo());
     }
 
     #[test]
     fn a_refusal_names_the_request_it_is_answering() {
-        // No grant exists in the test environment, so anything gated is
-        // refused, and the envelope has to carry the id back or the caller
-        // never matches the answer to its question.
         let line = r#"{"id":7,"method":"pty.spawn","params":{}}"#;
         let refusal = refuse_unpermitted(line, "phone").expect("must refuse");
         let value: Value = serde_json::from_str(&refusal).unwrap();
         assert_eq!(value["id"], 7);
         assert_eq!(value["ok"], false);
         assert_eq!(value["error"]["code"], "workspace_not_allowed");
-        // Ungated methods are answered, not refused.
+
         assert!(refuse_unpermitted(r#"{"id":8,"method":"info"}"#, "phone").is_none());
     }
 }

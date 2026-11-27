@@ -16,8 +16,6 @@ final class TeamStore {
     private(set) var owner: TeamAccountOwner?
     private(set) var phase: Phase = .signedOut
     private(set) var capabilities: TeamCapabilities?
-    /// Last verified person for local draft recovery in this login lifetime.
-    /// Losing organization access must not hide this person's own writing.
     private(set) var localDraftPersonId: String?
     private(set) var organizations: [TeamOrganization] = []
     private(set) var organizationsNextOffset: Int?
@@ -110,8 +108,6 @@ final class TeamStore {
             catalogRefresh &+= 1
             await refreshLocalProjects()
             guard isCurrent(next, revision) else { return }
-            // A directory refresh is not proof that an unreturned later page
-            // was revoked. Keep a selected organization until its own lookup.
             if let selectedOrganizationId, let returned = self.organizations.first(where: { $0.id == selectedOrganizationId }), !returned.isActive {
                 cachedDirectories.removeValue(forKey: selectedOrganizationId); directory = nil
             }
@@ -137,13 +133,7 @@ final class TeamStore {
         section = .overview
         error = nil
     }
-    /// A shared chat to open as soon as a chat list shows it. Set by the
-    /// personal chat's "Continue in team chat", which knows only the share.
     var pendingShareId: String?
-    /// Open the team thread for a chat this account shared. On the computer
-    /// that publishes the folder the project and computer are known, so it
-    /// goes straight there. Elsewhere it opens the team's chats, and the
-    /// thread opens when its row loads.
     func openSharedChat(id: String, workspace: String?) {
         guard phase == .ready else { return }
         pendingShareId = id
@@ -166,15 +156,9 @@ final class TeamStore {
         focusedProject = repository; selectedRepositoryId = repository.id
         preferredCheckoutId = checkout; browsingProjects = false; section = .chats
     }
-    /// Names for organization ids, in this account's own words. An id this
-    /// directory has not loaded yet reads as the generic Team.
     func organizationNames(_ ids: [String]) -> [String] {
         Array(Set(ids.map { id in organizations.first { $0.id == id }?.name ?? L10n.text("common.teams.title") })).sorted()
     }
-    /// Who a folder is shared with: what its computer reports, plus this
-    /// computer's own publications, which are current before the next read.
-    /// Takes the folder's fields rather than the folder, so the store stays
-    /// free of the app's workspace model.
     func sharedOrganizations(reported: [String]?, workspace: String, isRemote: Bool) -> [String] {
         var ids = reported ?? []
         if !isRemote { ids += localProjects(for: workspace).map(\.organizationId) }
@@ -183,8 +167,6 @@ final class TeamStore {
     func localProjects(for workspace: String) -> [TeamLocalPublication] {
         localProjects.filter { $0.workspaceId == workspace && $0.phase == "active" }
     }
-    /// This directory belongs to the signed-in person and physical host, not
-    /// the selected team. Never infer sharing from a folder name or Git URL.
     func refreshLocalProjects() async {
         guard let owner, phase == .ready, capabilities?.canPublishCheckouts == true else { return }
         projectsRevision &+= 1
@@ -202,7 +184,6 @@ final class TeamStore {
             localProjects = rows; localProjectsError = nil
         } catch is CancellationError {} catch {
             guard self.owner == owner, projectsRevision == revision else { return }
-            // A failed refresh is not proof that the folder became private.
             localProjectsError = error.localizedDescription
             _ = retireAuthorization(for: error)
         }
@@ -290,12 +271,6 @@ final class TeamStore {
         }
     }
 
-    /// Login ownership, not organization navigation, owns the app heartbeat.
-    /// The account service advertises support before this operation is used.
-    /// `keepsWatching` holds the loop through a quiet spell. The Mac needs
-    /// it: the task restarts only when the scene changes, and a Mac window
-    /// stays in the same scene while another app is in front, so stopping
-    /// once left a person offline for the rest of the session.
     func watchAppPresence(keepsWatching: Bool = false, active: @MainActor () -> Bool) async {
         guard let owner, phase == .ready, capabilities?.supportsAppPresence == true else { return }
         repeat {
@@ -309,8 +284,6 @@ final class TeamStore {
 
     func publishAppPresence(_ active: Bool) async {
         guard let owner, phase == .ready, capabilities?.supportsAppPresence == true else { return }
-        // A complete empty directory has nobody who can see our status. A
-        // stale empty window must not publish inactive on behalf of another.
         guard !active || !organizations.isEmpty || organizationsNextOffset != nil else { return }
         await TeamAppPresence.shared.publish(active, owner: owner, api: api)
     }
@@ -322,12 +295,10 @@ final class TeamStore {
                 observations[member.id] = PresenceObservation(checked: at, activeForSeconds: seconds)
             } else { observations.removeValue(forKey: member.id) }
         }
-        // Match the bounded directory cache; this is never persisted history.
         if memberPresence.count >= 8, memberPresence[organization] == nil { memberPresence = [:] }
         memberPresence[organization] = observations
     }
     func presenceStatus(member: String, organization: String, at: Date) -> Bool? {
-        // The person reading this screen has the app open.
         if phase == .ready, member == capabilities?.actorId { return true }
         guard phase == .ready, let observation = memberPresence[organization]?[member] else { return nil }
         let age = at.timeIntervalSince(observation.checked)
@@ -402,9 +373,6 @@ final class TeamStore {
         await bind(to: owner, refresh: true)
         await refreshSelected()
     }
-    /// Recovery is scoped to the saved person's original resource, independent
-    /// of the currently selected project or an unavailable directory. The host
-    /// still checks current authority. This path cannot request a new review.
     func recoverAsk(origin: String, person: String, target: JSONValue, owner: TeamAccountOwner, method: String, input: [String: JSONValue]) async throws -> JSONValue {
         guard self.owner == owner, localDraftPersonId == person, owner.scope.origin == origin,
               ["team.chat.ask", "team.chat.ask.status", "team.chat.ask.stop"].contains(method) else { throw CancellationError() }
@@ -506,8 +474,6 @@ final class TeamStore {
     }
 }
 
-/// Kept separate from BridgeError so fixture transports can exercise the same
-/// recovery states without loading the FFI or opening an account connection.
 struct TeamRequestFailure: LocalizedError, Sendable {
     let code: String
     let message: String

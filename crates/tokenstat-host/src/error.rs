@@ -4,19 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! The error half of the response envelope.
-//!
-//! Every failure used to arrive as a bare string under one code, `call_failed`,
-//! which is enough for a person reading a message and not enough for a front
-//! end deciding what to do next. A client with no local archive asks for a
-//! report and has to tell "this build cannot answer that" apart from "the
-//! archive is corrupt", and a sentence cannot be matched on without inventing a
-//! second, worse protocol out of substring checks.
-//!
-//! So a dispatch failure carries a code. `From<String>` keeps every existing
-//! `map_err(|e| e.to_string())?` working unchanged and lands it on
-//! [`CALL_FAILED`], which is exactly what those call sites meant.
 
 use std::fmt;
 

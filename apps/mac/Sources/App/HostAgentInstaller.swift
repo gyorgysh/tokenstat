@@ -61,10 +61,6 @@ enum HostAgentInstaller {
             _ = try? run("/bin/launchctl", ["kickstart", service])
             return
         }
-        // Nothing loaded, or the loaded job runs some other copy (an earlier
-        // install at another path). Tear down a stale registration and load
-        // the plist this app owns. RunAtLoad is off when Always-on is off,
-        // so bootstrap alone does not start the process.
         _ = try? run("/bin/launchctl", ["bootout", service])
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
         _ = try? run("/bin/launchctl", ["kickstart", service])
@@ -115,9 +111,6 @@ enum HostAgentInstaller {
 
         let plist = launchAgents.appendingPathComponent("\(label).plist")
         let alwaysOn = resolvedAlwaysOn()
-        // ProcessType stays Interactive either way. Background throttles a
-        // live terminal. KeepAlive and RunAtLoad are the always-on switch:
-        // off, the helper dies with the app and does not start at login.
         let contents: [String: Any] = [
             "Label": label,
             "ProgramArguments": [helper.path],
@@ -139,12 +132,8 @@ enum HostAgentInstaller {
 
         if alreadyLoaded && !plistChanged && loadedRunsManagedHelper {
             if needsRestart {
-                // Same job definition, new binary: `-k` replaces the process
-                // without unloading the job, which is gentler than bootout and
-                // keeps the KeepAlive policy intact.
                 try run("/bin/launchctl", ["kickstart", "-k", service])
             } else {
-                // Same binary, same job definition: just make sure it is running.
                 try run("/bin/launchctl", ["kickstart", service])
             }
             try? fileManager.removeItem(at: marker)
@@ -152,13 +141,6 @@ enum HostAgentInstaller {
         }
 
         if alreadyLoaded {
-            // The loaded definition is stale: the plist on disk changed, or
-            // the job runs a binary this app does not manage (an earlier
-            // install at another path). `kickstart -k` would only restart the
-            // process under that stale definition, so unload the job and load
-            // the plist. The daemon owns live terminals either way: replacing
-            // it means restarting it. RunAtLoad follows Always-on, so
-            // bootstrap does not start the process on a laptop.
             _ = try? run("/bin/launchctl", ["bootout", service])
             try run("/bin/launchctl", ["bootstrap", domain, plist.path])
             try run("/bin/launchctl", ["kickstart", service])
@@ -230,9 +212,6 @@ enum HostAgentInstaller {
         return candidates.compactMap { $0 }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    /// Prepare the whole executable beside its destination before replacing
-    /// anything. A failed copy or rename leaves the installed helper intact
-    /// and throws before the caller can restart its launch agent.
     @discardableResult
     static func replaceHelperIfNeeded(
         from bundled: URL,
@@ -249,8 +228,6 @@ enum HostAgentInstaller {
         defer { try? fileManager.removeItem(at: staged) }
         try fileManager.copyItem(at: bundled, to: staged)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.path)
-        // If the later plist write or launchctl fails, an identical binary
-        // on the next attempt must still restart the old running process.
         try Data().write(to: restartMarker(for: helper), options: .atomic)
         guard rename(staged.path, helper.path) == 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
@@ -262,8 +239,6 @@ enum HostAgentInstaller {
         helper.appendingPathExtension("restart-required")
     }
 
-    /// A newer installed release always wins, even when its size or date
-    /// differs. Equal releases can still be different development builds.
     private static func helpersDiffer(_ a: URL, _ b: URL, manager: FileManager) -> Bool {
         let attributes: (URL) -> (Int, Date)? = { url in
             guard let values = try? manager.attributesOfItem(atPath: url.path),
@@ -280,14 +255,8 @@ enum HostAgentInstaller {
         return isVersionNewer(bundledVersion, than: installedVersion)
     }
 
-    /// All lifecycle entry points honor this, including launch-time refresh
-    /// and quit. Guarding only Bridge.connect would still let an older app
-    /// replace or stop the newer helper immediately afterwards.
     private static var hasNewerHelper: Bool { hasNewerHelper(patience: 5) }
 
-    /// `patience` is how long the socket probe may wait for a host that is
-    /// not answering. Callers that cannot wait use a short one and fall back
-    /// to the installed-versus-bundled version compare below.
     private static func hasNewerHelper(patience: TimeInterval) -> Bool {
         let socketPath = identityDirectory.deletingLastPathComponent().appendingPathComponent("host.sock").path
         if let transport = SocketTransport.connecting(to: socketPath),
@@ -303,14 +272,8 @@ enum HostAgentInstaller {
         return isVersionNewer(version(of: installed), than: version(of: bundled))
     }
 
-    /// Last policy this process applied, so quit does not reread a stale file.
     private static var cachedAlwaysOn: Bool?
 
-    /// Whether hostd should outlive the app.
-    ///
-    /// Missing `host.json`: keep the loaded plist's KeepAlive so a first
-    /// launch does not flip a desktop install to off before hostd writes
-    /// the hardware default. No plist either: off, the laptop-safe default.
     static func resolvedAlwaysOn() -> Bool {
         cachedAlwaysOn ?? storedAlwaysOn() ?? loadedPlistKeepAlive() ?? false
     }
@@ -338,12 +301,6 @@ enum HostAgentInstaller {
             ?? FileManager.default.temporaryDirectory
     }
 
-    /// Rewrite the launch agent so KeepAlive matches the switch.
-    ///
-    /// Changing KeepAlive requires unloading the job. That restarts hostd.
-    /// Call this after `host.setPolicy`, while the app is open and will
-    /// reconnect. Fails rather than caching a value the loaded job does
-    /// not honour: KeepAlive still true plus hostd `exit(0)` is a restart loop.
     static func applyPolicy(alwaysOn: Bool) throws {
         let previous = cachedAlwaysOn
         cachedAlwaysOn = alwaysOn
@@ -355,12 +312,6 @@ enum HostAgentInstaller {
         }
     }
 
-    /// How long the quit-time probe waits for the host.
-    ///
-    /// The ordinary patience is for a connection somebody is waiting on;
-    /// quitting must not stand behind a wedged host for it. The version
-    /// compare in `hasNewerHelper` still catches a newer installed helper
-    /// when the socket says nothing.
     private static let quitProbePatience: TimeInterval = 0.5
 
     /// Stop hostd when Always-on is off. Leaves the job loaded so the next
@@ -372,19 +323,12 @@ enum HostAgentInstaller {
         _ = try? run("/bin/launchctl", ["kill", "SIGTERM", service])
     }
 
-    /// The version a hostd reports when run with the version flag, for
-    /// example "tokenstat-hostd 0.2.8". Nil when the binary will not run or
-    /// prints nothing parseable.
     private static func version(of url: URL) -> String? {
         guard FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
         guard let output = try? run(url.path, ["--version"]) else { return nil }
         return output.split(whereSeparator: \.isWhitespace).last.map(String.init)
     }
 
-    /// True when `a` names a newer release than `b` (`0.2.8` > `0.2.7`).
-    ///
-    /// Numeric release parts, padded with zeros on the short side. A stable
-    /// release follows its prereleases; build metadata does not change order.
     private static func isVersionNewer(_ a: String?, than b: String?) -> Bool {
         guard let a, let b else { return false }
         let left = versionNumbers(a)

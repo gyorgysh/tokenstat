@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Keep pending CLI probes with their open conversation and current catalog row.</summary>
 internal sealed class ChatSignInChecks
 {
     private readonly HashSet<(int Generation, string Backend)> _active = [];
@@ -20,7 +19,6 @@ internal sealed class ChatSignInChecks
         {
             var status = await check(launcher);
             if (generation != currentGeneration()) return false;
-            // A catalog refresh can replace the node while a probe is running.
             var current = currentBackend(id);
             if (current is null || Text(current, "launcherId") != launcher) return false;
             var readiness = Text(status, "readiness", "unknown");

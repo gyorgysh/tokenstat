@@ -52,8 +52,6 @@ internal static class WorkspaceBypass
             }
             catch
             {
-                // Not remembered, so the next launch asks first. The safe way
-                // to lose this setting.
             }
         }
     }
@@ -72,16 +70,11 @@ internal static class WorkspaceBypass
         }
     }
 
-    /// <summary>
-    /// The Mac's Bypass switch, for the bar over a project's launcher and
-    /// terminals: a lock and a word, amber while on, so what it turns off
-    /// stays visible for as long as it is off. Read again at every launch.
-    /// </summary>
     public static Button Control(string workspaceId, Action changed)
     {
         var on = IsOn(workspaceId);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        row.Children.Add(new FontIcon { Glyph = on ? "\uE785" : "\uE72E", FontSize = 12 }); // Unlock, Lock
+        row.Children.Add(new FontIcon { Glyph = on ? "\uE785" : "\uE72E", FontSize = 12 });
         row.Children.Add(new TextBlock
         {
             Text = on ? L10n.Text("windows.workspacepage.bypass_on.57526f50") : L10n.Text("windows.workspacepage.bypass_off.bd6707b9"),
@@ -103,8 +96,6 @@ internal static class WorkspaceBypass
             MinWidth = 0,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        // The template's hover and pressed states repaint the text in the
-        // default colour, which turned the amber "on" grey under the pointer.
         button.Resources["ButtonForegroundPointerOver"] = button.Foreground;
         button.Resources["ButtonForegroundPressed"] = button.Foreground;
         button.Resources["ButtonBackgroundPointerOver"] = Theme.Brush(static () => Theme.RowHighlight);

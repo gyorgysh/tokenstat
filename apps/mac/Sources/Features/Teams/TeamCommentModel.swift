@@ -124,8 +124,6 @@ import Observation
         case .pending, .unknown: status = L10n.text("common.teams.comment_unconfirmed")
         }
     }
-    /// An explicit reload follows the visible copy action when another window
-    /// changed the saved draft. It never retargets an uncertain attempt.
     func reloadSavedDraft() async {
         guard !busy, !pending, current else { return }
         do {

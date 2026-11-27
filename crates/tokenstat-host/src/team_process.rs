@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! OS-owned process lifetime for Team guardians. The trusted anchor waits for
 //! private pipe admission before backend birth. No peer RPC accepts Program.
 //! A process group/Job is not confinement against arbitrary OS-account code.
@@ -223,8 +222,6 @@ pub fn anchor_main() -> io::Result<()> {
     std::thread::Builder::new()
         .name("team-anchor-control".into())
         .spawn(move || {
-            // One Stop or pipe EOF is sufficient. A backend never inherits this
-            // pipe as stdin, so its descendants cannot keep authority alive.
             let _command: io::Result<Control> = receive(&mut reader);
             let _ = sender.send(());
         })?;
@@ -273,8 +270,7 @@ pub(crate) fn boot_identity() -> Option<String> {
             tv_usec: 0,
         };
         let mut size = std::mem::size_of::<libc::timeval>();
-        // SAFETY: the name is NUL-terminated and the buffer is a timeval of
-        // the size passed, which is what kern.boottime writes.
+
         let status = unsafe {
             libc::sysctlbyname(
                 c"kern.boottime".as_ptr(),
@@ -381,11 +377,9 @@ impl Owned {
             _ => return Err(invalid()),
         }
         owner.os.ensure_anchor(&owner.child)?;
-        // Mint before the callback. Its authority check can then require at
-        // least this much remaining time without a later scheduling gap
-        // extending the one-shot window. Stamps stay only on private IPC.
+
         let window = BirthWindow::new()?;
-        // The anchor leads the process group the backend is born into.
+
         before_birth(owner.child.id())?;
         window.ensure_live()?;
         send(
@@ -422,13 +416,11 @@ impl Owned {
             if Instant::now() >= deadline {
                 return Err(invalid());
             }
-            // A concurrent fork may miss the first Unix signal sweep. The
-            // unreaped anchor still pins the exact group for every retry.
+
             self.os.terminate(&self.child)?;
             std::thread::sleep(Duration::from_millis(10));
         }
-        // Unix deliberately keeps the anchor waitable until group completion;
-        // no signal ever uses a PID whose Child has already been reaped.
+
         self.child.wait()?;
         self.finished = true;
         Ok(Completion { _private: () })

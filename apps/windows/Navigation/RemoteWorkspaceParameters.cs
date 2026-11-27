@@ -9,7 +9,6 @@ internal static class RemoteWorkspaceParameters
     {
         var forwarded = parameters?.DeepClone() as JsonObject ?? new JsonObject();
         forwarded["id"] = innerId;
-        // Forge methods name their owner workspaceId instead of id.
         if (forwarded["workspaceId"] is JsonValue value
             && value.TryGetValue<string>(out var owner) && owner == workspaceId)
             forwarded["workspaceId"] = innerId;

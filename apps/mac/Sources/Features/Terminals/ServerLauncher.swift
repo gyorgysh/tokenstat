@@ -3,8 +3,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// Saved SSH destinations in both terminal launchers. Opening a live server
-/// returns to its shell; a disconnected one uses the normal connection form.
 struct ServerLauncher: View {
     let library: SSHLibraryModel
     let sessions: SSHSessionsModel

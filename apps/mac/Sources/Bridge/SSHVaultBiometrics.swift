@@ -60,8 +60,6 @@ enum SSHVaultBiometrics {
 
     static func contains(account: String) -> Bool { exists(account: account) }
 
-    /// Look, do not prompt. `interactionNotAllowed` is what keeps this from
-    /// raising Face ID, so an item that is there but locked answers yes.
     private static func exists(account: String?) -> Bool {
         var query = query(account)
         query[kSecReturnAttributes as String] = true

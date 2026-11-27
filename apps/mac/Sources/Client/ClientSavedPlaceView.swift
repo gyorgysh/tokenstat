@@ -3,8 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Reachability belongs to the destination, including when it is opened from
-/// somewhere other than Home. Known sleeping machines never start a tunnel.
 struct ClientPlaceAvailability<Content: View>: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -59,8 +57,6 @@ struct ClientPlaceAvailability<Content: View>: View {
     }
 }
 
-/// Resolves saved identifiers only after navigation. Workspace IDs may be
-/// paths; folder metadata and terminal commands are fetched from the peer.
 struct ClientSavedPlaceView: View {
     let place: ClientRecentPlaces.Place
     var restoredSection: WorkspaceSection? = nil
@@ -149,11 +145,6 @@ struct ClientSavedPlaceView: View {
     }
 
     private func load(reopen: Bool = false) async {
-        // Once per place: availability rebuilds recreate `destination` and its
-        // `.task`, and without this each rebuild re-pairs and re-raises the
-        // tunnel while the person sits on the screen.
-        // An explicit reopen must fetch the existing session again: dismissal
-        // stopped the previous attachment, which cannot be reused.
         guard visible, !loading, reopen || loadedPlaceID != place.id,
               let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         let generation = loadGeneration
@@ -169,8 +160,6 @@ struct ClientSavedPlaceView: View {
         defer { if generation == loadGeneration { loading = false } }
         error = nil
         do {
-            // Home has never needed a tunnel. A cold-start tap must establish
-            // one here, just as opening the host from Devices does.
             await ClientDeviceName.publish()
             guard stillCurrent() else { return }
             _ = try await Bridge.pair(key: place.id.peer, label: hostName, address: "")

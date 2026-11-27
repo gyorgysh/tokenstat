@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// A labelled fact on a job or graph. Same shape on phone and iPad.
 struct ClientFactRow: View {
     let label: String
     let value: String
@@ -26,14 +25,10 @@ struct ClientFactRow: View {
     }
 }
 
-/// Prompt field plus Run / Stop / Continue, with confirms that name the machine.
 struct ClientWorkflowActions: View {
     @Bindable var session: ClientWorkflowSession
     var showsPrompt: Bool = true
-    /// When set, only Stop / Continue for that run. Start stays on the graph page.
     var pinnedRunID: String? = nil
-    /// False while an editor, history sheet or other cover is up above this
-    /// surface. The chord then stays listed but does not fire.
     var shortcutsEnabled = true
 
     @State private var pending: Pending?
@@ -116,9 +111,6 @@ struct ClientWorkflowActions: View {
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }
-        // Focused Run: the same confirm tapping Run opens, reachable from
-        // the keyboard and listed in discovery. Never bare Return, and never
-        // while a live run, a cover, or another start owns the surface.
         .clientShortcuts([
             .workbench(.run, id: "run-workflow", title: L10n.text("apple.clientjobchrome.run_workflow.4b5897af"),
                        enabled: WorkbenchShortcutPolicy.canRun(JobRunShortcutState(
@@ -161,13 +153,9 @@ struct ClientWorkflowActions: View {
     }
 }
 
-/// Run now / Stop / pause, with the same confirms as workflows.
 struct ClientAutomationActions: View {
     @Bindable var session: ClientAutomationSession
-    /// When set, only Stop for that run. Start stays on the job page.
     var pinnedRunID: String? = nil
-    /// False while an editor, history sheet or other cover is up above this
-    /// surface. The chord then stays listed but does not fire.
     var shortcutsEnabled = true
 
     @State private var pending: Pending?
@@ -237,9 +225,6 @@ struct ClientAutomationActions: View {
         .onChange(of: session.working) { _, working in
             if !working { pending = nil }
         }
-        // Focused Run: the same confirm tapping Run now opens, reachable
-        // from the keyboard and listed in discovery. Never bare Return, and
-        // never while a live run, an unconfirmed launch, or a cover owns it.
         .clientShortcuts([
             .workbench(.run, id: "run-automation", title: L10n.text("apple.clientjobchrome.run_automation.db76d94b"),
                        enabled: WorkbenchShortcutPolicy.canRun(JobRunShortcutState(
@@ -298,7 +283,6 @@ struct ClientAutomationActions: View {
     }
 }
 
-/// One past run as a row. Used on the phone list and the iPad column.
 struct ClientPastRunRow: View {
     let title: String
     let status: String

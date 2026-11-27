@@ -2,12 +2,6 @@
 
 import SwiftUI
 
-/// What one step produced, below its open Compact line.
-///
-/// The line above already says what the step was, so this draws no card, no
-/// second header and no show button: the full command or path, then the
-/// output or the diff, in the transcript's own quiet type. Shared by the Mac
-/// and the phone.
 struct ChatStepDetail: View {
     enum Step: Equatable {
         case tool(ChatToolState)
@@ -73,7 +67,6 @@ struct ChatStepDetail: View {
         }
     }
 
-    /// The whole command or path. The line above shortens both.
     private var subject: String? {
         switch step {
         case let .tool(state): state.target
@@ -90,8 +83,6 @@ struct ChatStepDetail: View {
         Text(text).foregroundStyle(.tertiary)
     }
 
-    /// Colouring a patch walks every line, so it runs when the patch
-    /// changes rather than on every pass of the transcript.
     private func render() {
         guard !patch.isEmpty else {
             diff = nil

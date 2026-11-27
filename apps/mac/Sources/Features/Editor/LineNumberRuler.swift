@@ -7,14 +7,7 @@
 #if os(macOS)
 import AppKit
 
-/// The gutter: line numbers, and a mark on lines this change touched.
-///
-/// An `NSRulerView` rather than a column of text beside the editor, because a
-/// second text view has to be kept scrolled to the same place as the first and
-/// never quite is. The ruler is drawn by the scroll view that owns the text, so
-/// it cannot drift.
 final class LineNumberRuler: NSRulerView {
-    /// One-based lines that differ from HEAD.
     var changedLines: Set<Int> = [] {
         didSet {
             guard changedLines != oldValue else { return }
@@ -35,10 +28,6 @@ final class LineNumberRuler: NSRulerView {
         fatalError(L10n.text("apple.linenumberruler.not_loaded_from_a_nib.658eb5f1"))
     }
 
-    /// Widen for a file with more lines than the gutter can show.
-    ///
-    /// Measured from the digit count rather than from a fixed width: a 12,000
-    /// line file otherwise draws its numbers over the first column of code.
     func sizeToFit(lineCount: Int) {
         let digits = max(2, String(max(1, lineCount)).count)
         let width = CGFloat(digits) * 8 + 22
@@ -65,8 +54,6 @@ final class LineNumberRuler: NSRulerView {
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
 
-        // Only the visible rows are drawn. Walking every line of a large file
-        // on each scroll event is the difference between smooth and not.
         let visible = scrollView?.contentView.bounds ?? .zero
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
         let characterRange = layoutManager.characterRange(
@@ -118,22 +105,9 @@ final class LineNumberRuler: NSRulerView {
     private var cachedLength = -1
     private var cachedLineStarts: [Int] = [0]
 
-    /// One-based line for a character offset.
-    ///
-    /// Counts newlines rather than enumerating lines. `enumerateSubstrings`
-    /// with `.byLines` yields a substring for the partial line the offset sits
-    /// inside, so counting those puts every caret one line too far down except
-    /// when it happens to sit exactly on a line break.
-    ///
-    /// The starts are cached because every draw asks for two line numbers (the
-    /// caret's and the first visible line's), and each lookup used to walk the
-    /// file from offset 0: two full walks of a large buffer on the main thread
-    /// per draw. The cache is keyed on the text it was counted from, so an
-    /// edit of the same length does not reuse stale starts.
     private func lineNumber(for location: Int, in text: NSString) -> Int {
         guard location > 0, location <= text.length else { return 1 }
         let starts = lineStarts(in: text)
-        // The last line start at or before the offset is its line.
         var low = 0
         var high = starts.count - 1
         while low < high {
@@ -147,7 +121,6 @@ final class LineNumberRuler: NSRulerView {
         return low + 1
     }
 
-    /// Offsets at which each line begins, counted once per distinct text.
     private func lineStarts(in text: NSString) -> [Int] {
         if text.length == cachedLength, cachedText == (text as String) {
             return cachedLineStarts

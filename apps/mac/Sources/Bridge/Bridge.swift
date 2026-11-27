@@ -7,10 +7,6 @@
 import Foundation
 import OSLog
 
-/// Errors surfaced by the bridge.
-///
-/// `core` carries a message the Rust side already wrote for a human. Do not
-/// rewrite those in the UI: they name the actual file or setting at fault.
 enum BridgeError: LocalizedError {
     case core(code: String, message: String)
     case decoding(method: String, underlying: String)
@@ -25,31 +21,9 @@ enum BridgeError: LocalizedError {
     }
 }
 
-/// Where every call's outcome is reported, so one place can decide what the
-/// app believes about the network.
-///
-/// A closure rather than a dependency: `Bridge` owns no state and knows about
-/// no models, and it is not going to start now. The client installs a reporter
-/// at launch, the Mac may install one later, and with nothing installed this
-/// costs a nil check per call.
 enum BridgeObserver {
-    /// Method name, the peer it was addressed to when there was one, and the
-    /// error it failed with, or nil when it worked.
-    ///
-    /// The peer matters: "a machine is not answering" is a fact about that
-    /// machine, and folding every peer into one verdict made a laptop asleep in
-    /// a bag speak for the Mac being worked on.
     nonisolated(unsafe) static var report: (@Sendable (String, String?, Error?) -> Void)?
 
-    /// Asked before a call is made. Returning an error refuses it without
-    /// going near the transport.
-    ///
-    /// This exists for one case: a device with no internet. An account call
-    /// made in airplane mode sits on its patience budget and then fails with
-    /// the same answer it could have given immediately, and the screen waits
-    /// half a minute to say "offline". Nothing else belongs here: a gate that
-    /// starts guessing which calls are worth making is a gate that will block
-    /// the one that would have recovered.
     nonisolated(unsafe) static var precheck: (@Sendable (String) -> Error?)?
 
     static func note(_ method: String, peer: String?, _ error: Error?) {
@@ -57,50 +31,22 @@ enum BridgeObserver {
     }
 }
 
-/// Swift face of the Rust core.
-///
-/// Deliberately thin. It owns no state and caches nothing, because the Rust
-/// side already holds the open archive and the loaded price book. Which
-/// `Transport` carries a call is chosen once, at launch, by `Bridge.connect()`.
-/// Every method below is written as though there were only one.
 enum Bridge {
-    /// Performance events intentionally contain only a method name and timing;
-    /// bridge parameters can contain paths, terminal input, and chat text.
     private static let performanceLog = Logger(
         subsystem: "ai.tokenstat.tokenstat",
         category: "Performance"
     )
 
-    /// How long a call waits on a silent host before giving up.
-    ///
-    /// Not a deadline on the call, a budget on silence: the socket resets it
-    /// every time bytes arrive, so a large answer is never truncated. The point
-    /// is that no call can wait forever, because a call that waits forever
-    /// holds the thread it runs on forever.
     enum Patience {
-        /// Terminal polling, keystrokes, highlighting. A host that has not
-        /// answered one of these in a few seconds is not busy, it is stuck, and
-        /// the caller polls again in milliseconds anyway.
         static let interactive: TimeInterval = 10
 
-        /// Reports, git, the workspace list. Slow work, but bounded work.
         static let standard: TimeInterval = 60
 
-        /// `scan` walks every log on the machine and `sync` uploads. Both can
-        /// legitimately say nothing for minutes on a large archive.
         static let long: TimeInterval = 600
 
-        /// The host captures installer output and answers after exit. Wait
-        /// past its twenty-minute limit and the remote forwarder's grace.
         static let installer: TimeInterval = 21 * 60
     }
 
-    /// How calls leave this process, and whether a daemon owns them.
-    ///
-    /// One box behind one lock, because these two are read together and must
-    /// agree. `connect()` can run after terminals are already polling from
-    /// other threads, so an unsynchronized `var` here was a real data race with
-    /// a crash that pointed nowhere useful.
     private struct Route {
         var transport: Transport
         var isHosted: Bool
@@ -119,11 +65,8 @@ enum Bridge {
         return route
     }
 
-    /// Which transport is in use, for the interface and for a bug report.
     static var transportDescription: String { currentRoute.transport.describedAs }
 
-    /// True when a daemon owns this session's work, so terminals outlive the
-    /// window. The Machines screen will need to say this out loud.
     static var isHosted: Bool { currentRoute.isHosted }
 
     /// Choose a transport. Call once, before anything else.
@@ -146,20 +89,10 @@ enum Bridge {
             adopt(Route(transport: hosted, isHosted: true))
             let spoken = hostProtocolVersion(hosted)
             if !expectedProtocolVersion.isEmpty, spoken != expectedProtocolVersion {
-                // Opening an older app must not downgrade a newer helper.
-                // Its guarded route explains the mismatch without restarting
-                // the process that owns the user's current work.
                 if let spoken, let actual = Int(spoken),
                    let expected = Int(expectedProtocolVersion), actual > expected {
                     return
                 }
-                // The daemon outlives the app that installed it, so an old
-                // helper can be answering a new app. Everything added since it
-                // was built is then "unknown method", which is true and
-                // useless: it surfaced as raw protocol text on the SSH screen.
-                // Replace the helper. If that fails, keep the socket route:
-                // starting an in-process host beside an older helper would
-                // recover work that the older process may still be running.
                 try? HostAgentInstaller.installAndStart()
                 if let repaired = SocketTransport.connecting(to: path, expectedProtocolVersion: expectedProtocolVersion),
                    hostSpeaksThisProtocol(repaired)
@@ -167,9 +100,6 @@ enum Bridge {
                     adopt(Route(transport: repaired, isHosted: true))
                     return
                 }
-                // Each new connection verifies its contract before sending
-                // work. A mismatch stays actionable, and a later successful
-                // helper replacement is picked up without changing owners.
                 adopt(Route(transport: SocketTransport(path: path, expectedProtocolVersion: expectedProtocolVersion), isHosted: true))
             }
             return
@@ -178,13 +108,6 @@ enum Bridge {
         adopt(Route(transport: InProcessTransport(), isHosted: false))
     }
 
-    /// Whether the helper on the other end of this transport was built from
-    /// the same wire contract as this app.
-    ///
-    /// Cheap on purpose: `protocol` is answered without opening an archive, so
-    /// this costs a round trip and nothing else. A helper too old to know the
-    /// method at all fails the same way as one that answers with a different
-    /// number, which is the correct reading of both.
     private static func hostSpeaksThisProtocol(_ transport: Transport) -> Bool {
         expectedProtocolVersion.isEmpty || hostProtocolVersion(transport) == expectedProtocolVersion
     }
@@ -200,16 +123,7 @@ enum Bridge {
         return spoken.protocolVersion
     }
 
-    /// The contract this build speaks, read straight from the library rather
-    /// than written down twice.
-    ///
-    /// Its own C entry point, not a `protocol` call: every call through the
-    /// bridge warms the login environment and the shell pool, and this is asked
-    /// at launch, before the daemon has been chosen, in an app that is usually
-    /// about to hand that work to the daemon instead.
     #if DEBUG
-    /// `TOKENSTAT_EXPECT_PROTOCOL` pretends this build speaks another
-    /// version, to reproduce what an older app sees beside a newer helper.
     private static let expectedProtocolVersion = ProcessInfo.processInfo
         .environment["TOKENSTAT_EXPECT_PROTOCOL"] ?? InProcessTransport.protocolVersion
     #else
@@ -221,8 +135,6 @@ enum Bridge {
         route = next
         routeRevision &+= 1
         routeLock.unlock()
-        // Local only, once per adopted transport. Optional diagnostics must
-        // not hold up the handshake or start an account request themselves.
         DispatchQueue.global(qos: .utility).async {
             if let data = try? JSONSerialization.data(withJSONObject: ["version": AppInfo.version, "build": AppInfo.build]) {
                 _ = try? next.transport.call(method: "app.identify", params: String(decoding: data, as: UTF8.self), patience: 2)
@@ -239,13 +151,6 @@ enum Bridge {
     }
     #endif
 
-    /// Re-probe the host after the app provisions or repairs its launch agent.
-    ///
-    /// Only ever upgrades in-process to hosted. Going the other way would
-    /// strand every process the daemon owns behind an interface that had
-    /// quietly started answering from somewhere else, and the symptom is
-    /// terminals vanishing. If a daemon we were talking to has gone, the honest
-    /// answer is the error the socket already returns, not a silent demotion.
     static func reconnect() {
         guard !isHosted else { return }
         connect()
@@ -291,24 +196,14 @@ enum Bridge {
             reconnect()
             return
         }
-        // Soft start failed: the helper or the plist is missing or broken.
         try? HostAgentInstaller.installAndStart()
         _ = waitForSocket(seconds: hostRepairWait)
         reconnect()
         #endif
     }
 
-    /// How many times a `host_busy` answer is waited out before it is reported.
     private static let maxBusyWaits = 3
 
-    /// Whether this envelope is the daemon saying it is at its connection
-    /// ceiling.
-    ///
-    /// The substring is only a cheap filter: the verdict comes from the
-    /// decoded envelope, so a success that happens to quote the code is not
-    /// treated as a refusal and sent again. A busy daemon is not a failed
-    /// call: the crowd clears in milliseconds and asking again is the whole
-    /// fix.
     private static func isBusy(_ response: String) -> Bool {
         guard response.contains("host_busy") else { return false }
         struct Failure: Decodable { let code: String }
@@ -322,16 +217,10 @@ enum Bridge {
         return !refusal.ok && refusal.error?.code == "host_busy"
     }
 
-    /// Wait between busy attempts. Runs on the calls queue, where blocking is
-    /// what every call here does anyway.
     private static func waitOutBusy(_ attempt: Int) {
         Thread.sleep(forTimeInterval: 0.05 * Double(attempt))
     }
 
-    /// Call across the boundary and decode the result.
-    ///
-    /// Synchronous and potentially slow. Everything public here is `async` and
-    /// hops off the main actor first.
     private static func invoke<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -341,8 +230,6 @@ enum Bridge {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
 
-        // Every transport answers with an envelope or throws, so the only
-        // failure modes left below are decoding ones.
         let json = try Self.call(
             method: method,
             params: paramString,
@@ -356,9 +243,6 @@ enum Bridge {
         do {
             envelope = try decoder.decode(BridgeEnvelope<T>.self, from: data)
         } catch {
-            // A failed call still decodes as an envelope, so reaching here means
-            // the shape itself was wrong. Surface the raw payload: a protocol
-            // mismatch is otherwise invisible.
             throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
         }
 
@@ -372,22 +256,12 @@ enum Bridge {
         return result
     }
 
-    /// Run one transport call, repairing the local daemon when it is gone.
-    ///
-    /// A daemon that dies under the app is not something the user should fix
-    /// by hand: the bridge reinstalls and restarts the launch agent, waits for
-    /// the socket, and retries the call once before anything is reported. The
-    /// repair only runs for `host_unreachable`. A timeout means the daemon is
-    /// alive and busy, which is not the same situation at all.
     private static func call(
         method: String,
         params: String,
         patience: TimeInterval,
         route: Route
     ) throws -> String {
-        // A host that is still booting fails the first connect, then comes up.
-        // Repair and retry a bounded number of times so the caller gets its
-        // answer instead of an error the moment the host is ready again.
         var attempt = 0
         var busy = 0
         while true {
@@ -451,8 +325,6 @@ enum Bridge {
     private static func postHostBecameSilent() {
         postHostState(.hostBecameSilent)
         hostStateNotifier.monitorSilence(healthy: .hostRecoveryFinished) {
-            // Use a separate urgent connection, so a slow request or a full
-            // ordinary pool cannot make a healthy helper appear unavailable.
             routeLock.lock()
             let checked = route
             let revision = routeRevision
@@ -483,8 +355,6 @@ enum Bridge {
     private static func postHostBecameUnreachable() {}
     #endif
 
-    /// The urgent variant of `call`: same repair-and-retry loop, urgent
-    /// transport path.
     private static func callUrgent(
         method: String,
         params: String,
@@ -527,8 +397,6 @@ enum Bridge {
         }
     }
 
-    /// A timeout is not repairable, but it is still something the footer
-    /// should show. Repairable failures start their own recovery card.
     private static func noteHostCallFailure(_ error: Error) {
         if isTimeout(error) {
             postHostBecameSilent()
@@ -542,11 +410,6 @@ enum Bridge {
         return code == "host_timeout"
     }
 
-    /// Whether a transport error means the daemon is gone rather than busy.
-    ///
-    /// Only connection-level failures are repairable. A timeout means the
-    /// daemon is alive and working, and restarting it would interrupt that
-    /// work for no reason.
     private static func isRepairable(_ error: Error) -> Bool {
         guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
             return false
@@ -554,15 +417,7 @@ enum Bridge {
         return code == "host_unreachable"
     }
 
-    /// The host had the request and did not answer in time, so whether it
-    /// acted on it is unknown.
-    ///
-    /// Different from unreachable, which never arrived and can be repeated
-    /// without a thought. A send that timed out has to be reconciled before
-    /// anybody claims it failed.
     static func isDeliveryUnknown(_ error: Error) -> Bool {
-        // Cancellation can arrive after a mutation has reached the host. A
-        // cancelled waiter is not evidence that the host rejected the send.
         if error is CancellationError { return true }
         if isTimeout(error) { return true }
         guard let bridge = error as? BridgeError else { return false }
@@ -572,11 +427,6 @@ enum Bridge {
         }
     }
 
-    /// Whether an error means the host was unreachable or silent, which is
-    /// worth retrying once it is back.
-    ///
-    /// Screens use this to keep refreshing while the daemon boots instead of
-    /// pinning an error the user did not cause.
     static func isHostRecoveryError(_ error: Error) -> Bool {
         guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
             return false
@@ -584,28 +434,12 @@ enum Bridge {
         return code == "host_unreachable" || code == "host_timeout"
     }
 
-    /// Whether an error is "sign in first" rather than a fault.
-    ///
-    /// Push registration runs at launch whether or not anybody is signed in,
-    /// and a settings row that reports being signed out as a failure is noise
-    /// beside the sign-in button that is already on screen.
     static func isSignedOutError(_ error: Error) -> Bool {
         error.localizedDescription.localizedCaseInsensitiveContains("sign in")
     }
 
-    /// How many times a call is retried after repairing the host. The repair
-    /// itself waits for the socket, so a host that is merely slow to boot is
-    /// given this many chances to answer before an error is shown.
     private static let maxHostRepairAttempts = 3
 
-    /// Bring the local daemon back after it stopped answering.
-    ///
-    /// Runs on the calls queue, so it can afford to block. Prefer a soft
-    /// kickstart of the existing launch agent over a full reinstall: most
-    /// `host_unreachable` failures are a host that exited, not a missing
-    /// install. The reinstall is the last resort, and the whole path is gated
-    /// by a cooldown so a burst of failing calls does not boot the daemon
-    /// repeatedly. The socket probe itself is cheap and runs on every failure.
     private static func repairHost() -> Bool {
         #if os(macOS)
         hostRepairLock.lock()
@@ -614,17 +448,14 @@ enum Bridge {
         if let last = lastHostRepairAt,
            Date().timeIntervalSince(last) < hostRepairCooldown
         {
-            // Another call already repaired; reuse it rather than repeating it.
             return waitForSocket(seconds: hostRepairShareWait)
         }
         lastHostRepairAt = Date()
 
-        // Soft first: the agent is usually installed and only needs a nudge.
         try? HostAgentInstaller.ensureRunning()
         if waitForSocket(seconds: hostRepairWait) {
             return true
         }
-        // Soft start failed: reinstall and try once more.
         try? HostAgentInstaller.installAndStart()
         return waitForSocket(seconds: hostRepairWait)
         #else
@@ -648,8 +479,6 @@ enum Bridge {
 
     private static func waitForSocket(seconds: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
-        // Start tight: a healthy host binds in tens of milliseconds, and a
-        // 150ms sleep on every probe added a visible lag to every recovery.
         var interval: TimeInterval = 0.05
         while Date() < deadline {
             if socketIsUp() { return true }
@@ -660,17 +489,6 @@ enum Bridge {
     }
     #endif
 
-    /// Where blocking transport work runs.
-    ///
-    /// Deliberately its own queue and **not** the cooperative pool. A call is a
-    /// synchronous socket round trip, and the pool is sized to the core count:
-    /// `Task.detached` parked one of its threads per call in a `read(2)`, and
-    /// with a terminal poll task and a writer task per session plus the screens
-    /// that poll, the pool ran out of threads. Nothing else could make progress
-    /// while it did, so the app looked hung with an idle main thread.
-    ///
-    /// libdispatch grows this queue on demand and the connection ceiling in
-    /// `SocketTransport` bounds how many can be blocked at once.
     private static let calls = DispatchQueue(
         label: "ai.tokenstat.bridge.calls",
         qos: .userInitiated,
@@ -687,10 +505,6 @@ enum Bridge {
         }
     }
 
-    /// Run a call off the main actor.
-    ///
-    /// Every method below goes through this. Reports run SQL and `scan` walks
-    /// thousands of files, so none of it belongs on the thread that draws.
     private static func background<T: Decodable & Sendable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -704,10 +518,6 @@ enum Bridge {
         }
     }
 
-    /// Report what happened to `BridgeObserver` and pass the answer through.
-    ///
-    /// Wrapping the three async entry points rather than the sync core, so a
-    /// call is reported once even though `invoke` is reached several ways.
     private static func observed<T: Sendable>(
         _ method: String,
         peer: String?,
@@ -720,9 +530,6 @@ enum Bridge {
             throw refusal
         }
         #if os(macOS)
-        // A long poll waits on purpose, so it is left out of the disk log.
-        // A remote call names the method it carried, or every peer poll in
-        // the log reads as the same line.
         let logged = inner.map { "\(method):\($0)" } ?? method
         let diagnostic = isExpectedLongPoll(method) ? 0 : DiagnosticsLog.callStarted(logged)
         var failure: String?
@@ -749,9 +556,6 @@ enum Bridge {
         }
     }
 
-    /// Keep the normal path silent. Console gets an actionable record only when
-    /// an interaction took long enough to be felt; terminal long-polls are
-    /// intentionally excluded because their wait is the requested behaviour.
     private static func notePerformance(
         method: String,
         peer: String?,
@@ -771,8 +575,6 @@ enum Bridge {
     }
 
     #if DEBUG
-    /// `TOKENSTAT_LOG_ALL_CALLS=1` logs every call with its time, for counting
-    /// what a screen or a file save actually costs.
     private static let logsAllCalls = ProcessInfo.processInfo.environment["TOKENSTAT_LOG_ALL_CALLS"] != nil
     #endif
 
@@ -791,9 +593,6 @@ enum Bridge {
         params["peer"] as? String
     }
 
-    /// A one-shot call the user is waiting on. Same decoding as `background`,
-    /// but the transport skips the pool wait: opening a terminal must not
-    /// queue behind the sessions already polling.
     private static func backgroundUrgent<T: Decodable & Sendable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -830,11 +629,6 @@ enum Bridge {
         }
     }
 
-    /// A call whose result may legitimately be `null`.
-    ///
-    /// A convenience for callers naming the wrapped type. The generic
-    /// envelope also preserves successful null when T is Optional; here `ok`
-    /// alone decides whether the call worked and null means "nothing".
     private static func invokeOptional<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -882,18 +676,11 @@ enum Bridge {
         }
     }
 
-    // MARK: - Methods
 
     static func info() async throws -> Info {
         try await background("info", as: Info.self)
     }
 
-    /// Whether waiting for the host is still worth it.
-    ///
-    /// `settled` covers a host that answered and one that answered
-    /// `host_incompatible`. The second will not change until the helper is
-    /// replaced, so a readiness loop that kept asking only spent the launch
-    /// polling it a dozen times a second.
     static func hostSettled() async -> Bool {
         do {
             _ = try await info()
@@ -917,16 +704,6 @@ enum Bridge {
         )
     }
 
-    /// The activity grid behind Home's heatmap and streaks.
-    ///
-    /// Returns nil for an archive with nothing in it yet, which is a state and
-    /// not a failure: it is the first thing a new install will ever show.
-    /// The activity grid.
-    ///
-    /// `scope` is `"local"` for this device's archive or `"account"` for every
-    /// machine that syncs. The host answers with which one it actually built,
-    /// because an account grid can fall back to a local one and a client that
-    /// assumed otherwise would label one machine's year as everybody's.
     static func activityCalendar(
         weeks: Int = 53,
         scope: String = "local",
@@ -935,19 +712,11 @@ enum Bridge {
         try await backgroundOptional(
             "activity.calendar",
             ["weeks": weeks, "scope": scope, "force": force],
-            // Longer than the default: an account grid is a network call on the
-            // host's side, and this one is on the screen that opens first.
             patience: Patience.long,
             as: ActivityCalendar.self
         )
     }
 
-    /// One day's hover detail for the Home heatmap, mirroring the profile page.
-    ///
-    /// `scope` is `"local"` or `"account"`, matching `activityCalendar`. The
-    /// account answer comes from the same cached series the calendar uses, so
-    /// moving across the grid costs no extra network calls. A day with no
-    /// events is `nil`, which is an answer and not a failure.
     static func dayDetail(
         date: String,
         weeks: Int = 53,
@@ -960,29 +729,15 @@ enum Bridge {
         )
     }
 
-    /// The account's breakdown by one dimension, across every machine that
-    /// syncs.
-    ///
-    /// The sibling of `report`, which reads this device's archive. A client has
-    /// no archive, so this is the only way it can answer "which model ate the
-    /// month". `group` is `"model"`, `"source"` or `"day"`: the account holds
-    /// no project keys and no session ids, so there is nothing else to ask for.
     static func accountReport(group: String, weeks: Int = 53) async throws -> AccountReport {
         try await background(
             "account.report",
             ["group": group, "weeks": weeks],
-            // A network call on the host's side, same as the account grid.
             patience: Patience.long,
             as: AccountReport.self
         )
     }
 
-    /// What each device contributed over a window of days.
-    ///
-    /// The ids come from `account()`, because the caller already has them and
-    /// asking the service for the same list twice to answer one question is a
-    /// round trip nobody needs. One request per device on the host's side, so
-    /// this belongs to a screen somebody opened rather than to a warm-up pass.
     static func machineUsage(machines: [String], days: Int = 30) async throws -> [MachineUsage] {
         try await background(
             "account.machineUsage",
@@ -1000,39 +755,26 @@ enum Bridge {
         try await background("blocks.active", ["query": query.payload], as: [Block].self).first
     }
 
-    /// All aggregates the Insights screen draws, read from one archive moment.
     static func insightsSnapshot(_ query: Query = Query()) async throws -> InsightsSnapshot {
         try await background("insights.snapshot", ["query": query.payload], as: InsightsSnapshot.self)
     }
 
-    /// Read every discoverable log source into the archive. Slow by nature:
-    /// this is the call that walks the disk.
     static func scan() async throws -> ScanReport {
         try await background("scan", patience: Patience.long, as: ScanReport.self)
     }
 
-    /// Fetch remote vendor usage after an explicit user action.
     static func fetchRemotes() async throws -> [FetchReport] {
         try await background("fetch", patience: Patience.long, as: [FetchReport].self)
     }
 }
 
-// MARK: - Account
 
 extension Bridge {
-    /// Fetch the release's disk image and verify it against the release's own
-    /// checksums. The daemon stops at a file on disk; `AppInstaller` decides
-    /// whether to trust it.
     static func appUpdateDownload() async throws -> DownloadedFile {
-        // The host blocks for the whole DMG download here, so this needs the
-        // same patience as `hostUpdateApply`, not the 60-second default.
         try await background("app.updateDownload", patience: Patience.long, as: DownloadedFile.self)
     }
 
     static func appUpdateCheck() async throws -> AppUpdate {
-        // Pass the bundle marketing version so a tip hostd cannot hide an
-        // older app (or the reverse). The host ORs that with its own crate
-        // version and reports newer when either lags the release.
         try await background(
             "app.updateCheck",
             ["appVersion": AppInfo.version, "supportsRetryAfter": true],
@@ -1042,11 +784,7 @@ extension Bridge {
 }
 
 
-// MARK: - Chat
-
 extension Bridge {
-    /// Local hostd, or the same method on a peer. Chat is the same store
-    /// either way, and the phone talks to it over the tunnel.
     private static let chatReadFlights = ChatReadFlights()
     private struct ChatReadOwner: Encodable {
         let scope: WorkReference.Scope
@@ -1095,8 +833,6 @@ extension Bridge {
         }
         let invalidates = owner != nil && ChatReadFlights.mutations.contains(method)
         if invalidates, let owner { await chatReadFlights.invalidate(owner: owner, peer: peer) }
-        // The invalidation await must not carry earlier account authorization
-        // into a mutation dispatched for the next account.
         if let scope, !(await MainActor.run(body: { WorkSessionContext.shared.scope == scope
             && WorkSessionContext.shared.generation == generation })) { throw CancellationError() }
         if let expectedGeneration, await WorkSessionContext.shared.generation != expectedGeneration { throw CancellationError() }
@@ -1122,21 +858,11 @@ extension Bridge {
         return try await background(method, params, patience: patience, as: type)
     }
 
-    /// A Mac remote folder is stored as `remote:<peer>:<id>`. The phone already
-    /// passes the peer separately. Either way the host on the owning machine
-    /// only ever sees its own workspace id.
     static func chatRoute(workspaceID: String, peer: String? = nil) -> (workspaceID: String, peer: String?) {
         let route = WorkDestinationResolver.route(folderID: workspaceID, explicitPeer: peer)
         return (route.workspaceID, route.peer)
     }
 
-    /// Tell the host somebody has this conversation on screen, so it does not
-    /// push to this account's phones about a reply they are watching arrive.
-    ///
-    /// A lease, renewed on a timer: see `presence` on the host. Failures are
-    /// ignored because the consequence of one is a notification that was not
-    /// needed, and taking a chat screen down with an alert about a heartbeat
-    /// would be the worse trade by a distance.
     static func watching(conversationID: String, watcherID: String, peer: String? = nil,
                                   expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async {
         struct Ack: Codable, Sendable { var ok: Bool? }
@@ -1159,10 +885,6 @@ extension Bridge {
         )
     }
 
-    /// `refresh` asks the host to probe the agent CLIs now instead of serving
-    /// its cached lists. Only send it to a host that understands it: an older
-    /// one ignores the field and answers from the cache, which looks to a
-    /// person like a Refresh button that does nothing.
     static func chatBackends(peer: String? = nil, refresh: Bool = false) async throws
         -> [ChatBackend] {
         try await chatInvoke(
@@ -1196,9 +918,6 @@ extension Bridge {
             })
     }
 
-    /// Remote hosts require explicit search-session opt-in. A local Mac
-    /// searches its own work without contacting any paired machine.
-    /// The session owner validates the returned host-local references before use.
     static func workSearch(query: String, kinds: Set<WorkReference.Kind> = [],
                            workspaceIDs: Set<String> = [], cursor: String? = nil,
                            peer: String? = nil) async throws -> WorkSearchLive.Response {
@@ -1245,9 +964,6 @@ extension Bridge {
         )
     }
 
-    /// Recently messaged conversations across every workspace on one host.
-    /// The host answers from its in-memory index; no transcript crosses the
-    /// tunnel until somebody opens one of these rows.
     static func recentChats(peer: String, limit: Int = 50) async throws -> [ChatRecentConversation] {
         try await chatInvoke(
             peer: peer,
@@ -1281,9 +997,6 @@ extension Bridge {
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
         if let budgetSeconds { params["budgetSeconds"] = budgetSeconds }
-        // Nil omits the key so the host applies the workspace default. An
-        // empty string is No persona and has to travel, or it would look like
-        // the same omit.
         if let personaID { params["personaId"] = personaID }
         if let profileID {
             guard await RemoteHostFeature.agentProfiles.isSupported(peer: route.peer) else {
@@ -1305,8 +1018,6 @@ extension Bridge {
         return try await chatInvoke(peer: peer, "chat.fork", ["id": id], as: ChatConversation.self)
     }
 
-    /// Start a new chat that carries this one's setup and points its first
-    /// turn at the earlier history, without loading it.
     static func continueChatInNew(id: String, profileID: String? = nil, peer: String? = nil) async throws -> ChatConversation {
         guard await RemoteHostFeature.chatContinue.isSupported(peer: peer) else {
             throw NSError(domain: "Chat", code: 54, userInfo: [
@@ -1383,13 +1094,6 @@ extension Bridge {
         ).removed
     }
 
-    /// Send a message, optionally under a name the client chose for it.
-    ///
-    /// With a `clientMessageID` the host keeps a receipt, so the same message
-    /// arriving twice is answered rather than run twice. Only pass one to a
-    /// machine that speaks protocol 14 (`RemoteHostFeature.confirmedSend`):
-    /// older hosts do not provide the revision, crash and retention guarantees
-    /// needed to preserve the intended context and avoid a second turn.
     static func sendChat(
         id: String,
         text: String,
@@ -1424,10 +1128,6 @@ extension Bridge {
         )
     }
 
-    /// What the host knows about a message it may or may not have taken.
-    ///
-    /// Reporting only. A client whose answer went missing asks this before it
-    /// decides whether to put the words back in the composer.
     static func chatReceipt(
         id: String,
         clientMessageID: String,
@@ -1461,8 +1161,6 @@ extension Bridge {
         _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 
-    /// Answer one question the agent asked. The host decides how it travels:
-    /// on the running turn's next step, after that turn, or as a new turn.
     static func answerChatQuestion(id: String, questionID: String, text: String, peer: String? = nil) async throws -> ChatQuestionDelivery {
         guard await RemoteHostFeature.chatQuestions.isSupported(peer: peer) else {
             throw NSError(domain: "Chat", code: 29, userInfo: [
@@ -1473,17 +1171,14 @@ extension Bridge {
                              ["id": id, "questionId": questionID, "text": text], as: ChatQuestionDelivery.self)
     }
 
-    /// Park a short note on the next tool step. The turn keeps going.
     static func steerChat(id: String, text: String, peer: String? = nil) async throws {
         _ = try await chatInvoke(peer: peer, "chat.steer", ["id": id, "text": text], as: Ack.self)
     }
 
-    /// Drop a parked note so it cannot ride a tool result or start a turn.
     static func steerClearChat(id: String, peer: String? = nil) async throws {
         _ = try await chatInvoke(peer: peer, "chat.steerClear", ["id": id], as: Ack.self)
     }
 
-    /// Send a parked note once the turn has finished, if it is still there.
     static func steerDeliverChat(id: String, peer: String? = nil) async throws -> ChatSteerDelivery {
         try await chatInvoke(peer: peer, "chat.steerDeliver", ["id": id], as: ChatSteerDelivery.self)
     }
@@ -1494,13 +1189,6 @@ extension Bridge {
         return try await chatInvoke(peer: peer, "chat.events", params, as: ChatEventChunk.self)
     }
 
-    /// One bounded page of a conversation, newest first.
-    ///
-    /// `cursor` nil asks for the newest page, which is what a conversation
-    /// opens on. The cursor in the answer asks for the page before it. Only
-    /// hosts that know `chat.eventPage` answer this; an older one refuses
-    /// with `unknown_method` and the caller reads the whole timeline the way
-    /// it always did.
     static func chatEventPage(
         id: String,
         cursor: String?,
@@ -1514,12 +1202,6 @@ extension Bridge {
         return try await chatInvoke(peer: peer, "chat.eventPage", params, as: ChatEventPage.self)
     }
 
-    /// Saved work on this device. These always ride the local transport
-    /// (`background`, never a peer), which is what makes them local-client
-    /// reads and writes; a machine asking over the tunnel is refused by the
-    /// host rather than answered. An older helper that does not know them
-    /// refuses with `unknown_method`, and the caller treats the cache as
-    /// unavailable rather than as empty.
     static func cachePut(
         key: String, scope: String, id: String, kind: String, itemId: String,
         revision: String?, payload: [String: Any]
@@ -1530,8 +1212,6 @@ extension Bridge {
                                          revision: revision, payload: encoded, expectedGeneration: generation)
     }
 
-    /// Prepared snapshots cross actors as bytes, with deletion ownership
-    /// captured before preparation starts. JSON expansion stays off the UI.
     static func cachePutEncoded(
         key: String, scope: String, id: String, kind: String, itemId: String,
         revision: String?, payload: Data, expectedGeneration: UInt64
@@ -1692,12 +1372,10 @@ extension Bridge {
         }
     }
 
-    /// Context and tool metadata reported for this conversation's backend.
     static func chatInspection(id: String, peer: String? = nil) async throws -> ChatInspection {
         try await chatInvoke(peer: peer, "chat.inspection", ["id": id], as: ChatInspection.self)
     }
 
-    /// What this conversation tells its agent before it hears the person.
     static func chatInstructions(id: String, peer: String? = nil) async throws -> ChatInstructions {
         try await chatInvoke(peer: peer, "chat.instructions", ["id": id], as: ChatInstructions.self)
     }
@@ -1719,12 +1397,6 @@ extension Bridge {
         )
     }
 
-    /// One short turn on an installed agent, run to completion on the host.
-    ///
-    /// `Patience.long` because it spawns a CLI and waits for a whole answer,
-    /// and the host caps it at ninety seconds of its own. The standard budget
-    /// would give up first and leave a wizard saying the host was unreachable
-    /// when it was simply thinking.
     static func draftChatPersona(
         brief: String,
         backend: String,
@@ -1772,11 +1444,6 @@ extension Bridge {
         )
     }
 
-    /// Point a workspace's default at a persona, or at nothing.
-    ///
-    /// An empty id means no persona, and comes back as nil rather than as an
-    /// error: a workspace is allowed to decide that new chats here have no
-    /// voice of their own.
     static func setDefaultChatPersona(
         workspaceID: String,
         personaID: String,
@@ -1827,14 +1494,10 @@ extension Bridge {
 }
 
 extension Bridge {
-    /// Who is signed in. Signed out is a normal result, not an error: the
-    /// bridge reports `signedIn: false` so the UI can offer sign-in rather
-    /// than show a failure.
     static func account() async throws -> Account {
         try await background("account.status", as: Account.self)
     }
 
-    /// Whether this account could claim a handle. Advice while somebody types.
     static func checkHandle(_ handle: String) async throws -> HandleCheck {
         try await background("account.checkHandle", ["handle": handle], as: HandleCheck.self)
     }
@@ -1843,12 +1506,10 @@ extension Bridge {
         try await background("account.claimHandle", ["handle": handle], as: Account.self)
     }
 
-    /// Answer the one-time offer with "not now", for every device.
     static func skipHandle() async throws -> Account {
         try await background("account.skipHandle", as: Account.self)
     }
 
-    /// Nil leaves that setting as it is.
     static func setProfile(public isPublic: Bool?, indexable: Bool?) async throws -> Account {
         var params: [String: Any] = [:]
         if let isPublic { params["public"] = isPublic }
@@ -1878,21 +1539,15 @@ extension Bridge {
         )
     }
 
-    /// Begin a device authorization. Returns the code to show and the URL to
-    /// open. Opening the browser is this side's job.
     static func startLogin() async throws -> DeviceLogin {
         try await background("account.deviceStart", as: DeviceLogin.self)
     }
 
-    /// Poll once. Never sleeps: the caller owns the cadence, which is what
-    /// keeps the window responsive and the flow cancellable.
     static func pollLogin() async throws -> DevicePoll {
         try await background("account.devicePoll", as: DevicePoll.self)
     }
 
     static func cancelLogin() async {
-        // Best effort. A stale pending login is harmless, it expires anyway,
-        // and failing to clear it must not surface as an error to the user.
         _ = try? await background("account.cancelLogin", as: Ack.self)
     }
 
@@ -1901,8 +1556,6 @@ extension Bridge {
         // Dev and ad-hoc builds hit missing-entitlement paths here, and any
         // other Keychain error would otherwise leave the user signed in.
         try? SSHVaultBiometrics.remove()
-        // Interactive: the Rust side already uses a short HTTP timeout for the
-        // revoke, and Sign out must not sit on the default long silence budget.
         _ = try await background(
             "account.logout",
             patience: Patience.interactive,
@@ -1910,7 +1563,6 @@ extension Bridge {
         )
     }
 
-    /// Send the aggregate window to the account. Network-bound and slow.
     static func sync(dryRun: Bool = false) async throws -> SyncOutcome {
         try await background(
             "sync.run",
@@ -1924,9 +1576,6 @@ extension Bridge {
         try await background("sync.scheduleStatus", as: SyncScheduleStatus.self)
     }
 
-    /// Fetch the hosted list-rate snapshot and reload the session's cached
-    /// copy. The daemon does this on its own schedule; the in-process
-    /// scheduler is the only thing that can on a machine with no host agent.
     static func pricingRefresh() async throws -> PricingRefresh {
         try await background(
             "pricing.refresh",
@@ -1935,16 +1584,6 @@ extension Bridge {
         )
     }
 
-    /// Adopt the price book this build ships with, if the machine has none.
-    ///
-    /// Offline, cheap, and never replaces a book that was fetched, so it is
-    /// safe on every launch. It matters most where there is no other way to get
-    /// one: iPhone and iPad have no CLI to run `tokenstat pricing --refresh`
-    /// and no daemon to schedule it, so without this a first launch draws a
-    /// heatmap with counts and no money on it.
-    ///
-    /// A missing resource is not an error worth surfacing. A build that shipped
-    /// without a seed behaves exactly as builds did before there was one.
     @discardableResult
     static func pricingSeed() async -> PricingSeed? {
         guard let url = Bundle.main.url(forResource: "PriceBookSeed", withExtension: "json")
@@ -1957,12 +1596,9 @@ extension Bridge {
     }
 }
 
-/// For methods whose result is only "it worked".
 private struct Ack: Codable, Sendable {}
 
 extension Bridge {
-    /// Two-level report. `project` split by `source` answers "which harnesses
-    /// ran in this folder", which is what the sidebar tree is.
     static func reportSplit(
         group: GroupBy,
         splitBy: GroupBy,
@@ -1976,25 +1612,17 @@ extension Bridge {
     }
 }
 
-// MARK: - Plan limits
 
 extension Bridge {
-    /// What each vendor says is left of its plan.
-    ///
-    /// Automatic reads share the helper's minute cache. Explicit Refresh asks
-    /// again; simultaneous readers still share the same vendor pass.
     static func usageLimits(force: Bool = true) async throws -> [ProviderLimits] {
         try await background("usage.limits", ["force": force], patience: Patience.long, as: [ProviderLimits].self)
     }
 
     #if os(macOS)
-    /// Whether Claude Code's status line hands its limits to this Mac's host.
     static func claudeLiveFeed() async throws -> ClaudeLiveFeedState {
         try await background("usage.claudeLiveFeed", as: ClaudeLiveFeedState.self)
     }
 
-    /// Turns the live feed on or off. This edits Claude Code's own settings,
-    /// so it is only ever called from the switch a person flipped.
     static func setClaudeLiveFeed(enabled: Bool) async throws -> ClaudeLiveFeedState {
         try await background("usage.setClaudeLiveFeed", ["enabled": enabled], as: ClaudeLiveFeedState.self)
     }
@@ -2005,8 +1633,6 @@ extension Bridge {
     }
     #endif
 
-    /// Whether this machine posts plan-limit readings after sync / refresh (P2),
-    /// which sources are skipped, and the last readings we have on disk.
     static func limitsSync() async throws -> LimitsSyncState {
         try await background("config.limitsSync", as: LimitsSyncState.self)
     }
@@ -2031,13 +1657,7 @@ extension Bridge {
         )
     }
 
-    // MARK: - Push notifications
 
-    /// Tell the account where to reach this device.
-    ///
-    /// `environment` is the Apple host the token belongs to, sandbox for a
-    /// development build and production for a shipped one. The account keeps
-    /// it per device, because a token minted for one is refused by the other.
     static func pushRegister(token: String, platform: String, environment: String) async throws {
         _ = try await background(
             "push.register",
@@ -2093,14 +1713,8 @@ struct PushTestResult: Codable, Sendable {
     var signedIn: Bool = false
 }
 
-// MARK: - Workspaces
 
 extension Bridge {
-    /// Registered folders with their current git state. Reads git per folder,
-    /// so treat it as a refresh rather than something to call on every keypress.
-    ///
-    /// Asks for the general folder too. An older host ignores the flag and
-    /// simply has none, so "No repository" is offered only where it exists.
     static func workspaces() async throws -> [WorkspaceFolder] {
         try await background("workspace.list", ["includeGeneral": true], as: [WorkspaceFolder].self)
             .map(\.presented)
@@ -2117,19 +1731,14 @@ extension Bridge {
         }
     }
 
-    /// One folder with its git state, read fresh. For the file watcher: a
-    /// save in one project should not re-read git in every other one.
     static func workspaceStatus(id: String) async throws -> WorkspaceFolder {
         try await background("workspace.status", ["id": id], as: WorkspaceFolder.self)
     }
 
-    /// Counts for every registered folder, in one call.
     static func workspaceSummaries() async throws -> [WorkspaceSummary] {
         try await background("workspace.summary", as: [WorkspaceSummary].self)
     }
 
-    /// The same, on another machine. Ids come back as that machine's own, so
-    /// the caller re-prefixes them the way `remoteWorkspaces` does.
     static func remoteWorkspaceSummaries(peer: Peer) async throws -> [WorkspaceSummary] {
         let summaries = try await onPeer(peer.key, "workspace.summary", as: [WorkspaceSummary].self)
         return summaries.map { summary in
@@ -2143,7 +1752,6 @@ extension Bridge {
         try await background("workspace.add", ["path": path], as: WorkspaceFolder.self)
     }
 
-    /// Forgets the entry. Never deletes the folder.
     static func removeWorkspace(id: String) async throws {
         _ = try await background("workspace.remove", ["id": id], as: Removed.self)
     }
@@ -2157,8 +1765,6 @@ extension Bridge {
         }
     }
 
-    /// Recent commits, newest first. Empty for a folder that is not a
-    /// repository, and for one whose first commit has not happened yet.
     static func workspaceLog(id: String, limit: Int = 100) async throws -> [Commit] {
         if let target = remoteWorkspace(id) {
             return try await onPeer(
@@ -2171,8 +1777,6 @@ extension Bridge {
         return try await background("workspace.log", ["id": id, "limit": limit], as: [Commit].self)
     }
 
-    /// One directory of the file tree. Lazy: pass the relative path of the
-    /// folder being opened, or "" for the project root.
     static func workspaceTree(id: String, path: String = "") async throws -> [TreeEntry] {
         if let target = remoteWorkspace(id) {
             return try await onPeer(
@@ -2185,7 +1789,6 @@ extension Bridge {
         return try await background("workspace.tree", ["id": id, "path": path], as: [TreeEntry].self)
     }
 
-    /// One file's diff against HEAD, staged and unstaged together.
     static func workspaceDiff(id: String, path: String) async throws -> FileDiff {
         if let target = remoteWorkspace(id) {
             return try await onPeer(
@@ -2210,12 +1813,6 @@ extension Bridge {
         return try await background("workspace.read", ["id": id, "path": path], as: FileText.self)
     }
 
-    /// Colour a buffer.
-    ///
-    /// Takes the text rather than a workspace and a path, for two reasons. The
-    /// buffer on screen is what wants colouring, and it is usually not what is
-    /// on disk. And it needs no session, so it answers without queuing behind a
-    /// `git status` the way anything on the workspace path would.
     static func highlight(path: String, text: String) async throws -> Highlighting {
         try await background(
             "highlight",
@@ -2225,7 +1822,6 @@ extension Bridge {
         )
     }
 
-    /// One commit in full: message, files, and their diffs.
     static func workspaceShow(id: String, commit: String) async throws -> CommitDetail {
         if let target = remoteWorkspace(id) {
             return try await onPeer(
@@ -2239,11 +1835,7 @@ extension Bridge {
     }
 }
 
-// MARK: - Git, the parts that write
 
-/// These change the repository, so every one of them is called from a button
-/// and never from a timer, a watcher, or a refresh. See
-/// `tokenstat_workspace::gitwrite` for why that split is kept in the Rust too.
 extension Bridge {
     static func pullAvailability(
         workspaceID: String,
@@ -2272,8 +1864,6 @@ extension Bridge {
         )
     }
 
-    /// The pull request for a workspace's branch, or the branch it is on.
-    /// Nil from a paired computer too old to answer, which shows no badge.
     static func branchPull(
         workspaceID: String,
         peer: String? = nil,
@@ -2320,8 +1910,6 @@ extension Bridge {
         return try await background("pulls.list", params, as: [PullSummary].self)
     }
 
-    /// Older hosts keep their existing first-page response; never send them a
-    /// cursor they would ignore and then mistake that response for another page.
     static func pullListPage(
         workspaceID: String, peer: String?, scope: PullScope, state: PullStateFilter,
         cursor: String? = nil, refresh: Bool = false
@@ -2352,12 +1940,6 @@ extension Bridge {
         return version >= RemoteHostFeature.pullAllState.minimumProtocol
     }
 
-    /// Public author pictures for a history list.
-    ///
-    /// An older paired computer returns an empty index, because it has no
-    /// method to ask. A missing forge or a failed request throws, and the
-    /// history list treats that the same way: initials, and the commits
-    /// still show.
     static func commitAvatars(workspaceID: String, peer: String? = nil, oid: String) async throws -> HistoryAvatarIndex {
         var params: [String: Any] = ["workspaceId": workspaceID]
         if !oid.isEmpty { params["oid"] = oid }
@@ -2444,8 +2026,6 @@ extension Bridge {
         return try await background(method, params, as: type)
     }
 
-    // These methods are deliberately separate from refreshable reads. Every
-    // call site is one labelled button press in PullDetailView.
     static func preparePullCreation(workspaceID: String, peer: String?) async throws -> PullCreateContext {
         try await pullRead(workspaceID: workspaceID, peer: peer, method: "pulls.prepareCreate", values: [:], as: PullCreateContext.self)
     }
@@ -2685,12 +2265,8 @@ private func remoteWorkspace(_ id: String) -> RemoteWorkspaceTarget? {
     return RemoteWorkspaceTarget(peer: parts[1], workspace: parts[2])
 }
 
-// MARK: - Terminals
 
 extension Bridge {
-    /// Discover model servers that are already listening on this Mac's loopback.
-    /// The host performs the probes so the client never needs a second network
-    /// path or permission model for local tools.
     static func localModels() async throws -> [LocalProvider] {
         try await background("local.models", patience: Patience.interactive, as: [LocalProvider].self)
     }
@@ -2704,8 +2280,6 @@ extension Bridge {
         try await onPeer(peer, "local.models", as: [LocalProvider].self)
     }
 
-    /// Launch a command in the workspace's folder. The process is owned by the
-    /// host, so it outlives this window and any tab switch.
     static func ptySpawn(
         workspaceID: String,
         command: String,
@@ -2719,9 +2293,6 @@ extension Bridge {
         profileID: String? = nil,
         hidden: Bool = false
     ) async throws -> PtySessionInfo {
-        // Urgent: a person clicked Shell and is watching this round trip. It
-        // must not queue behind sessions already polling when the pool is
-        // saturated.
         var params: [String: Any] = [
             "workspaceId": workspaceID,
             "command": command,
@@ -2729,9 +2300,6 @@ extension Bridge {
             "rows": rows,
             "cols": cols,
             "noColor": noColor,
-            // Which way round the background is. A TUI that cannot ask the
-            // emulator assumes dark, which is how a light window ended up
-            // full of agents drawn for a black terminal.
             "dark": dark,
         ]
         if let modelProvider {
@@ -2743,7 +2311,6 @@ extension Bridge {
         if let profileID {
             params["profileId"] = profileID
         }
-        // Inspector consoles and daemon jobs stay off the workspace tab list.
         if hidden {
             params["hidden"] = true
         }
@@ -2754,11 +2321,6 @@ extension Bridge {
         try await background("pty.list", patience: Patience.interactive, as: [PtySessionInfo].self)
     }
 
-    /// Liveness, size and activity for one session.
-    ///
-    /// Carries the viewer id because for a session owned by another machine
-    /// this is the only call that reaches the owner: reads there are answered
-    /// from a locally pushed cache. See `TerminalViewer`.
     static func ptyInfo(id: String) async throws -> PtySessionInfo {
         try await background(
             "pty.info",
@@ -2768,15 +2330,6 @@ extension Bridge {
         )
     }
 
-    /// Output after `offset`. Returns immediately, empty when there is none.
-    /// Poll, do not push.
-    /// Output since `offset`.
-    ///
-    /// `waitMs` lets the host hold the call open until there is something to
-    /// send. Zero is a plain poll, which is what a session nobody is looking at
-    /// wants. The focused session asks the host to wait instead, so a keystroke
-    /// echo comes back on the round trip it is ready on rather than on the next
-    /// scheduled read.
     static func ptyRead(id: String, offset: UInt64, waitMs: Int = 0) async throws -> PtyChunk {
         try await background(
             "pty.read",
@@ -2786,7 +2339,6 @@ extension Bridge {
         )
     }
 
-    /// Keystrokes. Bytes, not text: an escape sequence is a byte stream.
     static func ptyWrite(id: String, bytes: [UInt8]) async throws {
         _ = try await background(
             "pty.write",
@@ -2796,11 +2348,6 @@ extension Bridge {
         )
     }
 
-    /// Say what this front end can show, and get back what the session became.
-    ///
-    /// Not the same thing when a phone is watching the same session: the host
-    /// sizes it to suit every viewer, so the answer can be smaller than the ask.
-    /// See `TerminalViewer`.
     @discardableResult
     static func ptyResize(id: String, rows: Int, cols: Int) async throws -> PtySizeAck {
         try await background(
@@ -2811,11 +2358,6 @@ extension Bridge {
         )
     }
 
-    /// Stop showing a session without stopping the process.
-    ///
-    /// Gives up this front end's claim on the size so the others get their own
-    /// back at once. The host expires the claim on its own if this never
-    /// arrives, so it is a courtesy rather than a requirement.
     static func ptyDetach(id: String) async throws {
         _ = try await background(
             "pty.detach",
@@ -2825,26 +2367,18 @@ extension Bridge {
         )
     }
 
-    /// Stop the process. Killing an already dead session is not an error.
     static func ptyKill(id: String) async throws {
         _ = try await background("pty.kill", ["id": id], as: Ack.self)
     }
 
-    /// Kill and forget. The host's buffer goes with it.
     static func ptyClose(id: String) async throws {
         _ = try await background("pty.close", ["id": id], as: Ack.self)
     }
 
-    /// What this machine can launch in a workspace, answered by the host that
-    /// would run the session. The same method a remote folder asks its owner;
-    /// using it locally keeps one source of truth and stops the app running a
-    /// login shell of its own to find the PATH.
     static func launcherCatalog() async throws -> [RemoteLaunchProfile] {
         try await background("launcher.catalog", as: [RemoteLaunchProfile].self)
     }
 
-    /// `profile` asks about a profile's own login. Profiles are this
-    /// machine's, so it is never sent to a peer.
     static func agentSetupCheck(peer: String?, id: String, profile: String? = nil) async throws -> AgentSetupStatus {
         if let peer { return try await onPeer(peer, "launcher.checkSignIn", ["id": id], as: AgentSetupStatus.self) }
         var params: [String: Any] = ["id": id]
@@ -2859,7 +2393,6 @@ extension Bridge {
         return try await background("launcher.signIn", params, as: PtySessionInfo.self)
     }
 
-    // MARK: Agent profiles. This machine's only, so never sent to a peer.
 
     static func agentProfiles(peer: String? = nil) async throws -> AgentProfiles {
         if let peer { return try await onPeer(peer, "profiles.list", [:], as: AgentProfiles.self) }
@@ -2894,10 +2427,6 @@ extension Bridge {
         try await background("profiles.delete", ["id": id], patience: Patience.long, as: AgentProfiles.self)
     }
 
-    /// Run a profile's official installer on this machine, then the caller
-    /// refreshes the catalog. The id selects a command hardcoded in the host,
-    /// never a string from this app, so this stays "the user clicked Install
-    /// on a known tile". Long by nature: installers download binaries.
     static func launcherInstall(id: String, reinstall: Bool = false) async throws -> LauncherInstallResult {
         try await background(
             reinstall ? "launcher.reinstall" : "launcher.install",
@@ -2907,8 +2436,6 @@ extension Bridge {
         )
     }
 
-    /// Installed agent versions. With `check`, the latest each vendor
-    /// publishes too, which is a request to the vendor: only on a button press.
     static func agentUpdates(check: Bool, peer: String?) async throws -> [AgentUpdateRow] {
         let params: [String: Any] = ["check": check]
         if let peer {
@@ -2917,8 +2444,6 @@ extension Bridge {
         return try await background("launcher.updates", params, patience: Patience.long, as: [AgentUpdateRow].self)
     }
 
-    /// Update one agent with its own updater, or its installer when it has
-    /// none. The host picks the command from the id.
     static func agentUpdate(id: String, peer: String?) async throws -> AgentUpdateResult {
         if let peer {
             return try await onPeer(peer, "launcher.update", ["id": id], patience: Patience.installer, as: AgentUpdateResult.self)
@@ -2926,24 +2451,20 @@ extension Bridge {
         return try await background("launcher.update", ["id": id], patience: Patience.installer, as: AgentUpdateResult.self)
     }
 
-    /// Take a profile off this machine's launcher. The binary stays.
     static func launcherHide(id: String) async throws {
         struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
         _ = try await background("launcher.hide", ["id": id], as: Result.self)
     }
 
-    /// Put a hidden profile back on this machine's launcher.
     static func launcherShow(id: String) async throws {
         struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
         _ = try await background("launcher.show", ["id": id], as: Result.self)
     }
 
-    /// Allowlisted settings for a launcher profile. The form names the file.
     static func harnessConfig(id: String) async throws -> HarnessConfig {
         try await background("harness.config.get", ["id": id], as: HarnessConfig.self)
     }
 
-    /// Write allowlisted settings. Unknown keys are refused by the host.
     @discardableResult
     static func saveHarnessConfig(id: String, values: [String: String]) async throws -> HarnessConfig {
         try await background(
@@ -2954,7 +2475,6 @@ extension Bridge {
     }
 }
 
-// MARK: - Automations
 
 extension Bridge {
     static func automations() async throws -> [Automation] {
@@ -3025,12 +2545,10 @@ extension Bridge {
         try await background("automation.runs", as: [RunRecord].self)
     }
 
-    /// The agent backends a job can choose, as the daemon knows them.
     static func automationBackends() async throws -> [AgentBackend] {
         try await background("automation.backends", as: [AgentBackend].self)
     }
 
-    /// Argv for an interactive TTY. Not an automation run.
     static func automationInteractiveCommand(
         backend: String,
         prompt: String,
@@ -3053,7 +2571,6 @@ extension Bridge {
         return result.argv
     }
 
-    /// Output a run produced after `offset`. Poll while the run is running.
     static func automationTranscript(id: String, offset: UInt64) async throws -> TranscriptChunk {
         try await background("automation.transcript", ["id": id, "offset": offset], as: TranscriptChunk.self)
     }
@@ -3078,7 +2595,6 @@ extension Bridge {
     }
 }
 
-// MARK: - Workflows
 
 extension Bridge {
     static func workflows() async throws -> [WorkflowGraph] {
@@ -3133,7 +2649,6 @@ extension Bridge {
         try await background("workflow.continue", ["id": runID], as: WorkflowRunRecord.self)
     }
 
-    /// Cheap local backend. Does not save or run the draft.
     static func designWorkflow(
         prompt: String,
         workspaceID: String?,
@@ -3176,7 +2691,6 @@ private extension Encodable {
     }
 }
 
-// MARK: - Todo
 
 extension Bridge {
     static func todoCards(includeArchived: Bool = false) async throws -> [TodoCard] {
@@ -3232,7 +2746,6 @@ extension Bridge {
         _ = try await background("todo.remove", ["id": id], as: Removed.self)
     }
 
-    /// Hand the card to an agent. The card moves to Doing and the run starts.
     static func todoDelegate(id: String) async throws -> TodoCard {
         try await background("todo.delegate", ["id": id], as: TodoCard.self)
     }
@@ -3243,21 +2756,11 @@ extension Bridge {
 }
 
 
-
 private struct PtyWriteAck: Codable, Sendable { let written: Int }
-/// What the session actually became. Not always what was asked for: see
-/// `TerminalViewer`.
 struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }
 private struct PtyDetachAck: Codable, Sendable { let detached: Bool }
 
-// MARK: - Machines
 
-/// This machine's identity, the peers it knows, and calls forwarded to them.
-///
-/// A front end never speaks the machine-to-machine protocol itself. It asks its
-/// own daemon, and the daemon reaches the peer. That is why there is no
-/// handshake anywhere in this app, and why an iPad client will not need one
-/// either. See `docs/remote-transport.md`.
 extension Bridge {
     static func sshHosts() async throws -> [SSHHost] {
         try await background("ssh.host.list", as: [SSHHost].self)
@@ -3277,13 +2780,6 @@ extension Bridge {
         try await background("ssh.host.save", try payload(host), as: SSHHost.self)
     }
 
-    /// Write a record that arrived from the vault, keeping the timestamp it
-    /// came with.
-    ///
-    /// The plain save stamps the record with this machine's clock, which is
-    /// right for something a person just typed and wrong for something this
-    /// machine only received: it would make the copy look newer than the one
-    /// it was copied from and push it straight back.
     static func applySSHHost(_ host: SSHHost) async throws -> SSHHost {
         try await background("ssh.host.save", try keepingStamp(host), as: SSHHost.self)
     }
@@ -3306,7 +2802,6 @@ extension Bridge {
         return object
     }
 
-    /// Every SSH session this host is holding, alive or just closed.
     static func sshSessions() async throws -> [SSHSessionSummary] {
         try await background("ssh.session.list", as: [SSHSessionSummary].self)
     }
@@ -3346,8 +2841,6 @@ extension Bridge {
         try await background("ssh.folder.save", try payload(folder), as: SSHFolder.self)
     }
 
-    /// Deleting a folder keeps everything in it: hosts and sub-folders move up
-    /// one level. The host enforces that, this is only the door to it.
     static func deleteSSHFolder(id: String) async throws {
         _ = try await background("ssh.folder.delete", ["id": id], as: Removed.self)
     }
@@ -3364,13 +2857,10 @@ extension Bridge {
         try await background("ssh.knownhost.list", as: [SSHKnownHost].self)
     }
 
-    /// Forget a server's key so the next connection asks again. The honest
-    /// answer to a fingerprint that changed.
     static func forgetSSHKnownHost(id: String) async throws -> Bool {
         try await background("ssh.knownhost.forget", ["id": id], as: SSHKnownHostForget.self).forgotten
     }
 
-    /// What `~/.ssh/config` already describes. Read only, always.
     static func sshConfigCandidates() async throws -> [SSHConfigCandidate] {
         try await background("ssh.config.preview", as: [SSHConfigCandidate].self)
     }
@@ -3412,9 +2902,6 @@ extension Bridge {
             "env": host.env.map { ["name": $0.name, "value": $0.value] },
             "auth": auth,
             "jump": jump as Any,
-            // Carried so `ssh.session.list` can name what it is holding. The
-            // host never dials with either: it reaches the server by hostname
-            // and username the way it always did.
             "hostId": host.id,
             "label": host.label,
         ]
@@ -3429,19 +2916,11 @@ extension Bridge {
         ), as: SSHSessionHandle.self)
     }
 
-    /// Publish this machine's record on the account again.
-    ///
-    /// Login does it once, best effort. When that one call did not land, every
-    /// account feature that needs a device refuses from then on with nothing
-    /// to retry it.
     static func registerThisMachine() async throws {
         struct Registered: Codable, Sendable { var registered: Bool }
         _ = try await background("account.registerMachine", [:], as: Registered.self)
     }
 
-    /// Every vault operation keeps its caller's account through queued Rust
-    /// dispatch and response publication. The host verifies the scope against
-    /// its captured credentials; a late A call cannot operate on B's vault.
     private static func vaultInvoke<T: Decodable & Sendable>(
         _ method: String,
         _ params: [String: Any] = [:],
@@ -3503,22 +2982,10 @@ extension Bridge {
         try await background("host.updateCheck", patience: Patience.standard, as: HostUpdateState.self)
     }
 
-    /// What a paired computer knows about its own release.
-    ///
-    /// Sessionless on the host, so this answers on a machine whose archive
-    /// will not open, which is one of the machines most in need of an update.
     static func hostUpdateCheck(peer: String) async throws -> HostUpdateState {
         try await onPeer(peer, "host.updateCheck", patience: Patience.standard, as: HostUpdateState.self)
     }
 
-    /// Move a host to the newest release.
-    ///
-    /// `restartNow` ends the terminals and agent turns that host owns, so only
-    /// pass it where a person has been told that and said yes. Left off, the
-    /// host installs and waits for a quiet moment.
-    ///
-    /// Patient: this downloads an archive, checks it, proves the new binaries
-    /// run and only then replaces anything.
     static func hostUpdateApply(restartNow: Bool = false) async throws -> HostUpdateResult {
         try await background(
             "host.updateApply",
@@ -3538,23 +3005,10 @@ extension Bridge {
         )
     }
 
-    /// The wire version spoken by a paired host.
-    ///
-    /// `protocol` is sessionless, so this is safe to ask before mounting a
-    /// feature that an older desktop cannot answer. A version is a capability
-    /// boundary, not a release number: a newer phone can explain what needs an
-    /// update instead of making a feature call that only returns unknown method.
-    /// Whether the paired host reports no display layer.
-    ///
-    /// Asked live because the account record carries no platform: a headless
-    /// server answered with nothing to gate on. An older host that cannot
-    /// answer throws, and callers fail open to the current behavior.
     static func peerHeadless(_ peer: String) async throws -> Bool {
         try await provisionStatus(peer: peer).headless
     }
 
-    /// Whether View screen can open on the paired host, as the host itself
-    /// reports it. A host older than the `screen` field answers by `headless`.
     static func peerCanShowScreen(_ peer: String) async throws -> Bool {
         let status = try await provisionStatus(peer: peer)
         return status.screen ?? !status.headless
@@ -3589,21 +3043,13 @@ extension Bridge {
         try await background("screen.access.request", as: ScreenAccessRequest.self)
     }
 
-    /// Ask another computer to let this device see its screen.
-    ///
-    /// Over the tunnel, because that is the only channel that can carry which
-    /// device is asking. The host takes the peer from the connection, so
-    /// nothing here names one.
     static func askScreenAccess(peer: String, control: Bool) async throws -> ScreenAccessAsk {
         try await onPeer(peer, "screen.access.ask", ["control": control], as: ScreenAccessAsk.self)
     }
 
-    /// Devices waiting for an answer on this machine, of one kind.
     static func pendingDeviceAccess(_ kind: DeviceAccessKind) async throws -> [DeviceAccessPending] {
         let method = kind == .screen ? "screen.access.pending" : "workspace.access.pending"
         var rows = try await background(method, as: [DeviceAccessPending].self)
-        // The kind comes from the method that answered, not from the wire, so
-        // neither host policy has to know the other exists.
         for index in rows.indices { rows[index].kind = kind }
         return rows
     }
@@ -3612,10 +3058,6 @@ extension Bridge {
         try await onPeer(peer, "workspace.access.ask", as: ScreenAccessAsk.self)
     }
 
-    /// Whether this device may open that computer's work.
-    ///
-    /// Asked before anything loads. A positive access answer lets the client
-    /// resolve its destination before asking for any private work.
     static func workspaceAccessAllowed(peer: String) async throws -> Bool {
         struct Answer: Codable, Sendable { var allowed: Bool }
         let scope = await WorkSessionContext.shared.scope
@@ -3633,14 +3075,6 @@ extension Bridge {
         return allowed
     }
 
-    /// Devices this machine has let into its work.
-    /// Redeem a code minted at a machine's own console, so a device that has
-    /// never been there can be let in.
-    ///
-    /// The only method a device which is not yet allowed can call to change
-    /// anything. Everything protecting it is on the machine: single use,
-    /// fifteen minutes, five wrong guesses retire the code, and the device has
-    /// to be on the same account. tokenstat.ai never sees it.
     static func redeemWorkspaceAccess(peer: String, code: String) async throws -> Bool {
         struct Granted: Codable, Sendable { var granted: Bool }
         return try await onPeer(
@@ -3652,8 +3086,6 @@ extension Bridge {
         try await background("workspace.access.list", as: [String].self)
     }
 
-    /// Let one in, or shut it out. Answering a request and moving the toggle
-    /// in Devices are the same act, so they are the same call.
     static func setWorkspaceAccess(peerID: String, allow: Bool) async throws {
         struct Saved: Codable, Sendable { var saved: Bool }
         _ = try await background(
@@ -3663,7 +3095,6 @@ extension Bridge {
         )
     }
 
-    /// Answer one. Denying is view and control both false.
     static func answerScreenAccess(peerID: String, view: Bool, control: Bool) async throws {
         struct Saved: Codable, Sendable { var saved: Bool }
         _ = try await background(
@@ -3681,11 +3112,6 @@ extension Bridge {
         try await background("screen.capture.push", ["id": id, "frame": frame.base64EncodedString()], patience: Patience.interactive, as: ScreenCapturePush.self)
     }
 
-    /// Everything waiting for the capture helper, oldest first.
-    ///
-    /// One call rather than one per event: this is polled on a timer, and a
-    /// call that could only ever return the oldest event capped the whole
-    /// input path at the poll rate.
     static func screenCaptureInput(id: String) async throws -> [Data] {
         let result = try await background("screen.capture.input", ["id": id], patience: Patience.interactive, as: ScreenCaptureInput.self)
         return result.events.compactMap { Data(base64Encoded: $0) }
@@ -3703,17 +3129,10 @@ extension Bridge {
         quality: ScreenQualityChoice
     ) async throws -> ScreenViewerSession {
         var params: [String: Any] = ["peer": peer, "capability": capability, "control": control]
-        // Auto is the absence of an opinion, not a value. Sending it would ask
-        // the host to honour a choice rather than to read the route.
         if let wire = quality.wire { params["quality"] = wire }
         return try await background("screen.viewer.open", params, patience: Patience.standard, as: ScreenViewerSession.self)
     }
 
-    /// Change what a live session spends, without stopping the picture.
-    ///
-    /// The same shape as `setScreenControl`, and for the same reason: the relay
-    /// allows one screen channel per account, so anything that reopens the
-    /// stream races its own teardown.
     static func setScreenQuality(peer: String, sessionID: String, capability: String, quality: String) async throws {
         struct Answer: Codable, Sendable { var quality: String }
         _ = try await onPeer(
@@ -3724,13 +3143,6 @@ extension Bridge {
         )
     }
 
-    /// Hand the mouse over, or take it back, without reopening the stream.
-    ///
-    /// Control used to be fixed when the session opened, so the toggle tore
-    /// the stream down and dialled a fresh one. The relay counts one screen
-    /// channel per account and the old one is still closing when the new one
-    /// asks, which is the `screen_already_open` refusal behind the drop and
-    /// reconnect storm. This flips the flag on the session that is already up.
     static func setScreenControl(peer: String, sessionID: String, capability: String, control: Bool) async throws {
         struct Answer: Codable, Sendable { var control: Bool }
         _ = try await onPeer(
@@ -3763,8 +3175,6 @@ extension Bridge {
         try await background("screen.transfer.destination.set", ["path": path], as: ScreenTransferDestination.self)
     }
 
-    /// Create the account's one vault behind a password. Returns the recovery
-    /// code, which is shown once and is the way back if the password is lost.
     static func createSSHVault(password: String, tier: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultRecovery {
         try await vaultInvoke("ssh.vault.create", ["password": password, "tier": tier], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultRecovery.self)
     }
@@ -3773,11 +3183,7 @@ extension Bridge {
         try await vaultInvoke("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier, "migrate": true], patience: Patience.standard, expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: SSHVaultUnlock.self)
     }
 
-    /// Change the password, or set one after proving the recovery code. A reset
-    /// answers with a fresh recovery code, because it retires the one spent.
     static func setSSHVaultPassword(current: String = "", recovery: String = "", newPassword: String, expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws -> SSHVaultPasswordChange {
-        // Best effort, as in signOut: the password change must not fail
-        // because a stale biometric entry could not be deleted.
         let owner = try await prepareVaultBiometrics(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         return try await vaultInvoke("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, expectedScope: owner.scope, expectedGeneration: owner.generation, as: SSHVaultPasswordChange.self)
     }
@@ -3787,8 +3193,6 @@ extension Bridge {
         _ = try await vaultInvoke("ssh.vault.lock", [:], expectedScope: expectedScope, expectedGeneration: expectedGeneration, as: Locked.self)
     }
 
-    /// Retirement is allowed after the account has left. The helper compares
-    /// the old verified scope and exact session ID; a successor stays open.
     static func retireSSHVault(scope: WorkReference.Scope, sessionID: String) async {
         guard scope.kind == .account, !sessionID.isEmpty else { return }
         struct Locked: Codable, Sendable { var locked: Bool }
@@ -3799,8 +3203,6 @@ extension Bridge {
     }
 
     static func resetSSHVault(expectedScope: WorkReference.Scope? = nil, expectedGeneration: UInt64? = nil) async throws {
-        // Best effort, as in signOut: vault deletion must not abort because
-        // the biometric entry was already gone.
         let owner = try await prepareVaultBiometrics(expectedScope: expectedScope, expectedGeneration: expectedGeneration)
         _ = try await vaultInvoke("ssh.vault.reset", [:], expectedScope: owner.scope, expectedGeneration: owner.generation, as: SSHVaultReset.self)
     }
@@ -3840,11 +3242,6 @@ extension Bridge {
         ), as: SSHSessionHandle.self)
     }
 
-    /// Open a shell with an auth payload the caller already resolved.
-    ///
-    /// The setup wizard resolves the credential once and hands the same
-    /// payload to the check, the staged code and this. Branching on the kind
-    /// in three places is three places to get it wrong.
     static func openSSHWithResolvedAuth(
         _ host: SSHHost, auth: [String: Any], rows: Int, cols: Int, jump: [String: Any]? = nil
     ) async throws -> SSHSessionHandle {
@@ -3853,13 +3250,7 @@ extension Bridge {
         ), as: SSHSessionHandle.self)
     }
 
-    // MARK: - Setting a machine up over SSH
 
-    /// What a server is, before anything is written to it.
-    ///
-    /// Runs one fixed script on its own channel, so nothing appears in the
-    /// person's shell and nothing on the server changes. The command is chosen
-    /// by the host from a list it holds; this end sends only where to connect.
     static func probeServerForSetup(
         _ host: SSHHost, auth: [String: Any], jump: [String: Any]? = nil
     ) async throws -> ServerCheck {
@@ -3871,7 +3262,6 @@ extension Bridge {
         return check
     }
 
-    /// Bind setup to the daemon reached through the trusted SSH connection.
     static func setupServerIdentity(_ host: SSHHost, auth: [String: Any]) async throws -> String {
         struct Identity: Codable, Sendable { var key: String }
         return try await background("ssh.provision.identity", sessionParams(
@@ -3879,11 +3269,6 @@ extension Bridge {
         ), as: Identity.self).key
     }
 
-    /// Put the pairing code on the server as a private file.
-    ///
-    /// Never on the command line: there it lands in the shell history and,
-    /// briefly, in `/proc`. Its own channel too, so the shell the person is
-    /// watching never sees it.
     static func stagePairingCode(
         _ host: SSHHost, code: String, auth: [String: Any], jump: [String: Any]? = nil
     ) async throws -> String {
@@ -3893,7 +3278,6 @@ extension Bridge {
         return try await background("ssh.provision.stageCode", params, as: Staged.self).stageId
     }
 
-    /// And take it away again, because this app put it there.
     static func clearPairingCode(
         _ host: SSHHost, stageID: String, auth: [String: Any], jump: [String: Any]? = nil
     ) async throws {
@@ -3903,8 +3287,6 @@ extension Bridge {
         _ = try await background("ssh.provision.clearCode", params, as: Cleared.self)
     }
 
-    /// The install line, composed by the host so every surface that shows it
-    /// shows the same one.
     static func installLine(
         allow: String?, name: String?, agents: [String], printInvite: Bool,
         codeFile: Bool, code: String? = nil
@@ -3919,9 +3301,7 @@ extension Bridge {
         ], as: InstallLine.self)
     }
 
-    // MARK: - Folders on a machine with no file panel
 
-    /// One directory on a peer. `nil` starts at that machine's home.
     static func browse(peer: String, path: String?) async throws -> RemoteListing {
         try await onPeer(peer, "fs.browse", ["path": path as Any], as: RemoteListing.self)
     }
@@ -3930,18 +3310,11 @@ extension Bridge {
         try await onPeer(peer, "workspace.add", ["path": path], as: WorkspaceFolder.self)
     }
 
-    /// One new directory on a peer, so a clone has somewhere to land.
     static func makeDirectory(peer: String, path: String) async throws -> String {
         struct Made: Codable, Sendable { var path: String }
         return try await onPeer(peer, "fs.mkdir", ["path": path], as: Made.self).path
     }
 
-    /// Clone a repository onto a peer, in a terminal somebody can watch.
-    ///
-    /// Answers with the session, because that is what the caller does next:
-    /// the progress arrives on the ordinary terminal stream. Where the folder
-    /// landed comes back from `cloneStatus`, which is also what says whether
-    /// it finished.
     static func clone(
         peer: String, url: String, parent: String, name: String?
     ) async throws -> PtySessionInfo {
@@ -3958,28 +3331,14 @@ extension Bridge {
         )
     }
 
-    /// A pairing code for a machine this device is setting up.
-    ///
-    /// Minted on the account, single use, fifteen minutes. Returned once and
-    /// never stored: until it is redeemed it is the whole credential.
     static func mintPairingCode() async throws -> PairingCode {
         try await background("account.pairingCode", as: PairingCode.self)
     }
 
-    /// Is this machine finished being set up. Asked of a peer over the tunnel
-    /// once it is paired, so the wizard's last step reads the machine itself
-    /// rather than believing the installer's output.
     static func provisionStatus(peer: String) async throws -> ProvisionStatus {
         try await onPeer(peer, "host.provisionStatus", [:], as: ProvisionStatus.self)
     }
 
-    /// Describe a jump host, credentials included, for `ssh.session.open`.
-    ///
-    /// Built on the client because only the client can open the platform vault
-    /// where the private key lives. A jump host with no saved key cannot be
-    /// used: there is nobody to ask for a password at that point in the chain,
-    /// and prompting for two passwords before a terminal appears is worse than
-    /// saying so.
     static func sshJumpPayload(_ host: SSHHost, key: SSHKeyRecord?) async throws -> [String: Any] {
         guard let key else {
             throw BridgeError.core(
@@ -4007,7 +3366,6 @@ extension Bridge {
 
     static func isSSHSessionMissing(_ error: Error) -> Bool {
         guard case let BridgeError.core(code, message) = error else { return false }
-        // The exact legacy reply supports hosts predating the typed code.
         return code == "ssh_session_missing"
             || (code == "call_failed" && message == "SSH session no longer exists")
     }
@@ -4024,12 +3382,6 @@ extension Bridge {
         )
     }
 
-    /// What to offer for a half-typed command line.
-    ///
-    /// The fragment is read by the host to find the last word and dropped when
-    /// the call returns. It never leaves the machine: SSH sessions are local
-    /// only, and the host refuses this call from a remote peer like every
-    /// other one in the family.
     static func suggestSSHSession(
         id: String,
         fragment: String,
@@ -4043,12 +3395,6 @@ extension Bridge {
         )
     }
 
-    /// Tell the host a line was actually submitted.
-    ///
-    /// Only ever called for a line the far end was seen echoing, which is
-    /// what keeps a password out of it. The host keeps these in memory for
-    /// the life of the session, to offer back and to follow a `cd` with.
-    /// Nothing is written to disk and SSH sessions are local-only.
     static func sshSessionRan(id: String, command: String, directory: String?) async {
         struct Recorded: Codable, Sendable { var recorded: Bool }
         var params: [String: Any] = ["id": id, "fragment": command]
@@ -4075,8 +3421,6 @@ extension Bridge {
         try await background("machine.identity", as: MachineIdentity.self)
     }
 
-    /// Name this machine. An empty name puts the system's own name back, which
-    /// is why this takes a string rather than an optional: the field is the undo.
     static func renameMachine(_ name: String) async throws -> MachineIdentity {
         try await background("machine.rename", ["name": name], as: MachineIdentity.self)
     }
@@ -4085,8 +3429,6 @@ extension Bridge {
         try await background("machine.peers", as: [Peer].self)
     }
 
-    /// Pair with a machine whose key was typed or pasted. Approved outright:
-    /// entering a key by hand is the approval.
     static func pair(key: String, label: String, address: String) async throws -> Peer {
         try await background(
             "machine.pair",
@@ -4103,8 +3445,6 @@ extension Bridge {
         _ = try await background("machine.revoke", ["key": key], as: Changed.self)
     }
 
-    /// Forget a peer entirely, so it arrives as a stranger next time. Different
-    /// from revoking, which remembers that it was turned away.
     static func forget(key: String) async throws {
         _ = try await background("machine.forget", ["key": key], as: Forgotten.self)
     }
@@ -4129,9 +3469,6 @@ extension Bridge {
         try await background("host.setPolicy", ["alwaysOn": alwaysOn], as: HostPolicy.self)
     }
 
-    /// Bind a loopback port on this machine and bridge it to a service on a
-    /// peer's own localhost. The browser tab opens the returned URL as if the
-    /// service ran here.
     static func proxyListen(peer: String, host: String, port: Int) async throws -> ProxyListen {
         try await background(
             "proxy.listen",
@@ -4156,11 +3493,6 @@ extension Bridge {
         }
     }
 
-    /// Call a device on the account something.
-    ///
-    /// The name on the account row rather than on that machine's own disk,
-    /// which is what lets this Mac name a headless server it will never log
-    /// into. An empty name is the undo: the machine names itself again.
     static func renameAccountMachine(id: String, name: String) async throws {
         _ = try await background(
             "account.renameMachine",
@@ -4169,32 +3501,20 @@ extension Bridge {
         )
     }
 
-    /// Remove a machine from the account directory. The server deletes that
-    /// machine's uploaded rows, so this is for a stale machine id (a
-    /// reinstall) that is holding a machine-cap slot a live machine needs.
     static func unlinkMachine(id: String) async throws {
         _ = try await background("account.unlinkMachine", ["id": id], as: Removed.self)
     }
 
-    /// Turn remote reach on or off. The one switch: everything between
-    /// machines rides the tunnel, so there is nothing else to configure.
     static func setTunnel(_ enabled: Bool) async throws -> TunnelOutcome {
         try await background("remote.serve", ["tunnel": enabled], as: TunnelOutcome.self)
     }
 
-    /// Tell the daemon the network is back or the machine woke, so the tunnel
-    /// supervisor stops waiting out its reconnect backoff and tries now.
-    ///
-    /// `reconnect` drops a live socket: a path change (Wi-Fi to cellular)
-    /// leaves a socket that still looks fresh on the old route.
     private static let tunnelRecoveryFlights = TunnelRecoveryFlights()
 
     static func nudgeTunnel(reconnect: Bool = false) async {
         await recoverTunnel(urgency: reconnect ? .reconnect : .soft)
     }
 
-    /// Recheck on return without tearing down a healthy tunnel. Foreground
-    /// work supersedes an older soft check, and overlapping callers share it.
     static func nudgeTunnelOnForeground() async {
         await recoverTunnel(urgency: .foreground)
     }
@@ -4220,18 +3540,11 @@ extension Bridge {
         }
     }
 
-    /// Ask hostd to remint after a plan change. A `not_on_this_plan` refusal
-    /// is off the retry loop; this is the call that tries again.
     @discardableResult
     static func reconsiderPlan() async throws -> ReconsideredPlan {
         try await background("remote.reconsiderPlan", as: ReconsideredPlan.self)
     }
 
-    /// Ask a peer a question, through this machine's daemon.
-    ///
-    /// The result is the peer's own, unwrapped: a failure over there is a
-    /// failure here, so a caller has one error path whether the call was local
-    /// or remote.
     static func onPeer<T: Decodable & Sendable>(
         _ peer: String,
         _ method: String,
@@ -4247,11 +3560,6 @@ extension Bridge {
         )
     }
 
-    /// `onPeer` for a method whose answer may legitimately be nothing.
-    ///
-    /// The same distinction `invokeOptional` draws locally, kept over the
-    /// remote hop: a peer with an empty archive answers `null` to
-    /// `activity.calendar`, and that is an answer, not a failure.
     static func onPeerOptional<T: Decodable & Sendable>(
         _ peer: String,
         _ method: String,
@@ -4269,8 +3577,6 @@ extension Bridge {
 private struct Changed: Codable, Sendable { let changed: Bool }
 
 extension Bridge {
-    /// Teams uses this device's account transport. Choosing a directory scope
-    /// never redirects this call to a repository host or changes login ownership.
     static func teamRequest(_ method: TeamHostMethod, parameters: JSONValue, owner: TeamAccountOwner) async throws -> JSONValue {
         try Task.checkCancellation()
         guard await MainActor.run(body: { teamOwnerIsCurrent(owner) }),

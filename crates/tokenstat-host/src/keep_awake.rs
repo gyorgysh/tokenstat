@@ -4,26 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! System-sleep assertion for inbound remote workspace work.
-//!
-//! `hostd` is a launchd user agent on macOS and a per-user scheduled
-//! task on Windows. Always-on host is what sets `KeepAlive` /
-//! `RunAtLoad`, or the matching Task Scheduler restart policy. Neither
-//! is a sleep lock. `ProcessType=Interactive` is the macOS scheduler
-//! class so a live terminal is not throttled. It is also not a sleep
-//! lock.
-//!
-//! The Mac app being closed must leave the laptop free to sleep, unless
-//! Always-on host is on. A tunnel that is merely present, a sync, a
-//! `workspace.list` / `pty.list` poll, and a local terminal must do the
-//! same. Sleep is prevented only while a remote peer is actually using a
-//! workspace, a terminal, or an agent on this machine, or for the life of
-//! hostd when Always-on host is on.
-//!
-//! The assertion is `PreventUserIdleSystemSleep` on macOS and
-//! `PowerRequestSystemRequired` on Windows. Closing the lid is still
-//! the user's choice. Nothing here calls `pmset` or holds a Keepresso lease.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
@@ -40,7 +21,6 @@ pub(crate) const GRACE_MS: i64 = 120_000;
 struct Inner {
     streams: u32,
     grace_until_ms: i64,
-    /// macOS IOPM id, or a Windows POWER_REQUEST handle truncated to u64.
     assertion: Option<u64>,
 }
 
@@ -65,12 +45,6 @@ fn lock_inner() -> std::sync::MutexGuard<'static, Inner> {
     state().inner.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Milliseconds on a monotonic clock that only runs in this process.
-///
-/// A wall-clock deadline is wrong here: a backwards clock step (NTP, a manual
-/// set) pushes `grace_until_ms` into the future and holds sleep until the
-/// clock catches up. `Instant` cannot step, and the condvar below waits on the
-/// same clock.
 fn now_ms() -> i64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as i64
@@ -80,15 +54,9 @@ fn now_ms() -> i64 {
 /// a terminal, or an agent here. List polls and everything else do not.
 pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
     match method {
-        // List polls. A client asking what is running is not somebody
-        // working, and `ssh.session.list` runs on a timer: without this line
-        // the poll alone would hold sleep open for as long as the app is open.
         "workspace.list" | "pty.list" | "ssh.session.list" | "work.overview" => false,
         "workflow.list" | "workflow.get" | "workflow.runs" | "workflow.transcript" => false,
-        // Polls inside the agent families. A Chat screen asks about events,
-        // approvals and receipts on a timer, and an Automations or todo screen
-        // polls its lists: none of that is somebody working, and counting it
-        // would hold sleep open for as long as a remote screen is open.
+
         "chat.list"
         | "chat.events"
         | "chat.eventPage"
@@ -117,9 +85,7 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("ssh.") => true,
         m if m.starts_with("screen.transfer.") => true,
-        // These families launch agents: a chat turn, a scheduled automation,
-        // a launcher, a harness install, and a delegated card all run a
-        // process here, so none of them is somebody merely reading.
+
         m if m.starts_with("chat.") => true,
         m if m.starts_with("automation.") => true,
         m if m.starts_with("launcher.") => true,
@@ -271,12 +237,6 @@ fn worker_flag() -> &'static AtomicBool {
     &STARTED
 }
 
-/// Start the grace-expiry thread if it is not already running.
-///
-/// The flag is set only after spawn succeeds. A `Once` that swallowed a
-/// failed spawn would never retry, and an assertion taken on this thread
-/// would then live until hostd restarted. Concurrent callers wait on the
-/// gate so nobody treats a still-spawning worker as live.
 fn ensure_worker() -> bool {
     static GATE: Mutex<()> = Mutex::new(());
     if worker_started() {
@@ -347,8 +307,6 @@ fn create_assertion() -> Option<u64> {
 
 #[cfg(not(any(all(target_os = "macos", not(test)), all(windows, not(test)))))]
 fn create_assertion() -> Option<u64> {
-    // Tests, and OSes without a sleep assertion, must not pin the build
-    // machine awake.
     None
 }
 

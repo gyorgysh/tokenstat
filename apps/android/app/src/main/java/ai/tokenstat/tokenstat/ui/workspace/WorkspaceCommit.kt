@@ -66,13 +66,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// The review composer: title, description, the frozen selection with a
-/// reviewed diff per file, then Commit. Ports `GitCommitComposer` on the
-/// phone (focused composer, files as pushed rows).
-///
-/// The draft (title, details, selection, submitted operation) is preserved
-/// across restarts. Reopening with a submission reconciles that record
-/// before another commit is allowed.
 @Composable
 fun CommitComposerDialog(
     model: AppViewModel,
@@ -221,8 +214,6 @@ private fun reviewPathsOf(review: JsonObject): List<String> =
         it.jsonPrimitive.contentOrNull
     } ?: emptyList()
 
-/// One reviewed file: its path, and the immutable diff frozen for this
-/// submission, even if the worktree moved since.
 @Composable
 private fun ReviewedFileRow(
     model: AppViewModel,
@@ -281,12 +272,6 @@ private fun ReviewedFileRow(
     }
 }
 
-/// Push control and sheet, porting `GitPushControl` and `GitPushView`.
-///
-/// Loading restores the persisted operation identity; it never pushes.
-/// After a lost response the outcome is checked before another push, and
-/// only a missing receipt allows retrying the same submission. A finished
-/// push clears the submission.
 @Composable
 fun PushButton(
     model: AppViewModel,
@@ -452,7 +437,6 @@ internal fun PushSheet(
             val params = buildJsonObject { put("id", workspace); put("operationId", opId) }
             val answer = gitFormRequest(request, "workspace.pushReceipt", params)
             if (answer == kotlinx.serialization.json.JsonNull) {
-                // Retry is safe only after a successful read confirms absence.
                 canRetry = review != null
                 error = if (review != null) {
                     L10n.text("android.workspacecommit.this_computer_has_no_receipt_for_the_submi.cadba34a")
@@ -551,7 +535,6 @@ internal fun PushSheet(
             } else if (outcomeState == "succeeded" || shown?.let { it.str("remoteHead") == it.str("head") } == true || shown?.get("outgoing")?.jsonPrimitive?.contentOrNull == "0") {
                 TsAccentButton(label = L10n.text("common.done"), icon = ActionIcon.Done.vector, modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
             } else if (lfs?.ready == false) {
-                // The setup card offers the actions until a new review clears the block.
             } else if (review != null) {
                 TsAccentButton(
                     label = if (review!!.str("remoteHead") == null) L10n.text("android.workspacecommit.publish_branch.e1f5968c") else L10n.text("android.workspacecommit.push_branch.97deb7c0"),
@@ -626,8 +609,6 @@ internal fun PushSheet(
     }
 }
 
-/// The branch this folder is on, and the way to switch it. One selector per
-/// folder, drawn under the push row like the Apple folder header.
 @Composable
 fun BranchRow(
     model: AppViewModel,
@@ -637,9 +618,6 @@ fun BranchRow(
     branch: String?,
     isRepo: Boolean,
     onChanged: () -> Unit,
-    /// Ahead, behind and the diff stat, when there is anything waiting. The
-    /// Apple folder header carries them on this row rather than making you
-    /// open Changes to find out whether there is anything to open it for.
     stats: String? = null,
 ) {
     var showing by remember { mutableStateOf(false) }
@@ -742,9 +720,6 @@ private fun BranchDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        // A sheet with a surface under it. Without one the title drew over
-        // the dimmed screen behind, the rows floated as loose cards, and the
-        // create row landed on top of the tab bar.
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = LocalTsColors.current.background,
@@ -765,8 +740,6 @@ private fun BranchDialog(
             if (loading) {
                 Text(L10n.text("android.workspacecommit.loading.ba3bbbe1"), color = LocalTsColors.current.textSecondary)
             } else {
-                // The list scrolls itself; scrolling the dialog Column too
-                // would measure it with infinite height and crash.
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     items(branches, key = { it.str("name") ?: it.hashCode().toString() }) { branchRow ->
                         val name = branchRow.str("name") ?: return@items
@@ -809,9 +782,6 @@ private fun BranchDialog(
     }
 }
 
-/// Every changed file's diff on one screen, for the final read before a
-/// commit. Bounded twice: at most twenty files, sixty lines each, with a
-/// Full diff link per file for the rest.
 @Composable
 fun ReviewAllPage(
     model: AppViewModel,

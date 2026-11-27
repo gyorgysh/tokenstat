@@ -2,9 +2,6 @@
 
 import SwiftUI
 
-/// A pull request's state as a small branch drawing: two commits and a line
-/// for all of them, then what became of it. Drawn rather than borrowed, so the
-/// three states share one weight at sidebar size.
 struct PullGlyph: Shape {
     let state: String
 
@@ -57,7 +54,6 @@ struct PullGlyphView: View {
     }
 }
 
-/// The mark on a chat row: the state, and how many when there are several.
 struct ChatPullMark: View {
     let pulls: [ChatPull]
     var size: CGFloat = 13
@@ -78,7 +74,6 @@ struct ChatPullMark: View {
     }
 }
 
-/// Every pull request a chat opened or talked about.
 struct ChatPullList: View {
     let pulls: [ChatPull]
     let open: (ChatPull) -> Void
@@ -106,7 +101,6 @@ struct ChatPullList: View {
     }
 }
 
-/// `Merged · owner/repo #53   +1839 −1391`
 struct ChatPullSummaryLine: View {
     let pull: ChatPull
 
@@ -127,8 +121,6 @@ struct ChatPullSummaryLine: View {
     }
 }
 
-/// Asked when a pull request is opened. The answer is kept only when the
-/// person says so.
 struct PullOpenSheet: View {
     let pull: ChatPull
     let choose: (PullOpenPreference.Choice) -> Void
@@ -172,7 +164,6 @@ struct PullOpenSheet: View {
         #endif
     }
 
-    /// The setting sits in a different place on each.
     private var rememberHelp: String {
         #if os(macOS)
         L10n.text("apple.pulls.open_remember_help")
@@ -182,8 +173,6 @@ struct PullOpenSheet: View {
     }
 
     private func pick(_ choice: PullOpenPreference.Choice) {
-        // The presenter moves on from here. Dismissing as well would race it
-        // when the next thing is another sheet.
         if remember { PullOpenPreference.shared.choice = choice }
         choose(choice)
     }
@@ -201,8 +190,6 @@ extension ChatPull {
 }
 
 #if os(macOS)
-/// The row's mark, with the list beside it while the pointer rests on either,
-/// or after a click until it is dismissed.
 struct SidebarChatPullMark: View {
     let pulls: [ChatPull]
     let open: (ChatPull) -> Void
@@ -211,7 +198,6 @@ struct SidebarChatPullMark: View {
     @State private var overMark = false
     @State private var overCard = false
 
-    /// What the mark takes up in a row, for the row to leave room for.
     static func label(_ pulls: [ChatPull]) -> some View {
         ChatPullMark(pulls: pulls, size: DisplayFit.dp(13), font: Theme.fit(11))
             .padding(.vertical, 4)
@@ -226,8 +212,6 @@ struct SidebarChatPullMark: View {
             .buttonStyle(.plain)
             .onHover { overMark = $0 }
             .task(id: overMark || overCard) {
-                // A pause before opening, so crossing the list does not flash
-                // cards, and one before closing, so the pointer can get there.
                 do { try await Task.sleep(for: .milliseconds(overMark || overCard ? 250 : 200)) } catch { return }
                 showing = held || overMark || overCard
             }
@@ -249,8 +233,6 @@ struct SidebarChatPullMark: View {
     }
 }
 
-/// Where a chat row left room for its mark. The mark itself sits over the row,
-/// because a control inside the row's own button never gets its click.
 struct SidebarPullMarkSeat: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
@@ -260,7 +242,6 @@ struct SidebarPullMarkSeat: PreferenceKey {
 #endif
 
 #if os(iOS)
-/// One pull request over the chat it was mentioned in.
 struct ClientPullSheet: View {
     let pull: ChatPull
     let peer: String
@@ -278,7 +259,6 @@ struct ClientPullSheet: View {
 }
 #endif
 
-/// Where a chat's pull request opens, in both Apple settings surfaces.
 struct PullOpenPicker: View {
     @State private var preference = PullOpenPreference.shared
 

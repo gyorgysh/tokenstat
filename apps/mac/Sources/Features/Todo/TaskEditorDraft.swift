@@ -2,8 +2,6 @@
 
 import Foundation
 
-/// Shared task fields for desktop and mobile. Seconds remain exact when a
-/// saved budget is not a whole number of minutes.
 struct TaskEditorDraft: Codable, Equatable, Sendable {
     enum Invalid: LocalizedError {
         case fields(String)

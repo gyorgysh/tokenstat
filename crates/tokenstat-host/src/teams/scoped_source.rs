@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{
     AuthorizedTeamPrincipal,
     publications::{ChatShare, ChatTarget, Checkout, Folder, Owner, Store},

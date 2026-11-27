@@ -89,14 +89,10 @@ private struct SimulatorInspectorContent: View {
         guard !Task.isCancelled, surfaceIsActive, let id = request?.deviceID else { return }
         if session.attachedID == id { request = nil; return }
         if session.devices.contains(where: { $0.id == id }) {
-            // A link or external boot is a one-time action. Clearing the
-            // owner's request also prevents replay after navigating away.
             request = nil
             session.attach(id)
         } else if reportMissing, session.setup.status(for: id.hasPrefix("android:") ? .android : .ios) == .toolsMissing {
             request = nil
-            // The empty pane already shows setup. With another platform
-            // available, reveal the requested platform's setup cards once.
             settings = !session.devices.isEmpty
         } else if reportMissing, session.setup.status(for: id.hasPrefix("android:") ? .android : .ios).isAuthoritative {
             request = nil
@@ -348,7 +344,6 @@ private struct SimulatorControls: View {
     private var viewActions: some View {
         HStack(spacing: 0) {
             ToolbarIconButton(systemImage: "minus.magnifyingglass", help: L10n.text("apple.simulator.zoom_out")) { session.zoom = max(0.5, session.zoom - 0.25) }
-            // Between the two zoom glyphs, so a glyph rather than a word.
             ToolbarIconButton(systemImage: "1.magnifyingglass", help: L10n.text("apple.simulator.fit")) {
                 session.zoom = 1
                 session.perspective = false
@@ -362,8 +357,6 @@ private struct SimulatorControls: View {
     }
 }
 
-/// A document-style native window keeps the Metal surface in its own
-/// compositing tree while the editor and the device session remain available.
 @MainActor @Observable
 private final class SimulatorViewerWindow: NSObject, NSWindowDelegate {
     private(set) var isVisible = false

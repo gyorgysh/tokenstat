@@ -21,7 +21,6 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Missing device capabilities and account access must not become startup requirements. */
 @RunWith(AndroidJUnit4::class)
 class UsageWidgetFailureTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext

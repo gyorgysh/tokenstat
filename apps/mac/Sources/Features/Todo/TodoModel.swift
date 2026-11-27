@@ -5,19 +5,12 @@
 import Foundation
 import Observation
 
-/// What the global board is showing.
-///
-/// Inbox is not a fourth column, it is a filter: a card with no folder is an
-/// ordinary card that has not been assigned, and giving it a column of its own
-/// would mean moving a card twice to get it into a folder's To Do.
 enum TodoScope: Hashable, Sendable {
     case all
     case inbox
     case workspace(String)
 }
 
-/// The kanban board. Cards live in the daemon, and delegating one starts an
-/// agent run whose transcript lands in the automations history.
 @MainActor
 @Observable
 final class TodoModel {
@@ -25,37 +18,22 @@ final class TodoModel {
     private(set) var cards: [TodoCard] = []
     private(set) var backends: [AgentBackend] = []
 
-    /// True once the board has been read at least once.
-    ///
-    /// An empty board and a board that has not loaded look identical, and they
-    /// mean opposite things. Without this the columns said "No cards" for the
-    /// length of the first read, which is a claim rather than a wait.
     private(set) var hasLoaded = false
     var errorMessage: String?
     var selectedCardID: String?
-    /// Bumps on every select, including a second click on the same card, so
-    /// the inspector can reopen.
     private(set) var selectionGeneration = 0
     var noticeMessage: String?
     var noticeScope: TodoScope?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
 
-    /// True while the board is on screen.
-    ///
-    /// Polling is for keeping a board somebody is watching honest. The model
-    /// outlives the view, so without this the two-second loop carried on
-    /// running for the rest of the session after a single visit to a screen
-    /// with a delegated card on it.
     private var isVisible = false
 
-    /// The board appeared. Load, and start polling if anything is running.
     func appeared() async {
         isVisible = true
         await load()
     }
 
-    /// The board went away. Nothing to keep honest.
     func disappeared() {
         isVisible = false
         syncPolling()
@@ -63,55 +41,32 @@ final class TodoModel {
 
     var sortNewestFirst = true
 
-    /// Scheduler default, used when a new card does not set its own limit.
     var defaultBudgetMinutes = "180"
     var defaultNoLimit = false
 
-    /// When true, the Done column shows archived cards instead.
     var showingArchive = false
 
     var archivedCount: Int { cards.filter { $0.column == "archive" }.count }
 
-    /// Picker list: hidden workspace tiles stay out, except the current pick.
     func pickerBackends(keeping id: String? = nil) -> [AgentBackend] {
         backends.visibleForPicker(keeping: id)
     }
 
-    /// Board column id to the stored column (Archive lives under Done).
     func storageColumn(_ column: String) -> String {
         if column == "done", showingArchive { return "archive" }
         return column
     }
 
-    /// Which workspace the board is showing, set by the route. Nil is the
-    /// global board.
-    ///
-    /// Scope lives on the model rather than in the view because the counts in
-    /// the sidebar ask the same question, and two places deciding what belongs
-    /// to a folder is two places to get it wrong.
     var scope: String?
 
-    /// The global board's own selector. Ignored while `scope` is set: a
-    /// folder's board is that folder's, and a filter on top of it would be
-    /// two answers to one question.
-    ///
-    /// Separate from `scope` because they are different things. Scope is
-    /// where you are, filter is what you asked to see, and folding them
-    /// together made the global board look locked to a folder it had merely
-    /// been asked to show.
     var filter: TodoScope = .all
 
-    /// Which notes the notes screen is showing.
-    ///
-    /// Notes are not work in a stage, but they do belong somewhere: a folder,
-    /// or unassigned (global). All is the union of those.
     enum NoteScope: Hashable, Sendable {
         case all
         case unassigned
         case workspace(String)
     }
 
-    /// Notes in a scope, newest first.
     func notes(in scope: NoteScope, archived: Bool) -> [TodoCard] {
         cards
             .filter { $0.kind == .note && ($0.column == "archive") == archived }
@@ -135,11 +90,6 @@ final class TodoModel {
         }
     }
 
-    /// Capture a note. Title only, because that is the whole point: the cost
-    /// of writing one down has to be lower than the cost of losing it.
-    ///
-    /// `workspaceID` is empty for an unassigned (global) note, or a folder id
-    /// when the note belongs to a project.
     @discardableResult
     func addNote(_ text: String, workspaceID: String) async -> Bool {
         let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,7 +108,6 @@ final class TodoModel {
         }
     }
 
-    /// Put a note away, or take it back out.
     func archiveNote(_ card: TodoCard, archived: Bool) async {
         do {
             _ = try await Bridge.todoUpdate(id: card.id, column: archived ? "archive" : "backlog")
@@ -168,10 +117,6 @@ final class TodoModel {
         }
     }
 
-    /// Turn a note into a card on the board.
-    ///
-    /// The note's text becomes the prompt. An empty workspace id is allowed:
-    /// the card lands unfiled, the same as a task created that way.
     func convertToTask(_ card: TodoCard, workspaceID: String) async {
         do {
             _ = try await Bridge.todoUpdate(
@@ -188,7 +133,6 @@ final class TodoModel {
         }
     }
 
-    /// Cards for a column, in the active sort, inside the current scope.
     func cards(in column: String) -> [TodoCard] {
         let target = storageColumn(column)
         let list = cards.filter { $0.column == target && $0.kind != .note && inScope($0) }
@@ -198,7 +142,6 @@ final class TodoModel {
         return list.sorted { $0.order < $1.order }
     }
 
-    /// The filter that would show this card on the global board.
     private func destinationScope(of card: TodoCard) -> TodoScope {
         card.workspaceID.isEmpty ? .inbox : .workspace(card.workspaceID)
     }
@@ -218,8 +161,6 @@ final class TodoModel {
         return nil
     }
 
-    /// Cards nobody filed. Not an inbox anybody works out of: the absence of
-    /// a folder, which `todo.rs` has always allowed.
     var unfiledCount: Int {
         cards.filter {
             $0.kind != .note
@@ -229,10 +170,6 @@ final class TodoModel {
         }.count
     }
 
-    /// Cards still to do in a folder: the sidebar count.
-    ///
-    /// Done, archived and notes are not work left. A badge that only ever
-    /// goes up is not a badge.
     func openCount(in workspaceID: String) -> Int {
         cards.filter {
             $0.workspaceID == workspaceID
@@ -242,10 +179,6 @@ final class TodoModel {
         }.count
     }
 
-    /// Notes kept in a folder: the sidebar count.
-    ///
-    /// Archived notes are put away, so they are not part of what the folder
-    /// is holding on to.
     func noteCount(in workspaceID: String) -> Int {
         cards.filter {
             $0.workspaceID == workspaceID
@@ -254,7 +187,6 @@ final class TodoModel {
         }.count
     }
 
-    /// Drop a selection that the new scope would hide.
     func dropOutOfScopeSelection() {
         if let selected = selectedCard, !inScope(selected) {
             selectedCardID = nil
@@ -299,11 +231,6 @@ final class TodoModel {
         }
     }
 
-    /// Re-read the cards for the sidebar's counts, and nothing else.
-    ///
-    /// No backends, no queue config, and no error banner: this runs on a timer
-    /// nobody asked for, so a host that blinks during it must not put a red
-    /// message on a board the person is not even looking at.
     func refreshCounts() async {
         guard let fresh = try? await Bridge.todoCards(includeArchived: true) else { return }
         if cards != fresh { cards = fresh }
@@ -477,8 +404,6 @@ final class TodoModel {
         }
     }
 
-    /// While any card is running and somebody is looking, keep the board honest
-    /// without a push channel.
     private func syncPolling() {
         let running = isVisible && cards.contains { $0.delegate?.isRunning == true }
         if running && pollTask == nil {

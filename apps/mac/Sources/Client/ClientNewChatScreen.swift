@@ -132,13 +132,6 @@ struct ClientNewChatScreen: View {
         .onDisappear { draft.retire() }
     }
 
-    /// New chat is a first-class action on both layouts: the iPad keeps it at
-    /// the top of the sidebar and the phone in the Projects bar, whatever the
-    /// account has on it. So it is pressed by people with no computer paired
-    /// and by people whose account cannot currently connect, and what it used to open for
-    /// both was the whole composer with a Send that could never fire. A
-    /// disabled control is not an answer to "why can I not start a chat".
-    /// Projects already answers both questions, in these words.
     @ViewBuilder private var page: some View {
         if !remoteAllowed, account.signedIn {
             ZStack {
@@ -167,8 +160,6 @@ struct ClientNewChatScreen: View {
         }
     }
 
-    /// Why there is no composer here, on the same floor the page would have
-    /// been drawn on.
     private func reason(kind: ClientEmptyKind, art: EmptyArtKind, title: String, message: String,
                         actionTitle: String, icon: ActionIcon, request: ClientNavigationModel.NewChatRequest) -> some View {
         ZStack {
@@ -180,24 +171,17 @@ struct ClientNewChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Setup is a sheet owned by the root. The root starts it once this
-    /// screen has gone, rather than presenting it behind the closing page.
     private func leave(for request: ClientNavigationModel.NewChatRequest) {
         navigation.pendingNewChatRequest = request
         navigation.showingNewChat = false
     }
 
-    /// The plan's own answer, with the account's flag ahead of the tier it was
-    /// derived from. Twin of the test `ClientWorkspacesView` makes.
     private var remoteAllowed: Bool {
         if let remote = account.account?.canRemote { return remote }
         let tier = account.account?.tier?.lowercased()
         return ["free", "supporter", "patron", "legend"].contains(tier)
     }
 
-    /// A sole computer needs no extra choice. With several, use the last
-    /// connected one only while it is still retained or allowed to reconnect.
-    /// A manual disconnect with auto-connect off remains respected.
     private var defaultHost: ClientHost? {
         if workspaces.hosts.count == 1 {
             return workspaces.hosts.first {
@@ -285,8 +269,6 @@ struct ClientNewChatScreen: View {
             draft.failed(submission, message: reader.error ?? L10n.text("apple.chatview.chat_unavailable.a45aae80"))
             return
         }
-        // The host conversation exists now. Leave, a failed draft, or a failed
-        // fast-mode change has to delete it or the sidebar keeps an empty chat.
         func abandon(_ message: String?) async {
             let preserved = message ?? reader.error
             if submission.owner.scope == WorkSessionContext.shared.scope {

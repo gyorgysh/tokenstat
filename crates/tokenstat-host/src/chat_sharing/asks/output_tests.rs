@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::super::tests::{Fixture, new, principal};
 use super::*;
 
@@ -399,7 +398,6 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
             delta: "x".repeat(384 * 1024),
         }];
         if batch == 0 {
-            // New agent output cannot make another attachment reachable.
             events.push(Event::Attachment {
                 id: "not_approved".into(),
                 name: "Private.txt".into(),
@@ -456,8 +454,6 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
             .is_err()
     );
 
-    // No process exists in this storage fixture. Settle its recorded orphan,
-    // then admit a fresh Ask against the genuinely large authenticated archive.
     let fence = prepared.binding().fence.clone();
     drop(prepared);
     f.store
@@ -522,8 +518,7 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
     assert_eq!(count, context.count().unwrap());
     assert_eq!(text_bytes, expected_text_bytes);
     assert_eq!(context.metadata["message"]["text"], input.text);
-    // Metadata/file discovery validates the sealed chain, without opening an
-    // unrelated archived payload. Reading that payload still verifies bytes.
+
     let chain = fs::read_to_string(output_file(&f, true)).unwrap();
     let first: serde_json::Value = serde_json::from_str(chain.lines().next().unwrap()).unwrap();
     let path = f
@@ -558,8 +553,7 @@ fn metadata_and_approved_files_remain_bounded_above_the_full_history_limit() {
             )
             .is_err()
     );
-    // Avoiding old payload reads must not skip authentication of the chain
-    // that declares which payloads belong to this shared conversation.
+
     let digest = first["digest"].as_str().unwrap();
     let replacement = format!(
         "{}{}",
@@ -616,7 +610,7 @@ fn terminal_cleanup_retires_only_unwritten_output_and_preserves_written_batches(
             let fence = prepared.binding.fence.clone();
             if orphaned {
                 drop(prepared);
-                // A failed durable claim release must retain the source fence.
+
                 assert!(
                     f.store
                         .recover_orphaned_run(
@@ -643,7 +637,6 @@ fn terminal_cleanup_retires_only_unwritten_output_and_preserves_written_batches(
                     runs::State::Recovered
                 );
             } else {
-                // Exercise the terminal transaction used by sealed process completion.
                 f.store
                     .record_owned_run_state(f.target(), &prepared, runs::State::Succeeded)
                     .unwrap();

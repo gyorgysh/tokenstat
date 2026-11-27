@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Only Save writes settings. Reloads retain the person's pending edits.</summary>
 internal sealed class HarnessConfigState
 {
     public JsonNode? Config { get; private set; }
@@ -30,8 +29,6 @@ internal sealed class HarnessConfigState
         var edits = preservingEdits ? Changes : new JsonObject();
         var keys = (config["fields"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
             .Select(field => Format.Text(field, "key")).ToHashSet(StringComparer.Ordinal);
-        // A failed config read often returns an empty field list. Keep the old
-        // form and draft rather than discarding edits after an installer ran.
         if (edits.Any(edit => !keys.Contains(edit.Key)))
             throw new InvalidOperationException(L10n.Text("windows.harnessconfig.reload_preserved"));
         Config = config.DeepClone();
@@ -44,11 +41,6 @@ internal sealed class HarnessConfigState
     }
 }
 
-/// <summary>
-/// Agent versions and updates (protocol 55). Versions are read on the owning
-/// machine. The latest version is asked of the vendor only on a check, which
-/// runs when somebody presses Check for updates.
-/// </summary>
 internal static class AgentUpdates
 {
     public const int MinimumProtocol = 55;
@@ -65,7 +57,6 @@ internal static class AgentUpdates
             .FirstOrDefault(row => Format.Text(row, "id") == id);
     }
 
-    /// <summary>"Version 2.1.318 · 2.1.322 available", or empty.</summary>
     public static string Describe(JsonObject? row, bool checkedNow)
     {
         if (row is null) return "";
@@ -81,12 +72,10 @@ internal static class AgentUpdates
         return string.Join(" · ", parts);
     }
 
-    /// <summary>Offered once a check found a newer version, or nothing to compare.</summary>
     public static bool Offers(JsonObject? row, bool checkedNow) => row is not null && Format.Flag(row, "canUpdate")
         && (Format.Flag(row, "updateAvailable") || (checkedNow && !Format.Flag(row, "canCheck")));
 }
 
-/// <summary>One installer request per tool and owning machine, never retried here.</summary>
 internal static class LauncherInstaller
 {
     public const int MinimumReinstallProtocol = 37;

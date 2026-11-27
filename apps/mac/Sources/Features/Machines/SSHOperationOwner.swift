@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// One library's login lifetime. Geometry changes never change this ticket;
-/// leaving A and later returning to A creates a different lifetime.
 @MainActor
 final class SSHOperationOwner {
     struct Ticket: Equatable, Sendable {
@@ -37,8 +35,6 @@ final class SSHOperationOwner {
 }
 
 extension SSHHost {
-    /// Labels and colors may change during a connection. Its destination and
-    /// trusted identity must stay pinned to what the person approved.
     func sameConnectionTarget(as other: SSHHost) -> Bool {
         id == other.id && hostname == other.hostname && port == other.port
             && username == other.username && jumpHostID == other.jumpHostID

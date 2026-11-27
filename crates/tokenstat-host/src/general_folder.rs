@@ -3,27 +3,11 @@
 // Source-available: source sharing and own builds are permitted.
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
-
 //! One folder per host for chats that belong to no repository.
-//!
-//! Somebody who wants to ask an agent a question, or try something
-//! throwaway, should not have to pick or create a project first. Every
-//! agent still needs a working directory, so each host keeps one plain
-//! folder inside its own data directory and registers it like any other.
-//! Chats, terminals and lookups by id then work with no special case.
-//!
-//! It is one shared folder, not one per chat. A folder per chat would hide
-//! files an earlier chat left behind and would grow without bound, while a
-//! single place is what "no repository" means to a person.
-//!
-//! The folder is registered on first use and left out of `workspace.list`
-//! unless the caller asks for it, so a client that predates it never shows
-//! it as a project.
 
 use std::path::PathBuf;
 use tokenstat_workspace::registry::plain_path;
 
-/// The name the registry stores. Clients show their own localized label.
 const NAME: &str = "General";
 
 /// Where the folder lives, or `None` when there is no data directory.

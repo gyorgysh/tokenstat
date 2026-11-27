@@ -9,11 +9,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
 internal fun JsonObject.teamString(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
-/**
- * A project whose last computer stopped sharing stays in the team until an
- * admin removes it. An older account server sends no count, and then every
- * project reads as shared, as it always did.
- */
 internal fun JsonObject.teamShared(): Boolean = (this["activeCheckouts"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.let { it > 0 } ?: true
 internal fun JsonObject.teamRevision(): Long = (this["revision"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it >= 0 }
     ?: throw IllegalArgumentException("Invalid Team revision")
@@ -26,8 +21,6 @@ internal fun teamHandleValid(value: String) = teamHandle(value).matches(Regex("[
 
 internal data class TeamManagementPage(val rows: List<JsonObject> = emptyList(), val next: Int? = null, val loaded: Boolean = false)
 
-/** Native management keeps the exact organization, person and reviewed row
- * revision. The service remains authoritative for every permission change. */
 internal class TeamManagementModel(private val calls: TeamCalls, initial: JsonObject) {
     val organizationId = initial.teamString("id") ?: error("Missing Team")
     var organization by mutableStateOf(initial); private set

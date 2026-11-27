@@ -29,7 +29,6 @@ enum EcosystemScreen: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// Only navigation identifiers enter URLs. Never accept a command or file path.
 struct EcosystemRoute: Equatable, Sendable {
     var screen: EcosystemScreen
     var projectID: String?
@@ -116,7 +115,6 @@ struct EcosystemProject: Codable, Hashable, Sendable, Identifiable {
     var host: String
 }
 
-/// Dated quota readings only. Never copy provider credentials or response text.
 struct EcosystemLimitWindow: Codable, Hashable, Sendable, Identifiable {
     var label: String
     var percent: Double
@@ -202,8 +200,6 @@ struct EcosystemUsage: Codable, Equatable, Sendable {
     var days: [EcosystemDay]
     var streak: Int
 
-    /// Calendar dates follow the host's timezone. A previous day's value must
-    /// never silently become today's value after midnight or a timezone change.
     func today(at date: Date = Date(), calendar: Calendar = .current) -> EcosystemDay? {
         days.first { $0.day == Self.dayKey(date, calendar: calendar) && !$0.locked }
     }
@@ -231,8 +227,6 @@ struct EcosystemUsage: Codable, Equatable, Sendable {
     }
 
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
-        // Archive keys are Gregorian even when the user's display calendar is
-        // Buddhist, Japanese or Hebrew. Keep their timezone for day rollover.
         var archiveCalendar = Calendar(identifier: .gregorian)
         archiveCalendar.timeZone = calendar.timeZone
         let parts = archiveCalendar.dateComponents([.year, .month, .day], from: date)
@@ -258,7 +252,6 @@ struct EcosystemUsage: Codable, Equatable, Sendable {
 
 enum EcosystemRefreshKind: Sendable { case usage, limits }
 
-/// Brief interaction feedback, scoped to the same account as the readings.
 struct EcosystemWidgetRefresh: Codable, Equatable, Sendable {
     enum Phase: String, Codable, Sendable { case working, complete, failed, idle }
     var id: UUID
@@ -300,7 +293,6 @@ enum EcosystemWidgetTime {
     }
 }
 
-/// A small, versioned snapshot. No credentials, paths, messages or drafts.
 struct EcosystemSnapshot: Codable, Equatable, Sendable {
     var version = 1
     var owner: String?
@@ -379,7 +371,6 @@ struct EcosystemSnapshotStore {
 
     static var defaultDirectory: URL? {
         #if ECOSYSTEM_QA && os(macOS)
-        // Desktop fixture rendering must never overwrite the signed-in app's shared cache.
         return FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-widget-qa-\(ProcessInfo.processInfo.processIdentifier)")
         #else
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)

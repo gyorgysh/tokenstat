@@ -1,23 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Room for the descriptors a session actually needs.
-//!
-//! Apple's platforms hand a process a soft limit of 256 open files and a hard
-//! limit orders of magnitude above it. Two hundred and fifty six is generous
-//! for an app that opens documents and nothing like enough for this one: the
-//! archive, a relay tunnel, a direct connection per screen session, the
-//! pooled connection to every peer, and a socket per SSH session all live at
-//! once, and none of them is a leak.
-//!
-//! What that ceiling looks like when it is reached is the reason this module
-//! exists. The next `open` fails wherever it happens to be, so the sentence a
-//! person reads names whichever file lost the race, usually the machine key
-//! on the way into a screen session, and reads as corruption rather than as a
-//! process out of descriptors.
-//!
-//! Raising the soft limit is not raising a safety margin: the hard limit is
-//! still there and is the one the kernel enforces. This only stops the
-//! process asking for less than it is allowed.
 
 /// Raise this process's soft open-file limit towards its hard limit.
 ///
@@ -32,19 +14,11 @@ pub fn raise_open_file_limit() {
     });
 }
 
-/// The most this asks for.
-///
-/// `RLIM_INFINITY` is a valid hard limit and a terrible thing to ask for as a
-/// soft one: some of the C library's own tables are sized from it. Ten
-/// thousand and change is what a shell's `ulimit -n unlimited` resolves to on
-/// a Mac, and it is far beyond anything a session here opens.
 #[cfg(unix)]
 const WANTED: libc::rlim_t = 10_240;
 
 #[cfg(unix)]
 fn raise() {
-    // SAFETY: `getrlimit` writes a fully initialized `rlimit` through the
-    // pointer, and the pointer is to a local that outlives the call.
     let mut limit = unsafe {
         let mut value = std::mem::zeroed::<libc::rlimit>();
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut value) != 0 {
@@ -61,8 +35,7 @@ fn raise() {
         return;
     }
     limit.rlim_cur = ceiling;
-    // SAFETY: the same fully initialized value, with only the soft limit
-    // changed and never above the hard limit the kernel just reported.
+
     let _ = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) };
 }
 
@@ -72,7 +45,6 @@ fn raise() {
 pub fn open_file_limit() -> Option<(u64, u64)> {
     #[cfg(unix)]
     {
-        // SAFETY: as in `raise`.
         unsafe {
             let mut value = std::mem::zeroed::<libc::rlimit>();
             if libc::getrlimit(libc::RLIMIT_NOFILE, &mut value) != 0 {
@@ -116,7 +88,7 @@ mod tests {
     fn the_open_count_is_plausible() {
         let count = open_file_count().expect("unix can count /dev/fd");
         let (soft, _) = open_file_limit().expect("unix reports a limit");
-        // stdin, stdout, stderr and the directory being read, at least.
+
         assert!(count >= 3, "counted {count} open files");
         assert!(
             (count as u64) <= soft,

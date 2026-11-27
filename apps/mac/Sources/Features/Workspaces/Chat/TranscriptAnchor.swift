@@ -17,28 +17,13 @@ import SwiftUI
 /// `unitPoint` is what puts it back exactly.
 struct TranscriptAnchor: Equatable {
     let id: String
-    /// Its top edge, measured from the top of the viewport. Negative when the
-    /// row starts above the viewport, which is where a reader inside a long
-    /// reply always is.
     let top: CGFloat
     let height: CGFloat
 
-    /// The row to hold: the one covering the viewport's top edge, or the
-    /// first one below it.
-    ///
-    /// The row the reader is looking at, whatever its height. Picking only
-    /// rows that start on screen used to skip a reply taller than the window
-    /// and anchor on the next row screens below, or on nothing at all, and
-    /// a page then landed with nothing holding the place.
-    ///
-    /// A row exactly as tall as the viewport has no unit point that moves it
-    /// (see `unitPoint`), so the next one is used instead.
     static func pick(_ frames: [String: CGRect], viewportHeight: CGFloat) -> TranscriptAnchor? {
         candidates(frames, viewportHeight: viewportHeight).first
     }
 
-    /// The rows on screen that can be held, top first. The second is the
-    /// fallback when a page turns the first into a row of another kind.
     static func candidates(_ frames: [String: CGRect], viewportHeight: CGFloat) -> [TranscriptAnchor] {
         guard viewportHeight > 0 else { return [] }
         let rows = frames
@@ -69,7 +54,6 @@ struct TranscriptAnchor: Equatable {
         return UnitPoint(x: 0, y: top / room)
     }
 
-    /// How far the row now is from where it was.
     func drift(to frame: CGRect) -> CGFloat {
         frame.minY - top
     }

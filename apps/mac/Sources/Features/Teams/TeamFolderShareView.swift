@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The folder is already chosen. Team selection and the sharing review live
-/// together, rather than sending someone through account and repository setup.
 struct TeamFolderShareView: View {
     @Bindable var store: TeamStore
     let workspace: TeamLocalWorkspace

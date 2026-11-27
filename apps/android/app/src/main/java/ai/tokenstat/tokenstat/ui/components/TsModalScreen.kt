@@ -38,7 +38,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 
-/** A phone form owns its whole surface, with actions kept clear of the keyboard. */
 @Composable
 internal fun TsModalScreen(
     title: String,

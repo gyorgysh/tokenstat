@@ -554,8 +554,6 @@ impl TeamClient {
     pub fn my_moves(&self) -> Result<Value, TeamError> {
         let mut moves = Vec::new();
         let mut after = String::new();
-        // The server returns up to 1,000 rows per page. Bound requests as well
-        // as rows so a stream of tiny pages cannot monopolize host catch-up.
         for _ in 0..128 {
             let page: Value = self.request_query(
                 Method::GET,
@@ -587,8 +585,6 @@ impl TeamClient {
                     return Err(TeamError::InvalidResponse);
                 }
                 last = id.into();
-                // Keep only the bounded protocol metadata. Unknown response
-                // fields must not accumulate up to a megabyte for every row.
                 moves.push(json!({"repositoryId": id, "sequence": sequence}));
             }
             match page.get("nextCursor") {

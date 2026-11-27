@@ -4,13 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! The handful of harness settings the launcher (i) badge can change.
-//!
-//! Another tool's files are read, never written, except here: someone pressed
-//! Save on a form that names the file. Never on a timer, never on open. Only
-//! allowlisted keys come back, because these files also hold credentials. A
-//! backup, when one is written, is `0600` beside the original.
 
 use std::fs;
 use std::ops::Range;
@@ -208,13 +202,6 @@ enum FieldKind {
     Choice,
 }
 
-/// The band a number is allowed to sit in, and the step a drag moves by.
-///
-/// A compaction threshold is a dial, not a free number: typed digits are how
-/// somebody ends up compacting at 4 percent or reserving more tokens than the
-/// window holds. Where the tool documents a sane band, it is given here and
-/// the form draws a slider. `default` is what the tool itself uses when the
-/// key is absent, so the slider starts where the tool already is.
 #[derive(Clone, Copy)]
 struct Span {
     min: i64,
@@ -229,7 +216,6 @@ struct Field {
     kind: FieldKind,
     options: &'static [&'static str],
     hint: Option<&'static str>,
-    /// Numbers only. `None` keeps the plain text box.
     span: Option<Span>,
     loc: Loc,
 }
@@ -242,8 +228,6 @@ struct Schema {
 }
 
 fn home() -> PathBuf {
-    // Not `$HOME` alone: a systemd unit starts with no HOME, and joining onto
-    // an empty path put `.codex/config.toml` under the daemon's CWD.
     tokenstat_paths::home_dir().unwrap_or_default()
 }
 
@@ -329,10 +313,6 @@ const GROK: &[Field] = &[
             key: "auto_compact_threshold_percent",
         },
     },
-    // The mode Grok actually reads. `always-approve` and `bypassPermissions`
-    // are two names for one mode, so only the product name is offered, and
-    // the legacy `[ui] yolo` flag is not offered at all: it is a managed
-    // policy key, not a second switch a person should flip here.
     Field {
         key: "permission",
         label: "Permissions",
@@ -446,9 +426,6 @@ const CLAUDE: &[Field] = &[
         span: None,
         loc: Loc::Json { pointer: "/model" },
     },
-    // xhigh and max exist and are model dependent: Claude Code rejects an
-    // effort the model or the organization does not allow, at the point the
-    // session starts, rather than at the point this file is written.
     Field {
         key: "effort",
         label: "Effort",
@@ -500,10 +477,6 @@ const CLAUDE: &[Field] = &[
             pointer: "/autoCompactEnabled",
         },
     },
-    // The one setting on this sheet that changes what tokenstat can report.
-    // Transcripts older than this are deleted by Claude Code itself, and a
-    // deleted transcript is usage nothing can recover: the archive keeps what
-    // it already read, and nothing else.
     Field {
         key: "cleanup_days",
         label: "Keep transcripts",
@@ -682,10 +655,6 @@ fn read_json(text: &str, fields: &[Field]) -> Result<Vec<Value>, String> {
         .collect())
 }
 
-/// A number to write, refused outside the band the field declares.
-///
-/// Clamping silently would write something the person did not choose into
-/// another tool's config, so an out of range value is an error instead.
 fn number(field: &Field, value: &Value) -> Result<i64, String> {
     let n = value
         .as_i64()
@@ -1021,8 +990,7 @@ fn insert_member(
     }
     let end = consume_balanced(text, i, b'{', b'}')?;
     let close = end - 1;
-    // Insert before the first member: trailing commas and comments at the
-    // closing brace then remain intact, including line comments.
+
     let mut first = i + 1;
     skip_ws_and_comments(text, &mut first);
     let separator = if first == close { "" } else { "," };
@@ -1237,9 +1205,6 @@ mod tests {
         assert!(replaced.contains("// schema"), "{replaced}");
     }
 
-    /// Claude Code's own file shape: a `permissions` object that already
-    /// holds rules. The mode has to land inside it, not beside it, or the
-    /// rules the person wrote are shadowed by a second object.
     #[test]
     fn a_mode_lands_inside_an_existing_permissions_object() {
         let text = "{\n  \"model\": \"opus\",\n  \"permissions\": {\n    \"allow\": [\"Read\"],\n    \"deny\": []\n  }\n}\n";
@@ -1248,7 +1213,7 @@ mod tests {
         assert_eq!(parsed["permissions"]["defaultMode"], json!("plan"));
         assert_eq!(parsed["permissions"]["allow"], json!(["Read"]));
         assert_eq!(parsed["model"], json!("opus"));
-        // And again on a file that has no permissions object at all.
+
         let bare = json_set(
             "{\n  \"model\": \"opus\"\n}\n",
             "/permissions/defaultMode",

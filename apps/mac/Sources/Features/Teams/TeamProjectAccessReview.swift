@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Only the people reviewed for this new project may receive a grant. A
-/// retry can accept an identical grant, but cannot restore a revoked one.
 enum TeamProjectAccessReview {
     static func grants(reviewed: Set<String>, role: TeamRepositoryRole, members: [TeamRepositoryMember]) throws -> [TeamRepositoryMember] {
         guard role == .viewer || role == .contributor,

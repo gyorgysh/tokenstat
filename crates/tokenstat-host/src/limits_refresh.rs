@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Share simultaneous quota reads and bound automatic vendor traffic.
-
 use serde_json::Value;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

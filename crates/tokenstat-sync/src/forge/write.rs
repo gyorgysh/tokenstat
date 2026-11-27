@@ -58,7 +58,6 @@ pub fn create(
             "Choose different source and target branches".into(),
         ));
     }
-    // Branch names may hold characters a query string must escape.
     let query: String = reqwest::Url::parse_with_params(
         "https://query.invalid/",
         &[

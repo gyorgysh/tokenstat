@@ -27,7 +27,6 @@ internal fun JsonObject.optLong(key: String): Long? =
 internal fun JsonObject.optInt(key: String): Int? =
     this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull
 
-/// Monday through Friday bits, matching the host.
 const val WEEKDAYS_MASK = 0b0001_1111
 
 enum class ScheduleKind(val label: String) {
@@ -45,7 +44,6 @@ enum class ScheduleKind(val label: String) {
     }
 }
 
-/// When a job fires. Port of `AutomationSchedule`.
 data class AutomationSchedule(
     val kind: ScheduleKind = ScheduleKind.ONCE,
     val everySeconds: Long = 0,
@@ -75,7 +73,6 @@ data class AutomationSchedule(
             (0..6).filter { (mask and (1 shl it)) != 0 }.map { dayShort[it] }.joinToString(", ")
     }
 
-    /// One phrasing for every client, so a job cannot say two things.
     val summary: String get() {
         val time = "$hour:${minute.toString().padStart(2, '0')}"
         return when (kind) {
@@ -105,7 +102,6 @@ data class AutomationSchedule(
         }
     }
 
-    /// A repeating schedule can be paused. Once is only ever a button.
     val repeats: Boolean get() = kind != ScheduleKind.ONCE
 
     fun toJson(): JsonObject = buildJsonObject {
@@ -118,8 +114,6 @@ data class AutomationSchedule(
     }
 }
 
-/// Labels shared by automation and workflow schedule pickers.
-/// Port of `JobScheduleCopy`.
 object JobScheduleCopy {
     val weekdayNames = listOf(L10n.text("android.automationmodels.monday.6a00dfc1"), L10n.text("android.automationmodels.tuesday.7d8af1de"), L10n.text("android.automationmodels.wednesday.c0a6cc82"), L10n.text("android.automationmodels.thursday.fc266206"), L10n.text("android.automationmodels.friday.e21f3f37"), L10n.text("android.automationmodels.saturday.dbe35c73"), L10n.text("android.automationmodels.sunday.873fef76"))
     val weekdayShort = listOf(L10n.text("android.automationmodels.mo.d23e867e"), L10n.text("android.automationmodels.tu.62afcc74"), L10n.text("android.automationmodels.we.f3fe997b"), L10n.text("android.automationmodels.th.3bff939c"), L10n.text("android.automationmodels.fr.eed8f901"), L10n.text("android.automationmodels.sa.a951efc7"), L10n.text("android.automationmodels.su.2d88a3a2"))
@@ -139,9 +133,6 @@ object JobScheduleCopy {
     }
 }
 
-/// Frequency fields both job editors write. Schedule values stay exact
-/// until a picker is touched, so a 90-second interval does not round to a
-/// minute. Port of `JobScheduleEditing`.
 data class ScheduleFields(
     val scheduleKind: ScheduleKind = ScheduleKind.ONCE,
     val intervalMinutes: String = "60",
@@ -235,8 +226,6 @@ data class ScheduleFields(
     }
 }
 
-/// Minutes and no-limit, shared by automations and workflows.
-/// Port of `JobBudgetEditing`.
 data class BudgetFields(val budgetMinutes: String = "180", val noTimeLimit: Boolean = false, val originalSeconds: Long? = null) {
     companion object {
         fun load(seconds: Long): BudgetFields =
@@ -260,18 +249,13 @@ data class BudgetFields(val budgetMinutes: String = "180", val noTimeLimit: Bool
         if (budgetSeconds == null) L10n.text("android.automationmodels.enter_a_positive_time_limit_or_choose_no_l.3b7996e8") else null
 }
 
-/// Wall-clock copy for jobs that fire on a connected computer.
-/// The host scheduler owns the zone: a phone in another zone must not
-/// convert 09:00 there into the device clock. Port of `HostScheduleClock`.
 object HostScheduleClock {
-    /// IANA name the host sent, or null when it is missing or unnamed.
     fun resolved(identifier: String?): String? {
         val trimmed = identifier?.trim().orEmpty()
         if (trimmed.isEmpty() || trimmed == "unknown") return null
         return trimmed
     }
 
-    /// Short place name. `America/New_York` becomes `New York`.
     fun place(identifier: String?): String? {
         val id = resolved(identifier) ?: return null
         if (id == "UTC" || id == "GMT") return "UTC"
@@ -303,8 +287,6 @@ object HostScheduleClock {
         else "${civil.dayOfMonth} $month ${civil.year}"
     }
 
-    /// Next-run timestamp in the host zone. Null when the zone is unknown,
-    /// so the caller does not fall back to this device.
     fun wallClock(epochMs: Long, timezone: String?): String? {
         val civil = civil(epochMs, timezone) ?: return null
         val day = shortDay(epochMs, timezone) ?: return null
@@ -342,10 +324,6 @@ object HostScheduleClock {
     }
 }
 
-/// Confirm copy for starting or stopping work on another machine.
-///
-/// One helper so workflows and automations cannot word the same threat
-/// differently. Port of `ClientJobCopy`.
 object JobCopy {
     fun run(name: String, folder: String, host: String): String =
         L10n.text("android.automationmodels.starts_0_in_1_on_2.c720825d", "${name}", "${folder}", "${host}")
@@ -366,16 +344,12 @@ object JobCopy {
         return L10n.text("android.automationmodels.0_minute_1.ef3d336c", "${minutes}", "${if (minutes == 1L) "" else "s"}")
     }
 
-    /// Fact-row value. The label is already "Last", so no prefix.
-    /// Port of `ClientJobCopy.lastRunWhen`.
     fun lastRunWhen(epochMs: Long?, nowMs: Long = System.currentTimeMillis()): String {
         if (epochMs == null || epochMs <= 0) return L10n.text("android.automationmodels.never_run.3d40a69d")
         return ai.tokenstat.tokenstat.ui.logic.RelativeClock.abbreviated(epochMs, nowMs)
     }
 }
 
-/// Scheduler card and editor copy. Port of `AutomationQueueDraft.summary`,
-/// `ClientSchedulerCard` scope, and the queue editor captions.
 object QueueCopy {
     fun summary(budgetSeconds: Long, maxConcurrent: Long): String {
         val budget = if (budgetSeconds == 0L) {
@@ -395,7 +369,6 @@ object QueueCopy {
         return "$budget · $slots"
     }
 
-    /// The list may be one folder. The copy must not be.
     fun scope(hostName: String, folderName: String, compact: Boolean = false): String {
         val host = hostName.trim()
         val folder = folderName.trim()
@@ -436,18 +409,14 @@ object QueueCopy {
     }
 }
 
-/// "2 enabled · 1 running", the automations library summary.
 fun automationListSummary(enabled: Int, running: Int): String = L10n.text("android.automationmodels.0_enabled_1_running.6a231a0e", "${enabled}", "${running}")
 
-/// Library search covers the name and the prompt, like the Apple client.
 fun jobMatchesQuery(job: AutomationJob, query: String): Boolean {
     val q = query.trim()
     if (q.isEmpty()) return true
     return job.name.contains(q, ignoreCase = true) || job.prompt.contains(q, ignoreCase = true)
 }
 
-/// The run the detail leads with: the live-first latest, else the job's
-/// recorded last run. Port of `ClientAutomationSession.lastRun(for:)`.
 fun lastAutomationRun(runs: List<AutomationRun>, job: AutomationJob): AutomationRun? {
     val jobRuns = runs.filter { it.jobId == job.id }
     val ordered = RunHistory.ordered(jobRuns.map { RunRef(it.id, it.startedAtMs, it.isRunning) })
@@ -455,8 +424,6 @@ fun lastAutomationRun(runs: List<AutomationRun>, job: AutomationJob): Automation
     return job.lastRunID?.let { id -> runs.firstOrNull { it.id == id } }
 }
 
-/// One agent automation. Port of `Automation` (revision defaults to 0 on
-/// hosts before protocol 21).
 data class AutomationJob(
     val id: String = "",
     val name: String = "",
@@ -492,8 +459,6 @@ data class AutomationJob(
         )
     }
 
-    /// Wire object for `automation.create`, `automation.update` and
-    /// `automation.edit` (the revision rides beside it on edit).
     fun toJson(): JsonObject = buildJsonObject {
         put("id", id)
         put("name", name)
@@ -512,7 +477,6 @@ data class AutomationJob(
     }
 }
 
-/// Shared automation fields. Port of `AutomationEditorDraft`.
 data class AutomationEditorDraft(
     val name: String = "",
     val prompt: String = "",
@@ -588,7 +552,6 @@ data class AutomationEditorDraft(
     }
 }
 
-/// Shared run queue. Port of `AutomationQueue`.
 data class AutomationQueue(
     val defaultBudgetSeconds: Long = 0,
     val maxConcurrent: Long = 2,
@@ -606,7 +569,6 @@ data class AutomationQueue(
     }
 }
 
-/// Queue editor validation. Port of `AutomationsModel.saveQueue`.
 object QueueValidation {
     const val HOST_CAP = 32L
 
@@ -641,7 +603,6 @@ object QueueValidation {
         countText.trim().toLongOrNull() in listOf(0L, 1L, 2L, 4L, 8L)
 }
 
-/// One completed or still-running agent run. Port of `RunRecord`.
 data class AutomationRun(
     val id: String = "",
     val jobId: String = "",
@@ -682,8 +643,6 @@ data class AutomationRun(
     }
 }
 
-/// A confirmed creation, including when the job has since been deleted.
-/// Port of `AutomationCreationOutcome`.
 data class AutomationCreationOutcome(
     val operationID: String = "",
     val jobID: String = "",
@@ -700,8 +659,6 @@ data class AutomationCreationOutcome(
     }
 }
 
-/// A confirmed run request. `run` is absent when the process was never
-/// recorded. Port of `AutomationRunOutcome`.
 data class AutomationRunOutcome(
     val operationID: String = "",
     val jobID: String = "",

@@ -21,14 +21,6 @@ using Windows.UI;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Screen viewer for another host. H.264 video frames are decoded through
-/// a MediaStreamSource after the same TSCR envelope check the Apple
-/// decoder runs, and plain JPEG stills from older hosts blit to an image.
-/// Pointer and keyboard input, the control toggle, quality, and display
-/// choice ride screen.viewer.input with the same event shapes the Apple
-/// capture side applies. Audio has a separate bounded playback stream.
-/// </summary>
 internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string _peer;
@@ -250,9 +242,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
 
     public event Action? ToolbarChanged { add { } remove { } }
 
-    /// <summary>
-    /// The machine on the other end of the viewer.
-    /// </summary>
     public UIElement? ToolbarScope => Chrome.ScopeChip(_name, Symbol.View);
 
     public IList<UIElement> ToolbarActions()
@@ -266,11 +255,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         };
     }
 
-    /// <summary>
-    /// The inspector column content: the connection behind the picture.
-    /// State changes repaint it, so the column stays live without the shell
-    /// asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -384,12 +368,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         _ = PollAsync(_poll.Token);
     }
 
-    /// <summary>
-    /// Open the viewer stream: fresh capability, then the local viewer
-    /// session over the same direct-then-relay ladder as terminals. Auto
-    /// quality is the absence of a choice, so it is omitted and the host
-    /// reads the route instead.
-    /// </summary>
     private async Task OpenAsync(bool control)
     {
         if (_closed) throw new OperationCanceledException();
@@ -410,7 +388,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         var openedId = Format.Text(opened, "id");
         if (_closed)
         {
-            // Closing while open is in flight must also close the late result.
             if (!string.IsNullOrEmpty(openedId))
             {
                 try { await AppServices.Host.CallAsync("screen.viewer.close", new JsonObject { ["id"] = openedId }); }
@@ -655,7 +632,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
             {
                 if (!frame.Keyframe)
                 {
-                    // A fresh decoder needs its parameter sets first.
                     return;
                 }
                 ResetDecoderOnUi();
@@ -1055,7 +1031,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         var kind = Format.Text(evt, "type");
         if (_closed || string.IsNullOrEmpty(id) || (!_control && kind != "display")) return;
         var data = Convert.ToBase64String(Encoding.UTF8.GetBytes(evt.ToJsonString()));
-        // Preserve press/release order even when the transport yields between writes.
         await _inputGate.WaitAsync();
         try
         {
@@ -1067,13 +1042,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         finally { _inputGate.Release(); }
     }
 
-    /// <summary>
-    /// Hand the mouse over, or take it back, on the session that is already
-    /// up. A fresh capability every time: the one this session opened with
-    /// says what it was opened for, and control is exactly the field the
-    /// host checks. Falls back to reopening when the host is too old to
-    /// flip in place.
-    /// </summary>
     private async Task SetControlAsync(bool wanted)
     {
         if (wanted == _control || _closed || _reconnecting || _changingControl || string.IsNullOrEmpty(_sessionId)) return;
@@ -1146,12 +1114,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         _ = PollAsync(_poll.Token);
     }
 
-    /// <summary>
-    /// Move a live session to a different budget without reopening: the
-    /// relay allows one screen channel per account, so a reopen races its
-    /// own teardown. A host too old to know the method keeps the picture
-    /// it has.
-    /// </summary>
     private async Task SetQualityAsync(string wire)
     {
         if (wire == _quality || _closed)
@@ -1185,7 +1147,6 @@ internal sealed partial class ScreenPage : Page, IInspectorContent, IToolbarItem
         }
         catch
         {
-            // Not worth a failed state. The session still runs on the old budget.
         }
     }
 

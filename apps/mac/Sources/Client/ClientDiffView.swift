@@ -7,15 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One file's changes, read from the machine that owns the folder.
-///
-/// This reads the current working copy. Changes owns file selection and the
-/// commit composer shows the immutable content reviewed for that submission.
-///
-/// Not `DiffView`, which compiles here but is built for a Mac pane: its two
-/// 44pt gutters and marker spend 102 points of chrome before a character of
-/// code, which is a quarter of a phone's width. One gutter instead, and the
-/// `+` or `−` carries which side of the change the line is on.
 struct ClientDiffView: View {
     let peer: String
     let workspaceID: String
@@ -78,8 +69,6 @@ struct ClientDiffView: View {
             Task { await load() }
         }
         .refreshable {
-            // Its own key. `ClientRefresh` throttles by key, so a diff sharing
-            // one with the file list it was pushed from would swallow a pull.
             await ClientRefresh.pull("workspace-diff-\(workspaceID)-\(file.path)") {
                 await load()
             }
@@ -91,8 +80,6 @@ struct ClientDiffView: View {
         }
     }
 
-    /// What file, where, and how much of it moved. The path is here rather
-    /// than in the title, which only has room for the name.
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(file.path)
@@ -167,15 +154,8 @@ struct ClientDiffView: View {
     }
 }
 
-/// One line of a diff, sized for a phone.
-///
-/// One number column, not two. A line is on one side or the other, the `+` or
-/// `−` says which, and a second column of dashes would spend width saying what
-/// the marker already said. The number is the line's position on whichever
-/// side it belongs to.
 struct DiffLineRow: View {
     let line: DiffLine
-    /// The available pane width, including the source-number gutter.
     let minWidth: CGFloat
     var continuation = false
     @ScaledMetric(relativeTo: .footnote) private var gutterWidth: CGFloat = 34
@@ -229,7 +209,6 @@ struct DiffLineRow: View {
                 .font(ClientType.code)
                 .foregroundStyle(tint)
                 .textSelection(.enabled)
-                // One source number stays at the top of all visual wraps.
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)

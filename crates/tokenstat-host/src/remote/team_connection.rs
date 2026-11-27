@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{current_team_scope, load_settings, session_for_serving, team_reach, tunnel_lifecycle};
 use crate::lease_clock::Deadline;
 use crate::{account_session::AccountSnapshot, error::DispatchError, teams::api_error};
@@ -15,11 +14,8 @@ use tokenstat_sync::teams::{
     RequestTicket, TeamCapability, TeamClient, TeamConnectionProof, TeamError,
 };
 
-// A canonical transcript record may be 4 MiB. Keep a hard transport cap while
-// allowing that record and JSON framing to reach the existing renderer intact.
 const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
 const RESPONSE_TIME: Duration = Duration::from_secs(15);
-/// An Ask answers once its agent has started, which can take a login shell.
 const ASK_RESPONSE_TIME: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -211,9 +207,6 @@ fn relay_unreachable() -> DispatchError {
         "This device could not reach the tokenstat relay. Check the connection and try again.",
     )
 }
-/// The relay answered the team channel with a refusal or never paired it.
-/// Its reason codes are stable and say which side to look at, so they are
-/// kept rather than folded into one sentence that fits every failure.
 fn relay_refused(reason: &str) -> DispatchError {
     if reason.contains("no_such_peer") {
         return unavailable();
@@ -259,8 +252,6 @@ fn deadline(proof: &TeamConnectionProof) -> Result<Instant, DispatchError> {
 }
 
 enum Transport {
-    // The physical publisher still obtains and validates the same signed
-    // read proof. There is no socket to pair back to itself.
     Local,
     Relay(Box<Relay>),
 }
@@ -311,8 +302,6 @@ struct Relay {
     _reach: team_reach::Demand,
 }
 
-// The private fields prevent construction without the verified account proof.
-// A different computer additionally requires the pinned Noise/Team channel.
 pub(crate) struct Link {
     transport: Transport,
     owner: AccountSnapshot,
@@ -433,8 +422,7 @@ impl Link {
             })
             .map_err(|_| unavailable())?
             .ok_or_else(unavailable)?;
-            // Socket creation is asynchronous. An initial Team open must wait
-            // for READY rather than racing the writer's first registration.
+
             let ready_deadline = (Instant::now() + Duration::from_secs(10)).min(deadline);
             let socket = tunnel.socket().map_err(|_| relay_unreachable())?;
             while !socket.status().connected {
@@ -601,8 +589,7 @@ impl Link {
             Deadline::capture(next_deadline.saturating_duration_since(Instant::now()))
                 .ok_or_else(unavailable)?,
         );
-        // A slow validation or suspended host cannot revive an already
-        // expired connection. Closed reads may establish a fresh connection.
+
         self.ensure_current()?;
         if let Transport::Relay(relay) = &self.transport {
             relay
@@ -615,8 +602,7 @@ impl Link {
         self.proof = next;
         self.deadline = next_deadline;
         self.continuous_deadline = next_continuous_deadline;
-        // A relay ACK updates the host's channel ticket. Local and remote
-        // reads both validate the replacement through the scoped boundary.
+
         let protocol = self.call(ReadMethod::Protocol, &ReadParams::default())?;
         self.verify_protocol(&protocol)
     }
@@ -682,7 +668,7 @@ impl Link {
         params: &Value,
     ) -> Result<Value, DispatchError> {
         self.ensure_current()?;
-        // A new chat has no share yet. Every other Ask is about one share.
+
         if self.request.capabilities != [TeamCapability::Read, TeamCapability::Run]
             || self.request.share_id.is_none() != (method == AskMethod::New)
         {

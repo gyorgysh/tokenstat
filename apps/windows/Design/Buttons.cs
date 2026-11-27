@@ -12,19 +12,8 @@ using Windows.UI;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// Content buttons in the Mac capsule family. Metrics come from the Mac Theme:
-/// 30pt height, 24pt dense, 8pt radius, 14pt padding, 10pt dense, 13pt medium
-/// type, 12pt dense. Every builder picks its mark from ActionIconGlyph, so the
-/// one-vocabulary rule holds here too. The older ActionIconGlyph.Button and
-/// the Chrome builders stay for their call sites.
-/// </summary>
 internal static class Buttons
 {
-    /// <summary>
-    /// The filled accent capsule: accent fill, white text, no border. For the
-    /// one action a surface offers.
-    /// </summary>
     public static Button Primary(string title, ActionIcon icon, RoutedEventHandler click, bool small = false)
     {
         var button = Capsule(
@@ -36,12 +25,6 @@ internal static class Buttons
         return button;
     }
 
-    /// <summary>
-    /// The action somebody may regret: delete, drop, revoke, forget. Same
-    /// shape as the rest, danger colour, so a row of actions sorts by colour.
-    /// Mirrors the Mac DestructiveButtonStyle: danger at 8 percent behind
-    /// danger text, danger at 35 percent around it.
-    /// </summary>
     public static Button Destructive(string title, ActionIcon icon, RoutedEventHandler click, bool small = false) =>
         Capsule(
             title, icon, click, small,
@@ -49,11 +32,6 @@ internal static class Buttons
             Theme.Brush(static () => Theme.Danger),
             Theme.Brush(static () => WithAlpha(Theme.Danger, 0.35)));
 
-    /// <summary>
-    /// The secondary action: panel fill, hairline border, default text. For
-    /// revoke, forget, and every real operation that is not the one being
-    /// offered. Mirrors the Mac SecondaryButtonStyle.
-    /// </summary>
     public static Button Secondary(string title, ActionIcon icon, RoutedEventHandler click, bool small = false)
     {
         var button = Capsule(
@@ -65,10 +43,6 @@ internal static class Buttons
         return button;
     }
 
-    /// <summary>
-    /// The Mac toolbar's 30px hit area and 14px mark: quiet at rest, a soft
-    /// rounded seat on hover, and an accent wash for an active panel.
-    /// </summary>
     public static Button ToolbarIcon(ActionIcon icon, string tooltip, RoutedEventHandler click, bool isAccent = false)
     {
         var button = new Button
@@ -152,10 +126,6 @@ internal static class Buttons
         return button;
     }
 
-    /// <summary>
-    /// Local property values beat the default disabled look, so dim by hand.
-    /// 0.42 matches the Mac styles.
-    /// </summary>
     private static void DimWhenDisabled(Button button)
     {
         button.IsEnabledChanged += (_, _) => button.Opacity = button.IsEnabled ? 1 : 0.42;

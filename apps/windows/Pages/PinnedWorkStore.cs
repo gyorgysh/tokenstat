@@ -8,7 +8,6 @@ internal sealed record PinnedWork(string AccountScope, string Owner, string Work
     public string Key => BrowserHistory.Key(Owner, ChatId);
 }
 
-/// <summary>Eight user-chosen Home shortcuts per account, scoped to their owning host.</summary>
 internal sealed class PinnedWorkStore
 {
     public const int Capacity = 8;

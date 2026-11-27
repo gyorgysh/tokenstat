@@ -12,31 +12,12 @@ using Windows.Foundation;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// The action strip above scrolling content. Mirrors the Mac
-/// DetailChromeBar, which is the source of truth: a 40 point row on every
-/// destination, leading navigation and scope on the left, the screen's own
-/// actions on the right, a hairline underneath. Pages with ad-hoc chrome rows
-/// can drop them for this.
-/// </summary>
 internal static class DetailBar
 {
     private static readonly ConditionalWeakTable<UIElement, ToolbarPanel> Owners = new();
 
-    /// <summary>The shared row height. Narrow toolbars may wrap into more rows.</summary>
     public const double Height = 40;
 
-    /// <summary>
-    /// Build the bar. Leading carries the screen's own navigation, then scope
-    /// names which folder is on screen, then the accessory says which version
-    /// of that folder it is, so it reads as part of the folder and not as one
-    /// more control at the far end. Trailing carries the destination actions
-    /// such as Refresh and the scope picker. Either side may be empty.
-    /// </summary>
-    /// <param name="leading">Navigation within this screen, in order.</param>
-    /// <param name="scope">Which folder this screen is showing, when it is showing one.</param>
-    /// <param name="accessory">Something belonging to the folder rather than the screen.</param>
-    /// <param name="trailing">This screen's actions, in order.</param>
     public static Grid View(
         IList<UIElement>? leading = null,
         UIElement? scope = null,
@@ -88,12 +69,6 @@ internal static class DetailBar
 
     private const double BottomSpacing = 3;
 
-    /// <summary>
-    /// Keep the two ends on one baseline when they fit. At narrower widths,
-    /// wrap whole controls onto more rows instead of measuring both ends at
-    /// infinity and letting them overlap or disappear outside the window.
-    /// Stateful pickers remain mounted during resizing.
-    /// </summary>
     private sealed class ToolbarPanel : Panel
     {
         public int LeadingCount { get; set; }
@@ -124,8 +99,6 @@ internal static class DetailBar
             double y = 0;
             void Row(List<UIElement> items, bool right, double? sharedHeight = null)
             {
-                // Qualify the shared metric: Panel inherits Height, whose
-                // unset value is NaN and cannot be used in layout geometry.
                 var height = sharedHeight ?? Math.Max(DetailBar.Height, items.Max(c => c.DesiredSize.Height) + BottomSpacing);
                 var x = Theme.SpaceM + (right ? Math.Max(0, available - Length(items)) : 0);
                 foreach (var child in items)
@@ -161,9 +134,6 @@ internal static class DetailBar
 
     private static void Attach(ToolbarPanel controls, UIElement element)
     {
-        // Stateful actions (for example terminal lifecycle buttons) survive
-        // toolbar rebuilds, even before their previous strip was mounted.
-        // Remember that owner instead of relying only on the visual tree.
         if (Owners.TryGetValue(element, out var previous))
         {
             previous.Children.Remove(element);

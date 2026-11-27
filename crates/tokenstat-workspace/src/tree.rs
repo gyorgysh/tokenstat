@@ -60,8 +60,6 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<TreeEntry>, TreeError> {
     let read = std::fs::read_dir(&dir).map_err(|e| TreeError::Unreadable(e.to_string()))?;
     for entry in read.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        // `.git` is machinery, not project content, and expanding it is never
-        // what anyone wanted.
         if name == ".git" {
             continue;
         }
@@ -125,9 +123,6 @@ pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError>
     if relative.is_empty() {
         return Ok(root.to_path_buf());
     }
-    // An absolute path is refused rather than quietly reinterpreted as a
-    // relative one. Stripping the leading slash would turn `/etc` into a lookup
-    // for `<workspace>/etc`, which answers a question nobody asked.
     let candidate = Path::new(relative);
     if candidate.is_absolute()
         || candidate
@@ -138,8 +133,6 @@ pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError>
     }
 
     let joined = root.join(candidate);
-    // Canonicalize both sides: the textual check above stops `..`, and this
-    // stops a symlink from doing the same thing without the characters.
     let real = joined
         .canonicalize()
         .map_err(|e| TreeError::Unreadable(e.to_string()))?;
@@ -190,15 +183,9 @@ fn mark_ignored(root: &Path, entries: &mut [TreeEntry]) {
         .spawn()
     {
         Ok(c) => c,
-        // Not a repository, or no git. Nothing is ignored, which is the honest
-        // answer rather than an error: a plain folder is a valid workspace.
         Err(_) => return,
     };
 
-    // Both ends are pipes, and git answers as it consumes: writing the whole
-    // list before reading stdout can fill git's stdout pipe while git waits on
-    // stdin, with both sides blocked. Write from a second thread and read the
-    // answer on this one.
     let mut stdin = child.stdin.take();
     let payload: Vec<u8> = entries
         .iter()

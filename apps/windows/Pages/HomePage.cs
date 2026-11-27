@@ -12,14 +12,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The screen the window opens on. Answers what is left before starting:
-/// who is signed in, the conversations worth going back to, today and this
-/// week at list rates, the year grid, what each vendor reports is left, and
-/// the devices on the account. Mirrors the Mac Home: the toolbar owns the
-/// scope picker, Refresh sits beside it, and a pinned day opens in
-/// the inspector column.
-/// </summary>
 internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, IToolbarItems
 {
     private readonly StackPanel _sections = new() { Spacing = Theme.SpaceS };
@@ -109,13 +101,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 }
             }
         }
-        catch { /* Missing or older preferences use the desktop default. */ }
+        catch { }
         _root.Children.Add(_status);
         _status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
             _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Visibility.Collapsed : Visibility.Visible);
         _signSlot.Visibility = Visibility.Collapsed;
-        // One spacing unit off the sidebar, like the Mac Home gutter: a card
-        // already carries its own padding, so the stack needs only a gutter.
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceS),
@@ -142,7 +132,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
 
     public event Action? ToolbarChanged { add { } remove { } }
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
     public IList<UIElement> ToolbarActions()
@@ -209,17 +198,8 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         catch (Exception ex) { _status.Text = L10n.Text("windows.homepage.could_not_save_home_layout_0.c56055d3", $"{FriendlyError.Display(ex.Message)}"); }
     }
 
-    /// <summary>
-    /// The shell reads this once, at navigation, and keeps the element. Day
-    /// changes replace its children, so the column stays live without the
-    /// shell ever asking again.
-    /// </summary>
     public UIElement? Inspector => _inspectorLayout;
 
-    /// <summary>
-    /// The toolbar scope picker pushes here, on navigation and on every
-    /// change. The page never reads the toolbar directly.
-    /// </summary>
     public void ApplyScope(DeviceScope scope)
     {
         var wire = scope.Wire();
@@ -232,17 +212,10 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             return;
         }
         _scope = wire;
-        // The new grid is a different set of numbers. A cached day from the
-        // old one would describe the wrong scope.
         InvalidateDayCaches();
         _ = LoadAsync();
     }
 
-    /// <summary>
-    /// Explicit re-read, for the toolbar button and for the shell if it ever
-    /// wants its own refresh affordance. Always hits the host, drops the
-    /// per-day caches, and re-pins the selected day fresh.
-    /// </summary>
     public async Task RefreshAsync()
     {
         LogoRefresh.Began();
@@ -333,8 +306,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             _root.Children.RemoveAt(1);
         }
         _status.Text = L10n.Text("windows.homepage.loading.ba3bbbe1");
-        // A wireframe shaped like the cards coming, with a light pulse so the
-        // wait does not feel frozen. Real content replaces it with an arrival.
         var skeleton = Motion.SkeletonCard();
         _root.Children.Add(skeleton);
 
@@ -385,7 +356,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         catch
         {
-            // Sharing stays unoffered rather than wrong.
         }
         try
         {
@@ -422,8 +392,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             if (!skip.Contains(Format.Text(item, "source")))
             {
-                // Clone out of the host answer. A node keeps its parent, and
-                // the filtered list must stand on its own.
                 _planLimits.Add(item?.DeepClone());
             }
         }
@@ -460,8 +428,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         catch
         {
-            // Continue is a shortcut, not the screen. An older host that does
-            // not report recents simply shows no section.
         }
 
         if (!Current()) return;
@@ -510,12 +476,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         RefreshInspector();
     }
 
-    /// <summary>
-    /// The inspector is empty until a day is pinned. Open today on first load
-    /// so Home is not "pick a day" when the grid is already about this year. A
-    /// later click is left alone, including across a quiet refresh. A scope
-    /// change re-selects: the cell is the same date, the numbers are not.
-    /// </summary>
     private void EnsureSelection()
     {
         if (_calendar is null)
@@ -542,11 +502,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
     }
 
-    /// <summary>
-    /// The account grid fell back because a sign-in is missing or stale. The
-    /// heatmap below is this PC's own year, so offer the fix where the failure
-    /// is rather than quoting a command at somebody already in the app.
-    /// </summary>
     private UIElement SignInPrompt(bool signedIn)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
@@ -570,11 +525,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return banner;
     }
 
-    /// <summary>
-    /// Local-clock greeting plus the first name. Signed out stays literal:
-    /// the handle, and nothing else. Streaks sit beside the name because they
-    /// are about the person, and the card below is about the data.
-    /// </summary>
     private static UIElement ProfileCard(JsonNode? account, JsonNode? calendar)
     {
         var head = new StackPanel
@@ -605,9 +555,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         var tier = Format.Text(account, "tier");
         if (!string.IsNullOrEmpty(tier))
         {
-            // The glyph the profile page uses, not the written pill. Beside a
-            // 20pt name a crown reads as a mark on the person; a word in a
-            // capsule reads as a label stuck to them.
             nameRow.Children.Add(Marks.TierMark(tier, 16) ?? Chrome.TierBadge(tier));
         }
         who.Children.Add(nameRow);
@@ -669,11 +616,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return GreetingPhrase(hasHistory) + ", " + FirstName(title);
     }
 
-    /// <summary>
-    /// A short greeting from the device clock, stable for the rest of the
-    /// local day so a refresh does not swap one phrase for another. Ports the
-    /// Mac HomeGreeting pool.
-    /// </summary>
     private static string GreetingPhrase(bool hasHistory)
     {
         var now = DateTime.Now;
@@ -702,12 +644,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return cut < 0 ? trimmed : trimmed[..cut];
     }
 
-    /// <summary>
-    /// The work worth going back to: recent conversations the host reports,
-    /// newest first. A shortcut, so it only renders when there is somewhere
-    /// to go back to. Each row opens its conversation in the folder's chat,
-    /// like the Mac.
-    /// </summary>
     private static UIElement ContinueCard(JsonArray recent)
     {
         var list = new StackPanel { Spacing = 0 };
@@ -895,12 +831,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return null;
     }
 
-    /// <summary>
-    /// What the figures under the title are counting, said plainly. Asked for
-    /// and got are not the same grid, and a grid that quietly fell back to
-    /// local while the control still says All devices would report one PC's
-    /// spend as everybody's.
-    /// </summary>
     private UIElement ActivityCard(JsonNode? calendar, string? error, bool signedIn)
     {
         if (calendar is null)
@@ -938,11 +868,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return Chrome.Card(L10n.Text("windows.homepage.activity.38da1505"), _heatmap, subtitle, mark: Chrome.CardMark(ActionIcon.Layout));
     }
 
-    /// <summary>
-    /// The first thing Home shows on a PC that has never scanned. Three steps,
-    /// and the first one arrives done: installing is behind you, you are
-    /// looking at the app. Signing in is step three and it is not a wall.
-    /// </summary>
     private UIElement GettingStarted(bool signedIn)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -986,11 +911,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return Chrome.Card(L10n.Text("windows.homepage.get_tokenstat_counting.331454ea"), body);
     }
 
-    /// <summary>
-    /// One panel per vendor that reported numbers, plus the archive's own
-    /// plan usage. A vendor with nothing to say is left out entirely: the
-    /// panels on screen are the tools actually installed.
-    /// </summary>
     private List<UIElement> PlanPanels(JsonArray limits, JsonArray planBySource)
     {
         var panels = new List<UIElement>();
@@ -1005,11 +925,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return panels;
     }
 
-    /// <summary>
-    /// Vendors worth a panel: anything that reported numbers, plus anything
-    /// whose failure is worth reading. A tool that is simply not installed is
-    /// not a failure and does not get one.
-    /// </summary>
     private static List<JsonNode?> VisibleLimits(JsonArray limits)
     {
         var visible = new List<JsonNode?>();
@@ -1029,10 +944,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return visible;
     }
 
-    /// <summary>
-    /// Do not turn an absent tool into an error card. Once a tool is present,
-    /// authentication, network, and rate-limit failures remain visible.
-    /// </summary>
     private static bool IsAbsentNote(string note)
     {
         var lower = note.ToLowerInvariant();
@@ -1066,10 +977,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
                 var note = Format.Text(provider, "note");
                 if (!string.IsNullOrEmpty(note))
                 {
-                    // Why the numbers stopped moving, under the numbers
-                    // themselves. A refresh that fails is not a reason to hide
-                    // what was true an hour ago, and it is not a reason to
-                    // pass that off as current either.
                     body.Children.Add(new TextBlock
                     {
                         Text = note,
@@ -1082,8 +989,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         }
         else
         {
-            // Words, not a zero bar. "We could not look" and "nothing used"
-            // are different answers and must not look the same.
             body.Children.Add(new TextBlock
             {
                 Text = Format.Text(provider, "note", L10n.Text("windows.homepage.the_vendor_could_not_be_read.7eb01313")),
@@ -1115,11 +1020,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return Chrome.Card(title, body, ProviderSubtitle(provider), accessory: actions, mark: AgentMark.View(source, 22));
     }
 
-    /// <summary>
-    /// The plan name when the vendor gave one, and always how old the reading
-    /// is. "As of" rather than a bare timestamp, because with a stale panel
-    /// the age is the point.
-    /// </summary>
     private static string? ProviderSubtitle(JsonNode? provider)
     {
         var parts = new List<string>();
@@ -1193,8 +1093,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
             Grid.SetColumn(when, 2);
             head.Children.Add(when);
         }
-        // Clamped for drawing. A vendor reporting 104% is telling you it is
-        // over, not asking for a bar that runs off the edge.
         var bar = new ProgressBar
         {
             Value = Math.Clamp(percent, 0, 100),
@@ -1216,11 +1114,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         _ => Theme.Accent,
     };
 
-    /// <summary>
-    /// Codex reports the account's own allowance beside the running model's,
-    /// and both are weekly. Without the scope the two rows read as one limit
-    /// stated twice.
-    /// </summary>
     private static string WindowDisplayLabel(JsonNode? window)
     {
         var label = Format.Text(window, "label", "window");
@@ -1233,21 +1126,11 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         {
             "secondary" => L10n.Text("windows.homepage.0_all_models.31683c25", $"{label}"),
             "primary" => L10n.Text("windows.homepage.0_primary.57ab87b8", $"{label}"),
-            // A small model's own allowance: secondary, never bare beside the
-            // account's week.
             "current model" => L10n.Text("windows.homepage.0_secondary.6cd2b67a", $"{label}"),
-            // The account's own allowance reads as written. Anything else
-            // vendor-named stays qualified rather than translated, which is
-            // what hid an exhausted account limit.
             _ => $"{label} ({scope})",
         };
     }
 
-    /// <summary>
-    /// Archive usage that the source marked as covered by a subscription.
-    /// Separate from the limit panels above: vendor quota windows answer what
-    /// is left, this answers what the archive has already seen.
-    /// </summary>
     private static UIElement PlanUsageCard(JsonArray rows)
     {
         var list = new StackPanel { Spacing = 0 };
@@ -1360,10 +1243,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return Chrome.Card(L10n.Text("windows.homepage.machines.c061da19"), list, subtitle, mark: Chrome.CardMark(ActionIcon.Device));
     }
 
-    /// <summary>
-    /// One caption line under a device's name. The name is the quick read;
-    /// this is the answer to when it was last heard from.
-    /// </summary>
     internal static string StatusLine(JsonNode? machine, bool isSelf)
     {
         if (isSelf)
@@ -1403,12 +1282,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return L10n.Text("windows.homepage.no_sync_recorded.e74abceb");
     }
 
-    /// <summary>
-    /// A line offering the setting that would put these numbers on your other
-    /// devices. It says what the other devices show today rather than naming
-    /// the switch, because the reason to want this is the other screen being
-    /// empty. The switch itself lives on Account.
-    /// </summary>
     private static UIElement LimitsSyncHint()
     {
         var body = new StackPanel { Spacing = 2 };
@@ -1428,12 +1301,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return Chrome.Card(L10n.Text("windows.homepage.share_plan_usage.d8cf783b"), body);
     }
 
-    /// <summary>
-    /// The pointer moved over (or off) a heatmap day. Hover only glances: the
-    /// inspector previews the day under the pointer and falls back to the
-    /// pinned one. A quiet cell asks for nothing: the grid only lights priced
-    /// days, and a day with no value has nothing to show.
-    /// </summary>
     private void HoverDay(HeatDay? day)
     {
         string? date = day is not null && day.Value > 0 && !day.Locked ? day.Date : null;
@@ -1499,11 +1366,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         if (epoch == _dayEpoch) RefreshInspector();
     }
 
-    /// <summary>
-    /// Local reports for the pinned day: models, harnesses, projects,
-    /// sessions. The account series has no project or session keys, so this
-    /// stays off when the grid is counting every device.
-    /// </summary>
     private async Task FetchOverviewAsync(string date)
     {
         var epoch = _dayEpoch;
@@ -1549,10 +1411,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return new JsonArray();
     }
 
-    /// <summary>
-    /// A fresh single-day query. Built new for every call: a node keeps its
-    /// parent, so one shared object cannot sit in five payloads.
-    /// </summary>
     private static JsonObject DayQuery(string date, int? limit = null)
     {
         var query = new JsonObject { ["since"] = date, ["until"] = date };
@@ -1735,10 +1593,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return stack;
     }
 
-    /// <summary>
-    /// "This tool does not report cache writes" and "this tool reported zero
-    /// cache writes" are different facts. No value anywhere is n/a, not zero.
-    /// </summary>
     private static long? SumCounter(JsonArray? rows, string name)
     {
         long sum = 0;
@@ -2051,11 +1905,6 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return rows;
     }
 
-    /// <summary>
-    /// Display name for a harness, the agent CLI that produced the events.
-    /// The archive stores source ids like `claude_code`. These are shown to
-    /// people, so they get the same spelling tokenstat.ai uses.
-    /// </summary>
     private static string HarnessName(string id)
     {
         if (id == "opencode2")
@@ -2111,25 +1960,15 @@ internal sealed partial class HomePage : Page, IScopeAware, IInspectorContent, I
         return id;
     }
 
-    /// <summary>
-    /// The tool a stored source id belongs to. Recovery rows stay on disk as
-    /// `claude_code_estimate` / `claude_code_rollup` and fold into Claude Code.
-    /// </summary>
     private static string HarnessToolKey(string id) => id switch
     {
         "claude_code_estimate" or "claude_code_rollup" => "claude_code",
         _ => id,
     };
 
-    /// <summary>
-    /// Display label for a model id. Model ids are long and the useful part
-    /// is at the end, and bare "default"/"auto" is the Cursor router.
-    /// </summary>
     private static string ShortModel(string id)
     {
         var raw = id.Trim();
-        // `local:` marks synced usage a machine served itself. Its price
-        // says so already, and the name reads without it.
         if (raw.StartsWith("local:", StringComparison.OrdinalIgnoreCase)) raw = raw[6..];
         var slash = raw.LastIndexOf('/');
         var leaf = slash >= 0 ? raw[(slash + 1)..] : raw;

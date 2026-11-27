@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //! Proof that a message was taken, so a lost answer cannot run a turn twice.
-//!
-//! A send that reaches the host and whose reply never reaches the client looks
-//! exactly like a send that never arrived. Without a record the client has two
-//! bad options: drop the words, or send them again and run the agent twice. A
-//! receipt is what makes the second attempt free: the host recognises the
-//! message it already accepted and answers with the conversation instead of
-//! starting anything.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,15 +16,10 @@ pub mod team_runs;
 /// rather than being allowed to replay into it.
 pub const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
-/// Per conversation. Long enough for a device that was away for a while,
-/// short enough that the file is read and written whole beside every send.
 const CAPACITY: usize = 4096;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 
-/// The longest client message id accepted, and the alphabet it may use. A
-/// UUID fits with room to spare. The bound matters because the id becomes
-/// part of a key in a file this host writes.
 const MAX_ID: usize = 128;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -90,11 +78,8 @@ impl Ledger {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
             Err(error) => return Err(format!("Message receipts could not be opened: {error}")),
         };
-        // Unresolved launches never become permission to replay merely because
-        // time passed. Accepted records keep the entire advertised window.
+
         entries.retain(|key, receipt| {
-            // A question has no client-created-at cutoff. Keep its proof so
-            // a missing answer row cannot invite a second launch months later.
             key.starts_with("question:")
                 || receipt.state != ReceiptState::Accepted
                 || now_ms.saturating_sub(receipt.at_ms) < RETENTION_MS + CLOCK_SKEW_MS
@@ -107,8 +92,6 @@ impl Ledger {
     }
 
     pub fn put(&mut self, key: String, receipt: Receipt) -> Result<(), String> {
-        // Refuse a new acceptance instead of silently evicting proof of a turn
-        // still inside the retention window. Existing receipts can settle.
         if !self.entries.contains_key(&key) && self.entries.len() >= CAPACITY {
             return Err("Message receipt storage is full. No new message was started. Older confirmed receipts are kept for thirty days.".into());
         }
@@ -215,8 +198,6 @@ pub(crate) struct RunnerLease {
     _path: PathBuf,
 }
 
-/// An exclusive lock on `path` without waiting, or None when someone else
-/// holds it. The lock goes with the process, however that process ends.
 fn try_lock_exclusive(path: &Path) -> Result<Option<File>, String> {
     try_lock(path, true)
 }
@@ -311,8 +292,7 @@ impl Drop for RunnerLease {
         let mut tracked = tracked_running_leases()
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        // A successor may acquire the OS lock immediately after it is released.
-        // Remove this entry before the successor can register its own lease.
+
         let _ = self._lock.take();
         tracked.remove(&self._path);
     }
@@ -356,10 +336,6 @@ pub(crate) fn running_count(root: &Path) -> usize {
         .count()
 }
 
-/// Whether somebody else holds this lease.
-///
-/// Taken and released immediately where it is free: the question is whose it
-/// is, and holding it would make the answer wrong for the next asker.
 fn lease_is_held(path: &Path) -> bool {
     {
         let tracked = tracked_running_leases()
@@ -681,7 +657,7 @@ mod tests {
     fn the_digest_covers_the_files_as_well_as_the_words() {
         assert_eq!(digest("hello", &[]), digest("hello", &[]));
         assert_ne!(digest("hello", &[]), digest("hello!", &[]));
-        // Delimiters in text must not masquerade as an attachment boundary.
+
         assert_ne!(
             digest("hello\u{1f}file", &[]),
             digest("hello", &["file".into()])

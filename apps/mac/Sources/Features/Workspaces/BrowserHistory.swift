@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// The address on the project computer, never a tunnel listener address.
 struct BrowserTarget: Codable, Equatable, Hashable, Sendable {
     let url: String
 
@@ -72,7 +71,6 @@ struct BrowserTarget: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-/// Device-local suggestions. Opening a field does not write or load a page.
 @MainActor
 final class BrowserHistory {
     static let shared = BrowserHistory()
@@ -103,7 +101,6 @@ final class BrowserHistory {
         let saved = entry(for: owner)
         if let last = saved.lastTarget.flatMap(BrowserTarget.init) { return String(last.port) }
         if let port = saved.ports.first { return String(port) }
-        // An old global preference is a suggestion only, not a project migration.
         if let legacy = defaults.string(forKey: "browser.lastPort").flatMap(BrowserTarget.parsePort) {
             return String(legacy)
         }

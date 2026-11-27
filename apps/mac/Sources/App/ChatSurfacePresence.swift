@@ -2,9 +2,6 @@
 
 import Foundation
 
-/// Each mounted reader releases only its own claim. A fold can mount the
-/// successor before the predecessor disappears; separate scenes can also
-/// read different conversations at the same time.
 struct ChatSurfacePresence {
     private struct Surface {
         let conversation: String

@@ -71,8 +71,6 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
         );
         return Ok(());
     }
-    // JSON keeps the stored ids. The table is a breakdown, so estimate and
-    // rollup share one recovered row rather than looking like two tools.
     let rows = if group == GroupBy::Source {
         if let Some(estimate) = values.remove("claude_code_estimate") {
             let rollup = values.entry("claude_code_rollup".into()).or_default();
@@ -90,13 +88,6 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
     Ok(())
 }
 
-/// Name the days in range that were worked and have no measurement.
-///
-/// A note rather than rows in the table. A row of zeros would say the day
-/// happened and cost nothing, which is the false statement this whole thing
-/// exists to stop, and a row of dashes would have to be excluded from every
-/// total and from the trend line anyway. The days are named so they can be
-/// recognised, and the totals above are honestly a floor.
 pub(super) fn note_unmeasured_days(store: &Store, q: &Query) {
     let days = unmeasured_days(store, q);
     let in_range: Vec<&String> = days
@@ -128,13 +119,6 @@ pub(super) fn note_unmeasured_days(store: &Store, q: &Query) {
     );
 }
 
-/// Sparkline and endpoints for a time-bucketed table, oldest point first.
-///
-/// Only day and week buckets have an order that means anything (months come
-/// through `monthly`, which builds its own table). Sorting by key is safe for
-/// both because their keys (`2026-08-03`, `2026-W31`) are fixed-width and
-/// already sort chronologically, so the trend reads left to right regardless of
-/// how the caller ordered the rows.
 fn trend_line(rows: &[Bucket], group: GroupBy) -> Option<(String, String, String)> {
     if !matches!(group, GroupBy::Day | GroupBy::Week) || rows.len() < 2 {
         return None;
@@ -160,8 +144,6 @@ fn print_table(
     prices: &PriceTable,
     values: &ValueMap,
 ) {
-    // Caller already handles the empty case so the table always has a body.
-    // The footer counts what the rows are: days, months, or plain rows.
     let noun = match group {
         GroupBy::Day => "days",
         GroupBy::Month => "months",
@@ -228,8 +210,6 @@ fn print_table(
         noun,
     );
 
-    // A time series has a shape, and a column of magnitudes hides it. One line
-    // under the table shows the trend without spending a row per point.
     if let Some((spark, first, last)) = trend_line(rows, group) {
         let s = ui::secondary();
         println!(
@@ -287,8 +267,6 @@ pub fn sessions(store: &Store, q: &Query, top: usize, json: bool) -> Result<()> 
     let prices = PriceTable::load_with_catalog();
     let values = values_by_key(&store.report_by_model(GroupBy::Session, q)?, &prices);
     if json {
-        // The array is capped at `top`, so say so: without the total a
-        // consumer cannot tell two sessions from two hundred.
         let shown: Vec<String> = rows
             .iter()
             .take(top)
@@ -361,7 +339,6 @@ pub fn blocks(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -> 
         "status",
     );
 
-    // Newest first: the active block should be at the top.
     for b in rows.iter().rev().take(40) {
         let start = format_block_instant(b.start_ms, tz);
         let c = &b.counters;
@@ -417,8 +394,6 @@ pub fn export(
     out: Option<&Path>,
     json_flag: bool,
 ) -> Result<()> {
-    // Reject an unknown format before the --json override below, so
-    // `--format bad --json` fails instead of silently emitting JSON.
     if format != "csv" && format != "json" {
         anyhow::bail!("unknown export format {format:?}, use csv or json");
     }

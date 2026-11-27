@@ -63,10 +63,6 @@ struct ClientChatMenu: View {
 
     var body: some View {
         Menu {
-            // Pin and Continue were rows among a dozen and people read past
-            // them. A control group draws them as the large pair of buttons
-            // at the head of the menu, the way the system shows the actions
-            // a menu is mostly opened for.
             if pinReference != nil || onHandoff != nil {
                 ControlGroup {
                     if pinReference != nil {
@@ -180,8 +176,6 @@ struct ClientChatMenu: View {
                     defer { removing = false }
                     guard visible, ownsProject, navigation.acceptsChatAction(ticket) else { return }
                     let removed = await model.remove(chat, in: workspaceID)
-                    // The completed deletion must retire sibling caches even
-                    // if selecting the next chat already changed navigation.
                     guard removed, ownsProject else { return }
                     onDelete?(chat)
                 }

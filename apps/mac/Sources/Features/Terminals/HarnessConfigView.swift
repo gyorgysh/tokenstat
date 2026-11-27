@@ -7,11 +7,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// How this harness starts a long session: model, effort, compaction.
-///
-/// A sheet, same shape as New automation, because a bubble next to a 22pt
-/// badge could only show one line at a time. Settings are written by Save;
-/// reinstallation is a separate, explicitly confirmed action.
 struct HarnessConfigView: View {
     let profile: LaunchProfile
     var peer: String? = nil
@@ -206,12 +201,6 @@ struct HarnessConfigView: View {
         }
     }
 
-    /// A compaction threshold, as a dial rather than as digits.
-    ///
-    /// The band and the step come from the host, which reads them from what
-    /// the tool documents. An empty value is not zero: it means the key is
-    /// absent and the tool is using its own default, so the handle starts
-    /// there and the number beside it says so.
     @ViewBuilder
     private func numberSlider(_ field: HarnessConfigField) -> some View {
         let low = Double(field.min ?? 0)
@@ -237,8 +226,6 @@ struct HarnessConfigView: View {
         }
     }
 
-    /// Percentages read as they are written. Token counts get separators,
-    /// because 900000 and 90000 are the same shape at a glance.
     private func numberLabel(_ field: HarnessConfigField, _ value: String) -> String {
         guard let number = Int(value) else { return value }
         if (field.max ?? 0) <= 100 { return "\(number)" }

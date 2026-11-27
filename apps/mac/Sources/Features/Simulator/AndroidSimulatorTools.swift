@@ -41,8 +41,6 @@ struct AndroidSimulatorTools: Sendable {
             return (String(fields[0]), transport)
         }
     }
-    /// An emulator port can be reused by another AVD after a restart. ADB's
-    /// transport identity pins the connection instead of retargeting that port.
     static func targetArguments(_ serial: String, transportID: UInt64?) -> [String] {
         transportID.map { ["-t", String($0)] } ?? ["-s", serial]
     }
@@ -84,7 +82,6 @@ struct AndroidSimulatorTools: Sendable {
         guard result.status == 0 else { throw SimulatorCommand.Failure(message: result.errors) }
         return result.data
     }
-    /// adb's remote shell joins arguments again, so quote user text at that boundary.
     static func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
     static func gestureArguments(from: CGPoint, to: CGPoint, duration: TimeInterval) -> [String] {

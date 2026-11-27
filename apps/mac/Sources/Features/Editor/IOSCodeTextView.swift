@@ -8,9 +8,6 @@
 import SwiftUI
 import UIKit
 
-/// The iPhone and iPad editor, using the same bridge spans as the Mac editor.
-/// It stays a native text view so selection, undo and keyboard editing work
-/// naturally instead of turning the file into a read-only coloured preview.
 struct IOSCodeTextView: UIViewRepresentable {
     let document: EditorDocument
     var find: EditorFindSession?
@@ -37,9 +34,6 @@ struct IOSCodeTextView: UIViewRepresentable {
         let length = (document.text as NSString).length
         let location = min(savedSelection.location, length)
         view.selectedRange = NSRange(location: location, length: min(savedSelection.length, length - location))
-        // No scrollRangeToVisible: this runs on every recreation (rotation,
-        // cell reuse), and yanking the scroll to the cursor each time is not
-        // restoring anything. Selection alone is the restore.
         return view
     }
 
@@ -89,8 +83,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             layoutGutter(beside: view)
         }
 
-        /// The gutter floats over the leading inset, so the text view keeps
-        /// its own scrolling, selection and keyboard behavior untouched.
         private func layoutGutter(beside view: UITextView) {
             let text = view.text as NSString
             gutterStarts = EditorGutterMap.lineStarts(in: text)
@@ -165,10 +157,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             guard view.markedTextRange == nil else { return }
             let selection = view.selectedRange
             applying = true
-            // Colours over the text that is already there, not a replacement
-            // for it. `setAttributedString` throws away the view's typing
-            // attributes and undo coalescing along with the string it was
-            // going to put back unchanged.
             applyColours(next, to: view.textStorage)
             applying = false
             appliedSpans = next.spansVersion
@@ -177,10 +165,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             refreshGutterState(beside: view)
         }
 
-        /// Match backgrounds over the buffer. Foreground colours belong to
-        /// the syntax pass, which never touches the background, so the two
-        /// do not fight. The current match needs no paint: the selection
-        /// itself is its highlight.
         private func applyFindHighlights(to view: UITextView, force: Bool) {
             guard let find else { return }
             guard view.markedTextRange == nil else { return }
@@ -213,9 +197,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             case .replaceCurrent:
                 guard !isComposing(view), let range = find.current,
                       let textRange = textRange(range, in: view) else { return }
-                // `applying` stays off the delegate while replacing would
-                // swallow the edit. Push the result to the document by hand:
-                // the replacement is user text, not a sync reset.
                 view.selectedRange = range
                 view.replace(textRange, withText: find.replaceText)
                 syncedText = view.text
@@ -234,8 +215,6 @@ struct IOSCodeTextView: UIViewRepresentable {
                 guard !isComposing(view), !find.matches.isEmpty,
                       let wholeDocument = textRange(NSRange(location: 0, length: (view.text as NSString).length), in: view)
                 else { return }
-                // One undo for the whole scope, which is this open document.
-                // The bounded match list is only for navigation/highlighting.
                 let replacement = find.replacingAll(in: view.text)
                 view.undoManager?.beginUndoGrouping()
                 view.replace(wholeDocument, withText: replacement)
@@ -260,8 +239,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             return composing
         }
 
-        /// Repaint an existing storage in place: one edit transaction, the
-        /// base colour reset across the whole range, then each span.
         private func applyColours(_ document: EditorDocument, to storage: NSTextStorage) {
             let full = NSRange(location: 0, length: storage.length)
             storage.beginEditing()
@@ -283,9 +260,6 @@ struct IOSCodeTextView: UIViewRepresentable {
             guard !applying else { return }
             syncedText = textView.text
             document.setText(textView.text)
-            // Typing moves the matches, and `sync` compares against
-            // `syncedText`, so without this the count would sit stale until
-            // an unrelated reload recomputed it.
             if textView.markedTextRange == nil {
                 find?.refresh(text: textView.text)
                 applyFindHighlights(to: textView, force: true)

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// One row per destination across saved/live sources. A confirmed live match
-/// replaces the saved copy of the same destination, including its message anchor.
-/// The presentation separately retains selected row order while offering updates.
 enum WorkSearchMerge {
     static func live(_ page: WorkSearchLive.Page, query: WorkSearchQuery,
                      machineName: String) -> [WorkSearchIndex.Hit] {

@@ -13,7 +13,6 @@ internal data class ChatActivityData(val goal: ChatActivityGoal?, val plan: List
     val planSource: String?, val goalReported: Boolean, val planReported: Boolean, val agentsReported: Boolean, val partial: Boolean, val live: Boolean,
     val observedAtMs: Long?) {
     val hasContent get() = goal != null || plan.isNotEmpty() || agents.isNotEmpty()
-    // A retained running status is historical once its owning run is gone.
     val runningAgents get() = if (live && agentsReported && agents.none { it.status == "unknown" }) agents.count { it.status == "running" } else null
     val completedSteps get() = plan.count { it.status == "completed" }
     val headline get() = goal?.objective?.takeIf { it.isNotBlank() } ?: plan.firstOrNull { it.status == "inProgress" }?.text

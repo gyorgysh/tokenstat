@@ -6,18 +6,6 @@
 
 import SwiftUI
 
-/// The outcome of the last sync, as a card above the account row.
-///
-/// The update card lives in the same slot and the two are drawn with the same
-/// shapes on purpose: a sync that worked is a confirmation like an update
-/// check, and one that was refused by the plan gate is a warning like an
-/// update that could not install itself. Success is the accent, rate limiting
-/// is amber, a real failure is red, and all three are the same card so the
-/// footer reads as one language instead of a caption plus a card.
-///
-/// A success also starts a button cooldown so a second press is not sent
-/// into the same gate. That cooldown is not a rate limit, and this card
-/// must not say it is.
 struct SyncCard: View {
     var account: AccountModel
 
@@ -54,9 +42,6 @@ struct SyncCard: View {
                 )
             }
         } else if account.isRateLimited && !account.syncNoticeDismissed {
-            // The 429 notice has faded, but the gate is still shut. Keep the
-            // warning until the remembered wait elapses. A success cooldown
-            // does not come through here.
             status(
                 title: L10n.text("apple.synccard.rate_limited.a06130a5"),
                 subtitle: L10n.text("apple.synccard.this_plan_allows_a_sync_every_few_minutes.3f3fb97d"),

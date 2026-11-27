@@ -13,8 +13,6 @@ enum MarkdownLinks {
         #endif
     }
 
-    /// Styling and URL filtering share one pass: an unsafe URL becomes plain
-    /// text, while a safe link keeps emphasis and gains a visible affordance.
     static func styled(_ attributed: AttributedString, color: Color) -> AttributedString {
         guard attributed.runs.contains(where: { $0.link != nil }) else { return attributed }
         var result = attributed
@@ -23,8 +21,6 @@ enum MarkdownLinks {
             if !allows(url) {
                 result[run.range].link = nil
             } else {
-                // Explicit attributes survive an enclosing foreground style,
-                // selection and mixed inline formatting on supported OSes.
                 result[run.range].foregroundColor = color
                 result[run.range].underlineStyle = Text.LineStyle(pattern: .solid, color: color)
             }
@@ -37,25 +33,20 @@ struct MarkdownLinkAttribute: TextAttribute {
     let url: URL
 }
 
-/// Bound native text views without reparsing fragments of Markdown syntax.
 enum MarkdownTextChunks {
     static let maximumLineBreaks = 64
     static let maximumUnwrappedCodeLine = 512
 
     static func splitCode(_ value: AttributedString, scrollsHorizontally: Bool, maximum: Int) -> [AttributedString] {
         if scrollsHorizontally { return splitLines(value) }
-        // Wrapped code also needs a character bound: a few long logical
-        // lines can occupy thousands of display lines at large text sizes.
         return value.characters.isEmpty ? [value] : split(value, maximum: maximum)
     }
 
-    /// The stack supplies a line break between chunks, but not a missing glyph.
     static func codeText(_ chunk: AttributedString, isLast: Bool) -> AttributedString {
         guard !isLast, chunk.characters.last?.isNewline == true else { return chunk }
         return AttributedString(chunk[..<chunk.characters.index(before: chunk.endIndex)])
     }
 
-    /// Keep code lines intact so a wide fence can still scroll horizontally.
     static func splitLines(_ value: AttributedString) -> [AttributedString] {
         let characters = value.characters
         var pieces: [AttributedString] = []
@@ -91,7 +82,6 @@ enum MarkdownTextChunks {
                 if lineBreaks == maximumLineBreaks { break }
             }
             if end < characters.endIndex {
-                // Prefer a word boundary, retaining the whitespace itself.
                 let halfway = characters.index(start, offsetBy: count / 2)
                 var boundary = end
                 while boundary > halfway {
@@ -108,8 +98,6 @@ enum MarkdownTextChunks {
 }
 
 extension MarkdownLinks {
-    /// Keep native link handling and one selectable Text, while giving each
-    /// wrapped link run an identity the hover renderer can recognize.
     static func text(_ attributed: AttributedString) -> Text {
         guard attributed.runs.contains(where: { $0.link != nil }) else { return Text(attributed) }
         let parts = attributed.runs.map { run -> Text in
@@ -132,8 +120,6 @@ extension MarkdownLinks {
 #if os(macOS)
 import AppKit
 
-/// Drawing may happen off the main thread. No observable state is mutated
-/// during layout, and only link rectangles (never the whole paragraph) hit.
 final class MarkdownLinkHitMap: @unchecked Sendable {
     struct Region { let url: URL; let rect: CGRect }
     private let lock = NSLock()
@@ -162,8 +148,6 @@ struct MarkdownLinkRenderer: TextRenderer {
                     let bounds = run.typographicBounds.rect
                     regions.append(.init(url: link.url, rect: bounds))
                     if link.url == hovered {
-                        // Recolor the glyphs and their underline, preserving
-                        // bold/italic and native selection/link interaction.
                         context.drawLayer { layer in
                             layer.draw(run)
                             layer.blendMode = .sourceIn
@@ -237,13 +221,6 @@ private struct MarkdownLinkTracking: NSViewRepresentable {
     }
 }
 
-/// One window-wide monitor for every paragraph with a link, not one each.
-///
-/// Selection overlays can own mouse-move delivery, so tracking areas alone
-/// miss moves over selectable text. The monitor fills that gap, but it only
-/// reaches the paragraphs the pointer is inside, which the tracking areas
-/// report on entry and exit. A long transcript then costs the same per mouse
-/// move as a short one. It always returns the event unchanged.
 @MainActor
 private enum LinkHoverMonitor {
     private static var monitor: Any?

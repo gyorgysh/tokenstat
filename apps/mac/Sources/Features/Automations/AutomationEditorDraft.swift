@@ -2,8 +2,6 @@
 
 import Foundation
 
-/// Shared automation fields for Mac and mobile. Schedule values stay exact
-/// until a picker is touched, so a 90-second interval does not round to a minute.
 struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, JobBudgetEditing {
     enum Invalid: LocalizedError {
         case fields(String)
@@ -26,8 +24,6 @@ struct AutomationEditorDraft: Codable, Equatable, Sendable, JobScheduleEditing, 
     var weeklyDays: Int
     var weeklyDayEdited: Bool
     var customDays: Int
-    // Preserve host seconds until the user edits the time limit. Optional for
-    // compatibility with drafts persisted before exact budgets were retained.
     var loadedBudgetSeconds: UInt64? = nil
     var budgetMinutes: String {
         didSet { if budgetMinutes != oldValue { loadedBudgetSeconds = nil } }

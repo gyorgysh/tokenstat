@@ -7,11 +7,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import ai.tokenstat.tokenstat.R
 
-/** Keep widget setup controls clear of system bars and display cutouts. */
 internal fun ScrollView.applyWidgetConfigurationInsets() {
     setBackgroundColor(context.getColor(R.color.ts_widget_surface))
     clipToPadding = false
-    // Older releases fit the content to the system windows themselves.
     if (Build.VERSION.SDK_INT >= 35) {
         ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
             val safe = insets.getInsets(

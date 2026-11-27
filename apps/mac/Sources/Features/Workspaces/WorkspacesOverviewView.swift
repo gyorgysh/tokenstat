@@ -7,15 +7,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// Every registered repository on every machine, by what it needs next.
-///
-/// The sidebar already lists the folders. This page answers the other
-/// question: what is waiting on the person, what is moving, and what was left
-/// unfinished. Each card says one next step and every figure on it opens the
-/// page it counts.
-///
-/// Only drawn facts. A machine that is asleep keeps its last known folders,
-/// and a missing figure means the host did not answer, not zero.
 struct WorkspacesOverviewView: View {
     @Bindable var model: RepositoryOverviewModel
     var folders: [WorkspaceFolder]
@@ -23,16 +14,11 @@ struct WorkspacesOverviewView: View {
     var directoryPresentation: WorkspaceDirectoryPresentation = .empty
     var directoryError: String? = nil
     var isFullScreen = false
-    /// The inspector is on screen. A card it is not showing is not marked.
     var peekShown = false
     var onRetry: () -> Void = {}
     var chatsIn: (String) -> [ChatConversation]
-    /// Live local sessions per folder id. Remote counts ride the summaries.
     var sessionsIn: (String) -> Int
-    /// True only for a computer known to be away.
     var isAsleep: (WorkspaceFolder) -> Bool = { _ in false }
-    /// The teams a local folder is shared into, by organization name. Empty
-    /// for a folder nobody else can see.
     var sharedWith: (WorkspaceFolder) -> [String] = { _ in [] }
     var refreshChats: (WorkspaceFolder) async -> Void
     var actions: RepositoryActions
@@ -55,7 +41,6 @@ struct WorkspacesOverviewView: View {
     private static let cardMinimum: CGFloat = 360
     private static let gap: CGFloat = 14
 
-    // MARK: Scope
 
     private struct MachineScope: Hashable {
         var id: String?
@@ -90,7 +75,6 @@ struct WorkspacesOverviewView: View {
         return (label?.isEmpty == false) ? label! : L10n.text("apple.workspacesoverviewview.remote_machine.d9dd1af3")
     }
 
-    // MARK: Data
 
     private func card(_ folder: WorkspaceFolder) -> RepositoryCardData {
         let summary = summaries[folder.id]
@@ -99,8 +83,6 @@ struct WorkspacesOverviewView: View {
         let pulls = model.pulls[folder.id]
         let terminals = folder.isRemote ? (summary?.sessions ?? 0) : sessionsIn(folder.id)
         let asleep = isAsleep(folder)
-        // What a sleeping computer was doing when it was last heard is not
-        // what it is doing now.
         let waiting = asleep ? [] : chats.filter { $0.waiting == true }
         let running = asleep ? [] : chats.filter { $0.running && $0.waiting != true }
         let last = chats.map { $0.lastMessageAtMs ?? $0.updatedAtMs }.max()
@@ -138,7 +120,6 @@ struct WorkspacesOverviewView: View {
             teams: sharedWith(folder), facts: facts, step: RepositoryNextStep.next(facts),
             workingAgent: running.first?.backend,
             dayKeys: usage == nil ? [] : model.days, days: usage?.days ?? [], marks: pulls?.marks ?? [:],
-            // Every waiting or running chat, so the strip can name each one.
             chats: Array(rows.prefix(max(3, waiting.count + running.count))).map {
                 .init(id: $0.id, title: $0.title, backend: $0.backend, at: $0.lastMessageAtMs ?? $0.updatedAtMs,
                       running: !asleep && $0.running, waiting: !asleep && $0.waiting == true, pulls: $0.pulls)
@@ -149,7 +130,6 @@ struct WorkspacesOverviewView: View {
             isQuiet: RepositoryNextStep.isQuiet(facts))
     }
 
-    /// In the order asked for, taken once and then held still.
     private func sorted(_ cards: [RepositoryCardData]) -> [RepositoryCardData] {
         switch order {
         case .yours: return cards
@@ -177,14 +157,12 @@ struct WorkspacesOverviewView: View {
         settled = true
     }
 
-    // MARK: Body
 
     var body: some View {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let all = folders.map(card)
         let visible = Set(folders.filter { matches($0, query: query) }.map(\.id))
         let shown = sorted(all).filter { visible.contains($0.id) }
-        // A search or a chosen order is a request to see them, not a summary.
         let splits = order == .needs && query.isEmpty
         let active = splits ? shown.filter { !$0.isQuiet } : shown
         let quiet = splits ? shown.filter(\.isQuiet) : []
@@ -222,15 +200,11 @@ struct WorkspacesOverviewView: View {
                 }
             }
             .background {
-                // The new chat page's surface, held still: the same room, with
-                // the light on the headline instead of the composer.
                 ChatStartBackdrop(isFullScreen: isFullScreen, active: false, pointer: pointer,
                                   focus: UnitPoint(x: 0.3, y: 0.08))
             }
         }
         .onChange(of: folders.map(\.id)) { _, _ in
-            // The machine a filter named can leave while the filter stays.
-            // Fall back to all rather than an empty grid.
             if let scope, !scopes.contains(where: { $0.id == scope }) { self.scope = nil }
             if let peek = model.peekID, !folders.contains(where: { $0.id == peek }) { model.peekID = nil }
         }
@@ -241,9 +215,6 @@ struct WorkspacesOverviewView: View {
         }
     }
 
-    /// Reads only, and only while the page is on screen. Local chat lists come
-    /// from the host's memory. Paired computers are asked once a minute, and
-    /// only those that already answered.
     private func keepFresh() async {
         await BridgeLaunch.wait()
         var pass = 0
@@ -256,8 +227,6 @@ struct WorkspacesOverviewView: View {
             await model.loadUsage(folders)
             if !settled, !folders.isEmpty, !Task.isCancelled { hold(folders.map(card)) }
             await model.loadPulls(folders.filter { !card($0).isQuiet })
-            // The first answers about pull requests may reorder the page, but
-            // never under a pointer or a keyboard that is already using it.
             if pass == 0, !Task.isCancelled, !folders.isEmpty, !pointerOnCards, focused == nil {
                 hold(folders.map(card))
             }
@@ -266,7 +235,6 @@ struct WorkspacesOverviewView: View {
         }
     }
 
-    // MARK: Tools
 
     private var tools: some View {
         HStack(spacing: Theme.Space.s) {
@@ -298,7 +266,6 @@ struct WorkspacesOverviewView: View {
         .padding(.vertical, Theme.Space.s)
     }
 
-    // MARK: Headline
 
     private func hero(_ cards: [RepositoryCardData]) -> some View {
         let owed = cards.reduce(0) { $0 + RepositoryNextStep.owed($1.facts).count }
@@ -350,7 +317,6 @@ struct WorkspacesOverviewView: View {
                 figure(L10n.text("apple.repositories.tokens_today"), formatTokens(today))
                 figure(L10n.text("apple.repositories.tokens_week"), formatTokens(week))
                 if value > 0 {
-                    // List-rate value, never a bill. See `Bucket.value`.
                     figure(L10n.text("apple.repositories.week_list_rates"), formatSpend(UInt64(value)))
                 }
             }
@@ -367,7 +333,6 @@ struct WorkspacesOverviewView: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: Needs you
 
     private struct Need: Identifiable {
         var card: RepositoryCardData
@@ -380,7 +345,6 @@ struct WorkspacesOverviewView: View {
         for card in cards {
             for step in RepositoryNextStep.owed(card.facts) { needs.append(Need(card: card, step: step)) }
         }
-        // Most pressing first across repositories, steady among equals.
         let ranked = needs.enumerated().sorted { (a: (offset: Int, element: Need), b: (offset: Int, element: Need)) -> Bool in
             let left = a.element.step.rank, right = b.element.step.rank
             return left == right ? a.offset < b.offset : left < right
@@ -453,7 +417,6 @@ struct WorkspacesOverviewView: View {
         }
     }
 
-    // MARK: Cards
 
     private func eyebrow(_ title: String, count: Int) -> some View {
         HStack(spacing: 8) {
@@ -468,8 +431,6 @@ struct WorkspacesOverviewView: View {
         let rows = stride(from: 0, to: cards.count, by: columns).map { Array(cards[$0..<min($0 + columns, cards.count)]) }
         return VStack(alignment: .leading, spacing: 12) {
             if titled { eyebrow(L10n.text("apple.repositories.active"), count: cards.count) }
-            // A grid rather than a lazy one: cards in a row share a height,
-            // and nobody has enough repositories in use for that to cost.
             Grid(alignment: .topLeading, horizontalSpacing: Self.gap, verticalSpacing: Self.gap) {
                 ForEach(rows, id: \.first?.id) { row in
                     GridRow {

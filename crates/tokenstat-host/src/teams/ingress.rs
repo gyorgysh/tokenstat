@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use crate::{Session, account_session::AccountSnapshot};
 use std::sync::{
     Arc, Mutex,
@@ -35,8 +34,7 @@ pub(crate) fn accept(
     let Some(permit) = reserve(&ACTIVE, MAX_CONNECTIONS) else {
         return;
     };
-    // A partial Team handshake must not block the relay's personal accept
-    // loop. The permit remains held through serving and every failure path.
+
     let _ = std::thread::Builder::new()
         .name("team-peer".into())
         .spawn(move || {
@@ -46,8 +44,7 @@ pub(crate) fn accept(
             else {
                 return;
             };
-            // A direct-only change while the handshake was in flight must not
-            // turn that pending channel into a new relayed Team session.
+
             if !crate::remote::load_settings().relay_fallback {
                 return;
             }

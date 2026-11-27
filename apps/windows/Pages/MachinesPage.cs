@@ -16,13 +16,6 @@ using Windows.ApplicationModel.DataTransfer;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// This PC, who may reach it, and who it can reach. Mirrors the Mac Devices
-/// screen: approvals first, then this PC's connection settings and account
-/// devices, then the encryption note. Ordered by what somebody
-/// came here to do: decide about a machine that is knocking, then read this
-/// PC's own two words to compare with the other end, then add something new.
-/// </summary>
 internal sealed partial class MachinesPage : Page, IInspectorContent, IInspectorRequest, IToolbarItems
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
@@ -39,11 +32,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
     private JsonArray _peers = new();
     private string? _notice;
 
-    /// <summary>
-    /// Devices asking this PC for something, both grants in arrival order.
-    /// Each row carries its kind, from the method that answered, so neither
-    /// host policy has to know the other exists.
-    /// </summary>
     private List<(JsonNode Row, bool Screen)> _requests = new();
     private HashSet<string> _workspaceAllowed = new(StringComparer.Ordinal);
     private Dictionary<string, (bool View, bool Control)> _screenPermissions =
@@ -60,10 +48,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
     private ScrollViewer? _scroll;
     private readonly StackPanel _signSlot = new() { Spacing = Theme.SpaceM, Visibility = Visibility.Collapsed };
 
-    /// <summary>
-    /// What the inspector is showing. Keys only, so a refresh cannot pin a
-    /// stale device value. Null means nothing is picked yet.
-    /// </summary>
     private string? _selectedId;
     private string? _selectedPeer;
     private bool _selectThis;
@@ -106,10 +90,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         });
     }
 
-    /// <summary>
-    /// Keep the device list live while the screen is open, like the desktop
-    /// Mac five-second refresh. A missed tick keeps the last rows.
-    /// </summary>
     private void StartPoll()
     {
         StopPoll();
@@ -204,22 +184,13 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         }
     }
 
-    /// <summary>
-    /// The inspector column content. Selection and reloads replace its
-    /// children, so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspectorRoot;
 
     public event Action? ToolbarChanged;
     public event Action? DetailsRequested;
 
-    /// <summary>Global screen: no folder to name.</summary>
     public UIElement? ToolbarScope => null;
 
-    /// <summary>
-    /// The re-read, plus pairing once the account says remote reach is
-    /// allowed, like the desktop Mac bar.
-    /// </summary>
     public IList<UIElement> ToolbarActions()
     {
         var trailing = new List<UIElement>
@@ -407,8 +378,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
 
     private void Render()
     {
-        // The five-second poll rebuilds these rows. Hold the scroll position
-        // across the rebuild so the list does not jump back to the top.
         var offsetX = _scroll?.HorizontalOffset ?? 0;
         var offsetY = _scroll?.VerticalOffset ?? 0;
         var searchFocus = _deviceSearch.FocusState;
@@ -429,7 +398,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
             _root.Children.Add(Chrome.Banner(_notice, Theme.Accent, Symbol.Contact));
             _notice = null;
         }
-        // Keep an active sign-in visible across device tabs and refreshes.
         _root.Children.Add(_signSlot);
         var account = _account;
         if (account is null)
@@ -522,8 +490,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         Restore();
     }
 
-    /// Search rebuilds only inventory rows, preserving the native editor,
-    /// caret and top-level management actions while the person types.
     private void RenderDeviceInventory()
     {
         _deviceInventory.Children.Clear();
@@ -559,10 +525,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
                 EmptyArtKind.Devices));
     }
 
-    /// <summary>
-    /// Whether the relay will take this account. The relay enforces the plan
-    /// at every HELLO, so this is the courtesy copy of the same gate.
-    /// </summary>
     internal static bool RemoteReachAllowed(JsonNode? account)
     {
         if (account?["canRemote"] is JsonValue flag
@@ -597,11 +559,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return pending;
     }
 
-    /// <summary>
-    /// Approved peers the account list does not already show, matched on
-    /// identity only. Dropping a device from here on a weaker match would
-    /// leave nowhere to revoke it.
-    /// </summary>
     private List<JsonNode> UnlistedKnown(JsonNode account)
     {
         var covered = new HashSet<string>(StringComparer.Ordinal);
@@ -664,12 +621,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return string.IsNullOrEmpty(id) ? Format.Text(machine, "machineID") : id;
     }
 
-    /// <summary>
-    /// The best name this PC has for an account machine. A machine that was
-    /// never named on the server would otherwise show only its code, which is
-    /// a row of strangers on a screen meant to answer "which one is my other
-    /// computer".
-    /// </summary>
     private string DeviceTitle(JsonNode? machine)
     {
         var label = Format.Text(machine, "label");
@@ -775,12 +726,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return approved;
     }
 
-    /// <summary>
-    /// Devices that have asked for something and are still waiting. The same
-    /// answers the desktop Mac offers, where somebody would go looking after
-    /// a notification has gone. Being approved is not being let in: each of
-    /// these is a separate yes from whoever is at this PC.
-    /// </summary>
     private UIElement WaitingForYouCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -820,9 +765,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
             var captured = row;
             if (screen)
             {
-                // Both answers, always, for a screen. Offering only what the
-                // device happened to ask for left no way to hand over the
-                // mouse without making somebody go back to their phone.
                 actions.Children.Add(ActionIconGlyph.Button(
                     L10n.Text("windows.machinespage.view_only.9b4c6c85"), ActionIcon.Preview, async (_, _) =>
                         await AnswerRequestAsync(captured, true, true, false, name)));
@@ -880,11 +822,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Whether this PC stays a host after the app quits. Mirrors the Account
-    /// screen's setting so it sits where somebody is deciding whether other
-    /// devices may reach this PC.
-    /// </summary>
     private UIElement AlwaysOnHostCard()
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -953,11 +890,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
             L10n.Text("windows.machinespage.whether_the_host_helper_stays_up_after_you.dd1619f2"));
     }
 
-    /// <summary>
-    /// What each paired device is allowed to do here. Being approved is not
-    /// being let in, so reaching the work on this PC is its own switch, and
-    /// it is first because it is the broadest of the three.
-    /// </summary>
     private UIElement DevicePermissionsCard(List<JsonNode> peers)
     {
         var body = new StackPanel { Spacing = Theme.SpaceM };
@@ -1183,10 +1115,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return card;
     }
 
-    /// <summary>
-    /// Names and presence only. Connect, revoke and forget belong on the plan
-    /// that can actually open a tunnel.
-    /// </summary>
     private UIElement LockedMachineList(JsonNode account, JsonArray machines)
     {
         var list = new StackPanel { Spacing = Theme.SpaceS };
@@ -1237,10 +1165,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
             L10n.Text("windows.machinespage.paste_the_key_from_the_other_machine_every.75ebefc4"));
     }
 
-    /// <summary>
-    /// Identity and remote access for this PC. The name, the two words to
-    /// compare with the other end, and the one switch.
-    /// </summary>
     private UIElement ThisMachineCard(JsonNode account, bool allowed, bool tunnel)
     {
         var selfName = Format.Text(_identity, "label");
@@ -1263,9 +1187,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         body.Children.Add(nameRow);
         if (!string.IsNullOrEmpty(words))
         {
-            // The comparison a person actually performs. The words are derived
-            // from a public key: there is nothing private in them, so they are
-            // shown plain and selectable.
             var knownRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
             knownRow.Children.Add(new TextBlock { Text = L10n.Text("windows.machinespage.known_as.9076e6ab"), Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
             knownRow.Children.Add(new TextBlock
@@ -1374,10 +1295,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
             L10n.Text("windows.machinespage.identity_and_remote_access_for_this_pc.0dd7ca7d"));
     }
 
-    /// <summary>
-    /// Account eligibility can be refreshed without sending someone to a
-    /// paid-plan checkout; personal remote access is available on every plan.
-    /// </summary>
     private UIElement RemoteLockedCard(JsonNode account)
     {
         var signedIn = account["signedIn"]?.GetValue<bool>() ?? false;
@@ -1395,11 +1312,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return Chrome.Card(L10n.Text("windows.machinespage.remote_is_on_patron.d25dea13"), body);
     }
 
-    /// <summary>
-    /// What protects a connection, with the keys it actually runs on. The
-    /// paragraph carries the fingerprints somebody can compare against the
-    /// other machine rather than asking them to take the sentence on trust.
-    /// </summary>
     private UIElement EncryptionNote()
     {
         var details = new StackPanel { Spacing = Theme.SpaceS };
@@ -1472,11 +1384,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return row;
     }
 
-    /// <summary>
-    /// One caption line under a machine's name. The presence light is the
-    /// quick read; this carries the detail, and the two never collide.
-    /// Matches the desktop Mac wording.
-    /// </summary>
     private string StatusLine(JsonNode? machine, bool isSelf)
     {
         if (isSelf)
@@ -1486,8 +1393,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         var isHost = Format.Text(machine, "kind") != "client";
         if (!isHost)
         {
-            // A phone holds the tunnel only while somebody is using it, so
-            // "offline" here means "not in the app right now", not "broken".
             if (MachineOnline(machine) == true)
             {
                 return L10n.Text("windows.machinespage.phone_in_the_app_now.49897ae2");
@@ -1541,10 +1446,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
     private static string? RelativeOrNull(string value) =>
         string.IsNullOrEmpty(value) ? null : Format.Relative(value);
 
-    /// <summary>
-    /// Keep Connect available for other computers. Presence can lag behind
-    /// wake or sign-in; an explicit attempt reports the actual result.
-    /// </summary>
     private bool CanConnect(JsonNode? machine)
     {
         var thisId = Format.Text(_account, "thisMachineId");
@@ -1556,8 +1457,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         {
             return false;
         }
-        // Presence can lag after wake/sign-in. Keep the explicit action
-        // available; the connection result explains any unmet prerequisite.
         return Format.Text(machine, "kind") != "client";
     }
 
@@ -1576,9 +1475,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         };
     }
 
-    /// <summary>
-    /// One account device. Technical identifiers and permissions stay in details.
-    /// </summary>
     private UIElement DeviceRow(
         JsonNode? machine, string id, string tier, ref int viewable)
     {
@@ -1720,10 +1616,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return card;
     }
 
-    /// <summary>
-    /// Connect, or the peer trust action the row needs first. Phones are
-    /// shown but never dialled: a client reaches a host, not the reverse.
-    /// </summary>
     private void AddConnectionActions(
         Panel actions, JsonNode? machine, JsonNode? peer, string title)
     {
@@ -1776,11 +1668,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         }
     }
 
-    /// <summary>
-    /// Whether the sweep dials this machine on its own, beside the connection
-    /// itself. Off stops the dialling and leaves a live connection alone;
-    /// only Disconnect drops it.
-    /// </summary>
     private UIElement AutoConnectRow(JsonNode peer, JsonNode? machine)
     {
         var peerKey = Format.Text(peer, "key");
@@ -1827,11 +1714,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Connect to a machine that belongs to this account. The account record
-    /// carries the public key, so this pins the identity and dials without
-    /// anybody copying or comparing anything.
-    /// </summary>
     private async Task ConnectMachineAsync(JsonNode? machine)
     {
         var key = Format.Text(machine, "publicIdentity");
@@ -1869,10 +1751,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
     private async Task DisconnectPeerAsync(string peerKey, string name)
     {
         RemoteWorkspaces.Disconnect(peerKey);
-        // Revoke ends trust and any workspace listing for this peer. Leaving
-        // Connected set after revoke made the row offer Disconnect for a
-        // machine that could no longer answer. Disconnect itself keeps trust:
-        // it only drops the folders from the sidebar.
         _notice = L10n.Text("windows.machinespage.disconnected_from_0_its_workspaces_are_no.3ecfb24d", $"{name}");
         await LoadAsync();
     }
@@ -1884,9 +1762,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         {
             if (machine is not null && !CanConnect(machine))
             {
-                // The sweep picks it up when it wakes, which is what the
-                // switch promises. Without a machine record there is no
-                // reachability to check, so the dial reports honestly.
                 Render();
                 RefreshInspector();
                 return;
@@ -1912,12 +1787,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
 
     private string _inspectorKey = "";
 
-    /// <summary>
-    /// What the inspector shows, fingerprinted: the selection, the fetched
-    /// state it reads, and the per-peer connection switches it also reads.
-    /// The five-second poll calls RefreshInspector every pass; an unchanged
-    /// key skips the rebuild so the column stops flickering.
-    /// </summary>
     private string InspectorKey()
     {
         var peerKey = _selectedPeer;
@@ -2216,11 +2085,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         _inspectorRoot.Children.Add(body);
     }
 
-    /// <summary>
-    /// Compact power, CPU and memory for a machine, filled after the read
-    /// lands. Peer set: ask that host. Peer null: this PC. Missing readings
-    /// stay off the bar rather than drawing as zero.
-    /// </summary>
     private UIElement HostStatsCard(string? peerKey)
     {
         var row = new StackPanel
@@ -2406,8 +2270,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         };
         if (restartPending)
         {
-            // The only thing left is the restart, and it ends whatever that
-            // machine is running, so it is never automatic here.
             if (canRestart)
             {
                 actions.Children.Add(Buttons.Primary(
@@ -2526,11 +2388,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         return stack;
     }
 
-    /// <summary>
-    /// Copy this PC's connection invite to the clipboard. Nobody has to read
-    /// the invite: it contains the public key and, while a listener is live, a
-    /// LAN address hint that is accepted only after Noise proves the key.
-    /// </summary>
     private void CopyInvite()
     {
         var key = SelfKey();
@@ -2604,9 +2461,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         var address = addressBox.Text.Trim();
         if (string.IsNullOrEmpty(address))
         {
-            // A live invite is key@host:port. Split at the last @; a bare
-            // key has no address, which is right for a machine that only
-            // ever connects to this one.
             var at = key.LastIndexOf('@');
             if (at > 0 && at + 1 < key.Length)
             {
@@ -2683,7 +2537,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         try
         {
             await AppServices.Host.CallAsync("machine.revoke", new JsonObject { ["key"] = key });
-            // Revoke ends trust and any workspace listing for this peer.
             RemoteWorkspaces.Disconnect(key);
             _notice = L10n.Text("windows.machinespage.0_can_no_longer_reach_this_device.e6993257", $"{name}");
         }
@@ -2763,11 +2616,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Call another device on this account something. Renames the account row,
-    /// not that machine's own file: the point is that a headless server nobody
-    /// can log into is still nameable from here.
-    /// </summary>
     private async Task RenameAsync(string id, string current, bool isSelf)
     {
         var box = new TextBox { Text = current, PlaceholderText = L10n.Text("windows.machinespage.device_name.155106be") };
@@ -2788,9 +2636,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         {
             if (isSelf)
             {
-                // This computer names itself: that writes the local label, so
-                // the two agree. Renaming only the account row would leave this
-                // PC calling itself one thing and the website another.
                 await AppServices.Host.CallAsync(
                     "machine.rename",
                     new JsonObject { ["name"] = name });
@@ -2814,11 +2659,6 @@ internal sealed partial class MachinesPage : Page, IInspectorContent, IInspector
         await LoadAsync();
     }
 
-    /// <summary>
-    /// Destructive on the server: the machine's uploaded history is deleted,
-    /// which is what a stale device id after a reinstall needs so a live
-    /// machine can use its slot. Never from a single click.
-    /// </summary>
     private async Task UnlinkAsync(string id, string name)
     {
         var dialog = new ContentDialog

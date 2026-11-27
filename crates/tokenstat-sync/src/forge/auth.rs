@@ -280,8 +280,6 @@ fn cached_credential(
         let mut cache = credential_cache()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // Discovery can involve a slow helper/network probe. A sign-out or
-        // new login while it was running must retire its old result.
         if cache.generation != generation {
             continue;
         }
@@ -441,7 +439,6 @@ fn credential_output(command: &mut Command, input: &[u8], timeout: Duration) -> 
         output.take(CAP + 1).read_to_string(&mut text).ok()?;
         (text.len() as u64 <= CAP).then_some(text)
     })();
-    // Reap on every early failure, including stdin and metadata errors.
     let _ = child.kill();
     let _ = child.wait();
     result

@@ -243,9 +243,7 @@ pub fn retained(bytes: &[u8], cap: usize) -> Result<Vec<u8>, &'static str> {
                 .chain(kept.into_iter().flat_map(|entry| entry.bytes))
                 .collect());
         }
-        // Reserve the summary in the same atomic rewrite as the retained
-        // rows. Its position advances with the evicted prefix even when that
-        // prefix contained no new usage, so cursors still detect every trim.
+
         let Some(removed) = kept.pop_front() else {
             return Err("conversation retention size is invalid");
         };

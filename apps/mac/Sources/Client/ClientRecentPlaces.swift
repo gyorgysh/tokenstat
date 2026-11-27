@@ -3,8 +3,6 @@
 import Foundation
 import Observation
 
-/// Device furniture only. Every read and write requires an account scope, so
-/// a late view callback cannot write into whichever account signed in next.
 @MainActor @Observable
 final class ClientRecentPlaces {
     static let shared = ClientRecentPlaces()
@@ -22,8 +20,6 @@ final class ClientRecentPlaces {
         }
 
         fileprivate var key: String {
-            // Length-prefixed rather than encoded: no throwing, and "ab"+"c"
-            // never shares a key with "a"+"bc".
             "client.recentPlaces.v1.\(host.count):\(host)\(identity.count):\(identity)"
         }
     }
@@ -38,8 +34,6 @@ final class ClientRecentPlaces {
             let itemID: String?
         }
         let id: ID
-        /// A workspace label only. Chat titles can contain the first prompt;
-        /// paths and commands are never accepted as display labels.
         let workspaceName: String
         let openedAt: Date
     }
@@ -58,8 +52,6 @@ final class ClientRecentPlaces {
             .sorted { $0.openedAt > $1.openedAt }.prefix(Self.capacity))
     }
 
-    /// Home is a shortcut, not another history list: one recent project and
-    /// one recent conversation. A terminal only fills an otherwise empty card.
     func continuePlaces(in scope: Scope?, limit: Int = 2) -> [Place] {
         guard limit > 0 else { return [] }
         let recent = places(in: scope)
@@ -105,9 +97,6 @@ final class ClientRecentPlaces {
     }
 
     private static func valid(_ id: Place.ID) -> Bool {
-        // Hosts use a canonical path as the workspace identifier. It must
-        // round-trip unchanged to reach the folder, but is never used as a
-        // display label. Peer and conversation IDs are not paths.
         if let workspace = id.workspaceID {
             guard !workspace.isEmpty, workspace.count <= 4096,
                   workspace.rangeOfCharacter(from: .controlCharacters) == nil else { return false }

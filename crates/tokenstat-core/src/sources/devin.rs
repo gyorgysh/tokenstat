@@ -102,8 +102,6 @@ struct Row {
     input: Option<i64>,
     output: Option<i64>,
     cache_read: Option<i64>,
-    /// `None` when the vendor reported null, omitted the key, or wrote
-    /// something that is not a number. Only a numeric figure becomes `Some`.
     cache_creation: Option<f64>,
 }
 
@@ -236,9 +234,6 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         let row = match row {
             Ok(row) => row,
             Err(e) => {
-                // A row that cannot be read is not a reason to walk away from
-                // the rest silently: surface the first one so a truncated read
-                // is visible where the watermark cannot see it.
                 if !row_failed {
                     out.warnings.push(Warning::Unreadable {
                         path: path.to_path_buf(),
@@ -249,17 +244,10 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 continue;
             }
         };
-        // Each counter stays an `Option`: a missing metric is the vendor
-        // reporting nothing for that bucket, not a measured zero, and only a
-        // real number may clear `has_unknown`.
         let input = row.input.map(|v| v.max(0) as u64);
         let output = row.output.map(|v| v.max(0) as u64);
         let cache_read = row.cache_read.map(|v| v.max(0) as u64);
-        // A JSON null, a missing key or a non-numeric value all read back as
-        // `None`: the vendor did not state the figure, so the counter stays
-        // unknown rather than becoming a zero it never measured.
         let cache_creation = row.cache_creation.map(|v| v.max(0.0) as u64);
-        // A turn that was interrupted before the model answered writes zeroes.
         if input.unwrap_or(0) == 0
             && output.unwrap_or(0) == 0
             && cache_read.unwrap_or(0) == 0
@@ -276,8 +264,6 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             .and_then(parse_iso8601_ms)
             .unwrap_or(row.created_at_secs.saturating_mul(1000));
 
-        // The request id, and nothing else, so the two nodes a turn is written
-        // to collapse into one event.
         let id = match row.request_id.as_deref() {
             Some(rid) if !rid.is_empty() => EventId::derive(&["devin", rid]),
             _ => EventId::derive(&[
@@ -289,15 +275,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         };
 
         if let Some(&idx) = by_id.get(&id) {
-            // Duplicate node: keep the larger counters rather than a
-            // second copy. An unknown bucket stays unknown unless the other
-            // node actually reported it.
             let kept = &mut out.events[idx].counters;
             kept.input_fresh = kept.input_fresh.max(input);
             kept.cache_read = kept.cache_read.max(cache_read);
             kept.cache_write_5m = kept.cache_write_5m.max(cache_creation);
             kept.output = kept.output.max(output);
-            // Timestamp and model are stable across the pair; keep first.
             continue;
         }
 
@@ -401,9 +383,6 @@ fn last_component(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// A database shaped like the real one, with the first two turns of the
-    /// session quoted in the module comment and the duplicate node each one is
-    /// written to.
     fn temp_db() -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -456,7 +435,6 @@ mod tests {
             18144,
             "2026-09-01T10:55:15.926098Z",
         );
-        // Each turn on two nodes, the way the forest stores it.
         for (node, message) in [(26, &first), (27, &first), (31, &second), (32, &second)] {
             conn.execute(
                 "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
@@ -465,7 +443,6 @@ mod tests {
             )
             .unwrap();
         }
-        // A user turn, which has no metrics and must not become an event.
         conn.execute(
             "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
              VALUES ('cheddar-windscreen', 25, NULL,
@@ -505,11 +482,7 @@ mod tests {
         assert_eq!(first.session, "cheddar-windscreen");
         assert_eq!(first.counters.input_fresh, Some(16810));
         assert_eq!(first.counters.cache_read, Some(1344));
-        // Beside the input, so the prompt is the sum of the two.
         assert_eq!(first.counters.input_total(), 16810 + 1344);
-        // `cache_creation_tokens` is a JSON null in the fixture. Null is the
-        // vendor saying it has no figure, not a measured zero, so the counter
-        // stays unknown and the event total is a lower bound.
         assert_eq!(first.counters.cache_write_5m, None);
         assert!(first.counters.has_unknown());
     }
@@ -517,7 +490,6 @@ mod tests {
     #[test]
     fn the_duplicate_node_collapses() {
         let out = parse_db(&temp_db());
-        // Both rows are read, because the archive is what deduplicates.
         assert_eq!(out.rows_seen, 4);
         let ids: std::collections::HashSet<_> = out.events.iter().map(|e| e.id).collect();
         assert_eq!(ids.len(), 2, "two requests, whatever the node count");
@@ -537,7 +509,6 @@ mod tests {
             .iter()
             .find(|e| e.counters.output == Some(252))
             .unwrap();
-        // 2026-09-01T10:55:11.971849Z, not the row's 1788260363 seconds.
         assert_eq!(first.ts.utc_ms, 1_788_260_111_971);
     }
 
@@ -556,8 +527,6 @@ mod tests {
 
     #[test]
     fn the_hour_cache_bucket_is_unknown_not_zero() {
-        // The vendor reports one creation figure with no TTL split, so the
-        // hour bucket must not clear `has_unknown` with a zero.
         let out = parse_db(&temp_db());
         assert!(!out.events.is_empty());
         for e in &out.events {
@@ -604,8 +573,6 @@ mod tests {
         assert_eq!(births, vec![(1_788_260_109_000, "live".into())]);
     }
 
-    /// A database from a CLI that predates the forest says nothing rather than
-    /// warning on every poll.
     #[test]
     fn an_install_with_no_forest_is_quiet() {
         let dir =

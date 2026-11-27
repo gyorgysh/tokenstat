@@ -3,17 +3,7 @@
 import Foundation
 import SwiftUI
 
-/// How long the current turn has been running, in words.
-///
-/// A turn is measured from the last chat instruction to now, across every
-/// agent step inside it: not per tool call, not per model round trip. The
-/// host reports only whether a conversation is running, so the start is the
-/// moment this app first saw it running: exact for a turn sent from here,
-/// and a lower bound for one already going when the app opened or the folder
-/// was last read.
 enum TurnElapsed {
-    /// "10s", "3m", "1h 5m". Floored, never rounded up: a turn that has run
-    /// 59.9 seconds has not run a minute yet.
     static func phrase(since start: Date, now: Date = Date()) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         if seconds < 60 { return L10n.text("apple.chatturntiming.0_s.c4c041f8", "\(seconds)") }
@@ -24,8 +14,6 @@ enum TurnElapsed {
         return rest == 0 ? L10n.text("apple.chatturntiming.0_h.360a8af5", "\(hours)") : L10n.text("apple.chatturntiming.0_h_1_m.d426ce3b", "\(hours)", "\(rest)")
     }
 
-    /// "10 seconds", "3 minutes", "1 hour 5 minutes". What the compact phrase
-    /// above reads as out loud, so a screen reader never meets "3m".
     static func durationWords(since start: Date, now: Date = Date()) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         if seconds < 60 { return count(seconds, unit: "second") }
@@ -43,13 +31,6 @@ enum TurnElapsed {
     }
 }
 
-/// Reconcile observed turn starts against the conversations known to be
-/// running right now.
-///
-/// Stamps exist exactly for running conversations: a newly running one is
-/// stamped with `now` and keeps that stamp while it runs, and anything that
-/// stopped, or is no longer known, leaves no stamp. Pure so the rule is
-/// unit tested; `ChatModel` feeds it every list it holds.
 func reconcileRunningSince(
     _ stamps: [String: Date],
     running: Set<String>,
@@ -63,12 +44,6 @@ func reconcileRunningSince(
     return next
 }
 
-/// A turn's age, ticking once a second while it is on screen.
-///
-/// Mount this only while the conversation is running. A static text is drawn
-/// when it is not, so nothing ticks for idle rows: the one-second cadence
-/// exists solely to count "10s" up, and minute-precise ages already have
-/// `RelativeClock`.
 struct TurnElapsedText: View {
     let since: Date
     var prefix = L10n.text("common.working")

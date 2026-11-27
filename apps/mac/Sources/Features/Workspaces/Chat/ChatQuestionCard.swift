@@ -2,16 +2,8 @@
 
 import SwiftUI
 
-/// A question the agent asked, drawn where it asked it.
-///
-/// Shared by the Mac and the phone. The choices answer in one tap; a
-/// multiple-choice question collects its picks first. The field below takes
-/// an answer of the person's own. Once answered, the card says what was sent
-/// and how it travels, and offers nothing more: the host keeps the record, so
-/// a second device sees the same answer rather than a second chance at it.
 struct ChatQuestionCard: View {
     let question: ChatQuestion
-    /// Whether the person can answer from here: false for a saved copy.
     var canAnswer = true
     var isSending = false
     let answer: (String) -> Void
@@ -85,7 +77,6 @@ struct ChatQuestionCard: View {
             }
             if question.multiple {
                 Button(L10n.text("apple.chatquestion.send_choices"), .send) {
-                    // Quoted, so a comma inside a choice cannot read as two.
                     answer(picked.map { "“\($0)”" }.joined(separator: ", "))
                 }
                 .buttonStyle(AccentButtonStyle(small: true))

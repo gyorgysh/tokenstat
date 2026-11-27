@@ -186,11 +186,6 @@ struct RawCatalog {
     models: Vec<CatalogModel>,
 }
 
-/// A key resolves to exactly one model, or to several and is therefore useless.
-///
-/// Ambiguity is real here: thousands of gateway entries reuse bare leaf names.
-/// Silently picking one would attach the wrong context window or the wrong
-/// price to a row, so an ambiguous key resolves to nothing at all.
 #[derive(Debug, Clone, Copy)]
 enum Resolved {
     One(usize),
@@ -203,12 +198,6 @@ pub struct Catalog {
     pub effective_from: String,
     models: Vec<CatalogModel>,
     by_key: HashMap<String, Resolved>,
-    /// Every published window, against the folded ids that carry it, with the
-    /// model each entry came from so aliases cannot vote twice.
-    ///
-    /// Built once at load because `sibling_context_window` runs on the live
-    /// meter's poll path, where folding three thousand ids and their aliases
-    /// on every call was thousands of throwaway allocations a second.
     windows_by_key: Vec<(String, u64, usize)>,
 }
 
@@ -245,8 +234,6 @@ impl Catalog {
                 by_key
                     .entry(folded)
                     .and_modify(|existing| {
-                        // The same model registering two keys that fold together
-                        // is not ambiguity, it is the same answer twice.
                         if !matches!(existing, Resolved::One(i) if *i == index) {
                             *existing = Resolved::Ambiguous;
                         }
@@ -333,8 +320,6 @@ impl Catalog {
             return None;
         }
         let mut counts: HashMap<u64, usize> = HashMap::new();
-        // A model's own entries are consecutive, so remembering the last one
-        // counted is enough to stop three aliases casting three votes.
         let mut last_counted: Option<usize> = None;
         for (key, window, model) in &self.windows_by_key {
             if !key.starts_with(&stem) || last_counted == Some(*model) {
@@ -356,8 +341,6 @@ impl Catalog {
     pub fn estimate_rates(&self, model: &str) -> Option<Rates> {
         let offer = self.get(model)?.offer.as_ref()?;
         let rates: Rates = offer.rates.into();
-        // A feed that publishes an all-zero offer is telling us it does not
-        // know the price, not that the model is free.
         (rates.input > 0.0 || rates.output > 0.0).then_some(rates)
     }
 }
@@ -465,10 +448,6 @@ fn data_dir() -> Result<PathBuf, CoreError> {
     tokenstat_paths::data_dir().ok_or(CoreError::NoDataDir)
 }
 
-/// The family stem of a model id: the leaf, minus its last version step.
-///
-/// `xai/grok-4.6` → `grok-4`, `claude-opus-4-6` → `claude-opus-4`. Enough to
-/// find siblings, short enough that a point release lands among them.
 fn id_stem(model: &str) -> String {
     let leaf = model.rsplit('/').next().unwrap_or(model);
     let cut = leaf
@@ -485,10 +464,6 @@ fn id_stem(model: &str) -> String {
     }
 }
 
-/// Fold a model id to a match key: lowercase, separators removed.
-///
-/// The hosted catalog folds `.` and `-` when it joins feeds, so we fold the
-/// same way. `claude-opus-5`, `claude.opus.5`, and `Claude_Opus_5` are one key.
 fn fold(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -590,8 +565,6 @@ mod tests {
 
     #[test]
     fn an_ambiguous_leaf_resolves_to_nothing_rather_than_a_guess() {
-        // Two vendors publish `shared-name`. Picking either would attach one
-        // vendor's price to the other's usage.
         assert!(catalog().get("shared-name").is_none());
         assert!(catalog().get("vendor-a/shared-name").is_some());
     }
@@ -602,7 +575,6 @@ mod tests {
         let r = c.estimate_rates("composer-2.5-fast").expect("has an offer");
         assert_eq!(r.input, 3.0);
         assert_eq!(r.output, 12.0);
-        // Absent cache fields default to zero rather than failing the parse.
         assert_eq!(r.cache_read, 0.0);
     }
 

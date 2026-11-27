@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-/// Tab and split selection uses stable IDs, independent of the transport.
 struct TerminalPaneSelection {
     var selectedID: String?
     var leadingID: String?
@@ -57,7 +56,6 @@ struct TerminalPaneSelection {
         }
     }
 
-    /// Move the visible sessions while keeping focus on the same terminal.
     mutating func swapPanes(available: [String]) {
         let showing = panes(in: available, split: true)
         guard let lead = showing.leading, let trail = showing.trailing else { return }
@@ -65,7 +63,6 @@ struct TerminalPaneSelection {
         trailingID = lead
     }
 
-    /// Returns true when a vanished split member requires a single pane.
     @discardableResult
     mutating func reconcile(available: [String]) -> Bool {
         let lostLead = leadingID.map { !available.contains($0) } ?? false

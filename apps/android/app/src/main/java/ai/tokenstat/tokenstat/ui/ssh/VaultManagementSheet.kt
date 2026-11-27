@@ -25,7 +25,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
-/** One shared status from the library, with operations owned by that screen. */
 @Composable
 internal fun VaultManagementSheet(
     status: JsonObject?,
@@ -149,8 +148,6 @@ internal fun VaultManagementSheet(
                 )
             }
         }
-        // Recovery from an existing vault never gets the shortcut
-        // that discards a newly created one. Typed Delete stays here.
         if (unconfirmedRecovery && onDiscard != null) {
             HorizontalDivider(color = colors.border)
             VaultManagementAction(

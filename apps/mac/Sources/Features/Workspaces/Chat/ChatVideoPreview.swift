@@ -2,7 +2,6 @@
 import SwiftUI
 import AVFoundation
 
-/// Only a downloaded file is inspected. Opening a transcript never fetches video.
 struct ChatVideoPreview: View {
     let file: URL
     @State private var poster: CGImage?

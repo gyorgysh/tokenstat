@@ -6,11 +6,6 @@
 
 import SwiftUI
 
-/// The day pinned from the Home heatmap: an Insights-shaped overview.
-///
-/// Today is pinned when Home first loads. Hover still pops a glance card.
-/// A later click lives here so leaving Home and coming back keeps that day,
-/// which a view `@State` would not survive.
 struct HomeInspector: View {
     var model: HomeModel
     var onOpenInsights: ((String) -> Void)? = nil
@@ -259,8 +254,6 @@ struct HomeInspector: View {
         return fold(detail.rows, key: { $0.model }, display: shortModel, monospaced: true)
     }
 
-    /// Models that have a list rate. Unpriced and local ones belong in
-    /// their own card, not mixed into a column that shows money.
     private func pricedModelRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {
         modelRows(detail, extra: extra).filter { !isUnpriced($0, in: detail) }
     }

@@ -67,8 +67,6 @@ fn forget(key: &[u8; 32]) {
 fn two_machines_authenticate_each_other_and_nobody_else() {
     let _sandbox = Sandbox::new();
 
-    // Two distinct machines. Neither reads the identity file: these are what a
-    // second computer would have.
     let server_identity = MachineIdentity::from_secret([11u8; 32]);
     let client_identity = MachineIdentity::from_secret([22u8; 32]);
     let server_key = server_identity.public_key();
@@ -90,10 +88,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
         }
         other => panic!("expected Unknown, got {other:?}"),
     }
-    // The client's handshake completed, so it believes it is connected. That is
-    // correct and worth stating: Noise authenticates, the peer store authorizes,
-    // and the refusal is the server declining to answer rather than a failed
-    // handshake. The client learns when its first request gets nothing back.
     drop(dialling.join().expect("thread"));
 
     let listed = PeerStore::load().expect("load").list();
@@ -188,9 +182,6 @@ fn two_machines_authenticate_each_other_and_nobody_else() {
     });
     let _ = server.accept();
     let message = dialling.join().expect("thread");
-    // The message is the product here. It has to say which of the two
-    // explanations to go and check, because "reinstalled" and "somebody is in
-    // the middle" look identical from this end.
     assert!(message.contains("laptop"), "{message}");
     assert!(message.contains("reinstalled"), "{message}");
     assert!(message.contains("in its place"), "{message}");

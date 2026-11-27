@@ -12,11 +12,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Switch branches without leaving the workspace. Local work first:
-/// remote branches create a tracking branch. Open editor buffers retain
-/// their drafts and re-read host content before any later save.
-/// </summary>
 internal static class WorkspaceBranches
 {
     private sealed class Choice
@@ -162,8 +157,6 @@ internal static class WorkspaceBranches
             var wasCreating = creating;
             var result = await Chrome.ShowDialog(owner, dialog);
             open = null;
-            // New branch dismisses the picker to rebuild it with the form.
-            // That dismissal is not the user's Close action.
             if (creating && !wasCreating) continue;
             if (picked is not null && !working)
             {

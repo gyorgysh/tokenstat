@@ -62,8 +62,6 @@ fn marker_ready(root: &Folder) -> Result<bool, Error> {
 }
 fn gate(root: &Folder) -> Result<File, Error> {
     let path = root.path.join("claims.lock");
-    // A removed registry must not be recreated as an empty one. Creating the
-    // file first would make the absence look like a fresh store.
     match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if marker_ready(root)? {
@@ -151,8 +149,6 @@ fn write(root: &Folder, file: &mut File, index: &Index) -> Result<(), Error> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err(Error::Unavailable);
     }
-    // A torn in-place registry is intentionally unreadable. The independent
-    // durable marker prevents a zero-length interruption becoming emptiness.
     let marker = root.path.join("claims.initialized");
     match std::fs::symlink_metadata(&marker) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

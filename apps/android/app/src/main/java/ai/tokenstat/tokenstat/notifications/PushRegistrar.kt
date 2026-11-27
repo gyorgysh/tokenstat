@@ -21,14 +21,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/** FCM issues a token at install, usually while still signed out. Re-register
- *  after every confirmed sign-in, and unregister on sign-out, matching the
- *  Apple client's PushRegistrar: off until asked for, every launch
- *  re-registers while on, and a removal that never landed is retried first.
- *
- *  Needs `app/google-services.json` from the Firebase console (gitignored)
- *  plus a server that accepts the android platform and holds an FCM key.
- *  Without both, registration fails and the settings row says so. */
 object PushRegistrar {
     private val operation = Mutex()
     @VisibleForTesting
@@ -49,35 +41,20 @@ object PushRegistrar {
         prefs()?.edit()?.putString(KEY_TOKEN, token)?.apply()
     }
 
-    /** Whether this device wants notifications. Off until asked for. */
     fun isOn(): Boolean = prefs()?.getBoolean(KEY_ON, false) == true
 
-    /** Turn notifications on: remember the choice, drop a moot pending
-     *  removal, and register. A removal that never landed is moot now: this
-     *  device is asking to be sent to again, and retrying it later would
-     *  take it back off. */
     suspend fun enable() = operation.withLock {
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_ON, true).remove(KEY_PENDING).apply()
         refreshLocked()
     }
 
-    /** Stop notifications at the account rather than only on this device, so
-     *  nothing is sent that Do Not Disturb happens to hide. The token comes
-     *  from the stored one when FCM has not handed one over yet this launch,
-     *  and a removal that does not reach the account is remembered rather
-     *  than dropped. */
     suspend fun disable() = operation.withLock {
         val prefs = prefs() ?: return
         prefs.edit().putBoolean(KEY_ON, false).apply()
         dropServerRow(prefs)
     }
 
-    /** Re-register at launch, and after signing in. Cheap, and the only
-     *  thing that keeps a reissued token reachable. Also finishes a removal
-     *  that never reached the account, before registering, or a device that
-     *  was switched off offline and switched back on would race its own
-     *  removal. Does nothing while switched off. */
     suspend fun refresh() = operation.withLock { refreshLocked() }
 
     private suspend fun refreshLocked() {
@@ -99,22 +76,11 @@ object PushRegistrar {
         }.onFailure { if (it is CancellationException) throw it }
     }
 
-    /** Sign-out: drop this device's server row but keep the switch, so
-     *  signing back in re-registers through `refresh()`.
-     *
-     *  Differs from `disable()` on purpose. The Apple client keeps its
-     *  preference across sign-out too, and a switch that silently turns
-     *  itself off on sign-out is one nobody turns back on: the toggle
-     *  would read off for somebody who asked for on. */
     suspend fun unregister(afterRemoval: suspend () -> Unit = {}) = operation.withLock {
         prefs()?.let { dropServerRow(it) }
-        // Logout runs under the same lock: a token refresh cannot re-register
-        // between unregistering the device and clearing account credentials.
         afterRemoval()
     }
 
-    /** Remove the stored token from the account, remembering a removal that
-     *  never landed so `refresh()` retries it before registering again. */
     private suspend fun dropServerRow(prefs: SharedPreferences) {
         val token = prefs.getString(KEY_TOKEN, null) ?: return
         runCatching { unregisterToken(token) }
@@ -125,9 +91,6 @@ object PushRegistrar {
             }
     }
 
-    /** Ask the account to send one, so somebody can tell "on" from "on but
-     *  nothing has happened yet". Returns the settings sentence, or null
-     *  when the test landed. Throws when the request itself failed. */
     suspend fun test(): String? {
         val answer = call("push.test", buildJsonObject {}).jsonObject
         val signedIn = answer["signedIn"]?.jsonPrimitive?.booleanOrNull ?: true

@@ -148,8 +148,6 @@ impl Fixture {
 #[test]
 fn partial_input_does_not_block_outbound_frames() {
     for readiness in [true, false] {
-        // Partial outer prefix, encrypted length header, frame boundary,
-        // encrypted body, and boundary between continuation frames.
         for cut in [1, 6, 24, 31, 24 + 4 + MAX_NOISE_MESSAGE] {
             let Fixture {
                 reader,
@@ -171,9 +169,6 @@ fn partial_input_does_not_block_outbound_frames() {
                 .expect("input paused after consuming bytes");
             let (sent, received) = mpsc::channel();
             let write = std::thread::spawn(move || sent.send(writer.write(b"outbound")).unwrap());
-            // This checks independence from paused input, not a latency SLA.
-            // The input stays paused for the entire wait, so a lock regression
-            // still fails; allow a loaded CI runner time to schedule the writer.
             let sent_while_paused = received.recv_timeout(Duration::from_secs(2));
             pause.release();
             write.join().unwrap();
@@ -184,8 +179,6 @@ fn partial_input_does_not_block_outbound_frames() {
             sent_while_paused
                 .unwrap_or_else(|_| panic!("outbound blocked at cut {cut}, readiness={readiness}"))
                 .unwrap();
-            // The opposite Noise direction remains valid despite yielding
-            // between pieces of the incoming message.
             let bytes = output.lock().unwrap();
             let mut wire = &bytes[..];
             let length = u32::from_be_bytes(wire[..4].try_into().unwrap()) as usize;
@@ -302,10 +295,10 @@ fn invalid_partial_streams_close_without_reinterpreting_remaining_bytes() {
             Arc::new(AtomicBool::new(true)),
             |bytes| match case {
                 0 => bytes[..4].copy_from_slice(&((MAX_NOISE_MESSAGE + 1) as u32).to_be_bytes()),
-                1 => bytes[6] ^= 1,  // Authentication fails in the length header.
-                2 => bytes[31] ^= 1, // Authentication fails in the message body.
-                3 => bytes.truncate(31), // EOF after a partial frame.
-                _ => (),             // The valid message exceeds the caller's maximum.
+                1 => bytes[6] ^= 1,
+                2 => bytes[31] ^= 1,
+                3 => bytes.truncate(31),
+                _ => (),
             },
         );
         pause.release();

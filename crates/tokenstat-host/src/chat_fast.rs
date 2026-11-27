@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Per-conversation speed selection, independent of the CLI's saved defaults.
-
 use serde_json::{Value, json};
 
 pub(crate) fn models(backend: &str) -> Option<Vec<String>> {
     let fixed: &[&str] = match backend {
-        // Codex decides availability for the selected model/account.
         "codex" => &[],
         "claude" => &[
             "opus",
@@ -20,8 +16,6 @@ pub(crate) fn models(backend: &str) -> Option<Vec<String>> {
     Some(fixed.iter().map(|model| (*model).into()).collect())
 }
 
-/// Grok Build exposes speed as separate model IDs, not a service-tier flag.
-/// Only offer pairs the installed CLI actually lists for this account.
 fn grok_models(catalog: &[String]) -> Option<Vec<String>> {
     let mut models: Vec<String> = catalog
         .iter()
@@ -31,8 +25,7 @@ fn grok_models(catalog: &[String]) -> Option<Vec<String>> {
     if models.is_empty() {
         return None;
     }
-    // An empty entry explicitly supports the CLI's Default selection; an
-    // empty list still means provider-controlled availability for Codex.
+
     if catalog.first().is_some_and(|model| models.contains(model)) {
         models.push(String::new());
     }
@@ -55,8 +48,7 @@ pub(crate) fn available(backend: &str, model: Option<&str>) -> bool {
         return true;
     }
     let Some(model) = model else { return false };
-    // Claude accepts the context suffix on full snapshot IDs as well as
-    // aliases. Strip it before checking the optional snapshot date.
+
     let model = model.strip_suffix("[1m]").unwrap_or(model);
     models.iter().any(|prefix| {
         model == prefix
@@ -82,7 +74,6 @@ pub(crate) fn apply(
     }
     match backend {
         "codex" => {
-            // Global options stay before `exec`, including resumed turns.
             let tier = if fast { "priority" } else { "default" };
             argv.splice(1..1, ["-c".into(), format!("service_tier=\"{tier}\"")]);
             if fast {
@@ -90,9 +81,6 @@ pub(crate) fn apply(
             }
         }
         "claude" => {
-            // Merge into the existing hook settings, so speed never drops
-            // approval or edit-observation hooks. Explicit false also wins
-            // over a fastMode preference saved in the user's Claude settings.
             if let Some(at) = argv[..argv.len().saturating_sub(1)]
                 .iter()
                 .position(|arg| arg == "--settings")

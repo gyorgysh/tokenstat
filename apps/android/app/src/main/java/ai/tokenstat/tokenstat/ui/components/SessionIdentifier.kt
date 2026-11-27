@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Copies only the explicitly supplied identifier, never an associated resume payload. */
 @Composable
 internal fun SessionIdentifierRow(label: String, value: String) {
     val colors = LocalTsColors.current
@@ -45,7 +44,6 @@ internal fun SessionIdentifierRow(label: String, value: String) {
             scope.launch {
                 clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(label, value)))
                 copied = true
-                // Android 13+ supplies clipboard confirmation itself.
                 if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, copiedLabel, Toast.LENGTH_SHORT).show()
             }
         }.padding(vertical = Space.xs),

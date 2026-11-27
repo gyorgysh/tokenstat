@@ -2,16 +2,10 @@
 
 import SwiftUI
 
-/// Conversation setup before the first turn, then a one-line chip strip.
-///
-/// Settings matter most before you commit and least once you are reading.
-/// After a turn has run, the same controls live behind Edit setup.
 struct ChatSetupHeader: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var collapsed: Bool
-    /// The in-conversation header explains that settings will move. The
-    /// inspector already is that place, so it skips the intro.
     var showsIntro: Bool = true
     var organized: Bool = false
     var onOpenInspector: (() -> Void)? = nil
@@ -30,18 +24,8 @@ struct ChatSetupHeader: View {
         .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
     }
 
-    /// The persona picker, with the chosen one's face beside it.
-    ///
-    /// The face is the point of the row: a name in a menu is a setting, and a
-    /// character sitting next to it is the thing you recognise from the
-    /// transcript. Split out of `form` because the type checker gave up on
-    /// that expression once the options list grew a second clause.
     private var personaRow: some View {
         HStack(spacing: Theme.Space.s) {
-            // Still, not breathing. This face sits beside a picker for as
-            // long as a chat is open, and every animated frame lays out and
-            // commits the whole window: a 30 point face held more than a
-            // quarter of the main thread with nobody touching the app.
             PersonaMark(seed: model.faceSeed, size: 30)
                 .environment(\.personaMotionAllowed, false)
             AppMenuPicker(
@@ -244,7 +228,6 @@ struct ChatSetupHeader: View {
     }
 }
 
-/// Speed for the next turn, saved with the conversation.
 struct ChatFastModeButton: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -283,9 +266,6 @@ struct ChatFastModeButton: View {
             #endif
             .font(Theme.callout)
             .foregroundStyle(chat.fastMode ? Theme.accent : .secondary)
-            // Turning it on fills the seat from the glyph outward and gives
-            // the bolt a small kick, so on and off read as a change of state
-            // rather than a recolour.
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Theme.accentSoft)
@@ -343,15 +323,11 @@ struct ChatFastModeButton: View {
     }
 }
 
-/// Agent, model and setup controls shared by phone and desktop composers.
 struct ChatComposerControls<Chrome: View>: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
     var locked: Bool
-    /// Phones use the two-row arrangement directly; desktops fit the
-    /// horizontal controls first, then use the same compact arrangement.
     var compact = false
-    /// Phone composers keep setup controls in a sheet to leave room for chat.
     var condensed = false
     var showCompactAgent = true
     let chrome: Chrome
@@ -464,9 +440,6 @@ struct ChatComposerControls<Chrome: View>: View {
             }
             .fixedSize(horizontal: !showCompactAgent, vertical: false)
         } else if compact {
-            // Keyboard and expansion actions share only the agent's row.
-            // Putting them beside the whole stack subtracts their width
-            // from the pills too, widening the transcript when focused.
             compactLayout
         } else {
             ViewThatFits(in: .horizontal) {
@@ -530,10 +503,6 @@ struct ChatComposerControls<Chrome: View>: View {
         )
         .disabled(locked)
         if isBypassOnly {
-            // One option, same block. A lone capsule read smaller and
-            // unrelated beside the mode pills, while this is the same control
-            // with its choice made by the backend. Never enabled: there is
-            // nothing to switch to, like the setup form's locked toggle.
             ChatCompactPills(
                 options: [(value: "bypass", label: L10n.text("apple.chatsetupheader.don_t_ask.15dae980"))],
                 selection: autonomyBinding,
@@ -600,12 +569,8 @@ struct ChatAgentChoices {
     let model: ChatModel
     let chat: ChatConversation
 
-    /// One row of the panel. Three kinds of choice share a list, so they share
-    /// a value: the section a row came from is what says which of the three
-    /// the person just changed.
     enum Choice: Hashable {
         case agent(String)
-        /// Empty is the agent's own default.
         case model(String)
         case effort(String)
     }
@@ -663,8 +628,6 @@ struct ChatAgentChoices {
         return model.signInReadiness(for: backend, chat: chat)
     }
 
-    /// Only show filters that have choices for the selected agent. For
-    /// example, an agent with no effort control should not advertise one.
     var selectableSections: [String] {
         var seen = Set<String>()
         return choices.compactMap { choice in
@@ -672,9 +635,6 @@ struct ChatAgentChoices {
         }
     }
 
-    /// What each section is set to, for its heading. The panel is three
-    /// settings, and a heading that only names the group leaves somebody
-    /// scrolling to find which row carries the mark.
     func currentValue(_ section: String) -> String? {
         let values: [String: String?] = [
             L10n.text("apple.chatsetupheader.agent.11b39c93"): agentLabel,
@@ -695,8 +655,6 @@ struct ChatAgentChoices {
         return prompts[section] ?? L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da")
     }
 
-    /// Three marks in one list, one per section, each reading the
-    /// conversation's own setting.
     func isSelected(_ choice: Choice) -> Bool {
         switch choice {
         case let .agent(id): id == chat.backend
@@ -739,7 +697,6 @@ struct ChatAgentChoices {
     }
 
     var compactSummary: String {
-        // The agent's mark sits beside this, so a local model needs only its name.
         var parts = [chat.model.flatMap { $0.isEmpty ? nil : (LocalChatModel.parse($0)?.model ?? $0) } ?? agentLabel]
         if backend?.efforts.isEmpty == false, let effort = chat.effort, !effort.isEmpty {
             parts.append(effort)
@@ -762,12 +719,6 @@ struct ChatAgentChoices {
     }
 }
 
-/// The field that says what this conversation is set to and opens the panel.
-///
-/// It holds no presentation of its own. Whoever places it owns that, because
-/// this field lives inside layout containers that swap their contents as the
-/// summary changes width, and a swap would close the panel. See
-/// `pickerPanelSurface`.
 struct ChatAgentField: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -792,8 +743,6 @@ struct ChatAgentField: View {
             .background { ChipHoverFill() }
             .chatControlChrome()
             .overlay(alignment: .topTrailing) {
-                // An installed agent has a newer version. The picker this
-                // opens marks which one, with its Update button.
                 if updateWaiting {
                     Circle().fill(Theme.accent)
                         .frame(width: 7, height: 7)
@@ -833,24 +782,17 @@ struct ChatAgentField: View {
         .minimumScaleFactor(compactLabel ? 0.85 : 1)
     }
 
-    /// Only the agent this chat runs on. Another agent being behind is
-    /// marked on its own row in the picker, not on this chat's button.
     private var updateWaiting: Bool {
         model.backend(for: chat.backend).map { $0.updateAvailable && $0.installed != false } ?? false
     }
 }
 
-/// The Update pill on an agent row in the picker, from the host's daily
-/// check. One press updates that agent with its own updater.
 struct AgentUpdatePill: View {
     let backend: ChatBackend
     let updating: Bool
     let enabled: Bool
     let onUpdate: () -> Void
 
-    /// A round icon rather than a labelled pill: rows that also show three
-    /// limit readings have no room for words, and a pill that shrinks takes
-    /// the agent's name with it.
     var body: some View {
         Button(updating ? L10n.text("common.agent_updates.updating") : L10n.text("common.agent_updates.update"), .download, action: onUpdate)
             .labelStyle(.iconOnly)
@@ -874,12 +816,6 @@ struct AgentUpdatePill: View {
     }
 }
 
-/// Agent, model and effort in one panel you can type into.
-///
-/// The Refresh lives here, not in the app's settings, because this is where
-/// somebody notices the list is short: they added an API key to a CLI a minute
-/// ago and the provider it unlocked is not in the list yet. See
-/// `ChatModel.reloadBackends`.
 struct ChatAgentPanel: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -897,8 +833,6 @@ struct ChatAgentPanel: View {
     @State private var refreshingAgents = false
     @State private var updating = false
     @State private var favorites = ModelFavoritesStore.shared
-    /// Installed agent versions, keyed by launcher id, and what an update or
-    /// a check said about each.
     @State private var versions: [String: AgentUpdateRow] = [:]
     @State private var supportsUpdates = false
     @State private var checkingUpdates = false
@@ -942,8 +876,6 @@ struct ChatAgentPanel: View {
                         case let .agent(id):
                             return AnyView(HarnessMark(id: id, size: 26))
                         case let .model(id) where !id.isEmpty:
-                            // Where the model runs, at a glance: the
-                            // provider's cloud, or a server on the machine.
                             let local = LocalChatModel.parse(id) != nil
                             return AnyView(
                                 Image(systemName: local ? "desktopcomputer" : "cloud")
@@ -1057,9 +989,6 @@ struct ChatAgentPanel: View {
         }
     }
 
-    /// What the profile switch costs: the cached tokens the new login gives
-    /// up, and the target profile's own plan windows. Both are already on
-    /// screen behind the alert; naming them here keeps the approval informed.
     private func continueMessage(chat: ChatConversation, profile: AgentProfile, peer: String?) -> String {
         var parts = [L10n.text("apple.profiles.continue_message", profile.title)]
         if let cache = chat.promptCache {
@@ -1092,11 +1021,6 @@ struct ChatAgentPanel: View {
         let agents: [String]
     }
 
-    /// Which login the listed agents run as, at the end of the caption line.
-    /// Nil, and nothing drawn, until there is more than the machine's own.
-    /// Which logins the agents use, as one row a finger can hit. It shows as
-    /// soon as the host lists profiles, even before there is a second one,
-    /// because the menu is also where somebody finds out profiles exist.
     private var profileRow: AnyView? {
         guard let profiles = model.agentProfiles else { return nil }
         let selected = model.profileID(for: chat) ?? AgentProfiles.system
@@ -1153,9 +1077,6 @@ struct ChatAgentPanel: View {
         )
     }
 
-    /// Make a profile and pick it for this chat. Profiles belong to the
-    /// computer the agents run on, and the host takes profile changes only
-    /// from its own app, so a phone says where to go instead.
     private func createProfile() {
         let name = newProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, model.peer == nil else { return }
@@ -1249,15 +1170,11 @@ struct ChatAgentPanel: View {
         }
     }
 
-    /// An update is offered once a check has something to say: a newer
-    /// version, or no published version to compare against.
     private func offersUpdate(_ row: AgentUpdateRow) -> Bool {
         supportsUpdates && row.canUpdate
             && (row.updateAvailable == true || (checkedUpdates && !row.canCheck))
     }
 
-    /// Agents with a real newer version, and free to update now. Muse, with
-    /// nothing published to compare, is left to its own Update button.
     private var behind: [AgentUpdateRow] {
         model.backends.compactMap { backend in
             guard backend.installed != false, let id = backend.launcherID, let row = versions[id],
@@ -1271,8 +1188,6 @@ struct ChatAgentPanel: View {
             : L10n.text("common.agent_updates.update_all", "\(behind.count)")
     }
 
-    /// One at a time: two installers at once can fight over the same package
-    /// manager, and the toast can only say one thing.
     private func updateAll() async {
         guard !updatingAll else { return }
         updatingAll = true
@@ -1283,9 +1198,6 @@ struct ChatAgentPanel: View {
         }
     }
 
-    /// Agents, models and versions, all at once. The host keeps the version
-    /// answer, so the rows here, the picker and the composer mark it right
-    /// after.
     private func refreshAll() async {
         guard !refreshingAgents else { return }
         refreshingAgents = true
@@ -1370,8 +1282,6 @@ struct ChatAgentPanel: View {
         return updatedChoices.selectableSections
     }
 
-    /// The favourite star, on model rows only. Same store as before, so what
-    /// somebody starred in the old menu is still pinned in this one.
     @ViewBuilder
     private func star(for choice: ChatAgentChoices.Choice) -> some View {
         if case let .model(id) = choice, !id.isEmpty, let backend = choices.backend {
@@ -1397,15 +1307,6 @@ struct ChatAgentPanel: View {
     }
 }
 
-/// Chrome for a control that sits in the composer.
-///
-/// The phone composer is glass, and glass only reads as glass if there is
-/// something to see through it. A control with an opaque panel fill on top of
-/// it is a solid rectangle across the one surface meant to show the transcript
-/// moving underneath, which is why that bar has been reading as a white slab.
-/// Another glass layer is not the answer either, since two of them overlapping
-/// is its own bug. So on Liquid Glass the control keeps its hairline and drops
-/// its fill. Everywhere else the fill stays: there is nothing behind it to see.
 extension View {
     @ViewBuilder
     func chatControlChrome(cornerRadius: CGFloat = 8) -> some View {
@@ -1432,7 +1333,6 @@ extension View {
     }
 }
 
-/// Compact pills that keep their own width. `SegmentedCapsulePicker` stretches.
 struct ChatCompactPills: View {
     var options: [(value: String, label: String)]
     @Binding var selection: String
@@ -1468,7 +1368,6 @@ struct ChatCompactPills: View {
     }
 }
 
-/// Capture before scheduling so a control cannot apply to a later selection.
 @MainActor
 func performSetupChange(
     model: ChatModel, chat: ChatConversation,
@@ -1483,7 +1382,6 @@ func performSetupChange(
     }
 }
 
-/// Keep the saved selection and writing visible when its executable disappears.
 struct ChatAgentAvailabilityNotice: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -1503,13 +1401,6 @@ struct ChatAgentAvailabilityNotice: View {
     }
 }
 
-/// Settings share the compact disclosure anatomy used by context and activity.
-/// How a chat section draws its edge.
-///
-/// A card where a section stands alone on a page, such as the new chat
-/// form. Flat in the inspector, where a column of framed cards read as a
-/// stack of boxes: there the sections sit on the pane and a hairline
-/// separates them, and the values carry the weight instead of the frames.
 enum ChatSectionStyle {
     case card, flat
 }
@@ -1549,7 +1440,6 @@ private struct ChatSectionSurface: ViewModifier {
 }
 
 extension View {
-    /// The one edge every chat section shares, card or flat by context.
     func chatSectionSurface() -> some View { modifier(ChatSectionSurface()) }
 }
 
@@ -1641,7 +1531,6 @@ extension EnvironmentValues {
     }
 }
 
-/// The Mac's borderless menu, and the phone's plain one.
 private struct BorderlessMenu: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -1652,8 +1541,6 @@ private struct BorderlessMenu: ViewModifier {
     }
 }
 
-/// The profile row in the agent picker: which logins the agents use, and a
-/// line saying what that means. Tall enough for a finger on the phone.
 private struct ProfileRowLabel: View {
     let title: String
     let detail: String
@@ -1693,8 +1580,6 @@ private struct ProfileRowLabel: View {
         .contentShape(Rectangle())
     }
 
-    // A menu tints its label with the accent. The row is a setting, so its
-    // text keeps the ordinary label colours.
     #if os(macOS)
     private static let label = Color(nsColor: .labelColor)
     private static let secondaryLabel = Color(nsColor: .secondaryLabelColor)

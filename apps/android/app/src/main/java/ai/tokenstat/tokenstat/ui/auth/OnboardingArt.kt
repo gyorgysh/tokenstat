@@ -74,15 +74,10 @@ import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.sin
 
-/// Which picture an onboarding page draws. Titles live next door, so a page
-/// can change its words without this file knowing the pitch.
 enum class OnboardingArtKind {
     Intro, Agents, Heatmap, Devices, Spend, Remaining, Workspaces, Sessions, OnTheGo, Privacy, Control,
 }
 
-/// The moving picture on an onboarding page. Compose shapes, the brand
-/// colours, and the mark the rest of the app already draws. Reduce Motion
-/// lands on the last frame and stays there. Port of `ClientOnboardingArt`.
 @Composable
 fun OnboardingScene(kind: OnboardingArtKind, active: Boolean) {
     val reduceMotion = rememberReduceMotion()
@@ -111,7 +106,6 @@ fun OnboardingScene(kind: OnboardingArtKind, active: Boolean) {
 @Composable
 private fun IntroArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
-    // Apple's spring(response 0.5, dampingFraction 0.82), staggered per tile.
     val spring = TsMotion.tunedSpring<Float>(0.5f, 0.82f)
     val tiles = listOf(
         Triple(L10n.text("android.onboardingart.agents.279b44d2"), Icons.Default.Forum, 0),
@@ -184,7 +178,6 @@ private fun AgentsArt(reduceMotion: Boolean, active: Boolean) {
             shown = true
         }
     }
-    // Apple's easeOut over 0.5s, after the prompt is already on screen.
     val fade by animateFloatAsState(
         if (shown) 1f else 0f,
         animationSpec = tween(500, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
@@ -322,7 +315,6 @@ private fun DeviceTile(
             shown = true
         }
     }
-    // Apple's spring(response 0.55, dampingFraction 0.78), staggered per tile.
     val spring = TsMotion.tunedSpring<Float>(0.55f, 0.78f)
     val rise by animateFloatAsState(
         if (shown) 0f else 18f,
@@ -362,8 +354,6 @@ private fun SpendArt(reduceMotion: Boolean, active: Boolean) {
         0.72f to androidx.compose.ui.graphics.Color(0xFF8B5CF6),
         1.00f to androidx.compose.ui.graphics.Color(0xFFE879F9),
     )
-    // Apple's spring(response 0.7, dampingFraction 0.78), each bar a tenth
-    // of a second after the one before it.
     val spring = TsMotion.tunedSpring<Float>(0.7f, 0.78f)
     Row(
         Modifier.height(120.dp),
@@ -406,14 +396,12 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
             trim = 0.70f
         } else {
             trim = 0f
-            // animateFloatAsState below picks this up.
             delay(16)
             trim = 0.70f
         }
     }
     val animated by animateFloatAsState(
         trim,
-        // Apple's easeOut over 0.9s to the 70% mark.
         animationSpec = tween(900, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
         label = "remaining",
     )
@@ -450,14 +438,12 @@ private fun RemainingArt(reduceMotion: Boolean, active: Boolean) {
 @Composable
 private fun WorkspacesArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
-    // Folder and file glyphs, like Apple's folder.fill and doc.text rows.
     val rows = listOf(
         Triple(0, Icons.Default.Folder, "project"),
         Triple(18, Icons.Default.Folder, "src"),
         Triple(36, Icons.Default.Description, "main.rs"),
         Triple(18, Icons.Default.Description, "README.md"),
     )
-    // Apple's spring(response 0.5, dampingFraction 0.82), staggered per row.
     val spring = TsMotion.tunedSpring<Float>(0.5f, 0.82f)
     Column(
         Modifier
@@ -549,8 +535,6 @@ private fun SessionsArt(reduceMotion: Boolean, active: Boolean) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.75f)))
         }
         script.forEachIndexed { index, line ->
-            // Each line fades in as it is typed, easeOut over 0.2s, while the
-            // row keeps its space so the card does not jump as lines arrive.
             val lineAlpha by animateFloatAsState(
                 if (lines > index) 1f else 0f,
                 animationSpec = tween(200, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)),
@@ -620,9 +604,6 @@ private fun OnTheGoArt(reduceMotion: Boolean, active: Boolean) {
     }
 }
 
-/// A device seat for the travel scene: accentSoft tile with the device glyph
-/// in the accent, sized like Apple's tile (glyph at 42% of the icon size on
-/// a seat 28 points larger each way).
 @Composable
 private fun GoTile(icon: ImageVector, iconSize: Dp) {
     val colors = LocalTsColors.current
@@ -655,8 +636,6 @@ private fun PrivacyArt(reduceMotion: Boolean, active: Boolean) {
             locked = true
         }
     }
-    // Apple's spring(response 0.55, dampingFraction 0.7): the ring settles
-    // from 0.86 and the lock from 0.88, closed once the delay lands.
     val spring = TsMotion.tunedSpring<Float>(0.55f, 0.7f)
     val ringScale by animateFloatAsState(
         if (locked) 1f else 0.86f,
@@ -699,7 +678,6 @@ private fun PrivacyArt(reduceMotion: Boolean, active: Boolean) {
 private fun ControlArt(reduceMotion: Boolean, active: Boolean) {
     val colors = LocalTsColors.current
     val rows = listOf("Private account" to true, "Sync totals" to false, "Remote reach" to false)
-    // Apple's spring(response 0.5, dampingFraction 0.84), staggered per row.
     val spring = TsMotion.tunedSpring<Float>(0.5f, 0.84f)
     Column(Modifier.width(280.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         rows.forEachIndexed { index, (label, on) ->

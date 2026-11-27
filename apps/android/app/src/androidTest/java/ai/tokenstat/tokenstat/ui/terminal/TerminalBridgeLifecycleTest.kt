@@ -15,7 +15,6 @@ import kotlinx.coroutines.channels.Channel
 @RunWith(AndroidJUnit4::class)
 class TerminalBridgeLifecycleTest {
     private fun inputs(bridge: TerminalBridge): Channel<String> {
-        // This queue feeds both transport pumps; no real shell is opened.
         val field = TerminalBridge::class.java.getDeclaredField("inbound").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST")
         return field.get(bridge) as Channel<String>
@@ -136,8 +135,6 @@ class TerminalBridgeLifecycleTest {
             val bridge = TerminalBridge()
             val api = bridge.jsApi
             repeat(1000) { api.onInput("YWJj") }
-            // Admission is bounded even while the UI queue cannot drain.
-            // Posting one UI task per key would leave another unbounded queue.
             val input = inputs(bridge)
             var admitted = 0
             while (input.tryReceive().isSuccess) admitted++

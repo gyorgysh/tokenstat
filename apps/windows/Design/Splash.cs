@@ -10,11 +10,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// What the launch splash reports about the background helper. Starting is
-/// the first frame. Offline and Error keep the mark on screen and say what
-/// happened, with a way to try again.
-/// </summary>
 internal enum HostSplashState
 {
     Starting,
@@ -22,14 +17,6 @@ internal enum HostSplashState
     Error,
 }
 
-/// <summary>
-/// The screen before the first page, while the background helper has not
-/// answered yet. Paper background with the mark rising and the wordmark, so
-/// the first frame is the brand: never a skeleton card, never a spinner. The
-/// waiting motion is the logo rise itself, via <see cref="Marks.LogoMark"/>.
-/// Needs no account: it shows before any sign-in check, and retry only knocks
-/// on the local helper again.
-/// </summary>
 internal static class HostSplash
 {
     public static FrameworkElement View(

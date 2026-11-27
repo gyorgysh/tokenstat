@@ -11,15 +11,8 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// The onboarding sheet behind "Add project…".
-///
-/// The decision is which folder. Everything else is two facts about that
-/// choice: agents work there, and adding it does not upload it. The folder
-/// panel still does the picking.
 struct AddWorkspaceSheet: View {
     @Bindable var model: WorkspacesModel
-    /// Account machines, so the remote flow can tell computers from phones.
-    /// Empty when unknown; the sheet then lists every peer as before.
     var machines: [Machine] = []
     @Environment(\.dismiss) private var dismiss
     @State private var picking = false
@@ -95,8 +88,6 @@ struct AddWorkspaceSheet: View {
 }
 #endif
 
-/// Separate folders let parallel tasks use different branches without switching
-/// the files under an existing terminal or chat.
 struct ProjectWorktreeSheet: View {
     let folder: WorkspaceFolder
     let onCreated: (WorkspaceFolder) -> Void
@@ -249,7 +240,6 @@ struct ProjectWorktreeSheet: View {
 
 }
 
-/// A path-only picker: choosing a destination never registers its parent as a project.
 private struct ProjectParentPicker: View {
     let peer: String
     let hostName: String

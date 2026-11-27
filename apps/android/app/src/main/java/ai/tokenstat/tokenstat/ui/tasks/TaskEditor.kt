@@ -59,10 +59,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Creation and editing use the same writing space and settings vocabulary.
-/// Port of `TaskFieldsView`: title plus prompt (or command for the `sh`
-/// backend), folder, priority, agent with model and effort, time limit with
-/// the shared chips, and the validation line.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskFields(
@@ -172,14 +168,6 @@ fun TaskFields(
     }
 }
 
-/// The full detail editor: title, prompt/command, folder, priority, backend,
-/// model, effort, budget, no-time-limit, all column-safe saves, foreground
-/// and background run with receipts, Stop, and View run/result.
-///
-/// Operation rules, ported from `TaskEditorSession`: the edit is sent with
-/// the baseline revision and one checked edit can win; a retry of a run
-/// repeats the same durable operation id and can never create a second run;
-/// receipt reads never launch work.
 @Composable
 fun TaskEditorDialog(
     model: AppViewModel,
@@ -211,7 +199,6 @@ fun TaskEditorDialog(
     }
 }
 
-/// The task detail editor as a full page on the app background.
 @Composable
 fun TaskEditorScreen(
     model: AppViewModel,
@@ -314,9 +301,6 @@ fun TaskEditorScreen(
                             conflict = false
                             fields = TaskEditorDraft.fromCard(fresh)
                         } else {
-                            // A timed-out edit may still arrive. Retrying the
-                            // same base revision is safe: only one checked
-                            // edit can win.
                             pendingEdit = false
                             conflict = fresh.revision != base.revision
                             if (!conflict) error = L10n.text("android.taskeditor.the_task_has_not_changed_your_draft_is_rea.c2632d0f")
@@ -687,10 +671,6 @@ private data class PendingTaskRun(
     val placement: TaskRunPlacement,
 )
 
-/// Task creation through `todo.createOnce`: the submission is saved before
-/// it leaves the device, receipt reads never create work, and an explicit
-/// retry always repeats the original operation. Port of
-/// `TaskCreationSession`.
 @Composable
 fun TaskCreateDialog(
     model: AppViewModel,
@@ -720,7 +700,6 @@ fun TaskCreateDialog(
     }
 }
 
-/// Task creation as a full page on the app background.
 @Composable
 fun TaskCreateScreen(
     model: AppViewModel,
@@ -901,9 +880,6 @@ fun TaskCreateScreen(
         }
     }
 
-/// The exact task run, with a door into that folder's files and history.
-/// Port of `ClientTaskResultView` (phone layout): header, live transcript,
-/// terminal door for foreground runs, and Changes/History links.
 @Composable
 fun TaskRunDialog(
     model: AppViewModel,
@@ -931,7 +907,6 @@ fun TaskRunDialog(
     }
 }
 
-/// The exact task run as a full page on the app background.
 @Composable
 fun TaskRunScreen(
     model: AppViewModel,

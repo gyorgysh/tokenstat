@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Creation receipts live in the same atomic file as the card. Keeping the
-//! receipt after deletion prevents a delayed retry from recreating deleted work.
-
 use super::{Board, COLUMNS, Card, CardKind};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -73,8 +70,7 @@ impl Board {
         if !COLUMNS.contains(&card.column.as_str()) {
             return Err("Choose To Do, Doing, Done or Archive.".into());
         }
-        // Server-owned fields are not part of the request. A caller cannot
-        // choose a card identity, inject a delegate, or change its revision.
+
         card.id.clear();
         card.revision = 0;
         card.order = 0;
@@ -93,7 +89,7 @@ impl Board {
             }
             return Ok(outcome(operation_id, receipt, &live));
         }
-        // Separate from legacy timestamp IDs and stable for this operation.
+
         card.id = format!("task-{}", hash(operation_id.as_bytes()));
         if live.iter().any(|saved| saved.id == card.id) {
             return Err("This task identity already exists without its creation receipt.".into());

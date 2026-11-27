@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Pick several chats once; each is shared only after its own current review.
 struct TeamChatReviewEditor: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -191,7 +190,7 @@ struct TeamChatReviewEditor: View {
     }
     private func failed(_ failure: Error) async {
         guard current else { return }; preview = nil; confirmed = false; checkedSaved = false
-        do { try await restore() } catch { /* Keep selection locked until a successful read. */ }
+        do { try await restore() } catch { }
         if current { error = failure.localizedDescription }
     }
 }

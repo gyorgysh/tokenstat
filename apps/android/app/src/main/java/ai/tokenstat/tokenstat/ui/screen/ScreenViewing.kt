@@ -12,13 +12,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import ai.tokenstat.tokenstat.R
 
-/// The ongoing "watching" notice posted while the screen viewer is up.
-///
-/// A screen session keeps flowing while the phone sits in a pocket, and the
-/// relay meters it. Saying so on screen is the honest counterpart of the
-/// Apple viewer's keep-awake picture: this device is spending something.
-/// Dismissed when the viewer closes. If notifications are not granted the
-/// post is skipped rather than requested; viewing never depends on it.
 object ScreenViewing {
     private const val CHANNEL = "screen-viewing"
     private const val ID = 41

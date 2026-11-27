@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The same folder and add badge on every client's first-project screen.
 struct FirstProjectArt: View {
     var body: some View {
         Canvas { context, _ in

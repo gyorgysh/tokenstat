@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! An OS-account owner can withdraw local sharing even after signing out or
-//! losing their cloud account. This surface grants no new access, uses no
-//! account credential and never sends a hosted mutation on their behalf.
-
 use super::publications::{Phase, Store};
 use crate::error::DispatchError;
 use serde::Deserialize;
@@ -64,8 +59,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                     Err(_) if binding.is_some() => None,
                     Err(error) => return Err(error),
                 };
-                // A crashed agent run keeps the chat fenced until the
-                // publisher releases it here.
+
                 let held = chats
                     .team_run_fence(&input.workspace_id, &input.id)?
                     .is_some();
@@ -108,8 +102,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                     );
                 }
                 let store = Store::capture()?;
-                // First make the exact reference unreadable. A failed local
-                // source repair or unavailable cloud service cannot undo it.
+
                 let (_, retired) = store.retire_source(
                     &input.workspace_id,
                     &input.id,

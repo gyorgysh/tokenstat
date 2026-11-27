@@ -8,16 +8,8 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Opens a chat's pull request where this person wants them: the app's own
-/// page, the browser, or a question each time.
-/// </summary>
 internal static class PullOpener
 {
-    /// <summary>
-    /// One whose repository is not a folder on that computer only has the
-    /// browser.
-    /// </summary>
     public static async Task OpenAsync(UIElement owner, string chatFolderId, JsonNode pull)
     {
         var folder = Format.Text(pull, "workspaceId");
@@ -26,8 +18,6 @@ internal static class PullOpener
             Browse(pull);
             return;
         }
-        // The host names its own folder. A chat on another computer needs
-        // that computer's name in front of it.
         var target = RemoteWorkspaces.TrySplit(chatFolderId, out var peer, out _)
             ? RemoteWorkspaces.Join(peer, folder) : folder;
         var choice = PullOpenPreference.Choice;
@@ -91,7 +81,6 @@ internal static class PullOpener
         return choice;
     }
 
-    /// <summary>The same choice, for the settings card.</summary>
     public static UIElement Picker()
     {
         var row = new StackPanel { Spacing = Theme.SpaceS };

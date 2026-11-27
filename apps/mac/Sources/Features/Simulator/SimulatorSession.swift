@@ -137,8 +137,6 @@ final class SimulatorSession {
                     guard bootIfNeeded else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.stopped")) }
                     do { _ = try await SimulatorCommand.simctl(["boot", id], timeout: 30) }
                     catch {
-                        // An agent can boot the device after our last inventory.
-                        // Accept that race only after verifying this exact device.
                         let fresh = try? await SimulatorDevice.appleInventory(SimulatorCommand.simctl(["list", "devices", "available", "--json"]))
                         guard fresh?.contains(where: { $0.id == id && $0.isRunning }) == true else { throw error }
                     }
@@ -194,8 +192,6 @@ final class SimulatorSession {
     private func attachAndroid(_ device: SimulatorDevice, lease: UUID, bootIfNeeded: Bool) async throws {
         guard let tools = AndroidSimulatorTools.installed() else { throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.android_missing")) }
         androidTools = tools
-        // Resolve again at attachment time: the cached emulator port may now
-        // belong to another AVD, even when that device is already fully booted.
         let current = try await tools.inventory().first { $0.id == device.id }
         try Task.checkCancellation()
         guard generation == lease else { return }
@@ -314,8 +310,6 @@ final class SimulatorSession {
                     guard let tools = self.androidTools ?? AndroidSimulatorTools.installed() else {
                         throw SimulatorCommand.Failure(message: L10n.text("apple.simulator.android_missing"))
                     }
-                    // A stream can disconnect while the device menu is open.
-                    // Resolve the exact AVD if that input lease was cleared.
                     let target = serial == nil ? try await tools.inventory().first(where: { $0.id == id }) : nil
                     if let serial = serial ?? target?.serial {
                         _ = try await tools.command(serial, ["emu", "kill"], transportID: transportID ?? target?.transportID)
@@ -332,8 +326,6 @@ final class SimulatorSession {
         guard (1...4).contains(value) else { return }
         if androidSerial != nil {
             let rotation = String(AndroidSimulatorTools.rotation(value, naturalLandscape: androidNaturalLandscape))
-            // A physical device rotation must also work when a tablet app
-            // requests a fixed orientation; the guest handles letterboxing.
             if androidFixedRotation { androidCommand(["shell", "wm", "fixed-to-user-rotation", "enabled"]) }
             if androidWindowRotation {
                 androidCommand(["shell", "wm", "user-rotation", "lock", rotation], refreshDisplay: true, expectedLandscape: [3,4].contains(value))

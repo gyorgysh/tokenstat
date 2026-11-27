@@ -6,10 +6,7 @@ import ai.tokenstat.tokenstat.ui.localization.L10n
 import java.text.NumberFormat
 import java.util.Calendar
 
-/// Pure text/format logic ported 1:1 from the Apple client so both platforms
-/// answer identically. Each object cites its Swift source.
 
-/// Port of `Sources/Design/Greeting.swift`.
 object HomeGreeting {
     fun line(name: String, hasHistory: Boolean, hour: Int, dayOfYear: Int): String =
         "${phrase(hour, hasHistory, dayOfYear)}, ${firstName(name)}"
@@ -26,8 +23,6 @@ object HomeGreeting {
             in 17..<22 -> L10n.text("android.tslogic.good_evening.15a421e4")
             else -> L10n.text("android.tslogic.hello.185f8db3")
         }
-        // Fixed length so a later hasHistory flip only changes the returning
-        // slots, not which index the day lands on.
         val pool = listOf(
             timed,
             L10n.text("android.tslogic.hello.185f8db3"),
@@ -47,16 +42,9 @@ object HomeGreeting {
         )
 }
 
-/// Full grouped counts, the reading of Swift's `.formatted()` on an integer.
-/// The Insights row subtitle keeps every event ("34,346 events"), unlike the
-/// stat chips above it which compact. Device locale, like the Apple client:
-/// money is pinned to US dollars but a count groups the way the user reads.
 fun groupedCount(count: Long?): String =
     NumberFormat.getIntegerInstance().format(count ?: 0L)
 
-/// Compact token counts, port of `formatTokens` in `Bridge/Models.swift`.
-/// Lowercase k, and whole thousands above ten thousand ("126k"), exactly
-/// like the Apple client.
 fun compactTokens(count: Long?): String = when {
     count == null || count <= 0 -> "0"
     count >= 1_000_000_000 -> "%.1fB".format(count / 1_000_000_000.0)
@@ -66,10 +54,6 @@ fun compactTokens(count: Long?): String = when {
     else -> count.toString()
 }
 
-/// Rates are published in US dollars, so the figure is formatted as one
-/// regardless of where the user is, like `Money` in `Bridge/Models.swift`.
-/// A Hungarian locale rendering a local amount would not match the `$6,786.57`
-/// the CLI prints for the very same archive.
 private val currencyFormat: NumberFormat by lazy {
     NumberFormat.getCurrencyInstance(java.util.Locale.US).apply {
         currency = java.util.Currency.getInstance("USD")
@@ -78,12 +62,8 @@ private val currencyFormat: NumberFormat by lazy {
     }
 }
 
-/// Micros to a US dollar string. Never money billed: subscription usage is
-/// valued the same way.
 fun money(micros: Long): String = currencyFormat.format(micros / 1_000_000.0)
 
-/// A bucket value with its qualifier, port of `Money.formatted`: a floor
-/// reads "at least this much" (+), an estimate "about this much" (~).
 fun moneyValue(micros: Long, estimated: Boolean, complete: Boolean): String {
     val amount = money(micros)
     if (!complete) return "${amount}+"
@@ -91,8 +71,6 @@ fun moneyValue(micros: Long, estimated: Boolean, complete: Boolean): String {
     return amount
 }
 
-/// Display name for a harness id, port of `harnessName` in
-/// `Bridge/Models.swift`. Same spelling tokenstat.ai uses.
 fun harnessName(id: String): String {
     if (id == "opencode2") return "OpenCode 2"
     return when (harnessCanonicalID(id)) {
@@ -122,7 +100,6 @@ fun harnessName(id: String): String {
     }
 }
 
-/// Stored source id to brand id, port of `harnessCanonicalID`.
 fun harnessCanonicalID(id: String): String {
     if (id == "agy") return "antigravity"
     if (id.startsWith("antigravity")) return "antigravity"
@@ -131,17 +108,11 @@ fun harnessCanonicalID(id: String): String {
     return id
 }
 
-/// Marks a sign-in URL as the Android client flow, the way
-/// `ClientWebAuth.start` tags `app=ios`: the site renders the phone variant
-/// of the approval page and redirects back to the app when it is approved.
-/// Harmless on a server that does not know the parameter yet.
 fun tagSignInUrl(url: String): String {
     val separator = if (url.contains("?")) "&" else "?"
     return "$url${separator}app=android&mobile=1"
 }
 
-/// "11 August", with the year only when it is not this one, port of
-/// `shortDate` in `ClientDates.swift`. Unparseable input passes through.
 fun shortDate(iso: String): String {
     val date = try {
         java.time.LocalDate.parse(iso, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
@@ -153,8 +124,6 @@ fun shortDate(iso: String): String {
     return date.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
 }
 
-/// Copy for a tunnel that is mid-reconnect, not gone
-/// (`ClientTunnelCopy` in ClientRemote.swift).
 object TunnelCopy {
     fun isAbsent(message: String): Boolean {
         val lower = message.lowercase()
@@ -178,23 +147,12 @@ object TunnelCopy {
         if (isAbsent(message)) waiting(host) else message
 }
 
-/// Substring translation of raw core errors into friendly copy, ported row for
-/// row from `FriendlyError.swift` (title + message + retry suggestion).
-/// Matching is on substrings on purpose: these strings cross a JSON boundary
-/// from Rust, where they are deliberately human sentences and not a code
-/// enum. A new phrasing that falls through lands in the default, which is
-/// honest, rather than being mapped to the wrong advice. Order matters: rows
-/// are checked in the same order as the Apple client, so both platforms
-/// answer identically.
 data class FriendlyError(val title: String, val message: String, val canRetry: Boolean)
 
 fun friendlyError(raw: String?): FriendlyError {
     if (raw == null) return FriendlyError(L10n.text("android.tslogic.something_went_wrong.ab827e3f"), L10n.text("android.tslogic.the_request_could_not_be_completed.4c9681ac"), true)
     val text = raw.trim()
     val lower = text.lowercase()
-    // What the relay says when a screen session is refused or ended. These
-    // arrive as the relay's own short codes. No numbers here: the limits get
-    // tuned, and a message naming one is wrong the week it changes.
     if (lower.contains("session_time_limit")) {
         return FriendlyError(
             L10n.text("android.tslogic.session_ended.4a50e4c0"),
@@ -223,8 +181,6 @@ fun friendlyError(raw: String?): FriendlyError {
             false,
         )
     }
-    // A keychain refusal, which arrives as a bare OSStatus and a sentence
-    // that says nothing.
     if (lower.contains("-34018") || lower.contains("errsecmissingentitlement")) {
         return FriendlyError(
             L10n.text("android.tslogic.this_build_cannot_use_the_keychain.d1a5c315"),
@@ -239,9 +195,6 @@ fun friendlyError(raw: String?): FriendlyError {
             false,
         )
     }
-    // Two different causes share the `machine_required` code: a login that
-    // was never tied to this computer, and a computer the account has not
-    // heard of. They need different advice.
     if (lower.contains("register this device before using the vault")) {
         return FriendlyError(
             L10n.text("android.tslogic.this_login_is_not_tied_to_this_computer.b304b378"),
@@ -272,8 +225,6 @@ fun friendlyError(raw: String?): FriendlyError {
             true,
         )
     }
-    // A method the host has never heard of is not a bad call, it is an old
-    // helper: the daemon outlives the app that installed it.
     if (lower.contains("unknown method") || lower.contains("unknown_method")) {
         return FriendlyError(
             L10n.text("android.tslogic.helper_is_out_of_date.ff2cd175"),
@@ -297,9 +248,6 @@ fun friendlyError(raw: String?): FriendlyError {
             false,
         )
     }
-    // Before the sign-in case, and deliberately: a refused tunnel credential
-    // repairs itself, and its sentence used to contain the words "sign in
-    // again", which sent people to fix something already being fixed.
     val wantsSignIn = lower.contains("sign in") || lower.contains("signed out") ||
         lower.contains("not logged in") || (lower.contains("token") && lower.contains("revoked"))
     if (wantsSignIn && (lower.contains("could not be minted") || lower.contains("paid-plan") ||
@@ -386,7 +334,6 @@ fun friendlyError(raw: String?): FriendlyError {
             false,
         )
     }
-    // Gateway failures establish unreachability, not its cause or duration.
     if (lower.contains("error code: 1033") ||
         (lower.contains("1033") && lower.contains("tunnel"))
     ) {
@@ -396,9 +343,6 @@ fun friendlyError(raw: String?): FriendlyError {
             true,
         )
     }
-    // Bare codes only count inside a failure sentence ("status request failed
-    // (503)"), never on their own: a number alone could be a port or a count
-    // in some other sentence.
     val readsAsFailure = lower.contains("status") || lower.contains("gateway") ||
         lower.contains("error") || lower.contains("failed")
     if (lower.contains("bad gateway") || lower.contains("service unavailable") ||
@@ -420,9 +364,6 @@ fun friendlyError(raw: String?): FriendlyError {
             false,
         )
     }
-    // The relay has no record of that computer. Most often the same cause: it
-    // has never been turned on for remote reach. A relay-evicted or
-    // temporarily offline Mac produces the same strings, so do not assert it.
     if (lower.contains("no_such_peer") || lower.contains("no direct address") ||
         lower.contains("peer_not_found") || lower.contains("no such peer") ||
         (lower.contains("could not reach") && (lower.contains("tunnel") ||
@@ -434,8 +375,6 @@ fun friendlyError(raw: String?): FriendlyError {
             true,
         )
     }
-    // Nothing matched. Say that something failed and show the words the
-    // machine used, rather than inventing a cause.
     return FriendlyError(
         L10n.text("android.tslogic.that_did_not_work.93a20328"),
         text.ifEmpty { L10n.text("android.tslogic.something_went_wrong_and_nothing_said_what.8776f982") },
@@ -443,10 +382,6 @@ fun friendlyError(raw: String?): FriendlyError {
     )
 }
 
-/// The same vault password rule the host enforces in `tokenstat_core::passphrase`.
-///
-/// Measured in Unicode scalars, with an ASCII-only digit test, so Eastern
-/// Arabic digits do not enable a button the host then refuses.
 fun vaultPasswordProblems(password: String): List<String> {
     val scalars = password.codePoints().toArray()
     val out = mutableListOf<String>()
@@ -454,8 +389,6 @@ fun vaultPasswordProblems(password: String): List<String> {
     if (scalars.none { Character.isUpperCase(it) }) out += L10n.text("android.tslogic.an_uppercase_letter.a61f4d4b")
     if (scalars.none { it in '0'.code..'9'.code }) out += L10n.text("android.tslogic.a_number.a3c9dfa2")
     if (scalars.none { scalar ->
-            // Rust's Unicode alphanumeric predicate includes alphabetic marks
-            // and all number categories, not only decimal digits.
             val number = Character.getType(scalar) in setOf(
                 Character.DECIMAL_DIGIT_NUMBER.toInt(),
                 Character.LETTER_NUMBER.toInt(),
@@ -467,7 +400,6 @@ fun vaultPasswordProblems(password: String): List<String> {
     return out
 }
 
-/// The same recovery-code normalisation the host uses.
 fun normalizedRecovery(value: String): String = buildString {
     for (ch in value.uppercase()) {
         if (!ch.isLetterOrDigit() || ch.code > 127) continue

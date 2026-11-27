@@ -31,8 +31,6 @@ internal sealed partial class ChatPage
 
     internal static Task<long> ReadFileHashAsync(Stream stream, IncrementalHash hasher, long expectedSize, CancellationToken cancellation)
     {
-        // Cached reads can complete synchronously. Keep the whole pass off
-        // the UI thread, including reads and hashing of resumed downloads.
         return Task.Run(async () =>
         {
             var buffer = new byte[FileChunkBytes];
@@ -93,8 +91,6 @@ internal sealed partial class ChatPage
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
-            // Active uploads are protected separately, including their atomic
-            // write files. Bound the receipts left by completed or failed work.
             foreach (var file in retained.OrderByDescending(file => file.LastWriteTimeUtc).Skip(128)) Remove(file);
         }
         catch (IOException) { }
@@ -161,8 +157,6 @@ internal sealed partial class ChatPage
             if (previousOffset < 0 || previousOffset > expectedSize) throw new IOException("Invalid file transfer response");
             JsonNode? caps = null;
             var relay = false;
-            // Receipt reuse and finishing already uploaded bytes do not need
-            // another payload channel, route size check or relay prompt.
             if (previousOffset != expectedSize)
             {
                 caps = await CallChatAsync("chat.fileCapabilities", new JsonObject { ["id"] = chat });
@@ -215,8 +209,6 @@ internal sealed partial class ChatPage
                 }
                 cancel.Token.ThrowIfCancellationRequested(); if (!current()) throw new OperationCanceledException();
                 var result = await CallChatAsync("chat.fileUploadFinish", new JsonObject { ["id"] = chat, ["transferId"] = transfer });
-                // Another attachment can fail before the message is sent.
-                // Keep this receipt so retrying the message reuses the upload.
                 return result;
             }
             catch (OperationCanceledException)
@@ -300,7 +292,6 @@ internal sealed partial class ChatPage
                     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     var offset = await ReadFileHashAsync(output, hash, output.Length, cancel.Token);
                     cancel.Token.ThrowIfCancellationRequested(); if (!Current()) throw new OperationCanceledException();
-                    // A complete local file needs checksum verification, not relay bytes.
                     if (offset < size && Format.Flag(caps, "relay"))
                     {
                         if (!await ConfirmFileRelayAsync(item.Name, size, caps?["relayRemainingBytes"] is null ? null : Format.Long(caps, "relayRemainingBytes")) || !Current()) throw new OperationCanceledException();

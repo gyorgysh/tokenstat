@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The point where a conversation changed hands, and what the incoming agent
-/// was told.
-///
-/// A banner rather than a divider. People missed the thin rule with a caption
-/// on it, and a change of agent changes what the replies below it can know,
-/// so it has to read as an event at a glance. Drawn in the brand gradient,
-/// the one place in a transcript that uses it, so it never looks like a
-/// message or a tool step. The summary is disclosed, never hidden.
 struct ChatHandoffBanner: View {
     let agent: String
     let brief: String

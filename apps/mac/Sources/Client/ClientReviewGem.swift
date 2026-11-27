@@ -5,18 +5,6 @@ import SceneKit
 import SwiftUI
 import UIKit
 
-/// A slim cut star you can spin with a finger, that catches the light.
-///
-/// Built from triangles here rather than shipped as a model file: a ten-point
-/// outline, a thin rim, and a low point on each face, every facet with its own
-/// normal so light breaks across it like a cut stone. The colours are the
-/// theme's accent and secondary.
-///
-/// Around it sit a soft glare with a four-point glint and a drift of small
-/// sparkles. Both answer to how fast the star is turning: a flick makes it
-/// flare and throw off sparks, and as it slows they settle back to a faint
-/// shimmer. A tap gives it a spin. Reduce Motion drops the idle turn and the
-/// sparkles; it can still be turned by hand.
 struct ClientReviewGem: UIViewRepresentable {
     var accent: Color
     var secondary: Color
@@ -53,12 +41,7 @@ struct ClientReviewGem: UIViewRepresentable {
         private let star = SCNNode()
         private let glare = SCNNode()
         private let sparkles = SCNParticleSystem()
-        /// Points per frame from the finger or the coast. Drives the glare
-        /// and the sparks.
         private var velocity = CGPoint.zero
-        /// The turn is held as two angles rather than an accumulated matrix:
-        /// a full spin left and right, and only a slight lean up and down, so
-        /// it turns like a star on a stand instead of tumbling.
         private var yaw: Float = 0.3
         private var pitch: Float = -0.08
         private var dragging = false
@@ -72,8 +55,6 @@ struct ClientReviewGem: UIViewRepresentable {
             let camera = SCNNode()
             camera.camera = SCNCamera()
             camera.camera?.fieldOfView = 32
-            // No HDR: its exposure lifted every facet toward white. The glare
-            // plane behind the star carries the glow instead.
             camera.position = SCNVector3(0, 0, 5.4)
             scene.rootNode.addChildNode(camera)
 
@@ -116,7 +97,6 @@ struct ClientReviewGem: UIViewRepresentable {
             sparkles.propertyControllers = [.opacity: SCNParticlePropertyController(animation: fade)]
             scene.rootNode.addParticleSystem(sparkles)
 
-            // In with a turn and a little overshoot, then the idle spin.
             star.scale = SCNVector3(0.01, 0.01, 0.01)
             let grow = SCNAction.scale(to: 1, duration: 0.6)
             grow.timingFunction = { t in
@@ -171,15 +151,12 @@ struct ClientReviewGem: UIViewRepresentable {
             }
         }
 
-        /// A tap is a flick to the side: a spin, a flare, a burst of sparks.
         @objc func tap(_ gesture: UITapGestureRecognizer) {
             star.removeAction(forKey: Self.idleKey)
             velocity = CGPoint(x: velocity.x + 38, y: velocity.y)
             startLink()
         }
 
-        /// A finger's travel becomes a turn about the screen's axes, so a
-        /// sideways drag always spins it sideways whatever angle it is at.
         private func turn(by delta: CGPoint) {
             yaw += Float(delta.x) * 0.012
             pitch = min(Self.maxPitch, max(-Self.maxPitch, pitch + Float(delta.y) * 0.004))
@@ -194,17 +171,13 @@ struct ClientReviewGem: UIViewRepresentable {
 
         @objc private func step() {
             let speed = hypot(velocity.x, velocity.y)
-            // Glare and sparks follow the spin: quiet at rest, bright and busy
-            // when flicked.
             let energy = min(1, speed / 30)
             glare.opacity = 0.22 + 0.4 * energy
             glare.scale = SCNVector3(Float(1 + 0.35 * energy), Float(1 + 0.35 * energy), 1)
             sparkles.birthRate = reduceMotion ? 0 : 4 + 90 * energy
             sparkles.particleVelocity = 0.25 + 1.4 * energy
             velocity = CGPoint(x: velocity.x * 0.95, y: velocity.y * 0.95)
-            // While a finger is down the pan has already turned it.
             if !dragging { turn(by: CGPoint(x: velocity.x, y: 0)) }
-            // Let go, and it settles back to its slight lean.
             if !dragging {
                 pitch += (-0.08 - pitch) * 0.08
                 pivot.eulerAngles = SCNVector3(pitch, yaw, 0)
@@ -223,12 +196,7 @@ struct ClientReviewGem: UIViewRepresentable {
             link = nil
         }
 
-        // MARK: Art
 
-        /// Ten points around, a thin rim, and a low point front and back.
-        /// Each facet has its own vertices so it shades flat; alternate
-        /// facets lean to the accent or the secondary so it flickers between
-        /// them as it turns. The rim is near white, so the edge catches.
         private static func starGeometry(accent: UIColor, secondary: UIColor) -> SCNGeometry {
             let outer: Float = 1.0, inner: Float = 0.4, rim: Float = 0.045, peak: Float = 0.26
             let ring: [SIMD2<Float>] = (0..<10).map { index in
@@ -259,8 +227,6 @@ struct ClientReviewGem: UIViewRepresentable {
                 let even = index.isMultiple(of: 2)
                 face(front, pf, qf, even ? rgba(accent, 0.9) : rgba(secondary, 0.8))
                 face(back, qb, pb, even ? rgba(secondary, 0.7) : rgba(accent, 0.62))
-                // The rim in the star's own colour, a shade darker than the
-                // faces, so the edge reads as thickness and not as a stripe.
                 let side = even ? rgba(accent, 0.55) : rgba(secondary, 0.5)
                 face(pf, pb, qb, side)
                 face(pf, qb, qf, side)
@@ -284,8 +250,6 @@ struct ClientReviewGem: UIViewRepresentable {
             return geometry
         }
 
-        /// A soft halo with a thin four-point glint, drawn once into an image
-        /// and added onto whatever is behind it.
         private static func glarePlane(tint: UIColor) -> SCNGeometry {
             let size = CGSize(width: 512, height: 512)
             let image = UIGraphicsImageRenderer(size: size).image { context in
@@ -326,7 +290,6 @@ struct ClientReviewGem: UIViewRepresentable {
             return plane
         }
 
-        /// One sparkle: a bright point with a tiny four-point cross.
         private static func sparkleImage() -> UIImage {
             let size = CGSize(width: 64, height: 64)
             return UIGraphicsImageRenderer(size: size).image { context in

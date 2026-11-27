@@ -120,8 +120,6 @@ internal sealed partial class ChatPage
             button.Click += async (_, _) => await ShowImageGalleryAsync(images, selected);
             tiles.Add(button); canvas.Children.Add(button);
         }
-        // Geometry changes resize these existing tiles. They never rebuild the
-        // transcript or restart an image download as metadata arrives.
         host.SizeChanged += (_, args) => {
             if (Math.Abs(args.NewSize.Width - args.PreviousSize.Width) < .1) return;
             availableWidth = args.NewSize.Width; Layout();
@@ -143,7 +141,7 @@ internal sealed partial class ChatPage
             image.Source = bitmap;
             decoded(aspect);
         }
-        catch { /* A file tile and its explicit viewer action remain available. */ }
+        catch { }
     }
     private static async Task<BitmapImage> DecodeImageAsync(string path, uint edge, Action<double>? aspectReady = null)
     {
@@ -398,7 +396,7 @@ internal sealed partial class ChatPage
         {
             if (contact?.IsInContact != true) return false;
             try { return UIElement.TryStartDirectManipulation(contact); }
-            catch (ArgumentException) { return false; } // The contact can end before the native handoff.
+            catch (ArgumentException) { return false; }
         }
         void PointerPressed(object sender, PointerRoutedEventArgs args)
         {
@@ -407,8 +405,6 @@ internal sealed partial class ChatPage
             var start = swipe.Press(args.Pointer.PointerId, point.X, point.Y, viewer.ZoomFactor,
                 viewer.ActualWidth, revision, image.Source is not null);
             if (start == ChatImageSwipe.Start.Observe) {
-                // Keep a fitted single-finger swipe on the UI thread. A
-                // second contact below resumes native pan/zoom for both.
                 surface.CancelDirectManipulations();
                 firstContact = args.Pointer;
                 if (!surface.CapturePointer(args.Pointer)) {

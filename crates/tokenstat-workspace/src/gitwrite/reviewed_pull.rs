@@ -133,8 +133,6 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         return Err("The upstream must be a branch.".into());
     }
     text(dir, &["check-ref-format", &remote_ref])?;
-    // A branch can follow a remote by URL rather than by name. That has no
-    // remote-tracking ref to fetch into, so say so before reaching for it.
     text(
         dir,
         &["check-ref-format", &tracking_ref(&remote, &remote_ref)],
@@ -143,7 +141,6 @@ pub fn review(dir: &Path) -> Result<Review, String> {
         "This branch follows a remote address, not a named remote. Pull it from a terminal."
             .to_string()
     })?;
-    // Exit code 2 is "no such ref", whatever language git speaks.
     let listed = network_command(
         dir,
         &[
@@ -174,8 +171,6 @@ pub fn review(dir: &Path) -> Result<Review, String> {
     if !listed.status.success() {
         return Err(failure(listed, "Git could not reach the remote."));
     }
-    // No tags, no submodules, and only this one branch: the fetch brings in
-    // what the review is about and nothing else.
     let fetched = network_command(
         dir,
         &[
@@ -254,8 +249,6 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
     let Some(target) = reviewed.upstream_head.as_deref() else {
         return Err("The upstream branch is gone. There is nothing to pull.".into());
     };
-    // A review crosses the client boundary. Only a full object id can bind
-    // the commit shown, never a movable ref or a git command option.
     if !matches!(target.len(), 40 | 64)
         || !target
             .bytes()
@@ -343,8 +336,6 @@ pub fn pull(dir: &Path, reviewed: &Review) -> Result<Outcome, String> {
 }
 
 fn untracked(dir: &Path) -> Result<HashSet<String>, String> {
-    // Include ignored files too: an incoming .gitignore can expose a file
-    // that already existed before checkout.
     nul_paths(dir, &["ls-files", "--others", "-z"])
 }
 
@@ -387,8 +378,6 @@ fn nul_paths(dir: &Path, args: &[&str]) -> Result<HashSet<String>, String> {
         .stdout
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
-        // Do not turn a non-UTF-8 path into a different file's name during
-        // cleanup. Such paths are left alone when they cannot be represented.
         .filter_map(|path| String::from_utf8(path.to_vec()).ok())
         .collect())
 }
@@ -471,7 +460,6 @@ mod tests {
         assert_eq!(outcome.head, reviewed.upstream_head);
         assert!(dir.join("theirs").exists());
         assert!(!dir.join("later").exists());
-        // Repeating it finds the work done rather than failing.
         let again = pull(dir, &reviewed).unwrap();
         assert!(again.ok);
     }
@@ -588,16 +576,13 @@ mod tests {
         let body = "Large file from upstream\n".repeat(1000);
         commit(f.other.path(), "asset.bin", &body);
         text(f.other.path(), &["push", "-q"]).unwrap();
-        // Override any global installation to model an unconfigured clone.
         text(dir, &["config", "filter.lfs.process", ""]).unwrap();
         let reviewed = review(dir).unwrap();
         assert!(!reviewed.lfs.as_ref().unwrap().ready());
         assert!(pull(dir, &reviewed).unwrap_err().contains("Git LFS"));
         assert_eq!(text(dir, &["rev-parse", "HEAD"]).unwrap(), reviewed.head);
         assert!(!dir.join("asset.bin").exists());
-        // The explicit enable action repairs the empty repository filter.
         assert!(super::super::lfs::setup(dir, false).unwrap().ready());
-        // Pull needs the filters, not an unrelated pre-push hook.
         let _ = fs::remove_file(dir.join(".git/hooks/pre-push"));
         let reviewed = review(dir).unwrap();
         assert!(pull(dir, &reviewed).unwrap().ok);

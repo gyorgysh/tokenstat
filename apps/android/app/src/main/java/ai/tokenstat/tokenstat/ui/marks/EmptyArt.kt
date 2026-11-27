@@ -32,10 +32,6 @@ import ai.tokenstat.tokenstat.ui.theme.TsColors
 import ai.tokenstat.tokenstat.ui.theme.TsMotion
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
 
-/// Every picture an empty screen draws, one per surface, ported from
-/// `ClientEmptyArt.swift`. "Nothing here" is a different sentence in a folder
-/// with no sessions and a folder with no jobs, so each surface gets its own
-/// drawing rather than a shared shrug.
 enum class EmptyArtKind {
     Sessions, Tasks, Notes, Workflows, Automations, Changes, History, NotGit,
     Files, Projects, Waiting, RemoteReach, Vault, Screen, WorkspaceAccess, Chat,
@@ -43,11 +39,6 @@ enum class EmptyArtKind {
     RentServer, ByHand, FirstBars, GetCounting, RemoteGate,
 }
 
-/// Line drawings from `ClientEmptyArt.swift`, 128x84, brand stroke. The Mac
-/// draws each scene with one small loop; the phone draws the resting frame
-/// and arrives on it with the shared intro spring (`TsMotion.introSpring`,
-/// the response 0.5-0.7s damping 0.7-0.84 family), so Reduce Motion lands on
-/// the frame by construction.
 @Composable
 fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = personaSeed("empty-chat")) {
     if (kind == EmptyArtKind.Chat) {
@@ -153,8 +144,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                     drawLine(border, Offset(size.width * 0.30f, cy + 5f), Offset(size.width * (if (i == 0) 0.48f else 0.44f), cy + 5f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 }
             }
-            // A folder that has no history behind it: the branch never meets
-            // the folder, so the picture is the missing connection.
             EmptyArtKind.NotGit -> {
                 val folder = Path().apply {
                     moveTo(size.width * 0.10f, size.height * 0.79f)
@@ -184,9 +173,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawRoundRect(border, Offset(size.width * 0.32f, size.height * 0.28f), Size(size.width * 0.36f, size.height * 0.44f), CornerRadius(8f, 8f), style = stroke)
                 drawCircle(accent.copy(alpha = 0.35f), size.minDimension * 0.22f, Offset(size.width * 0.5f, size.height * 0.5f), style = stroke)
             }
-            // A phone calling a Mac whose Remote Reach switch is still off:
-            // the pulse ends at the switch, so this reads as setup, not as a
-            // vague network failure.
             EmptyArtKind.RemoteReach -> {
                 drawRoundRect(border, Offset(size.width * 0.13f, size.height * 0.23f), Size(size.width * 0.20f, size.height * 0.54f), CornerRadius(9f, 9f), style = stroke)
                 drawLine(colors.secondary, Offset(size.width * 0.18f, size.height * 0.40f), Offset(size.width * 0.28f, size.height * 0.40f), strokeWidth = 3.4f, cap = StrokeCap.Round)
@@ -198,12 +184,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(colors.secondary, Offset(size.width * 0.65f, size.height * 0.45f), Offset(size.width * 0.84f, size.height * 0.45f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawRoundRect(accent, Offset(size.width * 0.74f, size.height * 0.56f), Size(size.width * 0.13f, size.height * 0.10f), CornerRadius(6f, 6f))
             }
-            // Two devices with a padlock between them, the way `VaultScene`
-            // draws it. The lock needs its shackle: a bare rectangle between
-            // a phone and a laptop reads as a box being passed around, which
-            // is the opposite of what an encrypted vault is. The ghost lines
-            // inside each frame are what make them read as devices holding
-            // something rather than as empty outlines.
             EmptyArtKind.Vault -> {
                 fun device(left: Float, top: Float, w: Float, h: Float) {
                     drawRoundRect(
@@ -228,10 +208,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 }
                 device(0.133f, 0.310f, 0.203f, 0.524f)
                 device(0.586f, 0.452f, 0.359f, 0.333f)
-                // A half circle whose ends land exactly on the body's top
-                // edge, drawn first so the box covers its round caps. Any
-                // shorter sweep leaves the shackle floating above the lock
-                // with daylight under it.
                 drawArc(
                     accent,
                     startAngle = 180f,
@@ -256,9 +232,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(colors.secondary, Offset(size.width * 0.32f, size.height * 0.64f), Offset(size.width * 0.68f, size.height * 0.64f), strokeWidth = 3.4f, cap = StrokeCap.Round)
                 drawLine(accent.copy(alpha = 0.45f), Offset(size.width * 0.20f, size.height * 0.30f), Offset(size.width * 0.80f, size.height * 0.30f), strokeWidth = 2.4f, cap = StrokeCap.Round)
             }
-            // A folder waiting on a key: permission, not emptiness. The key
-            // drifts in rather than turning, because nothing is locked
-            // against this person, it simply has not been handed over yet.
             EmptyArtKind.WorkspaceAccess -> {
                 drawRoundRect(border, Offset(size.width * 0.14f, size.height * 0.30f), Size(size.width * 0.50f, size.height * 0.55f), CornerRadius(12f, 12f), style = stroke)
                 drawRoundRect(border, Offset(size.width * 0.18f, size.height * 0.20f), Size(size.width * 0.20f, size.height * 0.12f), CornerRadius(5f, 5f), style = stroke)
@@ -341,9 +314,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
                 drawLine(accent, Offset(badge.x, badge.y + 4f), Offset(badge.x - 3.5f, badge.y), strokeWidth = 2.4f, cap = StrokeCap.Round)
                 drawLine(accent, Offset(badge.x, badge.y + 4f), Offset(badge.x + 3.5f, badge.y), strokeWidth = 2.4f, cap = StrokeCap.Round)
             }
-            // Insights with nothing on the account yet: bars rising, the last
-            // one still a dashed slot. The first counters are arriving, not
-            // absent.
             EmptyArtKind.FirstBars -> {
                 sparkle(Offset(size.width * 0.22f, size.height * 0.24f), 9f, accent)
                 sparkle(Offset(size.width * 0.78f, size.height * 0.74f), 6f, accent)
@@ -392,9 +362,6 @@ fun EmptyArt(kind: EmptyArtKind, modifier: Modifier = Modifier, seed: ULong = pe
     }
 }
 
-/// Three moments of the same machine: a server with nothing on it, a server
-/// being set up, and a server that answers. One drawing in three states, so
-/// walking the wizard never meets three different machines.
 private enum class ServerArtState { Waiting, Working, Ready }
 
 private fun DrawScope.serverScene(state: ServerArtState, stroke: Stroke, colors: TsColors) {
@@ -402,7 +369,6 @@ private fun DrawScope.serverScene(state: ServerArtState, stroke: Stroke, colors:
     val border = colors.border
     drawRoundRect(border, Offset(size.width * 0.07f, size.height * 0.27f), Size(size.width * 0.17f, size.height * 0.46f), CornerRadius(8f, 8f), style = stroke)
     drawLine(colors.secondary, Offset(size.width * 0.11f, size.height * 0.50f), Offset(size.width * 0.20f, size.height * 0.50f), strokeWidth = 3.4f, cap = StrokeCap.Round)
-    // The link is the whole story: nothing, a travelling signal, or settled.
     val dot: (Int) -> Unit = { i ->
         val color = when (state) {
             ServerArtState.Waiting -> border.copy(alpha = 0.5f)
@@ -425,9 +391,6 @@ private fun DrawScope.serverScene(state: ServerArtState, stroke: Stroke, colors:
     }
 }
 
-/// A four-point spark, the accent that makes a scene pop. Static by design:
-/// each scene already carries its one loop on the Mac, and the phone draws
-/// the resting frame.
 private fun DrawScope.sparkle(center: Offset, size: Float, accent: Color) {
     val half = size / 2f
     val inner = size * 0.16f

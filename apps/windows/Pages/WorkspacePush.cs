@@ -12,12 +12,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The reviewed push flow for one workspace, matching the Mac workbench.
-/// Opening the dialog restores the pending submission; it never reads a
-/// remote and never pushes on its own. One entry per workspace id, so a
-/// lost response is reconciled rather than re-sent.
-/// </summary>
 internal sealed class WorkspacePushSession
 {
     private static readonly Dictionary<(long Account, string Workspace), WorkspacePushSession> Sessions = new();
@@ -173,7 +167,6 @@ internal sealed class WorkspacePushSession
                     ["id"] = workspaceId,
                     ["operationId"] = SubmittedOperationId,
                 });
-            // HostClient represents a successful JSON null as an empty object.
             if (receipt is null or JsonObject { Count: 0 })
             {
                 CanRetry = true;
@@ -242,9 +235,6 @@ internal sealed class WorkspacePushSession
 
     private async Task LoadAsync(string workspaceId)
     {
-        // No disk store on Windows: the static session is the store, and it
-        // already holds the pending submission. Kept as a step so a later
-        // persistent draft has one place to land.
         await Task.CompletedTask;
     }
 
@@ -275,11 +265,6 @@ internal sealed class WorkspacePushSession
         state == "succeeded" || state == "failed";
 }
 
-/// <summary>
-/// The push dialog: branch, destination and outgoing commits, then one
-/// explicit push. Staging and pushing are real features behind buttons,
-/// never on a timer.
-/// </summary>
 internal static class WorkspacePushDialog
 {
     public static async Task ShowAsync(UIElement owner, string workspaceId, string folderName)

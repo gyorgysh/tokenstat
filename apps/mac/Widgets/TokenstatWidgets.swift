@@ -32,7 +32,6 @@ private func widgetTimeline(_ entry: TokenstatWidgetEntry) -> Timeline<Tokenstat
         TokenstatWidgetEntry(date: date, snapshot: entry.snapshot, period: entry.period, appearance: entry.appearance,
                             tint: entry.tint, screen: entry.screen, favoriteID: entry.favoriteID, showCharts: entry.showCharts)
     }
-    // Coarse ages are pre-rendered locally, without extra network requests.
     return Timeline(entries: entries, policy: .after(entry.date.addingTimeInterval(30 * 60)))
 }
 
@@ -94,8 +93,6 @@ struct TokenstatLauncherProvider: AppIntentTimelineProvider {
     }
 }
 
-/// Resolve appearance outside the content so semantic primary/secondary colors
-/// and the background always use the same scheme. Tinted widgets remain system styled.
 struct TokenstatWidgetSurface<Content: View>: View {
     let appearance: EcosystemAppearance
     @ViewBuilder let content: () -> Content
@@ -399,7 +396,6 @@ struct TokenstatUsageView: View {
     private var activity: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("RECENT ACTIVITY").font(.system(.caption2, design: .rounded, weight: .semibold)).foregroundStyle(muted)
-            // Include quiet and locked days rather than packing active days.
             let days = usage?.days ?? []
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 7), spacing: 5) {
                 ForEach(days) { day in
@@ -498,8 +494,6 @@ struct TokenstatLauncherView: View {
                                              date: entry.date, accent: accent)
             }
             if family == .systemSmall {
-                // Small widgets have one system tap target. A single launcher
-                // makes that behavior clear instead of drawing four buttons.
                 VStack(alignment: .leading, spacing: 8) {
                     Spacer(minLength: 0)
                     (entry.favorite == nil ? WidgetStyle.icon(for: entry.screen) : Image(systemName: "folder.fill"))

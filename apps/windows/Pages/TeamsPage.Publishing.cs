@@ -129,8 +129,6 @@ internal sealed partial class TeamsPage
             var events = history["events"]!.AsArray(); Require(events.All(row => row is JsonObject));
             foreach (var block in TeamTranscript.Project(events.OfType<JsonObject>(), Text(chat, "backend")))
             {
-                // A private preview has no shared-file authority. Its file names
-                // are reviewed here; fetching becomes available after sharing.
                 if (block.Kind == TeamBlockKind.File) fields.Children.Add(TeamText(Text(block.File, "name")));
                 else fields.Children.Add(TranscriptRow(model.Target(checkout), block));
             }

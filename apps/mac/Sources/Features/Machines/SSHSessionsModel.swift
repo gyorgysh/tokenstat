@@ -7,23 +7,10 @@
 import Observation
 import Foundation
 
-/// The SSH sessions this app is showing.
-///
-/// The shape `TerminalsModel` already has for workspace terminals, and for the
-/// same reason: the sessions belong to the host process, so this is a window
-/// onto them rather than their owner. It reconciles against `ssh.session.list`,
-/// adopts what a relaunch left running, and closes what somebody is done with.
-///
-/// It exists at all because an SSH terminal used to be `@State` in whichever
-/// view happened to open it, presented as a cover. One at a time, nothing else
-/// on screen, and closing the cover killed the shell. Nothing outside that one
-/// view could know a session existed, which is why there were no tabs, no
-/// split, and no sign of a live session anywhere in the sidebar.
 @MainActor
 @Observable
 final class SSHSessionsModel {
     private(set) var sessions: [SSHLiveTerminal] = []
-    /// The session the pane is showing, or the leading half when split.
     var selectedID: String?
     var error: String?
     private(set) var loaded = false
@@ -47,13 +34,8 @@ final class SSHSessionsModel {
         self.isOwnerCurrent = isOwnerCurrent
     }
 
-    /// Which host each pane was last looking at, so returning to a server
-    /// opens on the session that was in front rather than on the first one.
     private var selectedByHost: [String: String] = [:]
 
-    /// Handles explicitly closed in this window. Handles are unique for a
-    /// shell's lifetime; an old list or connection callback must never adopt
-    /// one again after a newer snapshot has already confirmed its absence.
     @ObservationIgnored private var closingIDs: Set<String> = []
 
     var selected: SSHLiveTerminal? {
@@ -64,8 +46,6 @@ final class SSHSessionsModel {
         sessions.filter { $0.hostID == hostID }
     }
 
-    /// Sessions with no saved record behind them. A one-off connection is
-    /// still a session and still needs somewhere to be listed.
     var looseSessions: [SSHLiveTerminal] {
         sessions.filter { $0.hostID == nil }
     }
@@ -74,13 +54,6 @@ final class SSHSessionsModel {
         sessions(for: hostID).filter(\.alive).count
     }
 
-    /// The session a host's pane is showing, or nil when it has none.
-    ///
-    /// Host-scoped on purpose. `selected` is global, so on a server whose pane
-    /// has not been touched yet it names a shell on a different machine, and
-    /// anything that types into it would type into the wrong server. The
-    /// inspector and the pane both read this rather than each deciding, so a
-    /// snippet cannot land somewhere other than the tab in front.
     func activeSession(for hostID: String) -> SSHLiveTerminal? {
         let mine = sessions(for: hostID)
         return mine.first { $0.id == selectedID }
@@ -88,13 +61,7 @@ final class SSHSessionsModel {
             ?? mine.last
     }
 
-    // MARK: - Reconciling with the host
 
-    /// Adopt what the host is holding and let go of what it is not.
-    ///
-    /// Runs on a timer while a pane is open, and once at launch. A session the
-    /// host has forgotten is dropped here rather than left as a tab that
-    /// writes into nothing.
     @discardableResult
     func reconcile() async -> Bool {
         let attempt = epoch
@@ -118,8 +85,6 @@ final class SSHSessionsModel {
                 }
                 let held = Set(summaries.map(\.id))
                 let ended = Set(summaries.filter { !$0.alive }.map(\.id))
-                // Preserve ended scrollback. A snapshot begun before a
-                // connection cannot end a terminal adopted during its await.
                 for session in sessions where session.alive && observed.contains(session.id)
                     && (!held.contains(session.id) || ended.contains(session.id)) {
                     session.markClosed()
@@ -139,8 +104,6 @@ final class SSHSessionsModel {
         }
     }
 
-    /// Keep the list honest while a pane is open. Slow on purpose: this is a
-    /// bookkeeping poll, and the host excludes it from what holds sleep open.
     func watch() async {
         while active && !Task.isCancelled {
             await reconcile()
@@ -150,9 +113,6 @@ final class SSHSessionsModel {
 
     private func isCurrent(_ value: UInt64) -> Bool { active && foreground && epoch == value && isOwnerCurrent() }
 
-    /// A reversible scene pause preserves terminal objects, read cursors and
-    /// startup progress. A new foreground gets a fresh list attempt even if
-    /// the predecessor's transport has not returned yet.
     func setForeground(_ value: Bool) {
         guard active, foreground != value else { return }
         foreground = value
@@ -170,13 +130,7 @@ final class SSHSessionsModel {
         }
     }
 
-    // MARK: - Opening and closing
 
-    /// Take a freshly opened session, select it, and remember it for its host.
-    ///
-    /// `startup` is whatever the library says should run on this server as
-    /// soon as a shell exists. Passed in rather than looked up, so the session
-    /// model stays ignorant of the record store.
     @discardableResult
     func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) -> SSHLiveTerminal? {
         guard active, isOwnerCurrent(), !closingIDs.contains(session.id) else {
@@ -214,21 +168,6 @@ final class SSHSessionsModel {
         return session
     }
 
-    /// Send the on-connect snippets, once the far end has had a moment to put
-    /// a prompt up.
-    ///
-    /// "Run automatically after connecting" has been a stored flag and a
-    /// checkbox in the editor since it was added, and nothing has ever read
-    /// it. This is the thing that reads it.
-    ///
-    /// The pause is not a race being papered over: the bytes would arrive
-    /// either way, because the shell buffers its input. It is so that what ran
-    /// is legible in the scrollback, under the login banner rather than
-    /// through the middle of it.
-    ///
-    /// Snippets with placeholders are skipped. Asking for values is a sheet,
-    /// and a sheet that opens by itself the moment a connection lands is not
-    /// something to do to somebody.
     private func start(_ snippets: [SSHSnippet], in session: SSHLiveTerminal) {
         guard !snippets.isEmpty, startups[session.id] == nil else { return }
         startups[session.id] = Startup(commands: snippets.filter {
@@ -261,8 +200,6 @@ final class SSHSessionsModel {
                     let dispatched = await session.sendStartupBytes(next.commands[next.next]) { [weak self] in
                         guard let self, !Task.isCancelled, self.isCurrent(attempt),
                               self.startupTickets[id] == token, !self.closingIDs.contains(id) else { return false }
-                        // Commit progress at dispatch, before awaiting the RPC.
-                        // An uncertain reply must not replay a shell command.
                         self.startups[id]?.next += 1
                         return true
                     }
@@ -279,8 +216,6 @@ final class SSHSessionsModel {
         startupTickets.removeAll()
     }
 
-    /// Retire this scene/account's local readers and delayed input. The
-    /// helper owns the remote shells, which stay running after sign-out.
     func deactivate() {
         guard active else { return }
         active = false
@@ -305,7 +240,6 @@ final class SSHSessionsModel {
         if let hostID = session.hostID { selectedByHost[hostID] = session.id }
     }
 
-    /// The session to show when a host's pane opens.
     func restoreSelection(for hostID: String) {
         guard active else { return }
         let mine = sessions(for: hostID)
@@ -357,19 +291,14 @@ final class SSHSessionsModel {
         return true
     }
 
-    /// Close every session on one host. Used when a saved record is deleted.
     func closeAll(for hostID: String) async {
         for session in sessions(for: hostID) {
             await close(session)
         }
     }
 
-    // MARK: - Layout
 
     #if os(macOS)
-    /// How each host's pane is arranged. Per host rather than global, because
-    /// two servers are two workspaces: a split that suits a log tail beside an
-    /// editor has no business following you to a different machine.
     private(set) var splitLayout: [String: TerminalSplitLayout] = [:]
     private(set) var splitFraction: [String: Double] = [:]
     private(set) var splitLeadingID: [String: String] = [:]
@@ -433,8 +362,6 @@ final class SSHSessionsModel {
         return mine.first { $0.id == id }
     }
 
-    /// Put a session in the half that is not showing it, so a tab can be
-    /// dragged into the other side without a drag.
     func sendToOtherHalf(_ session: SSHLiveTerminal, in hostID: String) {
         guard session.hostID == hostID else { return }
         if !layout(for: hostID).isSplit { setLayout(.side, for: hostID) }
@@ -452,11 +379,6 @@ final class SSHSessionsModel {
     }
 }
 
-/// Where a host's pane layout is remembered.
-///
-/// Keyed by the saved record's id, which survives a relaunch. Which session
-/// was in which half is not stored: those ids are handed out per connection
-/// and a stored one would name a shell that no longer exists.
 #if os(macOS)
 enum SSHPreference {
     private static let splitKey = "ssh.split"

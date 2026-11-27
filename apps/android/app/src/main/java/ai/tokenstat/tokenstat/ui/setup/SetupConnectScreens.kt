@@ -60,21 +60,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/// Door two: a server, over the SSH session this phone opens itself. Ported
-/// from `ClientSetupServerSteps.swift`.
-///
-/// One screen per step. Each of them can fail on its own, each failure has
-/// its own sentence, and the one place where a mistake is permanent (trusting
-/// a host key) is a screen rather than a row inside another one.
-///
-/// Eight steps: the six server steps, then the agent sign-in and the project.
-/// The Apple client numbers the project seventh; the agent step is inserted
-/// before it, exactly where the install and finish copy say the agent
-/// sign-in happens next.
 const val SETUP_CONNECT_TOTAL = 8
 
-/// Every step looks the same: what this is, the thing to do, and one button.
-/// A container rather than six copies, so the wizard reads as one flow.
 @Composable
 fun SetupStepScaffold(
     title: String,
@@ -120,10 +107,6 @@ fun SetupStepScaffold(
     }
 }
 
-/// What failed, what it changed, and the one thing to do next. Ported from
-/// `SetupFailureBanner`: the recovery action navigates, the two that happen
-/// elsewhere (signing in to the account, updating the machine) say so in
-/// words, and retry is the screen's own button rather than a second one.
 @Composable
 fun SetupFailureBanner(
     failure: SetupFailure,
@@ -223,8 +206,6 @@ fun SetupWhereStep(
             .onFailure { connect.failure = SetupFailure.from(it) }
     }
     val hosts = connect.libraryHosts.orEmpty()
-    // Carry the saved record's own credential over, so somebody who has
-    // connected to this server before does not choose a key twice.
     fun picked(host: JsonObject) {
         if (connect.pickedHostId == host.sshString("id")) {
             connect.pickedHostId = null
@@ -560,9 +541,6 @@ fun SetupCheckStep(
                 }
             }
             if ((check["root"] as? JsonPrimitive)?.booleanOrNull == true) {
-                // A fact next to the operating system version, not a warning
-                // triangle. It is the trade being made, and it is the right
-                // one for a machine that exists to do this work.
                 SetupSection(L10n.text("android.setupconnectscreens.who_agents_run_as.fc7c9918")) {
                     Text(L10n.text("android.setupconnectscreens.agents_on_this_machine_will_run_as_root.d624b53a"), style = TsType.body, color = colors.textPrimary)
                     Text(
@@ -620,9 +598,6 @@ fun SetupInstallStep(
     val sessionId = connect.installSessionId
     var watching by remember(sessionId) { mutableStateOf(sessionId != null) }
     if (sessionId != null && watching) {
-        // A real terminal, not a spinner. People trust an installer they can
-        // watch, and every support conversation about a failed install starts
-        // with this text.
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),

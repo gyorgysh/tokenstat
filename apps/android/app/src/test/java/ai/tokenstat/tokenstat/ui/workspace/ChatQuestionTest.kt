@@ -9,7 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The same cases as scripts/tests/ChatQuestionTests.swift.
 class ChatQuestionTest {
     private fun json(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 
@@ -31,7 +30,6 @@ class ChatQuestionTest {
             "Yes, shipping.",
             stripQuestionBlocks("$fence\n{\"question\":\"Ship?\"}\n```Yes, shipping."),
         )
-        // Captured from Grok: the next plan opens on the last one's closing line.
         val plan = "```$PLAN_FENCE\n{\"steps\":[{\"step\":\"Read\",\"status\":\"in_progress\"}]}\n```"
         assertEquals(
             "Working now.\nDone.",
@@ -55,8 +53,6 @@ class ChatQuestionTest {
         )
         assertEquals("Starting.", stripQuestionBlocks("Starting.\n$plan```$PLAN_FENCE\n{\"steps\":["))
         assertEquals("prose", stripQuestionBlocks("${plan.dropLast(3)}``````\nprose"))
-        // Captured from Cursor: the first plan closes and the next opens on
-        // the same line with prose between the fences.
         assertEquals(
             "A.\nNext works.\nDone.",
             stripQuestionBlocks("A.\n```$PLAN_FENCE\n{\"steps\":[{\"step\":\"A\",\"status\":\"completed\"}]}\n```Next works.```$PLAN_FENCE\n{\"steps\":[{\"step\":\"B\",\"status\":\"in_progress\"}]}\n```\nDone."),

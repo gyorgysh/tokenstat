@@ -26,10 +26,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/// A harness brand tile, ported from Design/Marks.swift `HarnessMark`: the
-/// product's vector mark on an accent tile, or the initial letter when the
-/// harness has no artwork. The drawables are transcribed from the same SVGs
-/// the Apple client ships in Brands.xcassets.
 @Composable
 fun HarnessMark(id: String, size: Dp = 26.dp) {
     val colors = LocalTsColors.current
@@ -37,7 +33,6 @@ fun HarnessMark(id: String, size: Dp = 26.dp) {
         "claude_code_estimate", "claude_code_rollup" -> "claude_code"
         else -> c
     }
-    // Direct references keep bundled marks reachable through resource shrinking.
     val res = when (canonical) {
         "antigravity" -> R.drawable.brand_antigravity
         "claude_code" -> R.drawable.brand_claude_code
@@ -76,10 +71,6 @@ fun HarnessMark(id: String, size: Dp = 26.dp) {
         "zed" -> R.drawable.brand_zed
         else -> 0
     }
-    // A shell is not a brand, so it has no artwork and fell through to the
-    // initial-letter path: the launch grid showed a plain "S" where every
-    // other tile showed a mark. The Apple grid draws it as a terminal glyph
-    // with no brand tile behind it, because there is no brand to tile.
     if (canonical == "shell") {
         Box(Modifier.size(size), contentAlignment = Alignment.Center) {
             Icon(

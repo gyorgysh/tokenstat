@@ -27,8 +27,6 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-/// Where the breadcrumb goes. Beside the archive, not in a temp directory that
-/// is swept before anybody thinks to look.
 fn log_path() -> Option<PathBuf> {
     tokenstat_paths::data_dir().map(|dir| dir.join("last-panic.log"))
 }
@@ -54,17 +52,12 @@ fn record(info: &std::panic::PanicHookInfo<'_>) {
         .location()
         .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
         .unwrap_or_else(|| "unknown location".into());
-    // `payload` is the argument to `panic!`, which in this codebase is always
-    // a literal or a message this codebase composed.
     let message = info
         .payload()
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())
         .or_else(|| info.payload().downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "panic with no message".into());
-    // Seconds since the epoch rather than a formatted date: this crate has no
-    // calendar dependency, and the only question ever asked of this line is
-    // whether it belongs to the crash being looked at.
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -82,7 +75,5 @@ fn record(info: &std::panic::PanicHookInfo<'_>) {
             .open(&path)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
-    // Also to stderr, which is where a development run and the daemon's
-    // journal both look.
     let _ = std::io::stderr().write_all(line.as_bytes());
 }

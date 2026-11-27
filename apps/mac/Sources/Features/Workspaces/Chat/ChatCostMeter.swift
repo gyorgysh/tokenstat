@@ -2,12 +2,6 @@
 
 import SwiftUI
 
-/// Folded usage for one conversation: every `Usage` event added together.
-///
-/// Counted by the host over the whole archive rather than by the client over
-/// what it happens to hold, because a conversation is read a page at a time
-/// and a total that climbed as somebody scrolled backwards would be wrong in
-/// every position but one.
 struct ChatUsageTotals: Codable, Equatable, Sendable {
     var input: UInt64
     var output: UInt64
@@ -18,7 +12,6 @@ struct ChatUsageTotals: Codable, Equatable, Sendable {
     var cache: Decimal { Decimal(cacheRead) + Decimal(cacheWrite) }
     var isValid: Bool { cost.isFinite && cost >= 0 }
 
-    /// Commit the whole increment only when every field is representable.
     mutating func add(_ other: ChatUsageTotals) -> Bool {
         guard isValid, other.isValid else { return false }
         let (nextInput, inputOverflow) = input.addingReportingOverflow(other.input)
@@ -45,11 +38,6 @@ enum ChatUsageSummary: Equatable {
     case unavailable
 }
 
-/// Conversation usage inside the shared context panel.
-///
-/// Fresh input, output and cache share one proportional bar. Cost
-/// only appears when a figure is actually known, so a plan-covered turn is
-/// not drawn as money charged.
 struct ChatCostMeter: View {
     let totals: ChatUsageSummary
     @ScaledMetric(relativeTo: .caption) private var metricWidth = 104
@@ -121,7 +109,6 @@ struct ChatCostMeter: View {
     }
 }
 
-/// All four token categories share one capsule. Empty stays a quiet track.
 private struct TokenSplitBar: View {
     let input: UInt64
     let output: UInt64

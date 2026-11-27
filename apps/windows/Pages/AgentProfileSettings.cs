@@ -73,7 +73,7 @@ internal sealed class AgentProfileSettings : StackPanel
                 _statuses[agent] = await AppServices.Host.CallAsync("launcher.checkSignIn",
                     new JsonObject { ["id"] = agent, ["profile"] = _selected });
             }
-            catch { /* The agent can still offer its sign-in terminal. */ }
+            catch { }
         }
     }
 

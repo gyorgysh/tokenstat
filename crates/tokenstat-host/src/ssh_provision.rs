@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Setting a machine up over the SSH session a person just opened.
-//!
-//! This is the provisioning plane, and its whole rule is in one sentence:
-//! **it may install and enroll, and it may not do work.** Cloning a folder,
-//! launching an agent and opening a terminal all happen afterwards, over the
-//! tunnel, through the same methods every other machine uses. If something
-//! here wants to reach for the SSH channel after enrollment, the host is
-//! missing a method.
-//!
-//! Nothing a caller sends becomes a command. The three things this runs on the
-//! far side are written out below, in full, and a client picks one by name.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -56,16 +45,11 @@ pub(crate) fn parse_identity(output: &str) -> Result<Value, String> {
         .as_str()
         .ok_or("The server did not return its host key.")?;
     validate_hex_key(key)?;
-    // Only the public key is needed; do not expose unrelated console output.
+
     Ok(json!({"key": key.to_ascii_lowercase()}))
 }
 
 pub(crate) fn stage_code_command() -> String {
-    // Both material and its exact staging identity travel over stdin. The
-    // owner record names the code it published. Clear refuses a receipt whose
-    // code is not the one still on disk, so a kill between the two renames
-    // cannot delete the previous code. Temps are removed if the lock wait
-    // gives up. The lock itself is removed only after this attempt took it.
     format!(
         "held=0; IFS= read -r owner || exit 1; IFS= read -r code || exit 1; \
          owner_tmp=$(mktemp \"$HOME/.tokenstat-pairing-owner.XXXXXX\") || exit 1; \
@@ -98,11 +82,6 @@ pub(crate) fn clear_code_command() -> String {
     )
 }
 
-/// Reclaim under an atomically published, nonempty reaper directory. Move
-/// the old lock to its unique quarantine before deleting anything, so no
-/// cleanup can unlink the next holder's pid. Dead reapers remain recoverable.
-/// Release also retires the whole directory while its live pid is visible:
-/// a late reaper must not strand a pidless directory for the full wait budget.
 fn pairing_lock_acquire() -> &'static str {
     r#"umask 077; lock="$HOME/.tokenstat-pairing.lock"; held=0; tries=0;
 lock_release() {
@@ -185,8 +164,7 @@ pub(crate) fn parse_check(output: &str) -> Value {
             _ => {}
         }
     }
-    // The one judgement this makes, so the wizard and the by-hand screen agree
-    // on what "ready" means rather than each deciding.
+
     let yes = |key: &str| facts.get(key).and_then(Value::as_bool) == Some(true);
     let linux = facts.get("os").and_then(Value::as_str) == Some("Linux");
     let mut blockers: Vec<&str> = Vec::new();
@@ -295,8 +273,7 @@ pub(crate) fn install_line(p: &LineParams) -> Result<Value, String> {
             .collect::<Vec<_>>()
             .join(" ")
     );
-    // Comments belong on separate lines: a backslash followed by a comment
-    // escapes a space, not the newline, and silently drops the remaining flags.
+
     let mut annotated = flags
         .iter()
         .map(|(flag, why)| format!("# {flag}: {why}\n"))
@@ -305,7 +282,6 @@ pub(crate) fn install_line(p: &LineParams) -> Result<Value, String> {
     Ok(json!({"oneLine": one_line, "annotated": annotated.trim_end()}))
 }
 
-/// Anything that reaches a shell is checked here, by shape, before it does.
 fn validate_hex_key(value: &str) -> Result<(), String> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("A device key is 64 hexadecimal characters.".into());
@@ -334,8 +310,6 @@ fn validate_agent_id(value: &str) -> Result<(), String> {
     }
 }
 
-/// A machine name is the one field a person types freely, so it is the one
-/// field that is quoted rather than merely checked.
 fn shell_quote(value: &str) -> Result<String, String> {
     if value.len() > 64 || value.chars().any(char::is_control) {
         return Err("That name is too long or has a control character in it.".into());
@@ -369,7 +343,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        // Replace the network/installer pipeline with an argument printer.
+
         let script = line["annotated"].as_str().unwrap().replace(
             "curl -fsSL https://tokenstat.ai/install.sh | bash -s --",
             "printf '%s\\n'",
@@ -507,7 +481,7 @@ mod tests {
             stage_code_command(),
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nWXYZ-1234\n",
         );
-        // The owner rename finished and the code rename did not.
+
         std::fs::write(
             root.join(".tokenstat-pairing.owner"),
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nABCD-5678\n",

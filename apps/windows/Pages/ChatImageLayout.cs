@@ -4,7 +4,6 @@ namespace Tokenstat.Pages;
 internal readonly record struct ChatImageTile(int Index, double X, double Y, double Width, double Height);
 internal sealed record ChatImageGeometry(double Width, double Height, IReadOnlyList<ChatImageTile> Tiles);
 
-/// <summary>Justified thumbnail rows, measured without creating UI or decoding images.</summary>
 internal static class ChatImageLayout
 {
     internal const double FallbackAspect = 1.2;

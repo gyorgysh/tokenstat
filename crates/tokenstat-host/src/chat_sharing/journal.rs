@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Local proof of attributed canonical rows. The journal holds hashes and
-//! receipts, plus at most one temporary write intent. Settled comments stay in
-//! events.ndjson. Settled agent text stays in content-addressed payloads.
-//! Callers hold source acceptance and transcript locks.
-
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -32,8 +26,6 @@ fn digest(bytes: &[u8]) -> String {
     tokenstat_identity::hex(&Sha256::digest(bytes))
 }
 
-/// Verify an append without retaining its entire earlier transcript. Callers
-/// hold the writer locks; a short read or changed prefix cannot settle a receipt.
 fn delivery_written(
     reader: &mut (impl Read + Seek),
     before: u64,
@@ -219,9 +211,7 @@ impl Record {
     }
     pub fn key(&self) -> Result<String, &'static str> {
         let a = &self.attribution;
-        // One person's attempt stays the same across their devices. The
-        // original verified device remains bound by the canonical row hash;
-        // reconnecting from another device cannot post that attempt twice.
+
         key_for(&a.scope, &a.actor.id, &a.client_message_id)
     }
     pub fn request_digest(&self) -> Result<String, &'static str> {
@@ -625,8 +615,7 @@ impl Journal {
         self.pending_ask = None;
         self.pending_agent = None;
         self.pending_segments = None;
-        // These are process/admission identities for the original source.
-        // A copied conversation cannot inherit its authority or recovery.
+
         self.runs = None;
         self.receipts
             .retain(|_, receipt| matches!(receipt, Receipt::Accepted { .. }));

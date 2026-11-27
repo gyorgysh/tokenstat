@@ -13,12 +13,6 @@ using Tokenstat.Notifications;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Scheduled jobs on this host. Matches the Mac workbench: a Writing and
-/// Settings editor, the host scheduler timezone on every wall-clock time,
-/// host-level queue settings, live-first run history, and revision-checked
-/// saves with receipts on protocol 21 and later.
-/// </summary>
 internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _scopeWorkspaceId;
@@ -79,10 +73,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
     private ComboBox? _dWeekday;
     private CheckBox[] _dDays = new CheckBox[7];
 
-    /// <summary>
-    /// The user's unsent field values. Kept across reloads so Save anyway
-    /// retries the same draft and Take saved throws it away.
-    /// </summary>
     private sealed class JobDraft
     {
         public string Name = "";
@@ -134,9 +124,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this screen belongs to, or null on the global list.
-    /// </summary>
     public UIElement? ToolbarScope
     {
         get
@@ -149,11 +136,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         }
     }
 
-    /// <summary>
-    /// The inspector column content: the selected job's detail, history, and
-    /// run views. Selection and reloads replace its children, so the column
-    /// stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _detailHost;
     public double MinimumContentWidth => 640;
 
@@ -192,12 +174,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         return stack;
     }
 
-    /// <summary>
-    /// One workbench method against this screen's folder, local or remote. A
-    /// remote folder travels as remote.call with the peer's own folder id.
-    /// Params are copied, never mutated, so a retry cannot forward an already
-    /// rewritten id. The global list has no folder and always stays local.
-    /// </summary>
     private Task<JsonNode> CallWorkbenchAsync(string method, JsonNode? parameters = null)
     {
         if (_scopeWorkspaceId is null
@@ -215,11 +191,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         return RemoteWorkspaces.CallOnPeerAsync(peer, method, forwarded);
     }
 
-    /// <summary>
-    /// The protocol of the host that owns these jobs: the peer's sessionless
-    /// protocol for a remote folder, the local one otherwise. Null means
-    /// unknown, and unknown means assume the feature is there.
-    /// </summary>
     private async Task<long?> ProtocolAsync()
     {
         if (_scopeWorkspaceId is not null
@@ -258,9 +229,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             if (_scopeWorkspaceId is not null
                 && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner))
             {
-                // Jobs from the peer carry its own folder id. Namespace them
-                // to this page's folder id so the scope filter below keeps
-                // matching, and list the folder itself so its name resolves.
                 foreach (var job in _jobs)
                 {
                     if (job is JsonObject obj && Format.Text(obj, "workspaceId") == inner)
@@ -270,9 +238,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 }
                 foreach (var run in _runs.OfType<JsonObject>())
                     if (Format.Text(run, "workspaceId") == inner) run["workspaceId"] = _scopeWorkspaceId;
-                // Folder choices must belong to the same host as the cards.
-                // Keep this page's selected folder in the shell namespace;
-                // other choices already carry the owning peer's native ids.
                 _folders = _folders.Select(folder =>
                     (Id: folder.Id == inner ? _scopeWorkspaceId : folder.Id, Name: folder.Name)).ToList();
                 if (RemoteWorkspaces.CachedFolder(_scopeWorkspaceId) is RemoteFolder cached
@@ -292,11 +257,9 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 }
             }
             var queue = queueTask.Result;
-            try { _queueBudget = queue["defaultBudgetSeconds"]?.GetValue<ulong>() ?? _queueBudget; } catch { /* keep */ }
-            try { _queueConcurrent = queue["maxConcurrent"]?.GetValue<uint>() ?? _queueConcurrent; } catch { /* keep */ }
+            try { _queueBudget = queue["defaultBudgetSeconds"]?.GetValue<ulong>() ?? _queueBudget; } catch { }
+            try { _queueConcurrent = queue["maxConcurrent"]?.GetValue<uint>() ?? _queueConcurrent; } catch { }
             _queueTimezone = Format.Text(queue, "timezone");
-            // Table action buttons must reflect the completed load. Quiet
-            // polling does not repaint an unchanged host response later.
             _working = false;
             RaiseToolbarChanged();
             RenderList();
@@ -763,8 +726,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         }
         body.Children.Add(Labeled(L10n.Text("windows.automationspage.days.e08c0aa8"), daysRow));
 
-        // The host scheduler owns the zone. Never print a wall-clock time
-        // without saying whose clock it is.
         body.Children.Add(new TextBlock
         {
             Text = WorkbenchOps.ClockCaption("", _queueTimezone),
@@ -970,14 +931,12 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             ["budgetSeconds"] = budgetSeconds,
             ["enabled"] = draft.Enabled,
         };
-        // The editor holds the namespaced id; the peer stores its own.
         if (_scopeWorkspaceId is not null
             && RemoteWorkspaces.TrySplit(_scopeWorkspaceId, out _, out var inner)
             && Format.Text(edited, "workspaceId") == _scopeWorkspaceId)
         {
             edited["workspaceId"] = inner;
         }
-        // Unknown host fields round-trip untouched.
         _rawJobs.TryGetValue(id, out var raw);
         return WorkbenchOps.PreserveUnknown(raw, edited);
     }
@@ -1004,8 +963,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
             var payload = JobPayload(draft, "", budgetSeconds, everySeconds);
             if (WorkbenchOps.AutomationReceipts(_protocol))
             {
-                // One operation id for the whole creation. A lost answer is
-                // checked with creationReceipt, never repeated as a new job.
                 _pendingCreateOp = WorkbenchOps.NewOperationId("automation-create");
                 _pendingCreateGeneration = creationGeneration;
                 _pendingCreateRevision = editRevision;
@@ -1056,8 +1013,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         _detailRevision = WorkbenchOps.Revision(job);
         _detailDirty = revision != _editRevision;
         _conflictId = null;
-        // Edits typed while Create awaited become edits to the accepted job,
-        // never a second Create with the same contents.
         if (!_detailDirty) _draft = null;
         _dName = null;
     }
@@ -1128,8 +1083,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                         ["job"] = payload,
                         ["expectedRevision"] = revision.Value,
                     });
-                    // Further typing keeps the draft dirty, but its next save
-                    // must build on the revision this save just accepted.
                     if (_selectedId == id && _detailRevision == savedRevision)
                     {
                         _detailRevision = WorkbenchOps.Revision(saved);
@@ -1251,8 +1204,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         {
             if (WorkbenchOps.AutomationReceipts(_protocol))
             {
-                // One operation id for the whole launch. Retry and Check again
-                // reuse it, so a lost answer can never start a second run.
                 _pendingRunOp = WorkbenchOps.NewOperationId("automation-run");
                 _pendingRunJob = id;
                 _runError = null;
@@ -1331,8 +1282,6 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
         }
         try
         {
-            // Same operation id as the first attempt: the host answers from
-            // the receipt when it already accepted the run.
             await CallWorkbenchAsync("automation.runOnce", new JsonObject
             {
                 ["id"] = _pendingRunJob,
@@ -1464,7 +1413,7 @@ internal sealed partial class AutomationsPage : Page, IInspectorContent, IToolba
                 new JsonObject { ["id"] = runId, ["offset"] = offset });
             var text = Format.Text(answer, "text");
             ulong next = 0;
-            try { next = answer?["nextOffset"]?.GetValue<ulong>() ?? 0; } catch { /* keep */ }
+            try { next = answer?["nextOffset"]?.GetValue<ulong>() ?? 0; } catch { }
             SnapshotDraft();
             var previous = offset > 0 && _transcripts.TryGetValue(runId, out var kept) ? kept.Text : "";
             _transcripts[runId] = (previous + text, next);

@@ -41,7 +41,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 
-/** All next-turn choices stay local until the explicit Send/Open chat action. */
 data class NewChatSetup(val backend: String, val model: String?, val effort: String?,
     val mode: String = LaunchDefaults.MODE, val autonomy: String = LaunchDefaults.AUTONOMY, val fastMode: Boolean = false, val profileId: String? = null) {
     fun isAvailable(backends: List<JsonObject>): Boolean {
@@ -70,7 +69,6 @@ data class NewChatSetup(val backend: String, val model: String?, val effort: Str
     }
 }
 
-/** An unbound prompt can be written before connecting; bound drafts never cross repositories. */
 internal fun newChatDraftOwner(account: String?, peer: String?, workspace: String?): String? {
     if (account == null) return null
     if (peer.isNullOrBlank() || workspace.isNullOrBlank()) return "$account|new-chat"
@@ -84,7 +82,6 @@ internal fun adoptUnboundNewChatDraft(drafts: ChatComposerSessions<StagedAttachm
     if (drafts.update(target, source.snapshot)) drafts.clearIfUnchanged(source.owner, source)
 }
 
-/** A Send intent is claimed once, even if navigation recreates its composition. */
 class NewChatRequest(val peer: String, val workspace: String, val accountScope: String,
     val source: ChatComposerSessions.Capture<StagedAttachment>, val id: String = UUID.randomUUID().toString(), val setup: NewChatSetup? = null) {
     private val claimed = AtomicBoolean(false)
@@ -101,7 +98,6 @@ class NewChatRequest(val peer: String, val workspace: String, val accountScope: 
     }
 }
 
-/** An accepted chat keeps its explicit choice; its next empty draft starts with Don't ask. */
 internal fun nextNewChatSetup(current: NewChatSetup?, submitted: NewChatSetup?, transferred: Boolean, hasWriting: Boolean): NewChatSetup? =
     if (transferred && !hasWriting && current == submitted) current?.copy(autonomy = LaunchDefaults.AUTONOMY) else current
 
@@ -123,8 +119,6 @@ fun NewChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var hostMenu by remember { mutableStateOf(false) }
-    // The draft owner changes when a repository is chosen. Host selection
-    // belongs to the account and must survive that change.
     var chosenPeer by rememberSaveable(accountScope) { mutableStateOf<String?>(null) }
     var requestedAttempted by remember(accountScope, requestedPeer) { mutableStateOf(false) }
     val effectivePeer = if (hosts.size > 1 && selectedRepository == null) {
@@ -154,8 +148,6 @@ fun NewChatScreen(
     val lockedProfile = profiles?.locked(workspace)
     val currentProfile = lockedProfile ?: setup?.profileId ?: profiles?.defaultId
     LaunchedEffect(lockedProfile, setup?.profileId) {
-        // The host applies the lock. Clear a previous explicit pick so it
-        // cannot compete with that lock after the repository changes.
         if (lockedProfile != null && setup?.profileId != null) {
             setup = setup?.copy(profileId = null)
             onSetup(setup)
@@ -176,8 +168,6 @@ fun NewChatScreen(
         ProjectOwner.from(model.state.value.account, "unselected", "new-chat")?.accountScope == accountScope
     fun importFiles(lease: ChatAttachmentInputLease, uris: List<android.net.Uri>, release: () -> Unit = {}) {
         if (uris.isEmpty() || !lease.accepts(currentLease) || !owns(lease.owner) || reading) { release(); return }
-        // Enter the finally block before the first suspension so even immediate
-        // navigation cancellation releases a cross-app drop's permission.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val owner = lease.owner
             reading = true; attachError = null
@@ -237,9 +227,6 @@ fun NewChatScreen(
     LaunchedEffect(setup) { onSetup(setup) }
     var repositoryMenu by remember { mutableStateOf(false) }
     val selected = folders.firstOrNull { it.newChatText("id") == selectedRepository }
-    // Why Send cannot fire, in the same words and the same order as the Apple
-    // page's `blockReason`. Without it the arrow is simply grey, and a written
-    // message with a repository still unchosen looks like it was swallowed.
     val blockReason = when {
         connecting || reading -> null
         effectivePeer == null -> newChatCopy("choose_host")
@@ -254,9 +241,6 @@ fun NewChatScreen(
         // safeDrawingPadding here a second time pushed the form down and left
         // unused space above the header on a phone.
         Column(Modifier.fillMaxSize()) {
-            // The way out holds its place at the top while the page under it
-            // reflows. No keyboard button here: the app's own bar above this
-            // page already grows one whenever the keyboard is up.
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(L10n.text("android.tokenstatapp.new_chat.db18382a"), style = MaterialTheme.typography.titleMedium,
@@ -266,27 +250,13 @@ fun NewChatScreen(
                 }
             }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                // What is left after the keyboard has taken its share, and
-                // how much of the page's own name fits in it. Measured on a
-                // phone: the mark, the question and the line under it come to
-                // 136dp, and the two pickers and the composer under them to
-                // 418dp. So the whole heading needs 560dp of room, and the
-                // question on its own needs 480dp.
                 val roomForHeading = maxHeight >= 560.dp
                 val roomForTitle = maxHeight >= 480.dp
                 Column(Modifier.fillMaxSize().verticalScroll(pageScroll).padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    // Centred in whatever room there is. Held against the
-                    // keyboard instead, the short page left a third of the
-                    // screen empty above it.
                     verticalArrangement = Arrangement.Center) {
                 Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // The page names itself with as much as the room allows,
-                    // in steps rather than all or nothing: a keyboard that
-                    // leaves most of the page still leaves room for the
-                    // heading, and dropping it there was what left a third of
-                    // the screen empty above the composer.
                     if (roomForHeading) LogoMark(size = 36)
                     if (roomForTitle) {
                         Text(newChatCopy("title"), style = MaterialTheme.typography.headlineSmall.copy(fontSize = 24.sp), fontWeight = FontWeight.Medium,

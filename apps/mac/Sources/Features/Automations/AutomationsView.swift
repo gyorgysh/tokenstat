@@ -4,24 +4,10 @@
 
 import SwiftUI
 
-/// The agent automations screen.
-///
-/// The automations are the screen. Runs are what they produced, and creating
-/// one is a sheet, because a permanent form standing over the list made an
-/// empty screen look like a form to fill in rather than a place where nothing
-/// had been set up yet.
-///
-/// A job is a backend, a prompt, a workspace and a schedule, exactly like
-/// launching `claude -p "…"` in a terminal but owned by the daemon and stopped
-/// at a budget. With Always-on host it runs after this window closes. On a
-/// laptop that switch is off, so a job runs while tokenstat is open.
 struct AutomationsView: View {
     @Bindable var model: AutomationsModel
-    /// The registered folders, shared with the workspaces screen. Passed in so
-    /// this screen never runs a second `workspace.list`.
     var folders: [WorkspaceFolder]
     var onNavigate: ((NavigationRequest) -> Void)? = nil
-    /// A run to open on arrival, requested from Tasks. Cleared once opened.
     @Binding var pendingRunID: String?
 
     @State private var creating = false
@@ -30,8 +16,6 @@ struct AutomationsView: View {
     @State private var schedulerJustSaved = false
     @State private var schedulerSaving = false
     @State private var showingScheduler = false
-    /// Jobs, or what they produced. One table at a time: the two lists used
-    /// to share a scroll, and the runs at the bottom were found by accident.
     @State private var showingRuns = false
     @State private var filter: JobFilter = .all
     @State private var jobOrder = [KeyPathComparator(\Automation.name)]
@@ -40,7 +24,6 @@ struct AutomationsView: View {
     @State private var historyJob: Automation?
     @State private var jobPendingDelete: Automation?
 
-    /// The quick cuts through the job list, counted in the menu.
     enum JobFilter: String, CaseIterable, Identifiable {
         case all, enabled, paused, failing
         var id: String { rawValue }
@@ -111,11 +94,7 @@ struct AutomationsView: View {
         }
         .task {
             await model.appeared()
-            // A delegated task navigated here asking for its transcript.
             guard let id = pendingRunID else { return }
-            // The run usually arrives with the list, but a run that finished
-            // moments ago can land a tick later; give it a beat before giving
-            // up rather than dropping the request silently.
             for _ in 0..<6 {
                 guard !Task.isCancelled else { return }
                 if let run = model.runs.first(where: { $0.id == id }) {
@@ -128,7 +107,6 @@ struct AutomationsView: View {
             }
             pendingRunID = nil
         }
-        // The model outlives this view, and the transcript tail must not.
         .onDisappear { model.disappeared() }
         #if DEBUG && os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
@@ -158,8 +136,6 @@ struct AutomationsView: View {
             )
             .fixedSize()
             templatesMenu
-            // A setting, not a daily action, so it takes a glyph's width and
-            // leaves the words to the things people press every day.
             ToolbarIconButton(
                 systemImage: ActionIcon.settings.symbol,
                 help: L10n.text("apple.automationsview.scheduler_time_limit_and_how_many_jobs_run.63c8f49a"),
@@ -215,8 +191,6 @@ struct AutomationsView: View {
     @ViewBuilder
     private var content: some View {
         if isWarming {
-            // "Nothing yet" is an answer, and it must not be given before the
-            // question has been asked. Grey rows say the daemon is being read.
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Skeleton.CardStack()
             }
@@ -258,16 +232,9 @@ struct AutomationsView: View {
         }
     }
 
-    // MARK: - Jobs
 
-    /// One row per job, with the facts people compare across jobs in columns:
-    /// when it runs, where, when it next fires and how it went last time.
-    /// Columns resize and the sortable ones sort, because that is what a
-    /// table is for.
     private var jobsTable: some View {
         Table(visibleJobs, selection: jobSelection, sortOrder: $jobOrder) {
-            // The agent's mark leads the name: it says who does the job, and
-            // the Schedule column already says when in words.
             TableColumn(L10n.text("apple.automationsview.name.dcd1d522"), value: \.name) { job in
                 HStack(spacing: Theme.Space.s) {
                     HarnessMark(id: job.backend, size: 16)
@@ -281,8 +248,6 @@ struct AutomationsView: View {
                 .help(job.prompt)
             }
             .width(min: 120, ideal: 160)
-            // Ideal widths add up to what a 1100 pt window leaves beside the
-            // sidebar, so every column is on screen without scrolling sideways.
             TableColumn(L10n.text("apple.automationsview.schedule.f4830a1d")) { job in
                 cell(model.scheduleSummary(job.schedule))
             }
@@ -291,8 +256,6 @@ struct AutomationsView: View {
                 cell(folderLabel(job.workspaceID))
             }
             .width(min: 70, ideal: 96)
-            // A paused job has no next run, so its status sits where the
-            // time would: one column answers "when does this go next".
             TableColumn(L10n.text("apple.automationsview.next_run.b3c0ab96"), value: \.nextRunOrder) { job in
                 nextRunCell(job)
             }
@@ -363,8 +326,6 @@ struct AutomationsView: View {
         }
     }
 
-    /// On or off, and a press flips it. The words say what it is, not what
-    /// the switch would do.
     private func statusCell(_ job: Automation) -> some View {
         Button {
             Task { await model.toggle(job) }
@@ -417,10 +378,7 @@ struct AutomationsView: View {
         Button(L10n.text("apple.automationsview.delete_automation.f71084e7"), .delete, role: .destructive) { jobPendingDelete = job }
     }
 
-    // MARK: - Runs
 
-    /// Every run in scope, newest first by default. Selecting one reads its
-    /// output in the inspector.
     private var runsTable: some View {
         Table(visibleRuns, selection: runSelection, sortOrder: $runOrder) {
             TableColumn(L10n.text("apple.automationsview.automation.d909750b"), value: \.name) { run in
@@ -484,7 +442,6 @@ struct AutomationsView: View {
         return L10n.text("apple.automationsview.0_h_1_m.d426ce3b", "\(total / 3600)", "\((total % 3600) / 60)")
     }
 
-    // MARK: - Data
 
     private var isSearching: Bool {
         !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -584,8 +541,6 @@ struct AutomationsView: View {
                     Text(L10n.text("apple.automationsview.max_concurrent_jobs.86a5921e"))
                         .font(Theme.callout)
                     Spacer()
-                    // Places at the table, filled by what is running now, so
-                    // "the next job waits" is visible rather than inferred.
                     SlotGauge(
                         filled: runningCount,
                         total: Int(model.queueMaxConcurrent) ?? 0,
@@ -634,20 +589,13 @@ struct AutomationsView: View {
         }
     }
 
-    /// Jobs occupying a slot right now. Queued ones are waiting for one, so
-    /// they are not counted as filling it.
     private var runningCount: Int {
         model.runs.filter { $0.status == "running" }.count
     }
 
     private static let suggestedTemplates = AutomationTemplate.suggested
 
-    // MARK: - Nothing set up yet
 
-    /// The first thing somebody sees, and the only chance to say what this
-    /// screen is for. An automation is not a familiar object, so the empty
-    /// state describes the thing rather than announcing its absence, and the
-    /// ready-made jobs sit right under it.
     private var nothingYet: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             EmptyState(
@@ -723,8 +671,6 @@ struct AutomationsView: View {
 }
 
 extension View {
-    /// Plain rows on the Mac: no zebra stripes, which on a dark surface read
-    /// as a second grid laid over the first. Other platforms keep their own.
     @ViewBuilder
     func quietTableStyle() -> some View {
         #if os(macOS)
@@ -735,14 +681,11 @@ extension View {
     }
 }
 
-/// Sort keys for the job table. A job that never fires sorts after every
-/// dated one, and a job that never ran before every one that has.
 extension Automation {
     var nextRunOrder: Int64 { enabled ? (nextRunAtMs ?? .max) : .max }
     var lastRunOrder: Int64 { lastRunAtMs ?? 0 }
 }
 
-/// The outcome of a run, in the one shape it takes everywhere on this screen.
 struct StatusPill: View {
     var status: String
     var text: String
@@ -807,14 +750,7 @@ private struct AutomationHistorySheet: View {
     }
 }
 
-// MARK: - Creating one
 
-/// Setting up an automation, in a sheet.
-///
-/// A sheet rather than a card at the bottom of the screen: this is a form with
-/// six decisions in it, and standing it permanently under the list meant an
-/// empty screen was mostly an empty form. It also gives Cancel somewhere to be,
-/// which a permanent form never had.
 struct NewAutomationSheet: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
@@ -828,21 +764,15 @@ struct NewAutomationSheet: View {
     @State private var backendID = ""
     @State private var workspaceID = ""
     @State private var prompt = ""
-    /// The selected backend's model alias and effort level. Empty means the
-    /// backend's default, which is also what the pickers start on.
     @State private var modelChoice = ""
     @State private var effortChoice = ""
     @State private var scheduleKind: ScheduleKind = .once
     @State private var intervalMinutes = "60"
-    /// Raw host interval until the picker is touched, so 90 seconds survives a
-    /// round trip instead of being shown as and saved back as one minute.
     @State private var intervalSeconds: UInt64 = 0
     @State private var intervalTouched = false
     @State private var scheduleTime = Date()
     @State private var scheduleWeekday = 0
-    /// Custom multi-day pick, Monday = bit 0. Defaults to Mon–Fri.
     @State private var customDays = AutomationSchedule.weekdaysMask
-    /// The mask of a multi-day weekly pick, kept unless the day menu is used.
     @State private var weeklyDays = 0
     @State private var weeklyDayEdited = false
     @State private var budgetFields = AutomationQueueDraft()
@@ -851,9 +781,6 @@ struct NewAutomationSheet: View {
     @State private var jobRevision: UInt64 = 0
     @State private var conflictJob: Automation?
 
-    /// Monday first, and zero-based, matching `AutomationSchedule.weekday` and
-    /// the daemon's `to_monday_zero_offset`. The picker used to be one-based
-    /// with Sunday at zero, so choosing Monday scheduled a Tuesday.
     private let weekdays = [
         (0, L10n.text("apple.automationsview.monday.6a00dfc1")), (1, L10n.text("apple.automationsview.tuesday.7d8af1de")), (2, L10n.text("apple.automationsview.wednesday.c0a6cc82")), (3, L10n.text("apple.automationsview.thursday.fc266206")),
         (4, L10n.text("apple.automationsview.friday.e21f3f37")), (5, L10n.text("apple.automationsview.saturday.dbe35c73")), (6, L10n.text("apple.automationsview.sunday.873fef76")),
@@ -861,8 +788,6 @@ struct NewAutomationSheet: View {
     private let dayShort = [L10n.text("apple.automationsview.mo.d23e867e"), L10n.text("apple.automationsview.tu.62afcc74"), L10n.text("apple.automationsview.we.f3fe997b"), L10n.text("apple.automationsview.th.3bff939c"), L10n.text("apple.automationsview.fr.eed8f901"), L10n.text("apple.automationsview.sa.a951efc7"), L10n.text("apple.automationsview.su.2d88a3a2")]
     private let intervalPresets = [15, 30, 60, 120, 360, 720, 1440]
 
-    /// Presets plus the current value when it is not one of them, so editing an
-    /// older "every 45 minutes" job still shows a truthful label.
     private var intervalMenuMinutes: [Int] {
         let seconds = intervalCurrentSeconds
         guard seconds % 60 == 0 else { return intervalPresets }
@@ -871,8 +796,6 @@ struct NewAutomationSheet: View {
         return (intervalPresets + [current]).sorted()
     }
 
-    /// The interval the picker stands for: the raw host value until a preset
-    /// is chosen, then whole minutes. Never traps on a huge typed number.
     private var intervalCurrentSeconds: UInt64 {
         if !intervalTouched, intervalSeconds > 0 {
             return max(intervalSeconds, 60)
@@ -888,8 +811,6 @@ struct NewAutomationSheet: View {
         return intervalPresetLabel(Int(seconds / 60))
     }
 
-    /// What the weekly day menu shows: every masked day while a loaded
-    /// multi-day pick is untouched, otherwise the single chosen day.
     private var weeklyDayLabel: String {
         if !weeklyDayEdited, weeklyDays != 0 {
             return (0..<7).compactMap { bit in
@@ -1027,9 +948,6 @@ struct NewAutomationSheet: View {
             }
         }
         .onChange(of: backendID) { old, new in
-            // Opening the editor sets backendID from the existing job.
-            // That is not a change of agent, and must not wipe the model
-            // the job already had. Only a later pick resets the pair.
             guard !old.isEmpty, old != new else { return }
             modelChoice = ""
             effortChoice = ""
@@ -1451,15 +1369,11 @@ struct NewAutomationSheet: View {
                 weekdays: AutomationSchedule.weekdaysMask
             )
         case .weekly:
-            // A loaded multi-day weekly keeps its mask until the day menu is
-            // used; writing `weekdays: 0` here collapsed Mon/Wed to Monday.
             return AutomationSchedule(
                 kind: .weekly, hour: hour, minute: minute, weekday: scheduleWeekday,
                 weekdays: weeklyDayEdited ? 0 : weeklyDays
             )
         case .custom:
-            // Do not invent days when none are selected. The host rejects an
-            // empty custom schedule, and the form blocks Continue instead.
             return AutomationSchedule(
                 kind: .custom, hour: hour, minute: minute, weekdays: customDays
             )
@@ -1481,8 +1395,6 @@ struct NewAutomationSheet: View {
         case 1:
             return !workspaceID.isEmpty && !backendID.isEmpty
         default:
-            // Custom with every day cleared is not a schedule. Block Continue
-            // rather than silently rewriting the pick to weekdays.
             if scheduleKind == .custom, (customDays & 0b0111_1111) == 0 {
                 return false
             }
@@ -1513,7 +1425,6 @@ struct NewAutomationSheet: View {
                 budgetSeconds: savedBudget,
                 enabled: existing.enabled,
                 lastRunAtMs: existing.lastRunAtMs,
-                // Host recomputes next run from the new schedule on update.
                 nextRunAtMs: nil,
                 lastRunID: existing.lastRunID,
                 revision: jobRevision

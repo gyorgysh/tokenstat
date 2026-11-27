@@ -7,7 +7,6 @@ import AppKit
 #endif
 
 #if os(macOS)
-/// A local working copy. Closing the sheet never changes Home.
 struct DesktopHomeEditor: View {
     let layout: HomeLayout
     var emptyReason: (HomeSection) -> String?

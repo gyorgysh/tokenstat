@@ -2,12 +2,6 @@
 
 import Foundation
 
-/// Working copy of a workflow graph: nodes, edges, selection and undo.
-///
-/// Mac's canvas and the phone/iPad step editor share this. It does not
-/// talk to the host. Save still goes through the existing create/update
-/// path. Identities stay stable: new steps are `n{n}`, edges are
-/// `from>to:when`.
 struct WorkflowGraphDocument {
     private struct Snapshot {
         var graph: WorkflowGraph
@@ -40,7 +34,6 @@ struct WorkflowGraphDocument {
 
     var stepsIssue: String? { graph?.stepsIssue }
 
-    /// Layout, select the first step, and start a clean undo history.
     mutating func open(_ graph: WorkflowGraph, dirty: Bool) {
         var laid = graph
         laid.layoutIfNeeded()
@@ -63,7 +56,6 @@ struct WorkflowGraphDocument {
         isDirty = false
     }
 
-    /// Host just wrote this graph. Keep undo so a person can still go back.
     mutating func markSaved(_ graph: WorkflowGraph, preservingEdits: Bool = false) {
         endGroupedEdit()
         guard var snapshot = current else { return }
@@ -87,7 +79,6 @@ struct WorkflowGraphDocument {
         isDirty = false
     }
 
-    /// Fresh copy from the host while this editor has no local edits.
     mutating func reloadClean(_ graph: WorkflowGraph) {
         guard isOpen, !isDirty else { return }
         var laid = graph
@@ -127,7 +118,6 @@ struct WorkflowGraphDocument {
         isDirty = true
     }
 
-    /// Write without a new undo. Pair with `beginGroupedEdit`.
     mutating func writeWorking(_ body: (inout WorkflowGraph) -> Void) {
         guard var snapshot = current else { return }
         body(&snapshot.graph)
@@ -149,8 +139,6 @@ struct WorkflowGraphDocument {
         endGroupedEdit()
         guard let current, var previous = undoStack.popLast() else { return }
         redoStack.append(current)
-        // Undo edits, not the host identity or revision confirmed by Save.
-        // Restoring a pre-create empty id would create a duplicate workflow.
         previous.graph.id = current.graph.id
         previous.graph.revision = current.graph.revision
         self.current = previous
@@ -204,7 +192,6 @@ struct WorkflowGraphDocument {
         pushUndo(current)
     }
 
-    /// Live drag. Undo was captured at `beginNodeMove`.
     mutating func moveNode(id: String, x: Double, y: Double) {
         guard var snapshot = current else { return }
         guard let idx = snapshot.graph.nodes.firstIndex(where: { $0.id == id }) else { return }
@@ -235,7 +222,6 @@ struct WorkflowGraphDocument {
         current = snapshot
     }
 
-    /// One undo. Changing the target of A→B to C drops A→B and any existing A→C.
     mutating func replaceConnection(id: String, to: String, when: WorkflowEdgeWhen) {
         guard let graph, let edge = graph.edges.first(where: { $0.id == id }) else { return }
         let from = edge.from

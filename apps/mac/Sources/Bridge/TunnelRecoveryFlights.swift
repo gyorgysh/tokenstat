@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Share overlapping recovery work. Returning to the foreground can supersede
-/// a soft check without waiting for a suspended transport's timeout.
 actor TunnelRecoveryFlights {
     enum Urgency: Int, Sendable { case soft, foreground, reconnect }
     private struct Flight {

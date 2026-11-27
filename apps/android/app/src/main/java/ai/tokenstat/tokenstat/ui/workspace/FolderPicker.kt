@@ -69,9 +69,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Register a folder that is already on the computer: browse its disk, make
-/// a folder where one is needed, and register the one you are looking at.
-/// Port of `ClientFolderPicker`.
 @Composable
 fun FolderPickerScreen(
     model: AppViewModel,
@@ -83,8 +80,6 @@ fun FolderPickerScreen(
 ) {
     HideTopBar()
     HideTabBar()
-    // A pushed screen owns the system back. Without it the gesture falls
-    // through to the activity and closes the app instead of stepping back.
     BackHandler { onClose() }
     val colors = LocalTsColors.current
     val scope = rememberCoroutineScope()
@@ -95,7 +90,6 @@ fun FolderPickerScreen(
     var naming by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
-    // Guards against stale responses when rows are tapped in quick succession.
     var generation by remember { mutableStateOf(0) }
 
     suspend fun load(path: String?) {

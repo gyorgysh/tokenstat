@@ -6,7 +6,6 @@ import AppKit
 import UIKit
 #endif
 
-/// Decoded pixels remain bounded by ChatImageDecodeCache; zoom never decodes again.
 struct ChatImageViewport {
     let image: CGImage
     @Binding var zoom: CGFloat
@@ -119,7 +118,6 @@ final class ChatImageScrollView: NSScrollView {
             wheelTravel = .zero; wheelWasFitted = false
             super.scrollWheel(with: event); return
         }
-        // Momentum belongs to the image that was swiped, not its replacement.
         guard event.momentumPhase.isEmpty else { return }
         wheelTravel.x += event.scrollingDeltaX; wheelTravel.y += event.scrollingDeltaY
         if event.phase.contains(.ended) {
@@ -167,8 +165,6 @@ final class ChatImageScrollView: UIScrollView, UIScrollViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
-        // Fitted images hand the drag to the native pager. Pinch and zoomed
-        // image panning keep the scroll view's own gesture handling.
         if pagesAtFit && gesture === panGestureRecognizer && zoomScale <= 1.001 { return false }
         return super.gestureRecognizerShouldBegin(gesture)
     }

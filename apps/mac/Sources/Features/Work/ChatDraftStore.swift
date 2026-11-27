@@ -9,20 +9,11 @@ import Foundation
 import Observation
 import Darwin
 
-/// A message somebody started writing and has not sent.
-///
-/// Text they typed, and the files they attached to it. Both belong to one
-/// conversation on one machine, which is what the reference carries.
 struct ChatDraft: Codable, Equatable, Sendable {
     var reference: WorkReference
     var text: String
     var attachments: [ChatAttachment]
     var updatedAt: Date
-    /// The name these words travel under when they are sent.
-    ///
-    /// Minted once per draft and kept for as long as the draft exists, which
-    /// is what makes sending again safe: a machine that has already taken a
-    /// message under this name answers instead of running the agent twice.
     var messageID: String?
 
     /// Written in the same camelCase a host record uses, so this file and a
@@ -37,34 +28,12 @@ struct ChatDraft: Codable, Equatable, Sendable {
     }
 }
 
-/// Unsent words are the person's own writing, so they are kept the way user
-/// data is kept, not the way a cache is kept.
-///
-/// A cache may be thrown away to make room. This may not: nothing evicts a
-/// draft to free space, and the only things that remove one are sending it,
-/// or explicitly clearing it. It lives in a file rather than in
-/// preferences because preferences are a plist that any process with the
-/// container can read, have no file protection on iOS, and are the wrong
-/// place for prose.
-///
-/// Reads are answered from memory so a list can ask "does this conversation
-/// have a draft" per row. Writes go to one serial queue, which reads the file
-/// back before merging a single key into it, so two windows editing different
-/// conversations cannot overwrite each other.
 @MainActor @Observable
 final class ChatDraftStore {
     static let shared = ChatDraftStore()
 
-    /// The last write failed, and the words on screen are the only copy.
-    /// The composer says so and offers to try again rather than claiming
-    /// a save that did not happen.
     private(set) var saveFailed = false
 
-    /// The conversations holding unsent words, as storage keys.
-    ///
-    /// Separate from the drafts themselves so a list that marks them is
-    /// invalidated when a draft appears or goes, and not on every keystroke
-    /// of one that is already marked.
     private(set) var occupied: Set<String> = []
 
     @ObservationIgnored private var drafts: [String: ChatDraft] = [:]
@@ -75,8 +44,6 @@ final class ChatDraftStore {
     @ObservationIgnored private let writer = Writer()
     @ObservationIgnored private var writeGeneration: UInt64 = 0
     private let byteLimit: Int
-    /// Enough for a long message with a few files named beside it, and small
-    /// enough that a corrupt or hostile file cannot be read into memory.
     private nonisolated static let maxFileBytes = 8 * 1024 * 1024
 
     init(directory: URL? = nil, byteLimit: Int = 8 * 1024 * 1024) {
@@ -94,8 +61,6 @@ final class ChatDraftStore {
             saveFailed = true
         }
         occupied = Set(drafts.keys)
-        // A save is queued, not awaited, so quitting a second after the last
-        // keystroke could otherwise leave the write unmade.
         #if os(macOS)
         let terminating = NSApplication.willTerminateNotification
         #else
@@ -112,7 +77,6 @@ final class ChatDraftStore {
         saveFailed = Self.queue.sync { writer.failed } || (saveFailed && writeGeneration == 0)
     }
 
-    // MARK: - Reading
 
     func drafts(in scope: WorkReference.Scope) -> [ChatDraft] {
         drafts.values.filter { $0.reference.scope == scope }.sorted { $0.updatedAt > $1.updatedAt }
@@ -128,8 +92,6 @@ final class ChatDraftStore {
         return result
     }
 
-    /// Protect both current in-memory writing and the latest persisted copy
-    /// when reviewing retained original files for explicit removal.
     func referencedAttachmentIDs(for reference: WorkReference) throws -> Set<String> {
         guard let key = Self.key(reference) else { return [] }
         let stored = try Self.queue.sync { try Self.read(file, byteLimit: byteLimit) }
@@ -142,22 +104,12 @@ final class ChatDraftStore {
         return drafts[key]
     }
 
-    /// Whether one conversation is holding unsent words.
-    ///
-    /// A key lookup rather than a list, and asked by the mark itself rather
-    /// than by the screen that lists the conversations. Reading `occupied`
-    /// registers whoever reads it as an observer of every draft coming and
-    /// going, and a screen that does that is a screen laid out again for a
-    /// mark on one of its rows.
     func hasDraft(for reference: WorkReference) -> Bool {
         guard let key = Self.key(reference) else { return false }
         return occupied.contains(key)
     }
 
-    // MARK: - Writing
 
-    /// Keep this conversation's unsent words. An empty draft removes the
-    /// record rather than storing emptiness.
     func save(text: String, attachments: [ChatAttachment], for reference: WorkReference,
               at date: Date = Date(), newMessage: Bool = false) {
         guard (try? originalAccess.get()) != nil else { saveFailed = true; return }
@@ -172,8 +124,6 @@ final class ChatDraftStore {
             flush(key: key, mutation: .remove)
             return
         }
-        // The time is not part of "has this changed": a save with the same
-        // words in it is not a save.
         if !newMessage, let held = drafts[key], held.text == draft.text, held.attachments == draft.attachments {
             return
         }
@@ -182,13 +132,6 @@ final class ChatDraftStore {
         flush(key: key, mutation: .save(draft))
     }
 
-    /// Touch `occupied` only when membership actually changes.
-    ///
-    /// Assigning a stored property the value it already has does not notify,
-    /// but a set mutated in place cannot be compared and notifies every time.
-    /// A conversation that is already marked was being re-marked on every
-    /// keystroke pause, and everything observing the set was laid out again
-    /// for a mark that had not moved. `ChatDraftStoreTests` pins this.
     private func mark(_ key: String, occupied wanted: Bool) {
         guard occupied.contains(key) != wanted else { return }
         if wanted {
@@ -204,8 +147,6 @@ final class ChatDraftStore {
         flush(key: key, mutation: .remove)
     }
 
-    /// Acceptance may arrive after this draft was edited in another window.
-    /// Remove only the exact submitted record, including on the writer queue.
     func clear(_ expected: ChatDraft) {
         guard let key = Self.key(expected.reference), drafts[key] == expected else { return }
         drafts.removeValue(forKey: key)
@@ -217,7 +158,6 @@ final class ChatDraftStore {
         flush()
     }
 
-    // MARK: - Storage
 
     private enum Mutation: Sendable {
         case save(ChatDraft)
@@ -225,8 +165,6 @@ final class ChatDraftStore {
         case removeIfMatches(ChatDraft)
     }
 
-    /// Accessed only on the shared serial queue. Failed changes stay pending,
-    /// including deletions, until a complete atomic write succeeds.
     private final class Writer: @unchecked Sendable {
         var pending: [String: Mutation] = [:]
         var failed = false
@@ -235,8 +173,6 @@ final class ChatDraftStore {
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                     attributes: [.posixPermissions: 0o700])
-                // Keep this inode across atomic replacements and empty stores.
-                // The serial queue coordinates windows; this lock coordinates processes.
                 let lock = Darwin.open(directory.appendingPathComponent("drafts.lock").path,
                                        O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
                 guard lock >= 0 else { throw CocoaError(.fileWriteUnknown) }
@@ -267,8 +203,6 @@ final class ChatDraftStore {
         }
     }
 
-    /// Merge only edits from this store. Rewriting an old in-memory snapshot
-    /// would resurrect a draft another window cleared or replace its edits.
     private func flush(key: String? = nil, mutation: Mutation? = nil) {
         writeGeneration &+= 1
         let generation = writeGeneration
@@ -289,15 +223,11 @@ final class ChatDraftStore {
 
     private enum StorageError: Error { case tooLarge, invalidRecord }
 
-    /// A missing file is empty. An unreadable or damaged file is an error,
-    /// so saving cannot overwrite writing we were unable to recover.
     private nonisolated static func read(_ file: URL, byteLimit: Int) throws -> [String: ChatDraft] {
         let handle: FileHandle
         do {
             handle = try FileHandle(forReadingFrom: file)
         } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
-            // FileHandle can report a directory as missing. It must never
-            // become an empty draft store that a later write removes.
             guard !FileManager.default.fileExists(atPath: file.path) else { throw error }
             return [:]
         }
@@ -347,8 +277,6 @@ final class ChatDraftStore {
         guard Darwin.fsync(descriptor) == 0 else { throw CocoaError(.fileWriteUnknown) }
     }
 
-    /// One conversation on one machine under one account, in the name every
-    /// per-conversation store on this device files things under.
     private nonisolated static func key(_ reference: WorkReference) -> String? {
         WorkReferenceKey.conversation(reference)
     }

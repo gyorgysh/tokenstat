@@ -4,9 +4,6 @@ import SwiftUI
 import AppKit
 #endif
 
-/// Whether teammates' Asks may start an agent on this computer, for one
-/// shared project. A run uses this computer's agent login and works in this
-/// folder, so it is the sharer's choice, and a new share starts with it off.
 enum TeamAgentAccess: String, Codable, CaseIterable, Sendable {
     case off, ask, on
     var label: String {
@@ -31,8 +28,6 @@ struct TeamAgentRequest: Decodable, Identifiable, Equatable, Sendable {
 }
 struct TeamAgentRequests: Decodable, Sendable { let requests: [TeamAgentRequest] }
 
-/// The setting itself, in a shared project's settings on the computer that
-/// shares it. Who is eligible stays with the team's agent access controls.
 struct TeamAgentAccessSettings: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -96,12 +91,8 @@ struct TeamAgentAccessSettings: View {
     }
 }
 
-/// Asks the sharer, wherever they are in the app, when a teammate's Ask is
-/// waiting for them. The teammate's app keeps sending the same request, so
-/// an answer here lets it start within a few seconds.
 struct TeamAgentApprovalPrompt: ViewModifier {
     let store: TeamStore
-    /// The local folder name for a shared checkout, for the prompt's wording.
     let projectName: (TeamLocalPublication) -> String?
     @State private var waiting: [TeamAgentRequest] = []
     @State private var answered: Set<String> = []
@@ -120,9 +111,6 @@ struct TeamAgentApprovalPrompt: ViewModifier {
                     try? await Task.sleep(for: .seconds(3))
                 }
             }
-            // A sheet rather than an alert: an alert makes its first button
-            // the Return key's, and approving a run must take a deliberate
-            // click. Escape and closing the sheet both deny.
             .sheet(item: Binding(get: { shown }, set: { _ in })) { request in
                 ThemedSheet(title: title(request), subtitle: L10n.text("common.teams.agent_access"), icon: .run, scrolls: true,
                             onClose: { Task { await decide(request, "deny") } }) {

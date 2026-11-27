@@ -8,23 +8,10 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Which computers are on this account, and what each of them is doing.
-///
-/// **Levels 1 and 2 of the machine plane**, as `docs/ios-client-ui.md` sets
-/// them out: the list, and one device's detail. Both are account plane, so this
-/// screen renders with every laptop asleep, which is the state a phone is
-/// usually in when somebody opens it.
-///
-/// Levels 3 to 5 (that device's folders, the sessions running in them, and
-/// attaching to a terminal) need the machine plane and a device that is awake.
-/// The detail screen links into them through `ClientHostWorkspacesView` when
-/// the device has a key to dial. Reach and awake state live on each row's
-/// caption, not in a second list of the same hosts.
 struct ClientDevicesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientNavigationModel.self) private var navigation
-    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(ClientDevicesModel.self) private var model
     @Environment(ClientSetupSession.self) private var setup
     @State private var search = ""
@@ -93,9 +80,6 @@ struct ClientDevicesView: View {
                     }
                     }
                     if let message = model.errorMessage {
-                        // The list still drew. What failed is the share of
-                        // spend beside each name, which is worth one quiet line
-                        // and not an error card where the devices should be.
                         Label(message, systemImage: "info.circle")
                             .font(ClientType.caption)
                             .foregroundStyle(.secondary)
@@ -110,11 +94,6 @@ struct ClientDevicesView: View {
         }
         .background(Theme.background)
         .searchable(text: $search, prompt: L10n.text("apple.clientdevicesview.search_devices.3aebaefc"))
-        // One push, driven from outside this tab: Workspaces sends a machine
-        // here rather than growing a device screen of its own. A binding
-        // rather than a path because the stack belongs to `ClientRootView`,
-        // and clearing the id on dismiss is what lets Devices open on its
-        // list the next time somebody taps the tab.
         .navigationDestination(
             isPresented: Binding(
                 get: { requestedMachine != nil },
@@ -129,10 +108,6 @@ struct ClientDevicesView: View {
                 )
             }
         }
-        // Always, not based on size. `basedOnSize` stops a short screen from
-        // bouncing, and a screen that cannot bounce cannot be pulled: the
-        // refresh gesture quietly disappeared exactly when the page was empty,
-        // which is when somebody most wants to pull it.
         .scrollBounceBehavior(.always, axes: .vertical)
         .refreshable {
             await ClientRefresh.pull("devices") {
@@ -144,12 +119,6 @@ struct ClientDevicesView: View {
                 )
             }
         }
-        // An id that matches nothing would otherwise sit in the model
-        // forever, and the push it was asking for can never happen. Clearing
-        // it lets Devices open on its list next time instead of on nothing.
-        // The same change is when per-device spend goes stale: a machine
-        // added, removed or renamed must refetch its share, and the load
-        // dedupes on the host id set so unchanged lists cost nothing.
         .onChange(of: machines) { _, _ in
             if let wanted = navigation.deviceMachineID,
                !machines.contains(where: { $0.machineID == wanted }) {
@@ -199,19 +168,11 @@ struct ClientDevicesView: View {
         }
     }
 
-    /// The machine another tab asked for, if the account still lists it.
-    ///
-    /// Resolved on every read rather than captured, because the account is
-    /// reloaded underneath this screen and a stale `Machine` would push a row
-    /// that no longer matches what the list shows.
     private var requestedMachine: Machine? {
         guard let wanted = navigation.deviceMachineID else { return nil }
         return machines.first { $0.machineID == wanted }
     }
 
-    /// This device first, then awake machines by spend, then everyone else by
-    /// how recently they were last active. Clients never rank on spend (they
-    /// do not upload usage), so value only separates hosts.
     private var sorted: [Machine] {
         machines.sorted { a, b in
             if isThisDevice(a) != isThisDevice(b) { return isThisDevice(a) }
@@ -233,8 +194,6 @@ struct ClientDevicesView: View {
         isThisDevice(machine) || machine.online == true
     }
 
-    /// Host spend for ordering. Clients and unknown usage sort below any real
-    /// figure so a $0 phone does not float above a busy laptop.
     private func sortSpend(_ machine: Machine) -> Int64 {
         guard machine.isHost, let usage = model.usage(for: machine) else { return -1 }
         return usage.valueMicros
@@ -276,8 +235,6 @@ struct ClientDevicesView: View {
         .accessibilityLabel(headerAccessibilityLabel)
     }
 
-    /// Plan fill as a trailing chip: "8 / 10". Reads as capacity, not as a
-    /// second title for the same list of devices below.
     @ViewBuilder
     private var capacityBadge: some View {
         if let limit = account.account?.machineLimit {
@@ -346,15 +303,11 @@ struct ClientDevicesView: View {
     }
 }
 
-/// One device in the list: what it is called, when it was last heard from, and
-/// how much of the account's recent work it did (hosts only).
 private struct DeviceRow: View {
     let machine: Machine
     let usage: MachineUsage?
     let isThisDevice: Bool
 
-    /// Phones, tablets and "this device" never upload an archive. A $0.00
-    /// figure there is noise, not a measurement, so the row stays about status.
     private var showsSpend: Bool {
         machine.isHost && !isThisDevice
     }
@@ -362,8 +315,6 @@ private struct DeviceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: Theme.Space.s) {
-                // The device in your hand is awake whatever the directory last
-                // recorded: the app asking the question is running on it.
                 AwakeDot(online: isThisDevice ? true : machine.online)
                 Image(systemName: ClientDeviceIcon.symbol(for: machine))
                 .font(Theme.font(13))
@@ -379,19 +330,12 @@ private struct DeviceRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: Theme.Space.s)
-                // Trailing column: spend on hosts, a You chip on this phone,
-                // nothing on other clients. Keeps the name line clean and
-                // lines the marker up with the figures on host rows.
                 if showsSpend {
                     if let usage {
                         Text(usage.value.formatted)
                             .font(ClientType.rowFigure)
                             .foregroundStyle(Theme.accent)
                     } else {
-                        // Not zero. A device whose share has not been fetched has
-                        // not been shown to have spent nothing, and reporting zero
-                        // for something we did not measure is the one thing the
-                        // data rules forbid outright.
                         Text(L10n.text("apple.clientdevicesview.n_a.a683c5c5"))
                             .font(ClientType.rowFigure)
                             .foregroundStyle(.tertiary)
@@ -411,8 +355,6 @@ private struct DeviceRow: View {
             }
         }
         .padding(Theme.Space.s)
-        // A row is a link, so the whole card has to be tappable and at least
-        // 44 points tall.
         .frame(minHeight: 44)
         .cardSurface()
         .accessibilityElement(children: .combine)
@@ -425,16 +367,12 @@ private struct DeviceRow: View {
     }
 }
 
-/// One device, level 2: what it is, what it spent, and whether it can be
-/// reached.
 struct ClientDeviceDetailView: View {
     @Environment(ClientWorkspacesModel.self) private var workspaces: ClientWorkspacesModel?
     @Environment(ClientDevicesModel.self) private var devices
     @State private var usageRequested = false
     let machine: Machine
     let isThisDevice: Bool
-    /// Re-read the account after a rename, so the list behind this screen says
-    /// the new name too.
     var onRenamed: () async -> Void = {}
     @Environment(AccountModel.self) private var account
     @Environment(ClientStore.self) private var store
@@ -444,12 +382,8 @@ struct ClientDeviceDetailView: View {
     @State private var savingName = false
     @State private var renameError: String?
     @FocusState private var editingName: Bool
-    /// The name this screen just set. `machine` is the copy this screen was
-    /// pushed with, so without it a rename read as having done nothing until
-    /// you went back to the list.
     @State private var renamedTo: String?
 
-    /// The device as it stands now: what was typed here, or what was pushed.
     private var current: Machine {
         guard let renamedTo else { return machine }
         var updated = machine
@@ -463,13 +397,9 @@ struct ClientDeviceDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                // Hosts only. Phones and tablets (including this device) do not
-                // upload usage, so a $0.00 card would invent a number.
                 if showsSpend {
                     spend
                 }
-                // Reachability, live readings and the two ways in, as one
-                // header shared with the screen you reach from Projects.
                 if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
                     ClientHostHeader(
                         name: DeviceCopy.name(current),
@@ -488,17 +418,8 @@ struct ClientDeviceDetailView: View {
                     reach
                 }
                 identity
-                // Which release that computer runs, and the button that moves
-                // it. A server has no application to update and nobody at the
-                // keyboard, so this is the only place it can be done from.
                 software
-                // Giving a machine more work after setup. The empty machine
-                // is covered from the Workspaces tab; a machine that already
-                // has folders had no way in from here.
                 work
-                // The same explanation the Workspaces tab carries, with this
-                // machine's key beside it: somebody reading a device page is
-                // asking what a connection to it actually is.
                 if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty {
                     ClientSecurityCard(peerKey: key, peerName: DeviceCopy.name(machine))
                 } else {
@@ -519,7 +440,6 @@ struct ClientDeviceDetailView: View {
         }
     }
 
-    /// Hosts that are not this phone: the only place spend is a real figure.
     private var showsSpend: Bool {
         machine.isHost && !isThisDevice
     }
@@ -557,9 +477,6 @@ struct ClientDeviceDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topTrailing) {
-            // Top trailing, the way every other figure card carries its mark.
-            // An overlay rather than a row, because the figure under it scales
-            // itself down to fit and must keep the whole width to do that.
             FeatureMark(name: "mark_insights", size: 26)
                 .accessibilityHidden(true)
         }
@@ -580,10 +497,6 @@ struct ClientDeviceDetailView: View {
         return parts.joined(separator: ", ")
     }
 
-    /// Naming a device, in the row where the name is read.
-    ///
-    /// Empty is the undo rather than an error: the machine goes back to
-    /// naming itself, which is the same rule the Mac's own name field has.
     private var nameField: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("apple.clientdevicesview.name.dcd1d522"))
@@ -655,9 +568,6 @@ struct ClientDeviceDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// More work for a machine that already has some. Both destinations run
-    /// their own connection and dismiss themselves, so this screen keeps no
-    /// loading state for them.
     @ViewBuilder
     private var work: some View {
         if !isThisDevice,
@@ -693,9 +603,6 @@ struct ClientDeviceDetailView: View {
         }
     }
 
-    /// The release a paired host runs. Only for a host, and only while it is
-    /// awake: a machine that cannot be reached cannot be asked, and this phone
-    /// is not a host at all.
     @ViewBuilder
     private var software: some View {
         if !isThisDevice,
@@ -707,8 +614,6 @@ struct ClientDeviceDetailView: View {
         }
     }
 
-    /// Power, CPU and memory after a hop to an awake host. This phone is
-    /// never sampled here: it is not a host.
     @ViewBuilder
     private var liveStats: some View {
         if !isThisDevice,
@@ -733,9 +638,6 @@ struct ClientDeviceDetailView: View {
                             : "not named on this account"
                     )
                     Spacer(minLength: Theme.Space.s)
-                    // Any device on the account, not only this phone. A Linux
-                    // server with nothing but the CLI on it has no other way
-                    // to be named.
                     Button(L10n.text("common.rename"), .edit) {
                         draft = current.label ?? ""
                         renaming = true
@@ -743,10 +645,6 @@ struct ClientDeviceDetailView: View {
                     }
                     .font(ClientType.caption.weight(.semibold))
                     .tint(Theme.accent)
-                    // Caption sized text is about twenty points tall on its
-                    // own, which is a hard thing to hit beside a name that
-                    // takes two lines. The glyph and the word stay small,
-                    // the target around them does not.
                     .frame(minHeight: 44)
                 }
             }
@@ -773,17 +671,9 @@ struct ClientDeviceDetailView: View {
     }
 }
 
-/// One row inside the From this device card: a glyph, a title, a line of why,
-/// a chevron.
-///
-/// The glyph and the panel under it are what say this is a button. Without
-/// them the two ways into another computer were the only actionable surface in
-/// the app drawn as plain text on a card, and people read past them.
 struct DeviceActionRow: View {
     let title: String
     let subtitle: String
-    /// From the one vocabulary, so an action cannot be a folder here and a
-    /// document on the next screen.
     let icon: ActionIcon
 
     var body: some View {
@@ -807,12 +697,6 @@ struct DeviceActionRow: View {
     }
 }
 
-/// The surface a device action row sits on, and what it does while held.
-///
-/// A style rather than a modifier on the row, because the pressed fill is the
-/// other half of "this is a button" and only the style can see the press. The
-/// panel and hairline are the ones `HostStatsBar` already nests inside the same
-/// card, so the rows and the readings above them are one family.
 struct DeviceActionRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -831,8 +715,6 @@ struct DeviceActionRowStyle: ButtonStyle {
     }
 }
 
-/// A label and its value, stacked when the value is long enough that a row
-/// would truncate it. Device ids are long enough.
 private struct DetailLine: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let label: String
@@ -854,11 +736,6 @@ private struct DetailLine: View {
     }
 }
 
-/// Awake, asleep, or nobody said.
-///
-/// Three states and three appearances, because a server that never reported
-/// presence must not be drawn as one that reported "asleep". The same rule the
-/// limit readings follow: "no answer" and "the answer is no" are different.
 struct AwakeDot: View {
     let online: Bool?
 
@@ -883,21 +760,9 @@ struct AwakeDot: View {
     }
 }
 
-/// Every sentence this screen says about a device, in one place so the list and
-/// the detail cannot describe the same machine differently.
 private enum DeviceCopy {
-    /// What to call a device.
-    ///
-    /// `Machine.displayName` falls back to the account's id, which on a Mac
-    /// sidebar is a reasonable last resort and on a phone is a row of hex where
-    /// a computer's name should be. A machine registers its name when remote
-    /// reach is turned on there, so an unnamed one is usually a laptop that
-    /// only ever synced.
     static func name(_ machine: Machine) -> String {
         if let label = machine.label, !label.isEmpty { return label }
-        // What the machine says it is, before giving up. A CLI-only install
-        // sends this at login, so "Linux computer" is usually available where
-        // a name is not, and it places the row in a way "Unnamed" cannot.
         if let platform = machine.platform,
            let family = platform.split(separator: "·").first?
                .split(separator: " ").first,
@@ -907,25 +772,14 @@ private enum DeviceCopy {
         return L10n.text("apple.clientdevicesview.unnamed_device.6aba593f")
     }
 
-    /// The second line: awake / reach first, then enough to tell two unnamed
-    /// devices apart when there is no status worth leading with.
     static func caption(_ machine: Machine, isThisDevice: Bool = false) -> String {
         let status = statusLine(machine, isThisDevice: isThisDevice)
-        // Named rows: status alone. Unnamed ones keep a short id so two
-        // "Linux computer" rows do not look identical under the same caption.
         guard machine.label?.isEmpty != false, let id = machine.machineID else {
             return status
         }
         return "\(shortID(id)) · \(status)"
     }
 
-    /// Short presence + reach for a list row. Detail still carries the longer
-    /// reach paragraph; the list only needs a glance.
-    ///
-    /// The account directory does not publish Always-on host as a flag, so
-    /// "Always on" is not claimed here. Online hosts read as awake; hosts with
-    /// a connection key but offline read as asleep and ready; hosts without a
-    /// key say so in one line instead of a second panel of the same machines.
     static func statusLine(_ machine: Machine, isThisDevice: Bool) -> String {
         if isThisDevice || machine.online == true {
             return L10n.text("apple.clientdevicesview.awake_now.64f95f4c")
@@ -945,8 +799,6 @@ private enum DeviceCopy {
         return L10n.text("apple.clientdevicesview.has_not_reported_in_yet.88f189cb")
     }
 
-    /// `m_c982…872c`. Long enough to be unique in a list of five, short enough
-    /// to sit under a name.
     static func shortID(_ id: String) -> String {
         guard id.count > 12 else { return id }
         return "\(id.prefix(6))…\(id.suffix(4))"
@@ -969,8 +821,6 @@ private enum DeviceCopy {
         if machine.publicIdentity?.isEmpty == false {
             return L10n.text("apple.clientdevicesview.asleep_it_has_a_connection_key_so_it_can_b.8982cace")
         }
-        // Not a fault, and not something to fix from a phone. Saying which
-        // switch it is beats "unavailable".
         return L10n.text("apple.clientdevicesview.not_set_up_for_remote_reach_turn_on_reach.9d22e688")
     }
 
@@ -987,14 +837,7 @@ private enum DeviceCopy {
     }
 }
 
-/// Device spend window by account tier. Free of MainActor so row labels can
-/// format without hopping into the model.
 enum DeviceHistory {
-    /// How far back this tier's device spend should look.
-    ///
-    /// Matches the account history product: free a month, supporter a year,
-    /// patron and legend everything the series still holds. The host clamps
-    /// the upper bound; the server still enforces each account's own depth.
     static func days(for tier: String?) -> Int {
         switch tier?.lowercased() {
         case "legend", "patron": return 3650
@@ -1003,7 +846,6 @@ enum DeviceHistory {
         }
     }
 
-    /// Human window for labels: "the last 30 days", "the last year", "all time".
     static func windowPhrase(days: Int) -> String {
         if days >= 1000 { return L10n.text("apple.clientdevicesview.all_time.c79ddf2b") }
         if days >= 360 { return L10n.text("apple.clientdevicesview.the_last_year.ce4cc449") }

@@ -9,11 +9,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// In-app plans, yearly by default. Required chrome: Restore, Privacy, Terms.
-///
-/// Always shows every rung. A live Apple plan still lists the others so
-/// upgrade, switch-at-renewal, and cancel are on this page, not only in
-/// Apple's manage sheet. A Paddle plan stays text only.
 struct ClientPaywallView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ClientStore.self) private var store
@@ -151,8 +146,6 @@ struct ClientPaywallView: View {
         current: ClientStoreProduct?,
         queued: ClientStoreProduct?
     ) -> some View {
-        // No plan has a free trial: the free plan, with two devices and a
-        // relay allowance, is how somebody tries tokenstat.
         let product = store.product(for: item)
         let busy = store.purchasingProductID == item.rawValue
         let isCurrent = current == item
@@ -279,10 +272,6 @@ struct ClientPaywallView: View {
             }
         } else if queued == item {
             actionButton(L10n.text("apple.clientpaywallview.switches_next_renewal.e700c0d8"), .scheduled, accent: false, busy: false, enabled: false) {}
-            // Only when the plan being kept is known. `current ?? item` fell
-            // back to the queued product itself when the store could not name
-            // the current one, which made "keep this plan" buy the switch the
-            // card said would wait.
             if let current, let keep = store.product(for: current) {
                 actionButton(
                     L10n.text("apple.clientpaywallview.keep_0.82638326", "\(current.title)"),
@@ -352,9 +341,6 @@ struct ClientPaywallView: View {
         .opacity(enabled ? 1 : 0.55)
     }
 
-    /// The comparison, Free included. Free is not for sale, but a plan's
-    /// pitch ("four devices, a year of history") only lands when the free
-    /// tier's own limits are beside it.
     private struct ComparePlan: Identifiable {
         let tier: String
         let title: String
@@ -405,8 +391,6 @@ struct ClientPaywallView: View {
         .tint(Theme.accent)
     }
 
-    /// The tier to draw as the reader's own column, or nil until the account
-    /// has answered.
     private var currentTier: String? {
         guard let signed = account.account else { return nil }
         return store.currentProduct(from: signed)?.tier ?? signed.tier?.lowercased()
@@ -489,9 +473,6 @@ struct ClientPaywallView: View {
         isCurrent ? Theme.accent.opacity(0.08) : Color.clear
     }
 
-    /// Direct connections do not count. These numbers are the hosted relay
-    /// only, the same ladder the host already uses: try a local address,
-    /// then fall back to the tunnel.
     private func relayCaption(for item: ClientStoreProduct) -> String? {
         switch item.tier {
         case "supporter":
@@ -588,7 +569,6 @@ struct ClientPaywallView: View {
     }
 }
 
-/// Website hover on the tier mark: a one-shot lift on appear.
 private struct PaywallTierMark: View {
     let tier: String
     let reduceMotion: Bool

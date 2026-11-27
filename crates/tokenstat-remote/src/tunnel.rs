@@ -436,9 +436,6 @@ impl TunnelSession {
             return Err(error);
         }
 
-        // Wait for OPENED or ERROR. The relay answers in milliseconds when it
-        // is there; the timeout covers the relay being gone or the peer being
-        // unreachable.
         let deadline = Instant::now() + OPEN_TIMEOUT;
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
         while !inner.opened && !inner.eof && inner.error.is_none() && Instant::now() < deadline {
@@ -752,8 +749,6 @@ impl Read for ChannelTransport {
         let started = Instant::now();
         let mut inner = self.state.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            // Revocation ends a Team stream before queued content is drained.
-            // Preserve the original tail-draining behavior for personal peers.
             if self.state.team.is_some() && (inner.eof || inner.error.is_some()) {
                 inner.buffer.clear();
                 return match &inner.error {
@@ -853,8 +848,6 @@ impl Transport for ChannelTransport {
         if self.closed.swap(true, Ordering::Relaxed) {
             return;
         }
-        // A reconnect can reuse an inbound ID. Dropping an old transport
-        // must neither erase nor close the new channel with that number.
         if self.session.forget_channel(&self.state) {
             let _ = self
                 .session
@@ -889,10 +882,6 @@ impl Transport for ChannelTransport {
 
 fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
     let mut backoff = RECONNECT_FLOOR;
-    // Consecutive attempts that ended in a fresh credential. Bounded, because
-    // "the relay refuses it and minting produces another it also refuses" is a
-    // real state (two daemons on one identity used to produce exactly it), and
-    // retrying that without a pause is a hot loop against the account host.
     let mut renewals = 0u32;
     loop {
         let Some(session) = session.upgrade() else {
@@ -901,16 +890,9 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         if session.stopped.load(Ordering::Relaxed) {
             return;
         }
-        // One line per attempt, and one per end. A machine that dropped off
-        // the relay and did not come back is the hardest thing here to work
-        // out afterwards, because the relay's own log can only say that a
-        // socket went away: whether this end was asleep, waiting out a
-        // backoff, or being refused is knowable only from here.
         eprintln!("tunnel: connecting to {}", session.endpoint);
         match connect_once(&session) {
             Ok(()) => {
-                // The socket died; that is the ordinary end of a connection,
-                // not an error to show.
                 *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus::default();
                 eprintln!("tunnel: socket closed, reconnecting");
                 backoff = RECONNECT_FLOOR;
@@ -931,12 +913,6 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         }
         mark_all_channels(&session, "tunnel disconnected");
         forget_all_channels(&session);
-        // A credential that was just replaced deserves an immediate attempt.
-        // The refusal has already been answered, so the wait that follows an
-        // ordinary failure would only keep the machine reading as offline for
-        // a repair that has happened. Bounded by `MAX_IMMEDIATE_RENEWALS`, so
-        // a credential the relay keeps refusing falls back to the backoff
-        // rather than spending the account's mint budget in a loop.
         if session.renewed.swap(false, Ordering::AcqRel) {
             renewals += 1;
             if renewals <= MAX_IMMEDIATE_RENEWALS {
@@ -946,11 +922,6 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         } else {
             renewals = 0;
         }
-        // Wait out the backoff, or wake early when the network comes back and
-        // a `nudge` lands. A wake resets the backoff so the fresh attempt is
-        // not punished for the failed ones a dead network already earned.
-        // `Disconnected` (the wake sender is gone) must not return instantly,
-        // or the loop would spin; the session upgrade at the top exits anyway.
         let woken = match wake_rx.recv_timeout(backoff) {
             Ok(()) => true,
             Err(mpsc::RecvTimeoutError::Timeout) => false,
@@ -1098,9 +1069,6 @@ fn handshake_relay(
         .set_write_timeout(Some(HELLO_TIMEOUT))
         .map_err(RemoteError::Io)?;
     let raw = stream.try_clone().map_err(RemoteError::Io)?;
-    // Published before TLS so `shutdown` can close the handshake. Stored
-    // only after this function used to leave a toggle-off as a live
-    // socket the IO loop could still keep.
     if let Some(session) = session {
         *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(raw.try_clone().map_err(RemoteError::Io)?);
@@ -1158,25 +1126,14 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             }
         }
         Message::Text(text) => {
-            // A refusal the machine can answer itself is answered here, before
-            // the supervisor sleeps: a stale, expired or re-registered
-            // credential is replaced so the next attempt is a different
-            // attempt. Plan and duplicate-key refusals are left alone, because
-            // minting again would only ask the account the same question.
             if renewable_denial(&text) {
                 match session.renew_credential() {
                     Renewal::Fresh => {
-                        // The supervisor reads this and retries at once. The
-                        // repair has already happened, and sleeping out a
-                        // backoff sized for a dead network would leave the
-                        // machine reading as offline for up to half a minute
-                        // after it was fixed.
                         session.renewed.store(true, Ordering::Release);
                         eprintln!("tunnel: credential refused, minted a fresh one");
                         return Err(RemoteError::Tunnel(denial_message(&text)));
                     }
                     Renewal::Unavailable(why) => {
-                        // The mint's reason, not the relay's. See `RenewToken`.
                         return Err(RemoteError::Tunnel(format!(
                             "{}, and a replacement could not be minted: {why}",
                             denial_message(&text)
@@ -1199,16 +1156,9 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         let _ = socket.close(None);
         return Err(error);
     }
-    // One IO thread owns the socket. It must never block inside a read or a
-    // flush: a read that waits is a read that cannot drain the writer queue,
-    // and a flush that waits is a write the relay is not draining, either of
-    // which stalls every channel on this socket. The socket is nonblocking
-    // and the loop parks briefly when there is nothing to do.
     set_relay_nonblocking(&mut socket)?;
 
     let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(OUTBOUND_FRAME_QUEUE);
-    // Each connection owns its accounting: old senders can still unwind
-    // after a reconnect, without subtracting from the new queue.
     let writer_bytes = Arc::new(AtomicUsize::new(0));
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Writer {
         sender: writer_tx,
@@ -1216,9 +1166,6 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     });
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket);
 
-    // The IO loop, inline: drain queued outgoing frames, then read one frame
-    // (or idle-wait), and repeat. The socket is nonblocking, so neither the
-    // read nor the flush can stall the loop.
     let mut writer_blocked = false;
     loop {
         if session.stopped.load(Ordering::Relaxed) {
@@ -1283,9 +1230,6 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             }
             Ok(Message::Close(_)) => break,
             Ok(_) => {
-                // Ping, Pong, Text. A ping is the relay's keepalive: counting
-                // it as a read is what keeps a quiet machine from looking
-                // half-open to `nudge`.
                 session.mark_read();
                 None
             }
@@ -1316,8 +1260,6 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     }
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    // A dead socket is the ordinary end of a connection, not a failure to
-    // report: the supervisor reconnects silently.
     Ok(())
 }
 
@@ -1383,19 +1325,11 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
 
 fn opened(session: &Arc<TunnelSession>, id: u32, ticket: Option<TeamTicket>) {
     let channels = &session.channels;
-    // Our own dial: mark it open. An id we do not know, or one that
-    // already died on the last socket, is the relay dialling us.
-    // Relay inbound ids restart at 1 on every new socket. Leaving a
-    // dead entry in the map would swallow that OPENED as a late ack
-    // of our own dial, and the host would never handshake.
     let mut map = channels.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(state) = map.get(&id) {
         let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.error.is_none() && !inner.eof {
             if !team::matches_open(state, ticket.as_ref()) {
-                // A Teams acknowledgement cannot upgrade a personal
-                // channel, and a legacy acknowledgement cannot strip
-                // a Team channel's scope.
                 if state.team.is_some() {
                     inner.error = Some("team admission changed".into());
                     inner.buffer.clear();
@@ -1408,14 +1342,6 @@ fn opened(session: &Arc<TunnelSession>, id: u32, ticket: Option<TeamTicket>) {
             return;
         }
     }
-    // Refuse rather than queue past the bound: a flood of opens must
-    // not grow the map or the host's backlog without limit. A live
-    // channel already holding this id must not be overwritten either:
-    // the duplicate is refused, not merged into the existing channel.
-    // A dead entry (errored on the last socket) is still replaced, so
-    // a reconnect reuses the id. The map guard is dropped before the
-    // refusal frame so a slow outbound queue cannot pin every other
-    // channel's routing.
     let mut state = ChannelState::new(id);
     state.team = ticket.map(|ticket| team::TeamChannel::new(ticket, None));
     let state = Arc::new(state);
@@ -1524,9 +1450,6 @@ fn denial_message(text: &str) -> String {
         }
         "not_on_this_plan" => "remote reach is a paid-plan feature",
         "key_already_live" => "another machine is already on the tunnel with this key",
-        // Not "sign in again": this machine mints a replacement and retries by
-        // itself, and telling somebody to go and fix a thing that is already
-        // fixing itself is how a transient refusal becomes a support message.
         "bad_token" => "the relay refused this machine's tunnel credential. getting a new one",
         other => return format!("the relay refused the connection: {other}"),
     }
@@ -1664,7 +1587,7 @@ mod tests {
         let mut offset = 0;
         let mut elapsed = Duration::ZERO;
         let mut output = vec![0; 65535];
-        let sizes = [2, 20, 2, 65535]; // Noise framing and payload reads.
+        let sizes = [2, 20, 2, 65535];
         let mut step = 0;
         let mut drain_to = |end: usize| {
             while offset < end {
@@ -1708,9 +1631,6 @@ mod tests {
             })
             .collect();
 
-        // Each channel represents a different host on the same relay socket.
-        // Interleave the replies, then fail one host while the others still
-        // have unread work. A channel id must never become another host's row.
         for id in (1..=10u32).rev() {
             let mut frame = vec![CH_DATA];
             frame.extend_from_slice(&id.to_be_bytes());
@@ -1831,7 +1751,6 @@ mod tests {
             .unwrap()
             .insert(7, Arc::clone(&personal));
         let mut personal = ChannelTransport::new(Arc::clone(&session), personal);
-        // A Team control cannot upgrade a personal channel.
         dispatch_frame(&session, &team_frame(7, 7, &next));
         assert!(personal.team_authorization().is_none());
         let mut data = vec![CH_DATA];
@@ -2081,7 +2000,6 @@ mod tests {
         assert!(renewable_denial("DENIED token_expired"));
         assert!(renewable_denial("DENIED key_mismatch"));
         assert!(renewable_denial("DENIED token_revoked"));
-        // Minting again cannot buy a plan or free a key another machine holds.
         assert!(!renewable_denial("DENIED not_on_this_plan"));
         assert!(!renewable_denial("DENIED key_already_live"));
         assert!(!renewable_denial("READY"));
@@ -2107,8 +2025,6 @@ mod tests {
             }
         }
         assert_eq!(immediate, MAX_IMMEDIATE_RENEWALS as usize);
-        // The ordinary case is one: expired, minted, retried. A ceiling below
-        // that would mean a credential that just healed still waits.
         const { assert!(MAX_IMMEDIATE_RENEWALS >= 1) };
     }
 
@@ -2250,8 +2166,6 @@ mod tests {
         assert_eq!(ChannelPurpose::Sftp.as_str(), "sftp");
         assert_eq!(ChannelPurpose::Files.as_str(), "files");
         assert_eq!(ChannelPurpose::Unknown.as_str(), "unknown");
-        // Every variant is one lowercase word: the relay matches the label
-        // against its own vocabulary and anything else meters as `unknown`.
         for purpose in [
             ChannelPurpose::Screen,
             ChannelPurpose::Pty,
@@ -2277,8 +2191,6 @@ mod tests {
         let (left, right) = payload.split_once(':').expect("a colon separates the two");
         assert_eq!(left, key, "the relay reads the key up to the first colon");
         assert_eq!(right, "screen");
-        // The key itself must never contain the separator, or the relay would
-        // cut it in the wrong place and refuse a perfectly good dial.
         assert!(!key.contains(':'));
     }
 

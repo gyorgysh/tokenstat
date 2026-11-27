@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// An agent update offered at the moment it matters: just before a message
-/// goes to an agent that is behind.
-///
-/// Asked once per version. Skipping a version keeps it out of the way until a
-/// newer one is published, and the picker still updates it by hand.
 struct AgentUpdatePrompt: Identifiable {
     let id = UUID()
     let backend: ChatBackend
-    /// Sends the message the prompt interrupted.
     let send: @MainActor () -> Void
 
-    /// Whether to ask before this send. Only an installed agent with a real
-    /// newer version, on this chat's host, that nobody skipped.
     static func isDue(_ backend: ChatBackend?, peer: String?) -> Bool {
         guard let backend, backend.updateAvailable, backend.installed != false,
               backend.launcherID != nil, let latest = backend.latestVersion else { return false }
@@ -25,14 +17,11 @@ struct AgentUpdatePrompt: Identifiable {
         UserDefaults.standard.set(latest, forKey: skipKey(backend, peer: peer))
     }
 
-    /// Per host: the same agent can be current on one machine and behind on
-    /// another.
     private static func skipKey(_ backend: ChatBackend, peer: String?) -> String {
         "agentUpdate.skipped.v1.\(peer ?? "local").\(backend.launcherID ?? backend.id)"
     }
 }
 
-/// Presents `ChatModel.agentUpdatePrompt`. Attach it once per chat surface.
 struct AgentUpdatePromptSheet: ViewModifier {
     @Bindable var model: ChatModel
     var isActive = true
@@ -121,8 +110,6 @@ private struct AgentUpdatePromptView: View {
         }
     }
 
-    /// "Skip this version" sends now and stays quiet until a newer one. After
-    /// a failed update the same button only sends.
     private func skip() {
         if !failed { AgentUpdatePrompt.skip(backend, peer: model.peer) }
         model.agentUpdatePrompt = nil

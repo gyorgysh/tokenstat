@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The first action needed before a conversation can start.
 struct ChatStartOnboarding: View {
     let onAdd: () -> Void
     var acceptsFolderDrops = false
@@ -39,9 +38,6 @@ struct ChatStartOnboarding: View {
     }
 }
 
-/// A few ways to begin, under an empty composer. A first-time reader learns
-/// what kind of thing to ask; anyone else ignores three quiet chips that go
-/// away the moment they start writing.
 struct ChatStartStarters: View {
     let onPick: (String) -> Void
     var revealed = true
@@ -65,8 +61,6 @@ struct ChatStartStarters: View {
     }
 }
 
-/// Lighter than a secondary button: these are suggestions, not actions the
-/// page is asking for.
 private struct ChatStartStarterStyle: ButtonStyle {
     @State private var hovering = false
 
@@ -133,9 +127,6 @@ private struct FlowRow: Layout {
     }
 }
 
-/// A quiet surface shared by the composer and the first-repository action.
-/// A faint lit edge along the top and a soft shadow lift it off the glass
-/// behind it without turning it into an object of its own.
 extension View {
     func chatStartCard(highlighted: Bool = false) -> some View {
         let shape = RoundedRectangle(cornerRadius: 16)

@@ -57,12 +57,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Folder drill with per-type icons and file open, port of `ClientFilesView`.
-///
-/// Tapping a file opens the full-page `WorkspaceFileEditorPage`, the port of
-/// the iOS phone editor (find and replace, save states, conflict handling,
-/// discard confirm). The editor names the folder it returns to, so Back
-/// lands in context rather than on a bare path.
 @Composable
 fun FilesSection(
     model: AppViewModel,
@@ -110,9 +104,6 @@ fun FilesSection(
     }
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = TabBarChrome.contentBottomInset), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        // At the root the breadcrumb is just the folder name, which the
-        // pushed header above already shows as its subtitle. It earns its row
-        // once you are inside something.
         if (path.isNotEmpty()) {
             item { Breadcrumb(folderName.ifBlank { L10n.text("common.files") }, path, onJump = { path = it }) }
         }

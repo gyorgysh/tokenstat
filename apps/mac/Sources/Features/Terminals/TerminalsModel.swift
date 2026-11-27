@@ -9,21 +9,12 @@ import AppKit
 import Foundation
 import Observation
 
-/// The terminal sessions visible in the app.
-///
-/// The sessions themselves belong to the host process, so this model is a
-/// window onto them rather than their owner: it reconciles against `pty.list`,
-/// spawns new ones, and closes ones the user is done with. A session that
-/// survives all of this stays alive in the host, which is what makes an
-/// automation a session and not a tab.
 @MainActor
 @Observable
 final class TerminalsModel {
     var sessions: [TerminalSession] = []
-    /// Client id of the selected session (stable; never the host's `pty-N`).
     var selectedID: String?
     var errorMessage: String?
-    /// The SSH model owns its sessions. Projects keep only tab associations.
     var sshSessions: SSHSessionsModel?
     private var workspaceSSHIDs = UserDefaults.standard.dictionary(forKey: "workspace.sshSessionTabs") as? [String: [String]] ?? [:]
 
@@ -42,19 +33,11 @@ final class TerminalsModel {
     }
     private var selectedByWorkspace: [String: String] = [:]
 
-    /// Host ids whose `pty.close` is still in flight.
-    ///
-    /// Closing takes the session off screen straight away and tells the host
-    /// afterwards, so for a moment the host still lists a pty this window has
-    /// already forgotten. Without this the next reconcile would adopt it back
-    /// and the chip the person just closed would reappear.
     @ObservationIgnored private var closingHostIDs: Set<String> = []
     @ObservationIgnored private var listGeneration: UInt64 = 0
     @ObservationIgnored private var sessionRevision: UInt64 = 0
 
     init() {
-        // The wheel is a terminal-wide concern, not a per-session one, so it is
-        // wired up once here rather than by whichever session appears first.
         TerminalWheelForwarder.install()
         TerminalMouseForwarder.install()
     }
@@ -123,11 +106,8 @@ final class TerminalsModel {
     }
 
     private(set) var splitLayout: [String: TerminalSplitLayout] = [:]
-    /// Divider position, 0.2...0.8, leading share of the column.
     private(set) var splitFraction: [String: Double] = [:]
-    /// Left / top session when split. Positions stay put when focus moves.
     private(set) var splitLeadingID: [String: String] = [:]
-    /// Right / bottom session when split.
     private(set) var splitTrailingID: [String: String] = [:]
     private var paneFocusIDs: Set<String> = []
     private var paneFocusClaims = TerminalFocusClaims()
@@ -175,8 +155,6 @@ final class TerminalsModel {
         trailingTerminal(in: workspaceID)?.local
     }
 
-    /// Put `session` in the half that is not focused, opening a side split
-    /// when the column is still single.
     func sendToOtherHalf(_ session: TerminalSession) {
         sendToOtherHalf(WorkspaceTerminal(session), in: session.workspaceID)
     }
@@ -192,23 +170,14 @@ final class TerminalsModel {
         selectedID = selection.selectedID
     }
 
-    /// The last session in a half closed: collapse back to one pane.
     func collapseIfNeeded(afterClosing session: TerminalSession) {
         reconcilePane(in: session.workspaceID)
     }
 
-    /// The last session selected in a workspace, falling back to its first
-    /// session. Selection belongs to the workspace, not the current pane, so
-    /// switching projects does not lose the place the user was working in.
     func active(in workspaceID: String) -> TerminalSession? {
         activeTerminal(in: workspaceID)?.local
     }
 
-    /// Say which sessions are on screen.
-    ///
-    /// A split shows two, and both have to drain at the visible rate or the
-    /// half you are only watching freezes. First responder is a separate
-    /// question, answered by the stack.
     func focus(_ ids: Set<String>) {
         paneFocusIDs = ids
         applyFocus()
@@ -224,12 +193,6 @@ final class TerminalsModel {
         applyFocus()
     }
 
-    /// Somebody came back to the app. Anything on screen has been seen.
-    ///
-    /// The `isFocused` hook cannot cover this: the session that raised the
-    /// call is usually the one already showing, so coming back to the app
-    /// changes nothing about focus and the notification would sit in
-    /// Notification Centre about a question the person is looking at.
     func acknowledgeVisibleAttention() {
         for session in sessions where session.isFocused {
             session.acknowledgeAttention()
@@ -258,8 +221,6 @@ final class TerminalsModel {
         if let remote = session.ssh { sshSessions?.select(remote) }
     }
 
-    /// Reconcile against the host. Spawned and closed elsewhere show up and
-    /// go away rather than being forgotten until relaunch.
     func load() async {
         listGeneration &+= 1
         let generation = listGeneration
@@ -270,11 +231,6 @@ final class TerminalsModel {
             var byHostID: [String: PtySessionInfo] = [:]
             for info in list { byHostID[info.id] = info }
 
-            // Forget sessions the host no longer has.
-            // A pending session is not on the host yet: the spawn is in
-            // flight, so it must not be treated as a session that vanished.
-            // Inspector shells are hidden from `pty.list`, so missing there
-            // is not gone.
             let gone = sessions.filter {
                 !$0.isPending && !$0.isInspectorShell && byHostID[$0.hostID] == nil
             }
@@ -284,13 +240,8 @@ final class TerminalsModel {
                 reconcilePane(in: session.workspaceID)
             }
 
-            // Host ids already represented by a local session (pending ones
-            // still use a synthetic host id, so they never match).
             let knownHostIDs = Set(sessions.map(\.hostID))
 
-            // A list row cannot identify which pending request created it.
-            // Wait for actual spawn receipts before adopting unknown rows;
-            // matching only command/workspace can attach an unrelated process.
             for info in list
             where !knownHostIDs.contains(info.id)
                 && info.hidden != true
@@ -305,26 +256,17 @@ final class TerminalsModel {
             if selectedID == nil, let first = sessions.first(where: { !$0.isInspectorShell }) {
                 select(first)
             }
-            // Selection can point at a session that was removed as gone.
             if let selectedID, !selectedID.hasPrefix("ssh:"), !sessions.contains(where: { $0.id == selectedID }) {
                 self.selectedID = sessions.first(where: { !$0.isInspectorShell })?.id
             }
             errorMessage = nil
         } catch {
             guard !Task.isCancelled, generation == listGeneration, revision == sessionRevision else { return }
-            // A quiet or unreachable host is not a failed launch. The sidebar
-            // footer owns that state. Putting it on `errorMessage` used to
-            // raise "Could not start session" every time this 10-second
-            // reconcile timed out, which is how a network flap looked like
-            // a spawn error on a timer.
             if Bridge.isHostRecoveryError(error) { return }
             errorMessage = error.localizedDescription
         }
     }
 
-    /// Keep one session per host id. The list reconcile and spawn completion
-    /// can both claim the same pty; the keeper is the one the user already has
-    /// on screen.
     private func dedupe(hostID: String, keeping keeper: TerminalSession) {
         let extras = sessions.filter { $0.hostID == hostID && $0.id != keeper.id }
         for extra in extras {
@@ -334,8 +276,6 @@ final class TerminalsModel {
         }
     }
 
-    /// Put an already-running visible host terminal in front. Task launches
-    /// use this after the host has durably linked the process to its card.
     @discardableResult
     func open(_ info: PtySessionInfo) -> TerminalSession {
         sessionRevision &+= 1
@@ -352,13 +292,6 @@ final class TerminalsModel {
         return session
     }
 
-    /// Keep the session list in step with the host while the app is open.
-    ///
-    /// Sessions do not only start from this window: another machine can spawn
-    /// one on this host, and an automation can too. Without a slow reconcile
-    /// loop the host's own window would never learn about them, which is the
-    /// parity failure of "I started a session remotely and it did not appear
-    /// on the machine it runs on".
     func watch() async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(10))
@@ -367,11 +300,6 @@ final class TerminalsModel {
         }
     }
 
-    /// Put a pending session on screen **now**, before any host call.
-    ///
-    /// The click handler must call this synchronously. Waiting until an
-    /// `async` `Task` starts left the launcher up for a frame (or longer under
-    /// main-actor load), which is the blink before the tty pane appears.
     @discardableResult
     func begin(
         workspace: WorkspaceFolder,
@@ -390,17 +318,11 @@ final class TerminalsModel {
         sessions.append(session)
         if selectAfter {
             select(session)
-            // Focus now, not when the pane's onChange fires next turn. Poll floor
-            // is 16ms for focused sessions and 150ms otherwise; the first agent
-            // bytes after spawn would otherwise sit in the host buffer for an
-            // extra frame or two before the reader noticed.
             focus(session.id)
         }
         return session
     }
 
-    /// Finish a `begin` by talking to the host. Safe if list reconcile already
-    /// attached the pending session.
     @discardableResult
     func complete(
         _ session: TerminalSession,
@@ -415,8 +337,6 @@ final class TerminalsModel {
     ) async -> TerminalSession? {
         guard sessions.contains(where: { $0.id == session.id }) else { return nil }
         do {
-            // The caller measured the pane; spawn at that grid so the first
-            // paint is not a 24×80 flash.
             let info = try await Bridge.ptySpawn(
                 workspaceID: session.workspaceID,
                 command: session.command,
@@ -430,11 +350,6 @@ final class TerminalsModel {
                 profileID: profileID,
                 hidden: hidden
             )
-            // The tab can be closed while the spawn is in flight. Attaching
-            // would resurrect it and leaving the host process alone would
-            // orphan it, so close what the host just made instead. Listing the
-            // host id while the close is in flight keeps a reconcile that
-            // lands in between from adopting it as a new tab.
             guard sessions.contains(where: { $0.id == session.id }) else {
                 closingHostIDs.insert(info.id)
                 defer { closingHostIDs.remove(info.id) }
@@ -450,8 +365,6 @@ final class TerminalsModel {
             errorMessage = nil
             return session
         } catch {
-            // Host silence belongs on the footer card. A real spawn rejection
-            // (missing binary, bad args) stays on the launch surface.
             if !Bridge.isHostRecoveryError(error) {
                 errorMessage = error.localizedDescription
             }
@@ -463,7 +376,6 @@ final class TerminalsModel {
         }
     }
 
-    /// Launch a command in a workspace's folder and select it.
     @discardableResult
     func start(
         workspace: WorkspaceFolder,
@@ -487,16 +399,6 @@ final class TerminalsModel {
         )
     }
 
-    /// Kill the process and forget the session. The host's buffer goes with it.
-    ///
-    /// The screen is cleared before the host is told, and on purpose. `pty.close`
-    /// is a round trip, and a busy machine with several agents draining at once
-    /// can take seconds to answer it. Waiting first left the chip on the strip
-    /// and the terminal on screen after the person had already confirmed, which
-    /// reads as a button that did not work and gets clicked again.
-    ///
-    /// The local teardown happens before the first suspension point, so the
-    /// strip has already lost the chip by the time this yields.
     func close(_ session: TerminalSession) async {
         sessionRevision &+= 1
         session.stop()
@@ -507,9 +409,6 @@ final class TerminalsModel {
             Task {
                 defer { closingHostIDs.remove(hostID) }
                 try? await Bridge.ptyClose(id: hostID)
-                // Whether or not it worked. A pty that survived the call is
-                // still running, and a later reconcile should say so rather
-                // than hide it forever.
             }
         }
         collapseIfNeeded(afterClosing: session)
@@ -540,8 +439,6 @@ final class TerminalsModel {
         await sshSessions?.close(remote)
     }
 
-    /// Re-apply the inspector-shell mark after a host reconcile. The flag is
-    /// local. Leftover hidden shells from the old console stay off the strip.
     func retagInspectorShells() {
         for session in sessions where !session.isInspectorShell {
             let host = WorkspacePreference.inspectorShellHostID(for: session.workspaceID)

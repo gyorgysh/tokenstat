@@ -22,19 +22,6 @@ enum SSHLibraryRoute: Hashable {
     case importCloud
 }
 
-/// The SSH library: hosts, keys and snippets, with folders and search.
-///
-/// One screen with a list and a detail side, rather than a segmented picker
-/// over three lists and a fixed-size sheet per action. The sheets were the
-/// problem: a snippet is a shell script and it was being edited in a box 380
-/// points tall, and a host had nowhere to show what it was actually configured
-/// to do. Sheets are kept for the two things that really are modal and
-/// dangerous: the recovery code, and confirming a deletion.
-///
-/// The phone and the iPad only. The Mac used to present this same view in a
-/// sheet over Devices; it has an SSH section in the sidebar and three columns
-/// of its own now, so what is left here is the push stack, which was already
-/// the right shape for a phone.
 #if !os(macOS)
 struct SSHLibraryView: View {
     var vaultTier: String?
@@ -92,15 +79,11 @@ struct SSHLibraryView: View {
 
     var body: some View { content }
 
-    // MARK: - The screen
 
     private var content: some View {
         listSide
             .navigationTitle(L10n.text("apple.sshlibraryview.ssh.01c4d3c2"))
             .toolbar { toolbarContent }
-            // Pushed onto whichever stack this screen was opened from, rather
-            // than onto one of its own: Devices already owns a stack, and a
-            // second one inside it draws a second title bar.
             .navigationDestination(item: Binding(get: { route }, set: { route = $0 })) { destination($0) }
     }
 
@@ -110,8 +93,6 @@ struct SSHLibraryView: View {
         case let .host(id):
             SSHHostEditor(model: model, hostID: id, folderID: nil, onDone: close)
                 .toolbar {
-                    // Same reason as the Mac inspector: the screen showing the
-                    // whole server had no way to reach it.
                     if let host = model.hosts.first(where: { $0.id == id }) {
                         ToolbarItem(placement: .primaryAction) {
                             Button(L10n.text("common.connect"), .connect) { connecting = host }
@@ -132,8 +113,6 @@ struct SSHLibraryView: View {
             SSHFolderEditor(model: model, folderID: id, parentID: nil, onDone: close)
         case let .newFolder(parent):
             SSHFolderEditor(model: model, folderID: nil, parentID: parent, onDone: close)
-        // The Mac shell selects one trusted server at a time; the phone shows
-        // the list and forgets from a row, so both land on the same screen.
         case .knownHost, .knownHosts:
             SSHKnownHostsView(model: model)
         case .importConfig:
@@ -143,7 +122,6 @@ struct SSHLibraryView: View {
         }
     }
 
-    // MARK: - The list side
 
     private var listSide: some View {
         VStack(spacing: 0) {
@@ -153,9 +131,6 @@ struct SSHLibraryView: View {
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.s)
             }
-            // A save that landed here but not in the vault. Said out loud, the
-            // way the Mac says it: silence is what made an edit that another
-            // device later overwrote look like the save had never happened.
             if let vaultError = model.vaultError {
                 let friendly = FriendlyError.from(vaultError)
                 InlineBanner(text: L10n.text("apple.sshlibraryview.saved_on_this_device_but_not_synced_0.97b249b6", "\(friendly.message)")) {
@@ -177,24 +152,14 @@ struct SSHLibraryView: View {
                 list
             }
         }
-        // One tone, not two. The header sat on the sidebar colour and the list
-        // on the background, which drew a hard band across the screen at the
-        // seam and made the two halves look like separate screens.
         .background(Theme.background)
     }
 
     private var header: some View {
         VStack(spacing: Theme.Space.s) {
-            // One row, not a control panel. Unlock, a new recovery code and
-            // delete live inside the screen it opens, where each of them has
-            // room for the sentence it needs.
             if vaultTier != nil {
                 SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
             }
-            // No label on the container. Applied to a group of buttons it can
-            // stand in for their own, which would announce one "SSH library"
-            // where there are three tabs a person has to be able to tell
-            // apart and select. The tabs say what they are.
             SegmentedTabs(options: Section.allCases, selection: Binding(get: { section }, set: { section = $0 }))
             SearchField(text: Binding(get: { model.search }, set: { model.search = $0 }), prompt: section.searchPrompt)
         }
@@ -206,10 +171,6 @@ struct SSHLibraryView: View {
         List {
             switch section {
             case .hosts:
-                // Live shells, above everything. A session outlives this
-                // screen now, so there has to be a way back to one: without
-                // this row a shell somebody left running is running with
-                // nothing on any screen that mentions it.
                 if !model.searching, !sessions.sessions.isEmpty {
                     SwiftUI.Section(L10n.text("apple.sshlibraryview.open_sessions.8bf47766")) {
                         ForEach(sessions.sessions) { session in sessionRow(session) }
@@ -237,20 +198,11 @@ struct SSHLibraryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        // The grouped styles paint their own grey twice: once behind the
-        // scroll view, and once behind every row. This deals with the first.
-        // The second is `themedRow` on each row builder, because
-        // `listRowBackground` applied to the List itself reaches nothing: it
-        // is a per-row modifier and the rows are what have to carry it.
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .listRowSeparatorTint(Theme.border)
     }
 
-    /// One row per visible line, with its depth.
-    ///
-    /// Flattened rather than nested `DisclosureGroup`s: a view that contains
-    /// itself cannot be typed, and indentation reads the same to a person.
     private struct Row: Identifiable {
         enum Kind {
             case folder(SSHFolder)
@@ -374,9 +326,6 @@ struct SSHLibraryView: View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(key.label).font(SSHRowType.name)
-                // The tail, not the whole line. A full SHA256 fingerprint is
-                // wider than a phone, so the row printed a wall of base64 that
-                // was cut off exactly where the part you compare against lives.
                 Text(SSHLibraryView.shortFingerprint(key.fingerprint) ?? key.algorithm)
                     .font(SSHRowType.mono)
                     .foregroundStyle(.secondary)
@@ -390,11 +339,6 @@ struct SSHLibraryView: View {
         .frame(minHeight: 44)
         .contentShape(.rect)
         .onTapGesture { open(.key(key.id)) }
-        // A long press, like every other row in this list. A swipe is the
-        // fastest way to delete and the least discoverable way to find out
-        // that deleting is possible, and it is the only thing a key row
-        // offered: copying the public key, which is the reason to open one at
-        // all, had no shortcut whatsoever.
         .contextMenu {
             Button(L10n.text("common.edit")) { open(.key(key.id)) }
             Button(L10n.text("apple.sshlibraryview.copy_public_key.5f2f4548")) { copyToPasteboard(key.publicKey) }
@@ -465,24 +409,11 @@ struct SSHLibraryView: View {
         }
     }
 
-    // MARK: - Plumbing
 
-    /// Leave an editor: clear the detail pane on macOS, pop the push on iOS.
-    /// One assignment does both, because both are driven by `route`.
     private func close() { route = nil }
 
     private func open(_ destination: SSHLibraryRoute) { route = destination }
 
-    /// A fingerprint without its algorithm prefix.
-    ///
-    /// Nil for an empty one, so the caller can fall back to the algorithm
-    /// rather than print an empty line.
-    ///
-    /// The prefix is dropped in every case, so the column holds one shape
-    /// rather than two. Nothing else is cut here: the row asks for head
-    /// truncation, and a string this trimmed by hand as well came out with
-    /// two ellipses on a narrow phone. Where a fingerprint has to be compared
-    /// in full, that is the editor's job, not a list row's.
     static func shortFingerprint(_ value: String) -> String? {
         guard !value.isEmpty else { return nil }
         guard let separator = value.firstIndex(of: ":") else { return value }
@@ -547,13 +478,6 @@ struct SSHLibraryView: View {
 }
 #endif
 
-/// The theme's own colours behind a list row.
-///
-/// `scrollContentBackground(.hidden)` deals with the scroll view and nothing
-/// else: an inset-grouped row paints its own light neutral card on top of
-/// whatever is behind it, which on this screen left the host cards as the one
-/// grey thing among the panels. `listRowBackground` is per row and does not
-/// travel down from the List, so every row builder says it.
 extension View {
     func themedRow() -> some View {
         listRowBackground(Theme.panel)
@@ -577,14 +501,9 @@ enum SSHRowType {
     static let detail = ClientType.caption
     #endif
 
-    /// A fingerprint or a command: content, so monospaced.
     static let mono = Theme.mono(11)
 }
 
-/// One server in the list.
-///
-/// Name in body weight, address in caption, folder colour as a leading bar, so
-/// ten servers scan as a list rather than as ten paragraphs.
 struct SSHHostRow: View {
     let host: SSHHost
     let folder: String?
@@ -627,7 +546,6 @@ struct SSHHostRow: View {
             }
             Spacer(minLength: 0)
             if let onConnect {
-                // Keep the primary action visible for pointer and keyboard use.
                 #if os(macOS)
                 Button(L10n.text("common.connect"), .connect, action: onConnect)
                     .buttonStyle(SecondaryButtonStyle(small: true))
@@ -650,10 +568,6 @@ struct SSHHostRow: View {
     }
 }
 
-/// A search field that looks the same on both platforms.
-///
-/// `.searchable` puts the field somewhere different on each, and this screen
-/// needs it above the list on both.
 struct SearchField: View {
     @Binding var text: String
     let prompt: String

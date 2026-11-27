@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The same setup sections serve the compact composer and full conversation sheet.
 struct ChatSetupForm: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation

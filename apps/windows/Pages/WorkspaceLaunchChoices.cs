@@ -24,8 +24,6 @@ internal static class WorkspaceLaunchChoices
 {
     private static readonly object Gate = new();
 
-    /// The tools the host can point at a local model server. The host decides
-    /// what the pick turns into and refuses a pair it has no contract for.
     private static readonly string[] LocalModelTools = ["claude_code", "codex", "opencode", "opencode2", "copilot"];
 
     private static string FilePath => Path.Combine(
@@ -36,7 +34,6 @@ internal static class WorkspaceLaunchChoices
     internal static string? Profile(string workspaceId) => Get(workspaceId, "profile");
     internal static string? LocalModel(string workspaceId) => Get(workspaceId, "localModel");
 
-    /// <summary>Adds the remembered profile and local model to a launch.</summary>
     internal static async Task AddToAsync(JsonObject spawn, string workspaceId, string launcherId)
     {
         try
@@ -49,7 +46,6 @@ internal static class WorkspaceLaunchChoices
         }
         catch
         {
-            // A host that cannot list profiles launches on its own logins.
         }
         if (LocalModelTools.Contains(launcherId) && LocalModel(workspaceId) is { } key
             && key.IndexOf(':') is > 0 and var at && at < key.Length - 1)
@@ -59,20 +55,16 @@ internal static class WorkspaceLaunchChoices
         }
     }
 
-    /// <summary>The profile menu for the project's bar. Empty until there is
-    /// a profile other than the computer's own.</summary>
     internal static DropDownButton ProfileControl(string workspaceId, Action changed)
     {
-        var button = Menu("", "workspace.launchProfile"); // Contact
+        var button = Menu("", "workspace.launchProfile");
         _ = FillProfilesAsync(button, workspaceId, changed);
         return button;
     }
 
-    /// <summary>The local model menu for the project's bar. Shown once the
-    /// host has LM Studio or Ollama serving a model.</summary>
     internal static DropDownButton ModelControl(string workspaceId, Action changed)
     {
-        var button = Menu("", "workspace.launchModel"); // Devices
+        var button = Menu("", "workspace.launchModel");
         _ = FillModelsAsync(button, workspaceId, changed);
         return button;
     }
@@ -81,7 +73,6 @@ internal static class WorkspaceLaunchChoices
     {
         if (profiles.Lock(workspaceId) is { } locked) return locked;
         var id = Profile(workspaceId) ?? profiles.DefaultId;
-        // The launch and its label agree when a remembered profile was removed.
         return profiles.Find(id) is not null ? id : AgentProfiles.SystemId;
     }
 
@@ -135,7 +126,7 @@ internal static class WorkspaceLaunchChoices
         var defaultLabel = L10n.Text("common.launch.each_tool_default");
         var current = choices.FirstOrDefault(choice => choice.Key == selected).Label
             ?? (selected is null ? defaultLabel : selected[(selected.IndexOf(':') + 1)..]);
-        SetLabel(button, selected is null ? "" : "", current, selected is not null); // Cloud, Devices
+        SetLabel(button, selected is null ? "" : "", current, selected is not null);
         var flyout = new MenuFlyout();
         var standard = new ToggleMenuFlyoutItem { Text = defaultLabel, IsChecked = selected is null };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(standard, "workspace.launchModel.default");
@@ -198,7 +189,6 @@ internal static class WorkspaceLaunchChoices
             var all = Read();
             if (all[workspaceId] is not JsonObject entry)
             {
-                // A node can only have one parent, so attach a new one once.
                 entry = new JsonObject();
                 all[workspaceId] = entry;
             }
@@ -212,8 +202,6 @@ internal static class WorkspaceLaunchChoices
             }
             catch
             {
-                // Not remembered: the next launch uses the default profile and
-                // each tool's own model, which is what it did before a pick.
             }
         }
     }

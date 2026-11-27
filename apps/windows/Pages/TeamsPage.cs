@@ -8,13 +8,6 @@ using Tokenstat.Host;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The member's side of Teams on Windows: set up Teams on this device, pick
-/// an organization, and see each repository's computers with their work in
-/// progress, with Land or Discard for kept work. Shared chats open read with
-/// comments and Ask. Publishing a project and choosing how its work lands
-/// happen on the computer that owns it, as on the other clients.
-/// </summary>
 internal sealed partial class TeamsPage : Page
 {
     private readonly StackPanel _body = new() { Spacing = Theme.SpaceM };
@@ -24,8 +17,6 @@ internal sealed partial class TeamsPage : Page
     private JsonObject? _organization;
     private List<JsonObject> _organizations = [];
     private int? _organizationsNext;
-    // Bumped by every redraw, so a load or a watch that outlived its screen
-    // stops instead of drawing over the one now shown.
     private int _view;
     private int _attachmentRevision;
     private string _composerMode = "comment";
@@ -50,7 +41,6 @@ internal sealed partial class TeamsPage : Page
     private string? _historyTarget;
     private TeamHistoryWindow _history = new([]);
     private bool _readingEarlier;
-    // Images opened in a chat, kept so the live refresh does not close them.
     private readonly Dictionary<string, Microsoft.UI.Xaml.Media.Imaging.BitmapImage> _openedImages = new();
 
     public TeamsPage() : this(null) { }
@@ -97,8 +87,6 @@ internal sealed partial class TeamsPage : Page
         DispatcherQueue.TryEnqueue(async () => { if (IsLoaded) await LoadAsync(); });
     }
 
-    /// Every Team call carries the signed-in account's receipt. The host drops
-    /// a call when that login is no longer the one it was made for.
     private async Task<JsonNode> CallAsync(string method, JsonObject? fields = null)
     {
         var body = fields?.DeepClone() as JsonObject ?? new JsonObject();
@@ -160,7 +148,6 @@ internal sealed partial class TeamsPage : Page
             if (!Format.Flag(capabilities, "ready"))
             {
                 ShowAuthorize(Format.Flag(capabilities, "deviceRemoved"));
-                // Teams should have turned on by itself. Name the step that stopped it.
                 if (capabilities["setupIssue"] is JsonObject issue && !Format.Flag(capabilities, "deviceRemoved"))
                     Note(L10n.Text("common.teams.setup_issue", Format.Text(issue, "message"), Format.Text(issue, "code")), true);
                 return;
@@ -191,8 +178,6 @@ internal sealed partial class TeamsPage : Page
             var selected = page.Rows.FirstOrDefault(row => Format.Text(row, "id") == Format.Text(_organization, "id"));
             if (selected is null && _organization is not null && page.Next is not null)
             {
-                // A selected team may be on a later page. Recheck that exact
-                // membership instead of redirecting to the first team.
                 var current = await CallAsync("teams.directory", new JsonObject { ["operation"] = "organizations.get", ["organization"] = Format.Text(_organization, "id") });
                 if (!IsLoaded || _view != view) return;
                 selected = current["organization"] as JsonObject ?? throw new InvalidDataException();
@@ -258,8 +243,6 @@ internal sealed partial class TeamsPage : Page
         _body.Children.Add(more);
     }
 
-    /// A signed-in device turns Teams on by itself, so this is shown for a
-    /// device the person removed from Teams, or a server that predates that.
     private void ShowAuthorize(bool removed = false)
     {
         var view = _view;
@@ -325,8 +308,6 @@ internal sealed partial class TeamsPage : Page
                 if (page.Rows.Any(row => Format.Text(row, "organizationId") != orgId)) throw new InvalidDataException();
                 if (failure is not null) { _body.Children.Remove(failure); failure = null; }
                 _body.Children.Remove(more);
-                // A project nobody shares has no chats to read here. It stays
-                // in the team's repository list, where an admin can remove it.
                 foreach (var repo in page.Rows.Where(TeamManagementModel.Shared))
                 {
                     if (!IsLoaded || _view != view) return;
@@ -487,8 +468,6 @@ internal sealed partial class TeamsPage : Page
         var selectedBackend = _newChatBackends.GetValueOrDefault(key) ?? "";
         agent.SelectedValue = selectedBackend;
         agent.PlaceholderText = selectedBackend;
-        // A refreshed/older catalog must not silently replace an existing
-        // draft's backend and the identity of its pending request.
         agent.SelectionChanged += (_, _) => { if (_view == view && agent.SelectedValue is string chosen) _newChatBackends[key] = chosen; };
         box.Text = _newChatWriting.GetValueOrDefault(key) ?? "";
         box.TextChanged += (_, _) => { if (_view == view) _newChatWriting[key] = box.Text; };
@@ -643,10 +622,6 @@ internal sealed partial class TeamsPage : Page
         var runs = Format.Flag(chat, "allowsAgentRuns");
         if (askControls is { } controls)
         {
-            // One well, one thing to write at a time, as on the Mac: a switch
-            // picks Comment or Ask agent when the chat allows both. A running
-            // agent or a request or comment waiting on delivery keeps its own
-            // side in view, so Stop and Check are never behind the switch.
             if (comment is { } both && runs && askModel!.Fence is null && !askModel.Pending && !both.Model.Pending)
             {
                 var mode = _composerMode;
@@ -663,8 +638,6 @@ internal sealed partial class TeamsPage : Page
         return true;
     }
 
-    /// New comments and agent output appear while the chat is open. Stops
-    /// when another screen is drawn, and waits while someone is typing.
     private async Task KeepCurrentAsync(JsonObject target, string title, string computer, int view, List<TextBox> inputs, TeamAskModel? ask)
     {
         while (true)

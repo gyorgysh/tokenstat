@@ -28,7 +28,6 @@ internal data class TeamCommentRecovery(val target: TeamCommentTarget, val draft
 internal data class TeamCommentDraftPage(val entries: List<TeamCommentRecovery>, val next: String?, val unreadable: Boolean)
 internal class TeamDraftFailure(val key: String) : java.io.IOException(key)
 
-/** App-private local writing. No personal queue, shared storage or automatic resend. */
 internal class TeamCommentDraftStore(private val directory: File) {
     companion object {
         private val gate = Any(); private const val LIMIT = 128 * 1024
@@ -60,7 +59,6 @@ internal class TeamCommentDraftStore(private val directory: File) {
     private fun read(file: File): Envelope? {
         if (!file.exists()) return null
         if (Files.isSymbolicLink(file.toPath()) || file.length() > LIMIT) throw TeamDraftFailure("comment_save_failed")
-        // Bound the read even when a file changes after the length check.
         val bytes = file.inputStream().use { stream ->
             val buffer = ByteArray(LIMIT + 1); var length = 0
             while (length < buffer.size) { val count = stream.read(buffer, length, buffer.size - length); if (count < 0) break; length += count }
@@ -94,7 +92,6 @@ internal class TeamCommentDraftStore(private val directory: File) {
                 Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
             } finally { temp.delete() }
         }
-        // The attempt's rename is durable before the caller sends anything.
         FileChannel.open(owner.toPath(), StandardOpenOption.READ).use { it.force(true) }
     }
     fun load(t: TeamCommentTarget): TeamCommentDraft? = locked(t) { read(it, t) }

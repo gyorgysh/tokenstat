@@ -6,7 +6,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>The account vault uses the same envelopes as Mac and Android.</summary>
 internal static partial class SshVault
 {
     public static async Task<UIElement> CardAsync(UIElement owner, Func<Task> reload)

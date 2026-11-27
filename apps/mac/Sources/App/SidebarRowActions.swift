@@ -5,7 +5,6 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// One flags monitor for all rows. Ordinary typing does not invalidate them.
 @MainActor @Observable
 final class SidebarModifierKeys {
     static let shared = SidebarModifierKeys()
@@ -23,7 +22,6 @@ final class SidebarModifierKeys {
     func refresh() { shift = NSEvent.modifierFlags.contains(.shift) }
 }
 
-/// Both controls occupy the same reserved seat, so hover never moves a title.
 struct SidebarRowActions: View {
     let name: String
     let visible: Bool
@@ -150,7 +148,6 @@ enum SidebarPinAction {
     }
 }
 
-/// Menus suspend hover cards until their native tracking loop finishes.
 @MainActor @Observable
 final class SidebarMenuTracking {
     static let shared = SidebarMenuTracking()

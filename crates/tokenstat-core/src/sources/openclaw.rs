@@ -113,8 +113,6 @@ pub fn parse_sessions_file(path: &Path, contents: &str) -> ParseOutput {
         .to_string();
 
     for (key, row) in root {
-        // A missing bucket is unknown, not zero: writing it down as a zero
-        // would defeat `has_unknown` and present a partial sum as complete.
         let input = row.input_tokens;
         let output = row.output_tokens;
         let cache_read = row.cache_read;
@@ -219,8 +217,6 @@ fn parse_model_completed(row: &Value, fallback_session: &str, agent: &str) -> Op
         .or_else(|| data.get("usage"))
         .or_else(|| data.get("lastCallUsage"))?;
 
-    // Each lookup stays an `Option`: a key the provider left out is unknown,
-    // not a measured zero, and a zero here must not clear `has_unknown`.
     let input = json_u64_opt(usage.get("input").or_else(|| usage.get("inputTokens")));
     let output = json_u64_opt(usage.get("output").or_else(|| usage.get("outputTokens")));
     let cache_read = json_u64_opt(
@@ -291,9 +287,6 @@ fn billing_for_provider(provider: Option<&str>) -> BillingMode {
     }
 }
 
-/// A counter the provider may not have reported. A missing key, a null, or a
-/// non-numeric value all read back as `None`: the vendor stated no figure, so
-/// the counter stays unknown rather than becoming a zero it never measured.
 fn json_u64_opt(v: Option<&Value>) -> Option<u64> {
     v.and_then(|inner| {
         inner

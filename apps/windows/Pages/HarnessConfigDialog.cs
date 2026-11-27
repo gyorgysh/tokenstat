@@ -7,7 +7,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>The tool's own settings and explicit installer, on its owning machine.</summary>
 internal static class HarnessConfigDialog
 {
     public static async Task<bool> ShowAsync(UIElement owner, JsonNode profile, string machine,

@@ -5,8 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// An empty chat left behind by New chat is not a conversation, and a list
-/// of them hides the ones that are. Anything with a word in it stays.
 class UntouchedChatsTest {
     @Test
     fun `an unused chat with the default title is left out`() {

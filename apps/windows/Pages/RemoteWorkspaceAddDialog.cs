@@ -10,7 +10,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Register or clone a folder on its owning computer, as on desktop Mac.</summary>
 internal sealed class RemoteWorkspaceAddDialog
 {
     private readonly ContentDialog _dialog = new()
@@ -121,7 +120,6 @@ internal sealed class RemoteWorkspaceAddDialog
         finally
         {
             view._closed.Cancel();
-            // In-flight host calls retain the token until their continuations finish.
         }
     }
 
@@ -164,7 +162,7 @@ internal sealed class RemoteWorkspaceAddDialog
                 var account = await AppServices.Host.CallAsync("account.status");
                 machines = account["machines"] as JsonArray ?? new();
             }
-            catch { /* approved peers remain usable without the account directory */ }
+            catch { }
             if (_closed.IsCancellationRequested) return;
             _peers.Clear();
             foreach (var peer in listed)

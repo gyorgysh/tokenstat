@@ -62,8 +62,7 @@ pub fn excerpt(original: &str, terms: &[String]) -> (String, Vec<Highlight>) {
     if end < graphemes.len() {
         end -= 1;
     }
-    // A single grapheme may contain arbitrarily many combining marks.
-    // Never split it, and never let it create an unbounded wire excerpt.
+
     let mut bytes = prefix * "…".len();
     for (index, grapheme) in graphemes.iter().enumerate().take(end).skip(start) {
         if bytes + grapheme.len() + "…".len() > 16 * 1024 {

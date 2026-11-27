@@ -14,9 +14,6 @@ enum ClientReviewPrompt {
     private static let lastAskedKey = "review.lastAskedAt"
     private static let firstSeenKey = "review.firstSeenAt"
     private static let usesKey = "review.usesSinceAsk"
-    /// Set once the person rated, wrote to us, or said not to ask. The
-    /// automatic ask never comes back after that, and Settings still opens
-    /// the rating sheet by hand.
     private static let stoppedKey = "review.never"
     static let interval: TimeInterval = 14 * 24 * 3600
     static let settle: TimeInterval = 7 * 24 * 3600
@@ -28,7 +25,6 @@ enum ClientReviewPrompt {
         }
     }
 
-    /// A message sent or a terminal opened.
     static func noteUse(_ defaults: UserDefaults = .standard) {
         defaults.set(defaults.integer(forKey: usesKey) + 1, forKey: usesKey)
     }
@@ -48,7 +44,6 @@ enum ClientReviewPrompt {
     /// The App Store page for this app, opened on its review form.
     static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6800501432?action=write-review")
 
-    /// The person has answered: no automatic ask on this device again.
     static func stop(_ defaults: UserDefaults = .standard) {
         defaults.set(true, forKey: stoppedKey)
     }

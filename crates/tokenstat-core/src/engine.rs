@@ -123,8 +123,6 @@ impl Engine {
         q: &Query,
         prices: &PriceTable,
     ) -> Result<Vec<PricedBucket>, CoreError> {
-        // Recovered and live usage form one source. Limiting before that fold
-        // can discard part of the winning source or select the wrong winner.
         let mut query = q.clone();
         if group == GroupBy::Source {
             query.limit = None;
@@ -208,7 +206,6 @@ impl Engine {
     }
 }
 
-/// Fold estimate and rollup rows into Claude Code. Disk ids stay as they are.
 fn fold_source_buckets(rows: Vec<Bucket>) -> Vec<Bucket> {
     let mut merged: Vec<Bucket> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -322,11 +319,6 @@ mod tests {
       ]
     }"#;
 
-    /// A clock alone is not unique enough. `SystemTime::now()` does not
-    /// advance every nanosecond, so two tests entering together built the same
-    /// path, shared one SQLite file, and saw each other's events. That failed
-    /// as a wrong row count in whichever test lost the race, which reads as a
-    /// query bug and is not one.
     static ENGINE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     fn engine() -> Engine {
@@ -386,8 +378,6 @@ mod tests {
         let tz = jiff::tz::TimeZone::UTC;
         let mut a = ev("a", "claude-opus-4-5", "s1");
         let mut b = ev("b", "claude-sonnet-4-5", "s1");
-        // Saturate on different columns, so the bucket SUMs stay in range
-        // while each split's priced value saturates on its own.
         a.counters.input_fresh = Some(u64::MAX);
         a.counters.output = None;
         b.counters.input_fresh = None;
@@ -408,8 +398,6 @@ mod tests {
             .priced_report(GroupBy::Day, &Query::default(), &prices)
             .unwrap();
 
-        // Each split saturates its own bucket; the fold must saturate too
-        // rather than wrap to a negative figure or panic.
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value.micros(), i64::MAX);
     }
@@ -432,9 +420,6 @@ mod tests {
             .report_split(GroupBy::Project, GroupBy::Source, &Query::default())
             .unwrap();
 
-        // Two harnesses in alpha, one in beta. This is the shape the sidebar
-        // tree is built from, and it must come from one query rather than a
-        // filtered query per project.
         let alpha: Vec<_> = rows.iter().filter(|r| r.key == "/work/alpha").collect();
         let beta: Vec<_> = rows.iter().filter(|r| r.key == "/work/beta").collect();
         assert_eq!(alpha.len(), 2);
@@ -486,8 +471,6 @@ mod tests {
             .priced_report(GroupBy::Day, &Query::default(), &prices)
             .unwrap();
 
-        // The value covers only the model that could be priced, and the bucket
-        // says so instead of presenting a short figure as a total.
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].is_complete());
         assert_eq!(rows[0].unpriced_models, vec!["totally-unknown-model"]);
@@ -504,7 +487,6 @@ mod tests {
         rollup.source = SourceId::ClaudeCodeRollup;
         e.store_mut().insert_events(&[live, rollup], &tz).unwrap();
 
-        // Old builds wrote the same shortfall as claude_code_estimate.
         {
             let conn = rusqlite::Connection::open(e.db_path()).unwrap();
             conn.execute(

@@ -3,14 +3,12 @@
 import Foundation
 
 enum SetupTourPreferences {
-    // Bump when the tour introduces something people should see.
     static let revision = 1
     static let seenKey = "setupTour.seenRevision"
     static let legacySeenKey = "setupTour.seenVersion"
     static let disabledKey = "setupTour.disabled"
     static let launchedKey = "setupTour.launchedBefore"
 
-    /// Take the first-launch snapshot before setting the flag for next time.
     static let isFirstLaunch = recordLaunch()
     private static func recordLaunch() -> Bool {
         let defaults = UserDefaults.standard
@@ -25,8 +23,6 @@ enum SetupTourPreferences {
                            firstLaunch: Bool = isFirstLaunch) -> Bool {
         guard signedIn, !firstLaunch, !defaults.bool(forKey: disabledKey) else { return false }
         var seenRevision = defaults.integer(forKey: seenKey)
-        // A dismissal under the old app-version scheme counts as seeing
-        // revision 1. It remains revision 1 when a later tour is introduced.
         if seenRevision == 0, defaults.string(forKey: legacySeenKey)?.isEmpty == false {
             seenRevision = 1
             defaults.set(seenRevision, forKey: seenKey)

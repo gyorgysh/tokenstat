@@ -159,8 +159,6 @@ impl Service {
         }
         #[cfg(target_os = "macos")]
         {
-            // The same script that installs it, so one file owns the label,
-            // the plist path and the legacy cleanup.
             let status = Command::new("bash")
                 .arg("-c")
                 .arg(include_str!("../../../scripts/install-host-agent.sh"))

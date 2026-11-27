@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use crate::transcript::Event;
 
-/// Coalesce adjacent deltas and split at UTF-8 boundaries before persistence.
-/// Continuation IDs and unscoped attachment references never become output.
 fn normalized(events: Vec<Event>) -> Result<Vec<Event>, DispatchError> {
     let mut rows = Vec::new();
     for event in events {

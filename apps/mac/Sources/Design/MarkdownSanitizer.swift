@@ -3,9 +3,6 @@ import Foundation
 
 enum MarkdownSanitizer {
     static func inline(_ source: String) -> String {
-        // Local file links are promoted to first-class chat attachments by
-        // the host. Keep only their human label in the prose so an absolute
-        // filesystem path is not duplicated above the attachment card.
         var safe = replacingLocalAttachmentLinks(in: source)
         safe = replacingImages(in: safe)
         return safe
@@ -52,12 +49,6 @@ enum MarkdownSanitizer {
         return output.joined(separator: "\n")
     }
 
-    /// The most text HTML conversion will read.
-    ///
-    /// GitHub caps a body at 64 KB, so any document past this is not a
-    /// conversation that grew long: it is input built to be expensive. What
-    /// is beyond the cap is left exactly as it arrived and only the prefix is
-    /// converted, so an oversized body still renders as plain text.
     private static let htmlCap = 128 * 1024
 
     private static func convertHTMLBlocks(_ source: String) -> String {
@@ -70,26 +61,14 @@ enum MarkdownSanitizer {
             return convertHTMLBlocks(String(source[..<split])) + String(source[split...])
         }
 
-        // Most bodies are plain Markdown with no tags and no entities in them.
-        // Everything between here and the whitespace tidy-up exists to turn
-        // GitHub's HTML into Markdown, and running twenty regular expressions
-        // and as many whole-string copies over a document that contains no
-        // markup is pure cost, paid on the main thread while a row is being
-        // laid out. One scan to find out is worth it.
         if source.contains("<") || source.contains("&") {
 
-        // Literal `<thing>` inside an inline code span is source text, not an
-        // HTML tag. Hide those spans while tags are converted and restore them
-        // afterwards. Fenced blocks are excluded by `blocks` above.
         safe = replace(pattern: #"`[^`\n]*`"#, in: safe) { match, string in
             let slot = codeSpans.count
             codeSpans.append(substring(match.range, in: string))
             return "\u{E000}\(slot)\u{E001}"
         }
 
-        // Preserve links before stripping their tags. A linked `<code>` label
-        // deliberately becomes a normal linked label: AttributedString cannot
-        // express code styling nested inside a Markdown link consistently.
         safe = replacingAnchors(in: safe)
 
         safe = replace(pattern: #"(?i)<strong[^>]*>"#, in: safe) { _, _ in "**" }
@@ -99,9 +78,6 @@ enum MarkdownSanitizer {
         safe = replace(pattern: #"(?i)<code[^>]*>"#, in: safe) { _, _ in "`" }
         safe = replace(pattern: #"(?i)</code\s*>"#, in: safe) { _, _ in "`" }
 
-        // A summary is the visible label of a GitHub details block. The
-        // native renderer has no disclosure control, so show it as a compact
-        // heading above the content that GitHub would reveal.
         safe = replace(pattern: #"(?i)<summary[^>]*>"#, in: safe) { _, _ in "\n\n### " }
         safe = replace(pattern: #"(?i)</summary\s*>"#, in: safe) { _, _ in "\n\n" }
         for level in 1...6 {
@@ -127,10 +103,6 @@ enum MarkdownSanitizer {
         ) { _, _ in "\n\n" }
 
         safe = strippingComments(in: safe)
-        // Only discard things that actually have the shape of HTML tags.
-        // A broad `<[^>]+>` also eats Markdown autolinks such as
-        // `<https://example.com>` and prose such as `one < two and three >
-        // two`, both of which are ordinary conversation content.
         safe = replace(
             pattern: #"(?i)</?[a-z][a-z0-9:-]*(?:\s+[^<>]*?)?\s*/?>"#,
             in: safe
@@ -138,13 +110,8 @@ enum MarkdownSanitizer {
         safe = decodeEntities(in: safe)
         }
 
-        // Keep Markdown indentation: nested list depth belongs to the parser.
-        // Generated HTML markers already start at column zero. Collapse blank
-        // lines without flattening original Markdown inside or beside HTML.
         safe = replace(pattern: #"[ \t]+\n"#, in: safe) { _, _ in "\n" }
         safe = replace(pattern: #"\n{3,}"#, in: safe) { _, _ in "\n\n" }
-        // Consecutive HTML `<li>` rows should be one Markdown list, not 81
-        // one-row lists separated by card-sized paragraph spacing.
         safe = replace(pattern: #"\n{2,}(?=- )"#, in: safe) { _, _ in "\n" }
         for (slot, code) in codeSpans.enumerated() {
             safe = safe.replacingOccurrences(of: "\u{E000}\(slot)\u{E001}", with: code)
@@ -200,7 +167,6 @@ enum MarkdownSanitizer {
         let string = source as NSString
         let matches = expression.matches(in: source, range: NSRange(location: 0, length: string.length))
         guard !matches.isEmpty else { return source }
-        // Preserve callback order: code-span replacement assigns identifiers.
         let replacements = matches.reversed().map { transform($0, string) }
         let result = NSMutableString()
         var cursor = 0
@@ -213,11 +179,6 @@ enum MarkdownSanitizer {
         return result as String
     }
 
-    /// Compiled patterns, so one document does not compile the same shape
-    /// twenty times and every scroll afterward does not compile it again.
-    /// `NSCache` is thread safe: `warm` runs
-    /// through here on a detached task while a row may be parsing on the
-    /// main one.
     private static let expressions: NSCache<NSString, NSRegularExpression> = {
         let cache = NSCache<NSString, NSRegularExpression>()
         cache.countLimit = 64
@@ -231,14 +192,6 @@ enum MarkdownSanitizer {
         return compiled
     }
 
-    /// Convert `<a href="…">label</a>` to Markdown in one pass.
-    ///
-    /// The regular expression this replaced searched for a close tag with
-    /// `[\s\S]*?` from every open one, and its open-tag shape scanned to the
-    /// end of the document for every `<a` with no `>`, so input full of
-    /// half-written anchors was quadratic. Open and close tags are each found
-    /// in one forward scan here, then paired by position, so no part of the
-    /// text is ever rescanned.
     private static func replacingAnchors(in source: String) -> String {
         guard source.range(of: "<a", options: [.caseInsensitive]) != nil else { return source }
         let string = source as NSString
@@ -254,9 +207,6 @@ enum MarkdownSanitizer {
         while true {
             if let current = open {
                 guard closeIndex < closes.count else {
-                    // No close: the text stays as it is, exactly as it did
-                    // when the regular expression declined to match and the
-                    // generic tag stripper removed the lone open tag.
                     break
                 }
                 let close = closes[closeIndex]
@@ -277,8 +227,6 @@ enum MarkdownSanitizer {
             let nextClose = closeIndex < closes.count ? closes[closeIndex] : nil
             guard nextOpen != nil || nextClose != nil else { break }
             if let close = nextClose, nextOpen == nil || close.location < nextOpen!.location {
-                // A stray close tag. Keep it for the generic stripper, which
-                // is what removed it before.
                 output.append(string.substring(with: NSRange(location: cursor, length: close.location + close.length - cursor)))
                 cursor = close.location + close.length
                 closeIndex += 1
@@ -302,12 +250,6 @@ enum MarkdownSanitizer {
         return output as String
     }
 
-    /// Every `<a …>` or `</a>` in the text, in one forward scan.
-    ///
-    /// `<a` only counts when a letter cannot continue it, so `<abbr>` is not
-    /// an anchor, and a tag with no `>` ends the scan instead of being
-    /// searched for again: that is what keeps this linear where the regular
-    /// expression was not.
     private static func anchorTags(in string: NSString, closing: Bool) -> [NSRange] {
         let literal = closing ? "</a" : "<a"
         var tags: [NSRange] = []
@@ -354,16 +296,6 @@ enum MarkdownSanitizer {
         return string.substring(with: match.range(at: 1))
     }
 
-    /// The label and destination as Markdown, or the label alone when the
-    /// destination is not one the app will open.
-    ///
-    /// A body is untrusted text. Only http, https and mailto reach the URL
-    /// handler; anything else is shown as its label, so a `javascript:` or
-    /// `file:` href can no more become a live link than it could when the tag
-    /// was dropped outright. A destination with whitespace or a bracket in it
-    /// could otherwise break out of the `[label](url)` shape and inject
-    /// Markdown, so those are refused too, and the label's own brackets are
-    /// escaped so it cannot close the link early.
     private static func anchorMarkdown(href: String, label rawLabel: String) -> String {
         var label = strippingTags(in: rawLabel)
         label = label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -381,12 +313,6 @@ enum MarkdownSanitizer {
         return "[\(label)](\(href))"
     }
 
-    /// Drop `<!-- … -->` in one forward pass.
-    ///
-    /// The lazy `[\s\S]*?-->` this replaced rescanned a document's whole
-    /// remainder from every `<!--` when no `-->` followed, which is quadratic
-    /// on text built exactly that way. An unterminated comment is left alone,
-    /// as before.
     private static func strippingComments(in source: String) -> String {
         guard source.range(of: "<!--") != nil else { return source }
         let string = source as NSString
@@ -418,12 +344,6 @@ enum MarkdownSanitizer {
         return output as String
     }
 
-    /// Remove `<…>` tag spans from a label, in one forward pass.
-    ///
-    /// `[^>]+` between literal brackets scans to the end of the string from
-    /// every `<` when no `>` follows, so a label built from `<` characters
-    /// was quadratic. This never looks past the next `<` or `>`, and leaves
-    /// an unterminated tag in place as the regular expression did.
     private static func strippingTags(in source: String) -> String {
         guard source.contains("<") else { return source }
         let string = source as NSString
@@ -455,7 +375,6 @@ enum MarkdownSanitizer {
         return output as String
     }
 
-    /// A tag boundary: whitespace or the `>` that ends an attribute list.
     private static func isAnchorBoundary(_ character: unichar) -> Bool {
         character == 62 || isHTMLWhitespace(character)
     }

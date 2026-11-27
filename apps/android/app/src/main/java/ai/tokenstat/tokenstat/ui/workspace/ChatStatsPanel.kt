@@ -147,7 +147,6 @@ internal data class ChatInspectionSnapshot(val data: JsonObject?, val loaded: Bo
                         loaded = true
                     },
                     onFailure = {
-                        // Keep the last matching snapshot while its live lease expires.
                         liveLease = false
                         loaded = true
                     },
@@ -256,8 +255,6 @@ private fun toolGroup(name: String): String = if (name.startsWith("mcp__")) name
     val accent = LocalTsColors.current.accent
     val colors = listOf(accent, accent.copy(alpha = .55f), LocalTsColors.current.warning)
     val background = LocalTsColors.current.border
-    // Prompt categories can segment the bar only when they exactly account for
-    // the reported context amount. Otherwise show the reported amount alone.
     val segments = metrics.capacitySegments()
     Canvas(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))) {
         drawRect(background)

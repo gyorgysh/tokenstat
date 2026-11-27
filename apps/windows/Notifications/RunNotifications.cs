@@ -12,24 +12,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat.Notifications;
 
-/// <summary>
-/// Local toasts for agent runs that ended on this computer. Mirrors the Mac
-/// RunNotifications: fed from the same run lists the pages already read, so
-/// there is no second source of truth, and only transitions are reported, and
-/// only after the first read, so a launch that finds finished runs from last
-/// night posts nothing.
-/// </summary>
-/// <remarks>
-/// Fixed titles only, and the body names the run the way the list already
-/// does. Folder paths, prompts, commands, and anything else from the work
-/// itself are never composed into a notification, local or otherwise: the
-/// push reason rule (a reason from a fixed list and a machine id, never
-/// content) holds here by keeping content out entirely. Toasts stay on this
-/// machine and need no account and no network.
-/// <para/>
-/// Off until asked for. A permission prompt on first launch, for a feature
-/// nobody has asked for yet, is the reason people say no forever.
-/// </remarks>
 internal sealed class RunNotifications
 {
     public static RunNotifications Shared { get; } = new();
@@ -45,7 +27,6 @@ internal sealed class RunNotifications
 
     private readonly Dictionary<Feed, Dictionary<string, string>> _lastStatus = new();
 
-    /// <summary>Feeds read once. Before that, everything is history.</summary>
     private readonly HashSet<Feed> _primed = new();
 
     private bool _registered;
@@ -54,7 +35,6 @@ internal sealed class RunNotifications
     {
     }
 
-    /// <summary>Off until asked for. Persisted locally, never synced.</summary>
     public bool IsOn
     {
         get => ReadOn();
@@ -89,10 +69,6 @@ internal sealed class RunNotifications
         }
         catch
         {
-            // A toast that cannot register is quiet, not fatal. The run list
-            // on screen still says what happened. The switch read is inside
-            // the try on purpose: this runs on the launch path before any
-            // window exists, and nothing here may kill a launch.
         }
     }
 
@@ -140,16 +116,9 @@ internal sealed class RunNotifications
         }
         catch
         {
-            // A switch that cannot persist still works for this run.
         }
     }
 
-    /// <summary>
-    /// Agent runs, as of this refresh. Steps stay quiet: a workflow node
-    /// starts an ordinary automation run, and machinery under something the
-    /// person started does not report to them. The workflow speaks for its
-    /// own steps.
-    /// </summary>
     public void SettleAutomations(JsonArray runs)
     {
         var top = new JsonArray();
@@ -164,10 +133,6 @@ internal sealed class RunNotifications
         Settle(top, Feed.Automations, workflows: false);
     }
 
-    /// <summary>
-    /// Workflow runs, as of this refresh. A workflow that is waiting has hit
-    /// a gate, which is a person's turn and worth saying so.
-    /// </summary>
     public void SettleWorkflows(JsonArray runs) => Settle(runs, Feed.Workflows, workflows: true);
 
     private void Settle(JsonArray runs, Feed feed, bool workflows)
@@ -202,8 +167,6 @@ internal sealed class RunNotifications
             {
                 continue;
             }
-            // Only a live run can produce news. A record rewritten by a
-            // reconcile is not something that just happened.
             if (previous != "running" && previous != "queued")
             {
                 continue;
@@ -236,10 +199,6 @@ internal sealed class RunNotifications
         return L10n.Text("windows.runnotifications.exit_0.32dc93f6", $"{Format.Long(run, "exitCode")}");
     }
 
-    /// <summary>
-    /// The settings button. Posts through the same path a real run would, so
-    /// a test that arrives proves the real one will.
-    /// </summary>
     public void SendTest()
     {
         EnsureRegistered();
@@ -260,7 +219,6 @@ internal sealed class RunNotifications
         }
         catch
         {
-            // A toast must never break the refresh that noticed the news.
         }
     }
 }

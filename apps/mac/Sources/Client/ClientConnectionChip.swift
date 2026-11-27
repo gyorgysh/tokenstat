@@ -7,20 +7,7 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The one place the client says the network is unwell.
-///
-/// Hidden while everything answers, so it never becomes furniture. Present, it
-/// is four words and a glyph, and tapping it explains which of the three
-/// things is wrong and offers the one control that can help.
-///
-/// It does not replace what a screen says about its own empty state. It is the
-/// global answer, the screen gives the local one, and they cannot contradict
-/// each other because both read `ConnectionModel`.
 struct ClientConnectionChip: View {
-    /// Glyph only. The words are three of them and a top bar that is 300
-    /// points wide is already carrying an avatar and a title: "Computer
-    /// unreachable" landed on top of both. The sentence lives in the popover,
-    /// which is where somebody who tapped it is looking anyway.
     var compact = false
 
     @Environment(ConnectionModel.self) private var connection
@@ -55,8 +42,6 @@ struct ClientConnectionChip: View {
         }
     }
 
-    /// A glyph per cause. A wall of identical warning triangles teaches people
-    /// to stop reading them, which `FriendlyError` argues at more length.
     private var symbol: String {
         if connection.isOffline { return "wifi.slash" }
         if connection.serviceFailing { return "exclamationmark.icloud" }
@@ -75,10 +60,6 @@ struct ClientConnectionChip: View {
                 Text(connection.title)
                     .font(ClientType.label.weight(.semibold))
                 Spacer(minLength: 0)
-                // Tapping outside already closes this, but a popover with no
-                // visible way out reads as stuck. This closes the popover and
-                // leaves the chip: the warning itself stands until it clears,
-                // the same as the Android dialog's Close.
                 NoticeDismissButton { showDetail = false }
             }
             Text(connection.detail)
@@ -100,15 +81,10 @@ struct ClientConnectionChip: View {
             .tint(Theme.accent)
         }
         .padding(Theme.Space.m)
-        // A fixed width, not a maximum. A popover sizes itself to what it is
-        // given, and "at most 320" let it collapse around the longest line and
-        // then sit half over the bar it came from.
         .frame(width: 300, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// The most recent answer from either plane. "Nothing since you opened the
-    /// app" is said by leaving this out rather than by inventing a date.
     private var lastGood: String? {
         let dates = [connection.lastServiceSuccess, connection.lastPeerSuccess].compactMap { $0 }
         guard let newest = dates.max() else { return nil }

@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Normalize partial provider text before the existing transcript parser.
-//! Only ordinary text/thinking events reach clients; completed records still
-//! carry tools, usage, images and inspection metadata.
-
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -26,8 +21,6 @@ impl Prefix {
     }
 
     fn remainder<'a>(&self, text: &'a str) -> &'a str {
-        // Keep a digest rather than another copy of potentially large output.
-        // A corrected or otherwise inconsistent final snapshot stays visible.
         match text.get(..self.bytes) {
             Some(prefix) if Sha256::digest(prefix.as_bytes()) == self.hash.clone().finalize() => {
                 &text[self.bytes..]
@@ -46,8 +39,6 @@ struct ClaudeMessage {
 
 #[derive(Default)]
 pub(crate) struct Streams {
-    // Claude's partial envelopes carry the parent tool id, while the final
-    // assistant record identifies its message directly.
     claude_active: HashMap<String, String>,
     claude: HashMap<String, ClaudeMessage>,
     codex: HashMap<String, Prefix>,
@@ -145,10 +136,6 @@ impl Streams {
             && let Some(message) = self.claude.get_mut(&id)
             && let Some(content) = value["message"]["content"].as_array_mut()
         {
-            // Claude emits one assistant record per completed block, before
-            // content_block_stop. Its single-element content array does not
-            // carry the original block index. Older full snapshots use array
-            // indices instead. Keep the other blocks until message_stop.
             let single_index = (content.len() == 1)
                 .then_some(message.current_block)
                 .flatten();
@@ -372,8 +359,7 @@ mod tests {
             )),
             "!"
         );
-        // Older exec versions emit no deltas; a new message with identical
-        // text must also remain a new message.
+
         assert_eq!(
             text(&feed(
                 &mut p,
@@ -398,7 +384,6 @@ mod tests {
                 vec![
                     json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"one"}}}),
                     json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi 🌍"}}}),
-                    // Some adapters close the stream before its final snapshot.
                     json!({"type":"stream_event","event":{"type":"message_stop"}}),
                     json!({"type":"assistant","message":{"id":"one","content":[{"type":"text","text":"Hi 🌍 \n"}]}}),
                 ],

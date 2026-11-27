@@ -11,12 +11,8 @@ struct TeamChatReadingKey: PreferenceKey {
 }
 
 private struct TeamAvatarOwnerKey: EnvironmentKey { static let defaultValue: TeamAccountOwner? = nil }
-/// Opens the team thread for a shared chat: the share id, and the folder the
-/// chat belongs to when it is known.
 typealias TeamChatOpener = @MainActor (String, String?) -> Void
 private struct TeamChatOpenerKey: EnvironmentKey { static let defaultValue: TeamChatOpener? = nil }
-/// A file from someone else's computer. Name and type are the ones that
-/// computer derived from the stored file, never the history's own label.
 struct TeamAttachmentFile: Sendable { let name: String; let mediaType: String?; let data: Data }
 typealias TeamAttachmentLoader = @MainActor @Sendable (String) async throws -> TeamAttachmentFile
 private struct TeamAttachmentLoaderKey: EnvironmentKey { static let defaultValue: TeamAttachmentLoader? = nil }
@@ -31,8 +27,6 @@ extension EnvironmentValues {
         get { self[TeamCommentStorageKey.self] }
         set { self[TeamCommentStorageKey.self] = newValue }
     }
-    /// Fetches one file the shared history shows from the publishing computer.
-    /// Nil outside a Team reader, where attachments are not reachable.
     var teamAttachmentLoader: TeamAttachmentLoader? {
         get { self[TeamAttachmentLoaderKey.self] }
         set { self[TeamAttachmentLoaderKey.self] = newValue }
@@ -48,10 +42,8 @@ extension EnvironmentValues {
 }
 
 enum TeamColors {
-    // The app's own accent and danger, so Team screens read as the same app.
     static let action = Theme.accent
     static let destructive = Theme.danger
-    // Keep the app's amber hue, with enough contrast for small text on light panels.
     static let warning = Color.adaptive(light: Color(red: 0x80 / 255, green: 0x54 / 255, blue: 0x0A / 255), dark: Theme.warning)
 }
 
@@ -166,7 +158,6 @@ struct TeamNotice: View {
         .accessibilityElement(children: .combine)
     }
 }
-/// The app's own button styles. Touch platforms get the comfortable size.
 struct TeamButtonStyle: ButtonStyle {
     var primary = false
     #if os(iOS)
@@ -209,9 +200,6 @@ struct TeamRowButtonStyle: ButtonStyle {
         .contentShape(.rect)
     }
 }
-/// The row under the chrome bar on every Team screen, the same row Devices
-/// has: the screen's tabs on the leading edge, its actions on the trailing
-/// edge, a hairline under both.
 struct TeamToolbarRow<Leading: View, Trailing: View>: View {
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var trailing: () -> Trailing
@@ -228,8 +216,6 @@ struct TeamToolbarRow<Leading: View, Trailing: View>: View {
     }
 }
 
-/// The scrolling body of a Team screen: the full width of the window with
-/// the same margin and gap as Devices, so cards line up across screens.
 struct TeamPage<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
@@ -242,27 +228,22 @@ struct TeamPage<Content: View>: View {
 }
 
 extension View {
-    /// A tile inside a card: the page ground, a hairline and a smaller
-    /// radius, so it reads as part of the card around it.
     func teamTile() -> some View {
         background(Theme.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
-    /// A standalone surface outside a card, with the card's own radius.
     func teamCard() -> some View {
         background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
-    /// Spacing of one row inside a card. The card supplies the side margin.
     func teamRowPadding() -> some View {
         padding(.vertical, Theme.Space.s)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }
 
-/// Rows inside a card, with a hairline between each pair.
 struct TeamRows<Item: Identifiable, Row: View>: View {
     let items: [Item]
     @ViewBuilder let row: (Item) -> Row
@@ -276,9 +257,6 @@ struct TeamRows<Item: Identifiable, Row: View>: View {
     }
 }
 
-/// A row that opens something. Hover and press tint the row the way a
-/// sidebar row tints, reaching just past the text so the tint has a margin,
-/// and a chevron says it leads somewhere.
 struct TeamListRowButtonStyle: ButtonStyle {
     var chevron = true
     func makeBody(configuration: Configuration) -> some View { RowBody(configuration: configuration, chevron: chevron) }
@@ -302,8 +280,6 @@ struct TeamListRowButtonStyle: ButtonStyle {
     }
 }
 
-/// One count on an overview, in the shape of the app's summary tiles. Every
-/// tile in a row has the same height and width, and the label never wraps.
 struct TeamMetricTile: View {
     let title: String
     let value: String
@@ -330,8 +306,6 @@ struct TeamMetricTile: View {
     }
 }
 
-/// A setting on a Settings page: what it is on the leading side, the
-/// control that changes it on the trailing side.
 struct TeamSettingRow<Control: View>: View {
     let title: String
     var detail: String?
@@ -351,7 +325,6 @@ struct TeamSettingRow<Control: View>: View {
     }
 }
 
-/// The trailing "more" menu of a row: platform menu rows, one glyph.
 struct TeamRowMenu<Content: View>: View {
     let label: String
     @ViewBuilder var content: () -> Content
@@ -407,8 +380,6 @@ enum TeamSheet: Identifiable {
     }
 }
 
-/// Menu picker titles are not visible outside Form on iOS. Keep the field name
-/// separate so every repository and permission level can be identified.
 struct TeamPickerField<Selection: Hashable, Options: View>: View {
     let title: String
     @Binding var selection: Selection
@@ -439,8 +410,6 @@ struct TeamChatActivityBadge: View {
     }
 }
 
-/// What the shared chat composer sends: a comment people read, or a
-/// request the publishing computer's agent runs.
 enum TeamComposerMode: String, CaseIterable, Hashable {
     case comment, ask
     var label: String {
@@ -451,9 +420,6 @@ enum TeamComposerMode: String, CaseIterable, Hashable {
     }
 }
 
-/// Buttons in a toolbar row and in the composer well. The Mac uses the
-/// dense size Devices and the main composer use. A phone keeps the
-/// comfortable touch target.
 struct TeamSmallButtonStyle: ButtonStyle {
     var primary = false
     @ViewBuilder func makeBody(configuration: Configuration) -> some View {
@@ -471,8 +437,6 @@ struct TeamSmallButtonStyle: ButtonStyle {
     }
 }
 
-/// The text field of the composer well: no box of its own, because the
-/// well is the box, exactly as in the main chat composer.
 struct TeamComposerField: View {
     let placeholder: String
     @Binding var text: String
@@ -485,8 +449,6 @@ struct TeamComposerField: View {
     }
 }
 
-/// The two views of the Teams place: the organizations and every shared
-/// project across them.
 enum TeamHubPage: String, CaseIterable, Hashable {
     case organizations, projects
     var label: String {
@@ -497,9 +459,6 @@ enum TeamHubPage: String, CaseIterable, Hashable {
     }
 }
 
-/// The sections of an organization on a phone: the same choice as the Mac's
-/// tabs, as a row of chips that scrolls when it does not fit, so every
-/// section is one tap away instead of behind a menu.
 struct TeamSectionChips: View {
     @Binding var selection: TeamSection
     var body: some View {
@@ -532,9 +491,6 @@ struct TeamSectionChips: View {
     }
 }
 
-/// Which teams can open a folder, as small accent pills. The same mark on
-/// the Mac's repository list and the phone's, so a shared folder is told
-/// apart at a glance wherever it is listed.
 struct TeamFolderBadges: View {
     let names: [String]
     var body: some View {
@@ -550,10 +506,6 @@ struct TeamFolderBadges: View {
     }
 }
 
-/// Says that Teams is an early preview, and what that means, wherever Team
-/// is open. It is a disclaimer rather than a control, so it reads as a
-/// small label: hovering it on a Mac explains it, and a tap or a click opens
-/// the same note on every device.
 struct TeamPreviewBadge: View {
     @State private var hovering = false
     @State private var pinned = false
@@ -594,8 +546,6 @@ struct TeamPreviewBadge: View {
     }
 }
 
-/// The note behind the preview badge: what works, what does not yet, and
-/// that the person's own projects are safe whatever happens to Teams.
 struct TeamPreviewNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {

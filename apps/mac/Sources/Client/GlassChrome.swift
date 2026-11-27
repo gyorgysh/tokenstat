@@ -9,7 +9,6 @@ import SwiftUI
 #if !os(macOS)
 
 extension ToolbarContent {
-    /// The avatar draws its own circular surface and plan ring.
     @ToolbarContentBuilder
     func clientAvatarChrome() -> some ToolbarContent {
         if #available(iOS 26, *) {
@@ -38,7 +37,6 @@ extension ToolbarContent {
 /// that, chrome falls back to the same Theme capsules the Mac already
 /// uses: content stays opaque, accent stays one colour.
 extension View {
-    /// A content card: opaque panel, hairline, card radius.
     func cardSurface() -> some View {
         background(Theme.panel, in: .rect(cornerRadius: Theme.cardRadius))
             .overlay {
@@ -74,7 +72,6 @@ extension View {
         modifier(ProminentGlassSwitch())
     }
 
-    /// Stable, full-width action for the machine setup forms.
     func setupPrimaryStyle() -> some View {
         buttonStyle(ClientProminentButtonStyle())
     }
@@ -176,8 +173,6 @@ extension View {
     @ViewBuilder
     func clientBottomBar<Bar: View>(separated: Bool = false, @ViewBuilder bar: () -> Bar) -> some View {
         if separated {
-            // Chat readers end above their controls. A safe-area overlay
-            // keeps scrolling messages underneath the entire tall composer.
             VStack(spacing: 0) {
                 self
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -199,7 +194,6 @@ extension View {
     }
 }
 
-/// Section title with the same FeatureMark cards use on the Mac.
 struct ClientSectionTitle: View {
     let title: String
     let mark: String
@@ -214,9 +208,6 @@ struct ClientSectionTitle: View {
     }
 }
 
-/// Full-width primary button: below glass chrome, and wherever glass would
-/// go grey. Disabled is the dimmed brand, never the platform grey: an action
-/// that cannot run yet is still ours.
 private struct ClientProminentButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -236,9 +227,6 @@ private struct ClientProminentButtonStyle: ButtonStyle {
     }
 }
 
-/// Glass while the action can run, brand the moment it cannot. Reads the
-/// room through the environment rather than at each call site, so no screen
-/// has to remember which style disabled means.
 private struct ProminentGlassSwitch: ViewModifier {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -252,7 +240,6 @@ private struct ProminentGlassSwitch: ViewModifier {
     }
 }
 
-/// Quiet capsule for secondary actions on older iOS.
 private struct ClientQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

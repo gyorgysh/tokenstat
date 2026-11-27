@@ -14,8 +14,6 @@ struct SidebarDetailField: Identifiable {
     var id: String { title }
 }
 
-/// A compact identity card beside a sidebar row. The card can keep the pointer
-/// while someone crosses from its row to an action such as Reveal in Finder.
 struct SidebarDetailCard<Footer: View>: View {
     let title: String
     let subtitle: String
@@ -126,14 +124,9 @@ private struct SidebarGitDetail: View {
     }
 }
 
-/// Session details are deliberate: opening a session or moving through the
-/// list never presents a card. The native popover stays open for reading.
 struct SidebarDetailButton<Card: View>: View {
     let title: String
     @Binding var isPresented: Bool
-    /// Whether the glyph is drawn. A list where every row carries a lit
-    /// glyph reads as noise, so rows show it on hover and when selected.
-    /// The seat is kept either way, so nothing in the row moves.
     var isRevealed: Bool = true
     @ViewBuilder var card: Card
     @State private var hovering = false
@@ -254,8 +247,6 @@ struct SidebarChatDetailCard: View {
         .task(id: readOwner) {
             let requested = readOwner
             guard let reference = requested.reference else { return }
-            // Git can take much longer than an inspection read. Keep it off
-            // the usage loop so a large working tree cannot freeze context.
             while !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) {
                 if scenePhase == .active, let fresh = try? await SidebarDetailRefresh.folder(folder.id) {
                     guard !Task.isCancelled, readOwner == requested, WorkCacheAccess.canRead(reference) else { return }
@@ -320,9 +311,6 @@ func sidebarDate(_ milliseconds: Int64?) -> String {
         .formatted(date: .abbreviated, time: .shortened)
 }
 
-/// Application-defined popovers do not consume the click that selects another
-/// row. Pointer checks span the row, the gap and the card, without taking focus
-/// from a terminal or composer.
 private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
     let hovering: Bool
     let enabled: Bool
@@ -408,9 +396,6 @@ private struct SidebarHoverPresentation<Card: View>: NSViewRepresentable {
             popover.contentViewController = NSHostingController(rootView: card)
             self.popover = popover
             popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
-            // Mouse-move events are not guaranteed in an NSPopover window.
-            // Sample the actual pointer while a card is open so leaving it
-            // still closes the card even when no row receives a hover exit.
             pointerState = SidebarHoverState()
             let timer = Timer(timeInterval: 0.08, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.checkPointer() }

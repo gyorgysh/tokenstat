@@ -20,15 +20,10 @@ import SwiftUI
 /// there. Nothing here is a bitmap and nothing needs a symbol that Apple might
 /// rename.
 enum SetupArtKind: Hashable {
-    /// Which server. A rack, and the beam that is looking for it.
     case find
-    /// How to sign in. A key going into a lock that opens.
     case unlock
-    /// The host key. A fingerprint that draws itself and is recognised.
     case identify
-    /// What is on the machine. A list that ticks itself off.
     case inspect
-    /// The install. A package landing in the rack, and the bar filling.
     case install
 }
 
@@ -37,8 +32,6 @@ struct ClientSetupArt: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// One canvas for every step, so the header does not jump by a pixel as
-    /// somebody walks through.
     static let size = CGSize(width: 132, height: 72)
 
     var body: some View {
@@ -57,10 +50,6 @@ struct ClientSetupArt: View {
 }
 
 
-/// A rack with a beam passing over it, and the unit it settles on lighting up.
-///
-/// The sweep is one pass that repeats, not a spinner: the step is a choice
-/// somebody is about to make, and a spinner would say the app is busy.
 private struct FindScene: View {
     var reduceMotion: Bool
     @State private var sweep: CGFloat = 0
@@ -119,11 +108,6 @@ private struct FindScene: View {
 }
 
 
-/// A key sliding into a shackle that opens. The one thing this step does.
-///
-/// The shackle hinges on one side and stays on the body, because a padlock
-/// whose top floats free is not a padlock that has opened, it is a padlock in
-/// two pieces.
 private struct UnlockScene: View {
     var reduceMotion: Bool
     @State private var turned = false
@@ -156,11 +140,7 @@ private struct UnlockScene: View {
                 .offset(y: 4)
             }
         }
-        // Into the lock and back out, which is the movement the animation is
-        // actually about.
         .offset(x: open ? 5 : -3)
-        // The bow is the widest part, so centring on the shaft leaves the key
-        // sitting low against the lock body.
         .padding(.bottom, 6)
     }
 
@@ -177,8 +157,6 @@ private struct UnlockScene: View {
             Shackle()
                 .stroke(open ? Ink.lead : Ink.quiet, style: Ink.style)
                 .frame(width: 18, height: 15)
-                // Hinged on the left post, so it swings rather than lifting
-                // off, and the right post clears the body by two points.
                 .rotationEffect(.degrees(open ? -22 : 0), anchor: .bottomLeading)
                 .offset(y: -22)
         }
@@ -205,15 +183,6 @@ private struct Shackle: Shape {
 }
 
 
-/// A fingerprint that draws itself, then is recognised.
-///
-/// Arcs traced with `trim` rather than a symbol, so the drawing is the
-/// animation. The gaps are staggered and the centres drift, because four
-/// concentric circles with the same gap read as a rainbow rather than a print.
-///
-/// The badge arrives only once the whorl is complete: this is the step where a
-/// mistake is permanent, and the picture must not say "known" before the
-/// question has been asked.
 private struct IdentifyScene: View {
     var reduceMotion: Bool
     @State private var drawn: CGFloat = 0
@@ -228,8 +197,6 @@ private struct IdentifyScene: View {
                     .trim(from: gap(arc), to: gap(arc) + span(arc) * progress(arc))
                     .stroke(Ink.lead.opacity(1 - Double(arc) * 0.13), style: Ink.style)
                     .frame(width: size, height: size)
-                    // A print is a set of ridges around one core, not a set of
-                    // rings around one centre.
                     .offset(y: CGFloat(arc) * -1.6)
             }
             badge
@@ -260,8 +227,6 @@ private struct IdentifyScene: View {
         0.74 - CGFloat(arc) * 0.055
     }
 
-    /// Outer ridges finish after inner ones, so the whorl grows outward
-    /// instead of five rings appearing at once.
     private func progress(_ arc: Int) -> CGFloat {
         guard !reduceMotion else { return 1 }
         let start = CGFloat(arc) * 0.11
@@ -311,8 +276,6 @@ private struct InspectScene: View {
 
     private func ticked(_ line: Int) -> Bool {
         guard !reduceMotion else { return true }
-        // The last quarter of the loop has everything ticked, so the list is
-        // seen finished rather than resetting the moment it completes.
         return checked > CGFloat(line) * 0.19
     }
 }
@@ -328,13 +291,8 @@ private struct InstallScene: View {
         VStack(spacing: 6) {
             ZStack(alignment: .top) {
                 rack
-                // Starts at the top of the canvas and falls into the first
-                // slot, so nothing is drawn outside the frame the header
-                // reserves for it.
                 package
                     .offset(y: reduceMotion ? 6 : phase * 15)
-                    // It goes in rather than landing on top: the fade is the
-                    // last quarter of the fall.
                     .opacity(reduceMotion ? 0.9 : 1 - max(0, phase - 0.7) * 3.2)
             }
             bar
@@ -360,8 +318,6 @@ private struct InstallScene: View {
         .padding(.top, 15)
     }
 
-    /// Units light from the top down as the bar fills, so the rack itself is
-    /// the progress rather than only the bar under it.
     private func filled(_ unit: Int) -> Bool {
         guard !reduceMotion else { return unit == 0 }
         return phase > CGFloat(unit) * 0.3 + 0.08
@@ -429,7 +385,6 @@ private struct ClientArtLoop: ViewModifier {
                     }
                 }
             } catch is CancellationError {
-                // The view or scene stopped owning the animation.
             } catch {
                 return
             }

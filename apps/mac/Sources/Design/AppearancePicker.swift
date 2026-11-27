@@ -2,12 +2,6 @@
 
 import SwiftUI
 
-/// Mode and the built-in colour themes, as one control.
-///
-/// Shared by the phone's This device card and the setup tour on every
-/// platform, so a theme picked in one place looks the same as in the other.
-/// The Mac's Appearance settings keep their own grid, which also lists
-/// imported themes.
 struct AppearancePicker: View {
     var comfortable = false
     private let appearance = AppAppearance.shared

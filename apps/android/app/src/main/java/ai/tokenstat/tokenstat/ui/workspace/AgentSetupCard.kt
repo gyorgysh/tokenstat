@@ -23,8 +23,6 @@ import kotlinx.serialization.json.*
 @Composable
 fun AgentSetupCard(model: AppViewModel, peer: String, hostLabel: String, backend: JsonObject,
                    running: Boolean, showWhenReady: Boolean = false,
-                   /// The readiness, and whether the CLI itself gave it. Only a
-                   /// confirmed answer may stop a send.
                    onReadiness: (String, Boolean) -> Unit) {
     val scope = rememberCoroutineScope()
     val id = backend["launcherId"]?.jsonPrimitive?.contentOrNull ?: return
@@ -70,9 +68,6 @@ fun AgentSetupCard(model: AppViewModel, peer: String, hostLabel: String, backend
         if (backend["canCheckSignIn"]?.jsonPrimitive?.booleanOrNull == true && backendId in listOf("claude", "claude_code", "codex", "cursor", "cursor_agent", "muse")) check()
     }
     if (backend["installed"]?.jsonPrimitive?.booleanOrNull == false || backendId == "sh") return
-    // Above the composer only a state with a next step shows. Agents whose
-    // login nothing can read are always "unknown"; the setup panel still
-    // shows every state.
     if (showWhenReady || readiness == "needsSignIn" || readiness == "expired") {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {

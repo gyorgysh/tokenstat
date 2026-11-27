@@ -27,8 +27,6 @@ struct WorkingTreeReviewView: View {
         return files.first { $0.path == path }
     }
 
-    /// Identity of the work to review: the folder and the change set. A save,
-    /// an agent edit, or a commit changes it and reloads the diffs.
     private struct ReviewKey: Equatable {
         let folderID: String
         let file: FileChange?
@@ -116,10 +114,6 @@ struct WorkingTreeReviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                // No "Back to terminal" button. This surface has a tab in the
-                // strip above, like a commit does, and that tab's close is how
-                // it goes away. A second way out, in a place a commit does not
-                // have one, made two alike surfaces read as different things.
             }
             if let git = folder.git {
                 HStack(spacing: Theme.Space.s) {
@@ -157,7 +151,6 @@ struct WorkingTreeReviewView: View {
         let loaded = await model.loadDiff(path, in: folderID)
         guard !Task.isCancelled, generation == loadGeneration else { return }
         let refreshed = model.diff(for: path, in: folderID).map { [$0] } ?? []
-        // Keep the row identity when a refresh found the same content.
         if diffs != refreshed { diffs = refreshed }
         if !loaded {
             error = L10n.text("apple.workingtreereviewview.could_not_refresh_0_file_s_available_chang.89fdefb0", "1")
@@ -190,9 +183,6 @@ struct ReviewFileHeading: View {
     }
 }
 
-/// The totals for an "All files" entry, which a nil selection stands for.
-/// A commit offers it, because it is read as one change. A working tree and a
-/// turn do not, and keep one file selected.
 struct ReviewAllFiles {
     let added: UInt64
     let removed: UInt64
@@ -218,7 +208,6 @@ struct ReviewFileBrowser<Detail: View>: View {
             } else {
                 VStack(spacing: 0) {
                     Menu {
-                        // A section, not a divider: the menu draws the break.
                         if allFiles != nil {
                             Section {
                                 Button(L10n.text("apple.reviewfilebrowser.all_files")) { selection = nil }
@@ -262,8 +251,6 @@ struct ReviewFileBrowser<Detail: View>: View {
                         if inside, !cursorPushed { NSCursor.resizeLeftRight.push(); cursorPushed = true }
                         if !inside { popCursor() }
                     }
-                    // A layout change or a closed tab never reports the
-                    // pointer leaving, so the cursor would stay a resize arrow.
                     .onDisappear { popCursor() }
                     #endif
                     .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)

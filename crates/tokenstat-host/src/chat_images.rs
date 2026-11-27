@@ -39,7 +39,7 @@ impl Collector {
         if self.count >= IMAGE_COUNT {
             return;
         }
-        // Correlation is explicit: Claude tool_result names its tool_use_id.
+
         if backend == "claude" {
             if value["type"] == "assistant"
                 && let Some(blocks) = value
@@ -48,8 +48,6 @@ impl Collector {
                     .and_then(Value::as_array)
             {
                 for block in blocks.iter().take(128) {
-                    // Use the actual local tool name and arguments. Display
-                    // verbs can be inferred from shell commands or MCP names.
                     if block["type"] == "tool_use"
                         && block["name"] == "Read"
                         && let Some(call) = block["id"].as_str()
@@ -93,9 +91,8 @@ impl Collector {
                         }
                     }
                     Some("image_generation") if item["status"] == "completed" => {
-                        // Native results can include both durable response
-                        // bytes and a temporary saved path. Prefer the bytes
-                        // so a removed or inaccessible path cannot hide them.
+
+
                         if let Some(data) = item["result"].as_str() {
                             self.inline(call, data);
                         }
@@ -133,8 +130,7 @@ impl Collector {
                     self.reads.insert(call.into(), path.into());
                 }
             }
-            // Other adapters already normalize their correlated tool end.
-            // Only one end may own the structured content in a record.
+
             let mut ends = events.iter().filter_map(|event| match event {
                 Event::ToolEnd { call_id, .. } => Some(call_id.as_str()),
                 _ => None,
@@ -260,8 +256,7 @@ impl Collector {
         {
             self.inline(call, uri);
         }
-        // Embedded resource bytes are evidence. A remote MCP file:// URI
-        // names its own host's filesystem, never this host's local files.
+
         if let Some(resource) = value.get("resource")
             && resource["mimeType"]
                 .as_str()

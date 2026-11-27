@@ -8,18 +8,10 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The two questions about reading a whole conversation again: sending after
-/// the prompt cache expired, and switching the model of a cached one.
-/// </summary>
 internal sealed partial class ChatPage
 {
     private enum ColdSendChoice { Send, StartNew, Cancel }
 
-    /// <summary>
-    /// Ask before a message that would make the agent read the whole
-    /// conversation again. Send when nothing needs asking.
-    /// </summary>
     private async Task<ColdSendChoice> AskBeforeColdSendAsync(bool movable)
     {
         if (ChatCacheRule.IdleSuppressed) return ColdSendChoice.Send;
@@ -79,7 +71,6 @@ internal sealed partial class ChatPage
             };
             if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
             {
-                // The picker already shows the new choice. Put the saved one back.
                 if (chat is not null && OpenChatIs(chat) && generation == _openGeneration)
                 {
                     PaintConversation();
@@ -106,10 +97,6 @@ internal sealed partial class ChatPage
         }
     }
 
-    /// <summary>
-    /// Start a chat that continues this one, send it the message, and open it.
-    /// The words stay in this composer if any step fails.
-    /// </summary>
     private async Task ContinueInNewChatAsync(string chat, string text)
     {
         var generation = _openGeneration;
@@ -145,13 +132,10 @@ internal sealed partial class ChatPage
         }
         catch (Exception ex)
         {
-            // A host refusal proves the message did not start. Release its
-            // receipt hold just as the regular outbox does; transport errors
-            // remain held until delivery can be checked.
             if (ex is HostException hostError && key is not null && attempted is not null)
             {
                 try { ChatOutbox.Shared.Refuse(key, attempted.Id, hostError.Code); }
-                catch { /* The saved pending copy can still be reviewed. */ }
+                catch { }
             }
             if (Current())
             {

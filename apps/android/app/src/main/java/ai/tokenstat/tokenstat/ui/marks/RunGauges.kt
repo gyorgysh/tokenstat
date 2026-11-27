@@ -32,10 +32,6 @@ import ai.tokenstat.tokenstat.ui.components.RelativeTick
 import ai.tokenstat.tokenstat.ui.components.RelativeTimeText
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 
-/// How much of the wait until the next run is already spent. Mirrors
-/// `CountdownRing` in `Sources/Design/CadenceGlyph.swift`: without a start
-/// the ring cannot show progress, so it draws empty; a non-positive span
-/// draws full.
 fun countdownFraction(startMillis: Long?, endMillis: Long, nowMillis: Long): Double {
     if (startMillis == null) return 0.0
     val total = endMillis - startMillis
@@ -43,9 +39,6 @@ fun countdownFraction(startMillis: Long?, endMillis: Long, nowMillis: Long): Dou
     return minOf(1.0, maxOf(0.0, (nowMillis - startMillis).toDouble() / total))
 }
 
-/// A date you would otherwise have to subtract today from, as a ring that is
-/// nearly closed when the run is soon. The fraction reads the shared
-/// `RelativeTick`, the same subscription the words beside it use.
 @Composable
 fun CountdownRing(
     startMillis: Long?,
@@ -88,8 +81,6 @@ fun CountdownRing(
     }
 }
 
-/// The countdown ring with the words it stands for, for rows that have
-/// space. Ported from `NextRunBadge`.
 @Composable
 fun NextRunBadge(startMillis: Long?, endMillis: Long, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -107,12 +98,8 @@ fun NextRunBadge(startMillis: Long?, endMillis: Long, modifier: Modifier = Modif
     }
 }
 
-/// Tiles actually drawn. The number comes from a text field somebody is
-/// still typing into, so it has to be bounded: past this many the count is
-/// words, not shapes. Ported from `SlotGauge.maxTiles`.
 const val SLOT_GAUGE_MAX_TILES = 12
 
-/// How many tiles to draw for a total that may still be mid-typing.
 fun slotGaugeDrawn(total: Int, maxTiles: Int = SLOT_GAUGE_MAX_TILES): Int =
     minOf(maxOf(total, 1), maxTiles)
 

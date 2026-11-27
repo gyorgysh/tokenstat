@@ -303,7 +303,6 @@ impl VaultClient {
             body,
             response_limit,
         });
-        // Both branches are retired before a caller can cache or act on them.
         self.ensure_current()?;
         let (status, bytes) = result?;
         if bytes.len() as u64 > response_limit {
@@ -517,8 +516,6 @@ fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
     });
     match error.error.as_str() {
         "not_enrolled" => VaultError::NotEnrolled,
-        // Typed rather than left as a server sentence, because the host acts
-        // on this one: it republishes the machine record and tries again.
         "machine_required" | "machine_not_registered" | "identity_required" => {
             VaultError::MachineNotRegistered(if error.message.is_empty() {
                 "this machine is not registered on the account".into()
@@ -554,7 +551,6 @@ fn read_capped(response: reqwest::blocking::Response, maximum: u64) -> Result<Ve
     Ok(bytes)
 }
 
-// Single-call compatibility entry points. Multi-step owners capture one client.
 pub fn get() -> Result<RemoteVault, VaultError> {
     VaultClient::capture()?.get()
 }
@@ -699,7 +695,6 @@ mod tests {
             Err(VaultError::AccountChanged)
         ));
         assert_eq!(wire.calls.lock().unwrap().len(), 1);
-        // A fresh operation can use B, while the captured A object remains retired.
         let b = VaultClient {
             authentication: Arc::new(current.lock().unwrap().clone()),
             ..a.clone()

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 #![cfg(feature = "local-host")]
 
 use std::{
@@ -38,7 +37,7 @@ fn fake() -> &'static Path {
     } else {
         "fake-agent"
     });
-    // Stable owned fixture path; the TempDir outlives every test thread.
+
     static PATH: OnceLock<PathBuf> = OnceLock::new();
     PATH.get_or_init(|| executable)
 }
@@ -202,8 +201,7 @@ fn a_descendant_in_another_group_cannot_prove_run_completion() {
         },
     )
     .unwrap();
-    // Release before Owned drops on every assertion/panic path, so cleanup
-    // never signals a possibly reused grandchild PID.
+
     let control = root.path().join("processes.control");
     let release = ReleaseLeaf(control.clone());
     wait(|| matches!(process.poll().unwrap(), Poll::Exited(Some(0))));
@@ -217,13 +215,10 @@ fn a_descendant_in_another_group_cannot_prove_run_completion() {
         .parse::<i32>()
         .unwrap();
     let stopped = process.stop();
-    // A fixed heartbeat sampling window can see no progress on a loaded CI
-    // runner. Ask for a fresh acknowledgement after Stop instead: the child
-    // must execute this request while its original owner refuses completion.
+
     fs::write(control.with_extension("probe"), "after-stop").unwrap();
     wait(|| beat(&control.with_extension("ack")) == "after-stop");
-    // SAFETY: these queries deliver no signal. The acknowledgement above
-    // proves the fixture is running; its group must differ from the anchor.
+
     let (group, session) = unsafe { (libc::getpgid(leaf_pid), libc::getsid(leaf_pid)) };
     drop(release);
     wait(|| control.with_extension("released").exists());

@@ -112,8 +112,6 @@ extension Bridge {
             return attachment
         }
         if let previous, previous.offset > size { throw CocoaError(.fileReadCorruptFile) }
-        // Receipt checks and finishing already uploaded bytes need no payload
-        // channel, route size limit or relay consent.
         var capabilities: ChatFileCapabilities?
         if previous?.offset != size {
             let available = try await chatInvoke(peer: peer, "chat.fileCapabilities", ["id": id], expectedScope: scope, expectedGeneration: generation, as: ChatFileCapabilities.self)
@@ -161,8 +159,6 @@ extension Bridge {
             }
             try Task.checkCancellation()
             let attachment = try await chatInvoke(peer: peer, "chat.fileUploadFinish", ["id":id,"transferId":upload.transferId], patience: Patience.long, expectedScope: scope, expectedGeneration: generation, as: ChatAttachment.self)
-            // Keep the receipt until expiry: another attachment can fail
-            // before the message is sent, and its retry should reuse this one.
             return attachment
         } catch {
             struct Cancelled: Decodable, Sendable { let cancelled: Bool }
@@ -190,8 +186,6 @@ extension Bridge {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tokenstat-chat-files/transfer-" + key, isDirectory:true)
         let name = ChatFileStaging.sanitized(info.attachment.name)
         let file = directory.appendingPathComponent(name == "." || name == ".." || name.isEmpty ? "attachment" : name)
-        // A completed local file needs verification, but no relay bytes.
-        // Keep consent before opening a partial so declining preserves it.
         let existingSize = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize
         if capabilities.relay && existingSize != Int(size) {
             guard await confirmRelay(capabilities.relayRemainingBytes) else { throw CancellationError() }

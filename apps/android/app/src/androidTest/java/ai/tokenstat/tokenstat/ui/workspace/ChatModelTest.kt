@@ -40,7 +40,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Real offline WebView; delay model parsing to exercise replaced loads. */
 @RunWith(AndroidJUnit4::class)
 class ChatModelTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()

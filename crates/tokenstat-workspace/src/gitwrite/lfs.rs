@@ -64,8 +64,6 @@ fn tracked_files_use_lfs(dir: &Path) -> bool {
         return false;
     };
     let paths = files.stdout.take().expect("piped Git file list");
-    // Connect the processes directly so a large index cannot deadlock while
-    // one side writes its input and the other writes attribute results.
     let attributes = command(dir, &["check-attr", "-z", "--stdin", "filter"])
         .stdin(paths)
         .output();
@@ -168,8 +166,6 @@ pub(super) fn pre_push(
         "{} {} {} {}\n",
         reviewed.branch, reviewed.head, reviewed.remote_ref, remote_head
     );
-    // The URL is the same pinned endpoint Git push will use. LFS maps that
-    // address to its configured remote, just as in Git's native pre-push hook.
     let mut child = command(dir, &["lfs", "pre-push", "--", url, url])
         .env_remove("GIT_LFS_SKIP_PUSH")
         .stdin(Stdio::piped())
@@ -252,8 +248,6 @@ pub(super) fn materialize(dir: &Path, remote: &str, commit: &str) -> Result<(), 
     if status(dir, None).is_none() {
         return Ok(());
     }
-    // HEAD may already have moved on an earlier attempt, with only pointer
-    // files left behind. Retrying must also recover a missing local object.
     if pointers_remain(dir)? {
         ensure_ready(dir, commit)?;
         fetch(dir, remote, commit)?;

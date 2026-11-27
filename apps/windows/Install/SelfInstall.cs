@@ -10,11 +10,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Install;
 
-/// <summary>
-/// Per-user install into %LOCALAPPDATA%\Programs\tokenstat.
-/// Click Tokenstat.exe from a zip: it copies itself there, writes Start Menu
-/// and HKCU uninstall, then relaunches from the install directory.
-/// </summary>
 internal static class SelfInstall
 {
     private static int _hostPolicyGeneration;
@@ -51,7 +46,7 @@ internal static class SelfInstall
         {
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat");
-            try { Directory.CreateDirectory(dir); } catch { /* Fall back below. */ }
+            try { Directory.CreateDirectory(dir); } catch { }
             return Directory.Exists(dir) ? dir : Path.GetTempPath();
         }
     }
@@ -91,10 +86,6 @@ internal static class SelfInstall
         }
     }
 
-    /// <summary>
-    /// Handle --install, --uninstall, --apply-update, and first-run copy.
-    /// Returns true when the process should exit instead of opening a window.
-    /// </summary>
     public static bool TryHandleCli(string[] args)
     {
         for (var i = 0; i < args.Length; i++)
@@ -151,7 +142,6 @@ internal static class SelfInstall
         TryRegisterHostTask();
     }
 
-    /// <summary>Copy completely before touching a working install, then swap with rollback.</summary>
     internal static void InstallTree(string source, string dest, Action stopProcesses)
     {
         var staging = dest.TrimEnd('\\', '/') + ".install-" + Guid.NewGuid().ToString("N");
@@ -185,10 +175,9 @@ internal static class SelfInstall
         }
         finally
         {
-            try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } catch { /* Best effort. */ }
-            // Keep the recoverable old tree if rollback itself failed.
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } catch { }
             try { if (Directory.Exists(dest) && Directory.Exists(previous)
-                && Tokenstat.Pages.WebViewProfile.MoveLegacyFrom(previous)) Directory.Delete(previous, recursive: true); } catch { /* Best effort. */ }
+                && Tokenstat.Pages.WebViewProfile.MoveLegacyFrom(previous)) Directory.Delete(previous, recursive: true); } catch { }
         }
     }
 
@@ -210,19 +199,13 @@ internal static class SelfInstall
         try
         {
             using var command = Registry.CurrentUser.OpenSubKey(@"Software\Classes\tokenstat\shell\open\command");
-            // Another private build can own the scheme. Uninstall removes
-            // this installation's association only.
             if (command?.GetValue(null) is string value
                 && value.StartsWith("\"" + InstalledExe + "\"", StringComparison.OrdinalIgnoreCase))
                 Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\tokenstat", throwOnMissingSubKey: false);
         }
-        catch { /* Removing a missing association must not block uninstall. */ }
+        catch { }
     }
 
-    /// <summary>
-    /// Stop the installed app and hostd. Does not touch a CLI `tokenstat.exe`
-    /// living somewhere else: match by path under the install directory.
-    /// </summary>
     public static void StopRelatedProcesses()
     {
         var self = Environment.ProcessId;
@@ -260,7 +243,6 @@ internal static class SelfInstall
             }
             catch
             {
-                // A process we cannot open is not ours to stop.
             }
             finally
             {
@@ -269,12 +251,6 @@ internal static class SelfInstall
         }
     }
 
-    /// <summary>
-    /// Bring the host helper's scheduled task in line with the always-on
-    /// switch, the way the Mac app rewrites the launch agent after
-    /// `host.setPolicy`. Call after the policy call returns: the script reads
-    /// the `alwaysOn` value hostd just wrote. Never a Windows Service.
-    /// </summary>
     public static void ApplyAlwaysOn(bool alwaysOn)
     {
         lock (HostPolicyGate)
@@ -294,10 +270,6 @@ internal static class SelfInstall
                 return;
             }
             UnregisterHostTask();
-            // hostd re-registers the task itself on `host.setPolicy`, in a
-            // powershell it does not wait for, so its registration can land after
-            // this delete. Sweep again once it has had time to arrive. A task
-            // with no logon trigger would do nothing, but disabled means gone.
             _ = Task.Run(async () =>
             {
                 try
@@ -318,12 +290,6 @@ internal static class SelfInstall
         }
     }
 
-    /// <summary>
-    /// Register the per-user task that runs hostd, with a logon trigger, by
-    /// invoking the bundled script. That script is the one definition of the
-    /// task shape (settings, principal, when the trigger applies); this only
-    /// falls back to schtasks when the script is not on disk.
-    /// </summary>
     public static void RegisterHostTask(string hostdExe, bool allowLogonFallback = false)
     {
         var script = BundledHostScript();
@@ -351,9 +317,6 @@ internal static class SelfInstall
             {
             }
         }
-        // Without the policy-aware script, never invent a logon trigger on
-        // a laptop/default-off install. Only the explicit always-on action
-        // authorizes this degraded fallback; otherwise launch on demand.
         if (!allowLogonFallback)
         {
             return;
@@ -379,8 +342,7 @@ internal static class SelfInstall
     }
 
     /// <summary>
-    /// Rewrite the Add/Remove Programs entry for the version on disk. Cheap
-    /// when nothing changed: the size walk only runs when the version moved.
+    /// Rewrite the Add/Remove Programs entry for the version on disk.
     /// </summary>
     public static void RefreshUninstallKey()
     {
@@ -430,13 +392,11 @@ internal static class SelfInstall
                 Arguments = $"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{helper}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                // The uninstall helper must not pin the directory it deletes.
                 WorkingDirectory = Path.GetTempPath(),
             });
         }
         catch
         {
-            // Uninstall key and shortcut are already gone.
         }
     }
 
@@ -583,7 +543,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // Start Menu is convenience. The exe in Programs still runs.
         }
     }
 
@@ -618,7 +577,6 @@ internal static class SelfInstall
         }
         catch
         {
-            // HostProcess.EnsureRunning will spawn hostd on next launch.
         }
     }
 
@@ -661,10 +619,6 @@ internal static class SelfInstall
         return File.Exists(installed) ? installed : null;
     }
 
-    /// <summary>
-    /// One schtasks call, best effort. A missing task, a locked scheduler, or
-    /// no schtasks on PATH all mean the helper simply starts with the app.
-    /// </summary>
     private static void RunSchTasks(string arguments)
     {
         try

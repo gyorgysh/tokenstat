@@ -43,7 +43,6 @@ final class IOSGutterView: UIView {
         let nsText = textView.text as NSString
         let offset = textView.contentOffset
         let inset = textView.textContainerInset
-        // Visible glyphs in text-container coordinates.
         let visible = CGRect(
             x: 0,
             y: offset.y - inset.top,

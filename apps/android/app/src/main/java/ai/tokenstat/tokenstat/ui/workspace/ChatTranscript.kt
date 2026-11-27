@@ -12,13 +12,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 
-/// Transcript display items, ported from ChatModel.swift `ChatDisplayItem`.
-///
-/// The host sends fine-grained events: text arrives as deltas, tools as
-/// start/end pairs keyed by call id. Rendering one card per event is the
-/// flat transcript of separate fragment bubbles. `coalesceTranscript` folds
-/// events into what the person reads: one assistant panel per prose run, one
-/// tool row per call, one edit card per file.
 data class ChatPlanStep(val text: String, val status: String)
 
 sealed interface ChatDisplayItem {
@@ -41,7 +34,6 @@ sealed interface ChatDisplayItem {
         val backend: String? = null,
     ) : ChatDisplayItem
 
-    /** Consecutive ordinary images share one bounded transcript row. */
     data class ImageGallery(override val id: String, val images: List<Attachment>) : ChatDisplayItem
 
     data class Approval(
@@ -58,41 +50,29 @@ sealed interface ChatDisplayItem {
 
     data class Failed(override val id: String, val text: String) : ChatDisplayItem
 
-    /// Steps folded into one line by the chat's detail level. See
-    /// `foldTranscript`.
     data class Group(override val id: String, val group: ChatStepGroup) : ChatDisplayItem
 
-    /// A question the agent asked, with the answer once there is one.
     data class Question(override val id: String, val question: ChatQuestion) : ChatDisplayItem
 
-    /// The plan as last reported. A newer report replaces the older row, so
-    /// the checklist sits where the latest update arrived.
     data class Plan(override val id: String, val steps: List<ChatPlanStep>) : ChatDisplayItem
 
-    /// One of an open group's steps, drawn below its header. Keeps the
-    /// step's own id, so the list keys it the same as when it is unfolded.
     data class GroupStep(
         override val id: String,
         val groupId: String,
         val item: ChatDisplayItem,
-        /// How a step under an open Compact line is drawn. Null elsewhere.
         val plain: PlainStep? = null,
     ) : ChatDisplayItem
 
-    /// The files a finished turn edited. Added by the fold after the turn's
-    /// last row, at every detail level. Port of `ChatTurnChanges`.
     data class Changes(override val id: String, val files: List<ChangedFile>) : ChatDisplayItem {
         val added: Long get() = files.sumOf { it.added }
         val removed: Long get() = files.sumOf { it.removed }
     }
 }
 
-/// One file a turn changed. Counts are summed over the turn's edits to it.
 data class ChangedFile(val path: String, val added: Long, val removed: Long, val patches: List<String> = emptyList()) {
     val fileName: String get() = path.substringAfterLast('/').ifEmpty { path }
 }
 
-/// A tool call on a transcript. Ported from ChatModel.swift `ChatToolState`.
 data class ChatToolState(
     val callId: String,
     val verb: String,
@@ -102,9 +82,6 @@ data class ChatToolState(
     val detail: String?,
     val startedAtMs: Long,
     val endedAtMs: Long?,
-    /// Display lines, split once at construction. A row reads them half a
-    /// dozen times per draw and Codex shell outputs reach megabytes, so the
-    /// full text stays in `detail` and the row only ever draws these.
     val snippet: List<String>,
     val backend: String? = null,
 ) {
@@ -113,10 +90,6 @@ data class ChatToolState(
     companion object {
         fun isFileEditVerb(verb: String): Boolean = verb == "Edit" || verb == "NotebookEdit"
 
-        /// Display lines for one detail string, split once. An edit's
-        /// red/green lines reach the row unprefixed so they keep their
-        /// colour; other verbs keep the output marker on every line, so a
-        /// shell trace like "+ set -x" never poses as a diff.
         fun makeSnippet(verb: String, detail: String?): List<String> {
             if (detail.isNullOrEmpty()) return emptyList()
             val isDiff = verb == "Edit" || verb == "NotebookEdit" || verb == "Diff"
@@ -126,8 +99,6 @@ data class ChatToolState(
             while (true) {
                 val end = detail.indexOf('\n', start).let { if (it < 0) detail.length else it }
                 if (count < SnippetLineCap) {
-                    // Keep the complete detail for expansion, but do not
-                    // allocate thousands of hidden lines just to draw sixty.
                     val shown = clip(detail, start, end)
                     out.add(if (isDiff && isDiffLine(shown)) shown else "| $shown")
                 }
@@ -141,17 +112,12 @@ data class ChatToolState(
             return out
         }
 
-        /// A unified or old/new diff body line. File headers stay grey.
         fun isDiffLine(line: String): Boolean {
             val first = line.firstOrNull() ?: return false
             if (first != '+' && first != '-') return false
             return !(line.startsWith("+++ ") || line.startsWith("--- "))
         }
 
-        /// Cut one line down to what a row can draw. A tool that answers in
-        /// JSON answers in one forty-kilobyte line, and handing that to a
-        /// stack that grows to fit is the hang: the cap stops the line that
-        /// is really a document.
         fun clip(line: String): String {
             return clip(line, 0, line.length)
         }
@@ -159,7 +125,6 @@ data class ChatToolState(
         private fun clip(text: String, start: Int, end: Int): String {
             if (end - start <= SnippetColumnCap) return text.substring(start, end)
             var cut = start + SnippetColumnCap
-            // UTF-16 offsets can land between an emoji's surrogate halves.
             if (text[cut - 1].isHighSurrogate() && text[cut].isLowSurrogate()) cut--
             return text.substring(start, cut) + "…"
         }
@@ -169,14 +134,11 @@ data class ChatToolState(
     }
 }
 
-/// A file the agent changed. One card, not a tool row plus a second copy.
-/// Ported from ChatModel.swift `ChatEditState`.
 data class ChatEditState(
     val path: String,
     val added: Long,
     val removed: Long,
     val patch: String,
-    /// 1-based count of this path since the last user message.
     val revision: Int,
     val running: Boolean,
     val failed: Boolean,
@@ -189,8 +151,6 @@ data class ChatEditState(
 
     val fileName: String get() = path.substringAfterLast('/').ifEmpty { path }
 
-    /// Last two folders of the parent path, enough to tell two same-named
-    /// files apart without drawing the whole absolute path as the title.
     val location: String
         get() {
             val folder = path.substringBeforeLast('/', "")
@@ -201,7 +161,6 @@ data class ChatEditState(
             return parts.takeLast(2).joinToString("/")
         }
 
-    /// Nil on the first change of a file in a turn. Later ones name themselves.
     val changeLabel: String? get() = if (revision >= 2) L10n.text("android.chattranscript.0_change.d4ef778c", "${ChatClock.ordinal(revision)}") else null
 
     fun applyPatch(added: Long, removed: Long, patch: String): ChatEditState {
@@ -223,8 +182,6 @@ data class ChatEditState(
         var minus = 0L
         var start = 0
         while (start < patch.length) {
-            // Count directly in the patch; expanded diffs can contain tens
-            // of thousands of lines that need no separate String objects.
             when (patch[start]) {
                 '+' -> if (!patch.startsWith("+++ ", start)) plus++
                 '-' -> if (!patch.startsWith("--- ", start)) minus++
@@ -269,9 +226,6 @@ private fun JsonObject.safeDouble(key: String): Double? =
 private fun JsonObject.safeBool(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.booleanOrNull
 
-/// Fold raw timeline events into display items. A faithful port of
-/// ChatModel.swift `ChatDisplayItem.coalesce`, reading the same JSON the
-/// Apple client decodes into `ChatTimelineEvent` / `ChatAgentEvent`.
 fun coalesceTranscript(
     events: List<JsonObject>,
     defaultBackend: String? = null,
@@ -280,9 +234,6 @@ fun coalesceTranscript(
     val items = mutableListOf<ChatDisplayItem>()
     var latestPlanID: String? = null
     val supersededPlanIDs = mutableSetOf<String>()
-    // Every row a call id has started, oldest first. A call id is not
-    // unique on every backend, so an End closes the oldest row still
-    // running under that name rather than the newest start.
     val toolIndexes = mutableMapOf<Pair<String?, String>, MutableList<Int>>()
     val toolStarts = mutableMapOf<String, Int>()
     val toolBackends = mutableMapOf<String, String>()
@@ -290,7 +241,6 @@ fun coalesceTranscript(
     val approvalIndex = mutableMapOf<String, Int>()
     val questionIndex = mutableMapOf<String, Int>()
     val editRevisions = mutableMapOf<String, Int>()
-    // Row order matters when an edit without a call ID needs its latest open tool.
     val runningIndexes = linkedSetOf<Int>()
     var text = StringBuilder()
     var textID = ""
@@ -367,13 +317,8 @@ fun coalesceTranscript(
         indexes.add(index)
     }
 
-    /// The row an End closes: the oldest one still running under this call
-    /// id, or, for a repeat End with nothing left running, the newest row
-    /// the id named.
     fun toolIndexesFor(callId: String, backend: String?): List<Int>? =
         toolIndexes[backend to callId]
-            // Older archives sometimes attributed an End to the chat's new
-            // backend. Only an unambiguous original namespace may recover it.
             ?: toolIndexes.entries.filter { it.key.second == callId }.singleOrNull()?.value
 
     fun toolEndIndex(callId: String, backend: String?): Int? {
@@ -408,8 +353,6 @@ fun coalesceTranscript(
                 }
             }
         }
-        // LinkedHashSet.reversed() resolves to Java 21's SequencedSet API
-        // with newer compile SDKs, but older Android runtimes lack it.
         for (index in runningIndexes.toList().asReversed()) {
             when (val item = items[index]) {
                 is ChatDisplayItem.Edit ->
@@ -430,8 +373,6 @@ fun coalesceTranscript(
         if (kind == "user") {
             flushText()
             flushThinking()
-            // A new user turn bounds any tools left open by an interrupted
-            // older turn, including histories recorded by older hosts.
             if (!ev.bol("steer")) {
                 latestPlanID = null
                 closeRunningTools(failed = false, at = atMsOf(ev, inner), detail = L10n.text("android.chattranscript.interrupted.132d124d"))
@@ -486,9 +427,6 @@ fun coalesceTranscript(
             continue
         }
         if (kind == "answer" || kind == "answerwithdrawn") {
-            // Lands on its question's card. One whose question is on an
-            // older page waits for that page. A withdrawn answer never
-            // reached the agent, so the card opens again.
             val at = ev.str("questionId")?.let { questionIndex[it] }
             val row = at?.let { items.getOrNull(it) } as? ChatDisplayItem.Question
             if (at != null && row != null) {
@@ -505,9 +443,6 @@ fun coalesceTranscript(
         if (approval != null || kind == "approval") {
             flushText()
             flushThinking()
-            // The timeline records an approval twice: once when the agent
-            // paused, and again with the answer. Keep the row in the place
-            // it happened and let the later state win.
             val raw = approval ?: ev
             val rowID = "approval-${raw.str("id") ?: stamp(ev, items.size)}"
             val at = approvalIndex[rowID]
@@ -547,9 +482,6 @@ fun coalesceTranscript(
                     textID = "text-${stamp(ev, items.size)}"
                     textBackend = ev.str("backend") ?: defaultBackend
                 }
-                // Older hosts fold tool one-liners into agent text ("Grep:
-                // path"). iOS never sees those as tools either; the text
-                // run keeps them inline like the Apple transcript does.
                 text.append(inner.str("delta") ?: inner.str("text") ?: ev.str("text") ?: "")
             }
             "thinking" -> {
@@ -575,8 +507,6 @@ fun coalesceTranscript(
                 val target = ChatToolState.clip(inner.str("target") ?: "")
                 if (eventBackend != null) toolBackends[rowID] = eventBackend
                 noteToolIndex(items.size, callId, eventBackend)
-                // A bare "tool" event without a start/end pair arrives
-                // already finished; only true starts run open.
                 val isStart = (inner.str("kind") ?: "").lowercase() != "tool"
                 val isFileEdit = ChatToolState.isFileEditVerb(verb)
                 if (isStart && (isFileEdit || inner.safeBool("running") != false)) {
@@ -806,8 +736,6 @@ fun coalesceTranscript(
                 items.add(
                     ChatDisplayItem.Usage(
                         "usage-${stamp(ev, items.size)}",
-                        // Tool calls send `input` as an object; the row
-                        // ignores it so usage still decodes.
                         input = inner.safeLong("input") ?: 0,
                         output = inner.safeLong("output") ?: 0,
                         costUsd = inner.safeDouble("costUsd") ?: inner.safeDouble("cost_usd"),
@@ -829,7 +757,6 @@ fun coalesceTranscript(
                 flushText()
                 flushThinking()
                 val status = inner.str("status") ?: ""
-                // Only the host's process outcome can fail a turn.
                 val failed = status == "error"
                 closeRunningTools(failed = failed, at = atMsOf(ev, inner), detail = if (failed) status else null)
             }
@@ -838,7 +765,6 @@ fun coalesceTranscript(
     }
     flushText()
     flushThinking()
-    // Tool logs are history; only the host knows whether a process lives.
     if (!running) {
         closeRunningTools(failed = false, at = null, detail = L10n.text("android.chattranscript.ended_without_a_tool_result.da8d3680"))
     }

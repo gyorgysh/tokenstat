@@ -27,7 +27,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Production storage and composer, with fictional account and lost replies. */
 @RunWith(AndroidJUnit4::class)
 class TeamCommentTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -69,7 +68,6 @@ class TeamCommentTest {
                 put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/tokenstat-teams-qa")
             }) ?: error("cannot save fictional screenshot")
             resolver.openOutputStream(image)!!.use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            // The checked receipt can settle a saved attempt without resending.
             val recovered = TeamCommentModel(restarted, target, "Fictional shared chat") { method, _ ->
                 assertEquals("teams.connection.call", method)
                 buildJsonObject { put("receipt", buildJsonObject {
@@ -100,8 +98,6 @@ class TeamCommentTest {
             compose.onNodeWithText(L10n.text("common.teams.copy_draft")).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText(L10n.text("common.teams.remove_local_draft")).performScrollTo().performClick()
             compose.onNodeWithText(L10n.text("common.teams.remove_draft")).assertIsDisplayed()
-            // Another writer changes the reviewed version while confirmation
-            // is open. The stale removal must preserve those new words.
             val before = storage.load(target)!!
             val newer = storage.save(target, "Newer fictional words", before, "Fictional shared chat on a computer")
             compose.onNodeWithText(L10n.text("common.teams.remove_draft")).performClick()

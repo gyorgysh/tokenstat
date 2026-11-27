@@ -12,8 +12,6 @@ pub struct Stamp {
 }
 impl Stamp {
     pub fn now() -> Option<Self> {
-        // Sample the boot clock first so clock sampling itself cannot enlarge
-        // the suspension-inclusive budget.
         let boot = boot_time()?;
         Some(Self {
             awake: Instant::now(),
@@ -55,8 +53,6 @@ impl Deadline {
         self.remaining_at(Stamp::now()?)
     }
     pub fn remaining_at(&self, now: Stamp) -> Option<Duration> {
-        // A failed or regressing platform clock retires authority rather than
-        // making an expired lease appear to have time left.
         if now.awake < self.awake_start || now.boot < self.boot_start {
             return None;
         }

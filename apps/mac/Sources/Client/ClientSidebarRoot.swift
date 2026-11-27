@@ -8,44 +8,20 @@
 import SwiftUI
 import UIKit
 
-/// The client with navigation down the left, for an iPad that has a keyboard.
-///
-/// Not a second app. Every screen here is the screen the tab bar shows, in the
-/// detail column instead of behind a tab. What the sidebar adds is the thing a
-/// tab bar cannot hold: the account's machines, their folders, and the sessions
-/// running in them, all visible at once the way the Mac's sidebar shows them.
-///
-/// `.sidebarAdaptable` would have been four lines and can only ever show the
-/// four destinations, which is exactly the part that was already fine.
 struct ClientSidebarRoot: View {
     @Binding var showAccount: Bool
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(ClientTabCustomization.self) private var tabCustomization
-    /// A pointer means a person aiming, not a thumb landing. Rows tighten and
-    /// grow hover states. See `ClientLayout`.
     @Environment(PointerKeyboardModel.self) private var input
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    /// One workspaces model for the whole layout: the tree in the sidebar and
-    /// the screen in the detail column are the same connection, not two. The
-    /// root owns it, so swapping to tabs and back does not dial again.
     let workspaces: ClientWorkspacesModel
     @State private var addingFirstProject = false
-    /// Whether the host-wide task board link shows under a connected host.
-    /// Off unless asked for in Customize Projects.
     @State private var workspacesLayout = WorkspacesLayout.shared
     @State private var notificationOpen = NotificationOpen.shared
-    /// What each folder holds, keyed by workspace id. One call for the whole
-    /// tree rather than one per folder: the Mac's sidebar draws these counts
-    /// too, and asking per row is five tunnel hops per folder.
-    /// What the detail column has pushed on top of the current page.
-    ///
-    /// Held here so picking a sidebar row can empty it. A link that names its
-    /// destination rather than a value still goes through this path, as an
-    /// entry with a type of the framework's own.
     @State private var detailPath = NavigationPath()
     @Environment(ClientProjectChats.self) private var projectChats
     @State private var pendingClose: (peer: String, info: PtySessionInfo)?
@@ -54,9 +30,6 @@ struct ClientSidebarRoot: View {
         get { navigation.sidebarVisible ? .all : .detailOnly }
         nonmutating set { navigation.sidebarVisible = newValue != .detailOnly }
     }
-    /// A path only knows about value-based links. Changes still opens a diff
-    /// through a view-based link, so changing the sidebar destination also
-    /// needs a fresh stack identity to dismiss that screen.
     @State private var detailGeneration = 0
 
     var body: some View {
@@ -91,24 +64,11 @@ struct ClientSidebarRoot: View {
                 GeometryReader { geo in
                     detail(width: geo.size.width)
                         .modifier(ClientOwnedPushDestination(tab: navigation.destination))
-                        // Fill the reader, top leading. Not `.frame(width:
-                        // height:)` from the reading, whose default alignment
-                        // is centre and which centres anything that does not
-                        // fill the column. And not a width carried up through
-                        // a preference either: that arrives a pass late, so
-                        // the first paint is laid out against a guess and
-                        // anything sized from it, a loading skeleton most
-                        // visibly, is drawn to the wrong width and hangs over
-                        // the edge until the real number lands.
                         .frame(
                             maxWidth: .infinity,
                             maxHeight: .infinity,
                             alignment: .topLeading
                         )
-                        // Search and the connection chip, top right of the
-                        // wide column rather than squeezed into the sidebar,
-                        // the way the tab layout draws them. On the root
-                        // content, so pushed screens bring their own bar.
                         .toolbar {
                             if ClientKeyboardPresence.shared.isVisible {
                                 ToolbarItem(placement: .topBarTrailing) {
@@ -124,17 +84,6 @@ struct ClientSidebarRoot: View {
                         }
                 }
             }
-            // One stack for the whole detail column, so anything a screen
-            // pushes sits *above* the root. Picking a different sidebar row
-            // swaps that root underneath, which left a chat thread on screen
-            // covering the page that had just opened behind it, visible only
-            // after going back.
-            //
-            // Emptied and re-identified, because the two do not cover the same
-            // ground: clearing the path pops value-based links, while a fresh
-            // identity dismisses view-based links such as a file diff. Doing
-            // only the first left a child screen sitting over the newly
-            // selected sidebar destination.
             .onChange(of: detailIdentity) { _, _ in
                 detailPath = NavigationPath()
                 detailGeneration &+= 1
@@ -187,11 +136,6 @@ struct ClientSidebarRoot: View {
         .onChange(of: notificationOpen.request) { _, _ in
             Task { await fulfillNotification() }
         }
-        // The same three moments the Workspaces screen watches. This layout
-        // never mounts that screen until somebody picks Workspaces, so
-        // without these an iPad with a keyboard opened to an empty tree and
-        // sat there. `connect` refuses a second attempt while one is running,
-        // so both surfaces asking is harmless.
         .onChange(of: workspaces.hosts) { _, _ in
             Task { await workspaces.autoConnectLastHost() }
         }
@@ -222,14 +166,9 @@ struct ClientSidebarRoot: View {
             }
     }
 
-    /// On a compact wide screen the global sidebar consumes the space needed
-    /// for the repository's own chat list. Restore it when leaving the chat;
-    /// the person can still reopen the global sidebar at any time.
     private func reconcileChatSpace() {
         guard navigation.sidebarLayoutActive else { return }
         if navigation.currentRoute?.reference?.kind != .conversation && !navigation.chatSwitchInProgress {
-            // The old route is briefly absent while the folded reader is
-            // handed to the new split view. This is not a chat exit.
             if navigation.chatHandoff.pending != nil { return }
             if navigation.sidebarCollapsedForChat, columns == .detailOnly { columns = .all }
             navigation.sidebarCollapsedForChat = false
@@ -244,10 +183,6 @@ struct ClientSidebarRoot: View {
     }
 
     private func reload() async {
-        // The directory is the authority for a host's online state. Refresh it
-        // before rebuilding sidebar rows; previously this only rebuilt rows
-        // from the account snapshot that was already on screen, so pulling to
-        // refresh could leave a just-awake Mac looking disconnected.
         await account.load()
         await workspaces.refresh(account: account.account)
         await workspaces.autoConnectLastHost()
@@ -261,43 +196,18 @@ struct ClientSidebarRoot: View {
         navigation.destination == tab && navigation.folderID == nil
     }
 
-    // MARK: - Sidebar
 
     private var sidebar: some View {
         list
-            // Avatar leading, wordmark in the middle. Search and the
-            // connection chip live in the detail column's own bar, where
-            // there is room: all four in this narrow column read as clutter,
-            // and the tab layout already puts search and the chip on the
-            // right.
-            //
-            // The same two positions windowed and fullscreen, which is the
-            // point. Windowed, the iPad parks its traffic lights at the start
-            // of this row and insets the bar's own items past them, so the
-            // avatar lands after the lights and the wordmark still has the
-            // middle. Moving the brand into the content while windowed was
-            // the other way to keep clear of the lights, and it cost a whole
-            // row of the column and put the name somewhere it was not when
-            // the window was zoomed.
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     AvatarButton(plainBadge: true) { showAccount = true }
-                        // A couple of points off the bar's own margin, so the
-                        // picture reads as inset from the column's edge rather
-                        // than stuck to it. Positive, not negative: the pull
-                        // that lined it up with the rows below sat it on the
-                        // window edge, and windowed it reached into the gap
-                        // the traffic lights sit in.
                         .padding(.leading, 2)
                 }
                 .clientAvatarChrome()
                 ToolbarItem(placement: .principal) {
                     Wordmark(size: 19, fills: false)
                         .accessibilityAddTraits(.isHeader)
-                        // The narrow column shares this row with the avatar,
-                        // the sidebar toggle and, windowed, the traffic
-                        // lights. The name is the one thing here that must
-                        // not come out as an ellipsis.
                         .fixedSize()
                 }
             }
@@ -361,8 +271,6 @@ struct ClientSidebarRoot: View {
                         }
                         ForEach(hostFolders) { folder in
                             folderRow(folder, peer: host.peerKey)
-                            // Keep the last opened folder expanded when the
-                            // detail column moves to a different destination.
                             if navigation.sidebarFolderID == folder.id {
                                 ForEach(sessions(in: folder, peer: host.peerKey)) { session in
                                     sessionRow(session, in: folder, peer: host.peerKey)
@@ -379,10 +287,6 @@ struct ClientSidebarRoot: View {
                     }
                 }
             } header: {
-                // The Mac's sidebar heading: small, uppercase, grey, with the
-                // count on the right. A title-case row in the platform's own
-                // header style was a third typographic voice in a list that
-                // already has two.
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         machinesHeading
@@ -400,11 +304,7 @@ struct ClientSidebarRoot: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        // The rows set their own height, so the list must not insist on a
-        // taller one underneath them: its default is 44 whatever a row asks.
         .environment(\.defaultMinListRowHeight, rowHeight)
-        // Sections were spending another 20 points on the gap above their
-        // heading, which is what made four destinations look like a menu.
         .clientCompactSections()
         .refreshable {
             await ClientRefresh.pull("sidebar") { await reload() }
@@ -427,11 +327,6 @@ struct ClientSidebarRoot: View {
         }
     }
 
-    /// What `⌘` opens, and what holding it lists.
-    ///
-    /// The numbers follow the sidebar's own order rather than the tab bar's,
-    /// because the sidebar is what is on screen. `⌘,` is Settings everywhere
-    /// on this platform, and here the account is the settings.
     private var shortcuts: [ClientShortcut] {
         var commands: [ClientShortcut] = []
         for (index, tab) in tabCustomization.visibleTabs.enumerated() {
@@ -463,18 +358,9 @@ struct ClientSidebarRoot: View {
         return commands
     }
 
-    /// A machine, with the dot that says whether it is awake.
-    ///
-    /// Asleep machines still list, greyed. The sidebar is a map of the account
-    /// rather than of what happens to be running.
     private func hostRow(_ host: ClientHost) -> some View {
         Button {
             navigation.chooseNavigation()
-            // The detail column lands on Workspaces, which draws this same
-            // model: its connecting line, waiting-for-approval card and
-            // errors are already there. Tapping from Home used to connect
-            // with the detail column somewhere else, so an access refusal
-            // landed nowhere and nothing on screen said why.
             navigation.restoredRoute = nil
             navigation.folderID = nil
             if workspaces.connectedKey == host.peerKey {
@@ -532,9 +418,6 @@ struct ClientSidebarRoot: View {
 
     private func folderLabel(_ folder: WorkspaceFolder) -> some View {
         HStack(spacing: Theme.Space.s) {
-            // The accent tile the phone's folder rows and the Mac's sidebar
-            // both use. A plain grey system folder in a list of purple marks
-            // was the one place this app looked like somebody else's.
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Theme.accent.opacity(0.14))
@@ -553,12 +436,6 @@ struct ClientSidebarRoot: View {
         }
     }
 
-    /// The branch and what is on it, as the Mac's sidebar draws it.
-    ///
-    /// In pieces rather than as one string, because the counts carry the diff
-    /// colours: as one grey line `main ⇡2 +535 −46` reads as a serial number
-    /// and nothing in it says which number is which. Numeric face throughout,
-    /// so a count ticking over does not shift the line sideways.
     @ViewBuilder
     private func gitLine(_ folder: WorkspaceFolder) -> some View {
         let font = ClientType.caption.monospacedDigit()
@@ -633,28 +510,14 @@ struct ClientSidebarRoot: View {
         return URL(fileURLWithPath: session.command).lastPathComponent
     }
 
-    /// A tap on a push. The sidebar can land the folder, a waiting
-    /// terminal, or the thread in place.
-    ///
-    /// Peek first, consume only once the tap resolves: taking up front and
-    /// then failing lost the tap with nothing on screen.
     private func fulfillNotification() async {
         guard let request = NotificationOpen.shared.request,
               let scope = WorkSessionContext.shared.scope, scope.kind == .account else { return }
         guard let opened = await workspaces.targetFromNotification(request, account: account.account) else {
-            // A cancelled attempt is not a failed one: this runs from a
-            // `.task` the system cancels when the view goes away, and
-            // `targetFromNotification` answers nil for that too.
             guard !Task.isCancelled, scope == WorkSessionContext.shared.scope else { return }
-            // Otherwise, same as the phone: keep the tap while it is worth
-            // retrying, land on the tree once it is not. See
-            // `NotificationOpen.patience`.
             if NotificationOpen.shared.dropIfStale() { landAfterFailedTap() }
             return
         }
-        // Compare before consuming. `take` always clears, so a newer tap that
-        // arrived while this one resolved would be swallowed by the equality
-        // check and both would be dropped. Peeking leaves it for its own turn.
         guard !Task.isCancelled, scope == WorkSessionContext.shared.scope,
               NotificationOpen.shared.request == request else { return }
         _ = NotificationOpen.shared.take()
@@ -687,16 +550,12 @@ struct ClientSidebarRoot: View {
         }
     }
 
-    /// Where a tap ends up when what it named cannot be found. The sidebar's
-    /// own tree, which is this layout's machine list.
     private func landAfterFailedTap() {
         if navigation.destination != .workspaces {
             navigation.destination = .workspaces
         }
     }
 
-    /// The sessions running in one folder, matched on the directory rather
-    /// than on a label: two checkouts can share a basename.
     private func sessions(in folder: WorkspaceFolder, peer: String) -> [PtySessionInfo] {
         let workspace = ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
         return workspaces.sessions(for: peer).filter {
@@ -706,12 +565,7 @@ struct ClientSidebarRoot: View {
         }
     }
 
-    // MARK: - Detail
 
-    /// What counts as a different page in the detail column.
-    ///
-    /// Explicit sidebar navigation dismisses pushed detail pages. Strip
-    /// selection keeps the workbench and sidebar mounted.
     private var detailIdentity: String {
         "\(navigation.destination)-\(navigation.folderID ?? "")-\(navigation.projectOpenGeneration)-\(navigation.restoredRouteGeneration)"
     }
@@ -748,20 +602,9 @@ struct ClientSidebarRoot: View {
     }
 }
 
-/// The sidebar's sizes, in one place.
-///
-/// The Mac's row is 28 points: 13 point text with five above and below. This
-/// list is touched as well as pointed at, so the **target** grows and the
-/// padding does not. Padding is the gap around a label, and growing it moves
-/// the rows apart without making any of them easier to hit. A minimum height
-/// grows the button itself: the wash, the leading bar and the tap area all
-/// follow it, and the type stays where it is.
 enum SidebarMetrics {
     static let macRow: CGFloat = 28
-    /// A pointer is precise, so this is the Mac's row plus the 15 percent that
-    /// makes it comfortable rather than exact.
     static let pointerRow: CGFloat = macRow * 1.15
-    /// A finger is not, and 44 is the platform's own number for one.
     static let touchRow: CGFloat = 44
 }
 
@@ -777,20 +620,6 @@ extension View {
         }
     }
 
-    /// The Mac's sidebar row, drawn rather than borrowed.
-    ///
-    /// A `List(selection:)` cell draws the platform's highlight and, on an
-    /// iPad with a keyboard, a focus ring. Neither is replaceable from
-    /// underneath, so an accent wash added there came out as a boxed outline
-    /// with a wash inside it. The rows are plain buttons in a plain list
-    /// instead: nothing system-drawn to fight, and the selection is the Mac's,
-    /// a soft accent wash with a three point bar down the leading edge.
-    ///
-    /// **This goes on the button's label, never on the button.** A button's
-    /// hit area is its label, so padding and a minimum height applied outside
-    /// it grow the picture and not the target: the row looked full width and
-    /// answered only where the words were. `contentShape` says the whole of
-    /// that grown label is the button, and it can only say so from inside.
     func clientSidebarRowSurface(isSelected: Bool, height: CGFloat) -> some View {
         padding(.horizontal, Theme.Space.s)
             .padding(.vertical, 5)
@@ -810,11 +639,6 @@ extension View {
             .contentShape(.rect)
     }
 
-    /// What the list needs to know about the row, applied to the button.
-    ///
-    /// Separate from the surface because these are the row's business rather
-    /// than the button's: insets, separators and the cell fill belong outside,
-    /// where the list can see them.
     func clientSidebarRowChrome() -> some View {
         hoverEffect(.highlight)
             .listRowInsets(EdgeInsets(

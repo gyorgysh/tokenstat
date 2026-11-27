@@ -207,8 +207,6 @@ impl Registry {
         if !path.is_dir() {
             return Err(RegistryError::NotAFolder(path.to_path_buf()));
         }
-        // Resolve symlinks and `..` so the same folder reached two ways is one
-        // workspace rather than two rows that disagree.
         let path = std::fs::canonicalize(path).map_err(|source| RegistryError::Io {
             path: path.to_path_buf(),
             source,

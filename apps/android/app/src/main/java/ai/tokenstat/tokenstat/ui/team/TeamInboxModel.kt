@@ -8,8 +8,6 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
-/** Viewing an invitation does not join or grant anything. Acceptance uses
- * only its reviewed identity, and never navigates to a different team reply. */
 internal class TeamInboxModel(private val calls: TeamCalls) {
     var page by mutableStateOf(TeamManagementPage()); private set
     var busy by mutableStateOf(false); private set

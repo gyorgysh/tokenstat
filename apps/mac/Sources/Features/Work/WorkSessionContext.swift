@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Unknown account state is distinct from signed-out local work. AccountModel
-/// publishes its already-loaded identity here; continuity never fetches an account.
 @MainActor @Observable
 final class WorkSessionContext {
     static let shared = WorkSessionContext()
@@ -11,8 +9,6 @@ final class WorkSessionContext {
     private(set) var accountSession: String?
     private(set) var generation: UInt64 = 0
     private(set) var localHostIdentity: String?
-    /// Only saved-page ownership may use this fallback. Live routing continues
-    /// to require `scope`, which remains nil until the account answers.
     var readingScope: WorkReference.Scope? { scope ?? savedAccess.reader?.scope }
     private let installationID: String
     private let savedAccess: SavedWorkAccess
@@ -28,10 +24,6 @@ final class WorkSessionContext {
     func update(account: Account?) {
         let next: WorkReference.Scope?
         if let account {
-            // Signed in without a handle is still a full account: the
-            // server's id scopes it, and every function works under that
-            // scope exactly as under a handle. Nil only when neither the
-            // handle nor the id answers, which is the unknown state.
             next = account.signedIn
                 ? WorkReference.Scope.accountIdentity(handle: account.handle, id: account.accountId)
                     .flatMap { WorkReference.Scope.account(origin: account.host, handle: $0) }
@@ -46,17 +38,12 @@ final class WorkSessionContext {
                     guard let identity = machine.publicIdentity, !identity.isEmpty else { return }
                     result[identity] = machine.displayName
                 }
-                // The name is shown ("Saved for …"), so it stays human: the
-                // identity underneath may be a server id, which names
-                // nothing a person would recognise.
                 return SavedWorkOwner(scope: scope, name: account.title ?? L10n.text("apple.worksessioncontext.your_account.17a7e5cf"), hosts: hosts)
             }
             savedAccess.verified(owner)
         } else {
             savedAccess.accountUnknown()
         }
-        // Purchase replies from older helpers omit the receipt. Preserve the
-        // last verified lifetime only while the account identity stays equal.
         let nextSession = account?.accountSession
             ?? (next != nil && next == scope ? accountSession : nil)
         if scope != next || accountSession != nextSession {

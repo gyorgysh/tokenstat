@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Lanes for Team runs on this computer.
-//!
-//! The publisher turns lanes on per shared checkout and picks the branch work
-//! lands on, the remote, and the check command. With lanes on, every Ask runs
-//! in its own linked worktree, and when its agent finishes, tokenstat commits,
-//! checks and lands the work. Settings stay on this computer.
-
 use crate::error::DispatchError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -181,8 +173,7 @@ fn update_settings_at(
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     };
-    // Reload after acquiring the cross-process lease: independent checkout
-    // saves must preserve one another's entries and any unreadable old state.
+
     let mut file = load_at(root)?;
     file.checkouts.insert(checkout, settings);
     let bytes = serde_json::to_vec(&file).map_err(|_| settings_storage())?;
@@ -274,7 +265,6 @@ pub(super) struct Lane {
     pub branch: String,
     repository: PathBuf,
     pointer: String,
-    /// A rebase stopped at its conflicts and waits for the agent's fix.
     rebasing: bool,
     keep: bool,
 }
@@ -292,20 +282,15 @@ impl Drop for Lane {
     }
 }
 
-/// What a lane is for, written beside it so members can see who is doing
-/// what. Local to this computer; it travels only over the Team channel.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct About {
     branch: String,
-    /// The target ref stays useful after committing, including in repositories
-    /// that disable Git's automatic upstream setup for new branches.
     #[serde(default)]
     base: Option<String>,
     ask: String,
     asked_by: Value,
     started_at_ms: i64,
-    /// The shared chat the Ask came from, so Land goes through its scope.
     #[serde(default)]
     share: Option<String>,
     repository: PathBuf,
@@ -414,8 +399,7 @@ pub(super) fn list(checkout: &str, share: Option<&str>) -> Result<Value, Dispatc
             if share.is_some() && about.share.as_deref() != share {
                 continue;
             }
-            // Read from the lane's own record: taking its lock here could make
-            // a new Ask's own lock fail.
+
             let running = about.status.as_deref() == Some("running");
             let files = lane::changed_files(&path, about.base.as_deref()).unwrap_or_default();
             lanes.push((about, running, files));
@@ -461,7 +445,6 @@ pub(super) fn finish_fix(
     settle(lane, settings, message, true, control)
 }
 
-/// One landing at a time per checkout on this computer, across processes.
 struct LandingLock(fs::File);
 impl Drop for LandingLock {
     fn drop(&mut self) {
@@ -483,8 +466,7 @@ fn landing_lock_at(root: &Path, lane: &Path) -> std::io::Result<Option<LandingLo
         .truncate(false)
         .write(true)
         .open(path)?;
-    // Never wait behind another landing's potentially twenty-minute check:
-    // this guardian must keep observing Stop and authority expiry.
+
     match file.try_lock() {
         Ok(()) => Ok(Some(LandingLock(file))),
         Err(fs::TryLockError::WouldBlock) => Ok(None),
@@ -497,8 +479,6 @@ fn landing_lock_controlled(
     path: &Path,
     control: &mut impl FnMut(lane::Control<'_>) -> Result<(), String>,
 ) -> Result<LandingLock, String> {
-    // Preserve automatic landing order while other lanes run their checks.
-    // The waiting guardian still renews its lease and observes Stop or expiry.
     loop {
         control(lane::Control::Guard)?;
         match landing_lock_at(root, path) {
@@ -527,8 +507,7 @@ fn settle(
             return Landing::Blocked { message };
         }
     };
-    // The agent could edit files in the lane. Its git pointer must still be
-    // the one tokenstat created, or git would follow the agent's choice.
+
     if lane::pointer(&lane.path).ok().as_deref() != Some(lane.pointer.as_str()) {
         lane.keep();
         return Landing::Blocked {
@@ -562,7 +541,7 @@ fn settle(
         !settings.review,
         control,
     );
-    // A lane kept by an earlier attempt is done once its work landed.
+
     lane.keep = !matches!(landing, Landing::Landed { .. });
     mark(&lane.path, matches!(landing, Landing::Ready { .. }));
     landing
@@ -592,8 +571,6 @@ pub(super) fn next_step(
         Landing::Conflict { .. } => {
             match lane::start_rebase(&lane.path, &settings.target, settings.remote.as_deref()) {
                 Ok(files) if !files.is_empty() => {
-                    // The rebase brought in teammates' files. An agent goes
-                    // back in only if no link leads out of the lane now.
                     if !matches!(lane::escaping_link(&lane.path), Ok(None)) {
                         lane::abort_rebase(&lane.path);
                         lane.keep();
@@ -608,13 +585,12 @@ pub(super) fn next_step(
                         files.join(", ")
                     ))
                 }
-                // The target moved again and the conflict went with it.
+
                 Ok(_) => Next::Done(finish_fix(lane, settings, message, control)),
                 Err(message) => Next::Done(Landing::Blocked { message }),
             }
         }
-        // The owner turned checks on knowing they run changed code, so the
-        // agent may read what its own change made the check print.
+
         Landing::CheckFailed { .. } if !matches!(lane::escaping_link(&lane.path), Ok(None)) => {
             Next::Done(Landing::Blocked {
                 message: "The project now has a link that leads outside it.".into(),
@@ -651,7 +627,7 @@ pub(crate) fn caught_up(repository: &str) {
         let Ok(workspace) = crate::workspaces::get(&row.workspace_id) else {
             continue;
         };
-        // The folder must still be the one that was published.
+
         if super::publications::Folder::capture(&workspace.path)
             .ok()
             .as_ref()
@@ -670,8 +646,7 @@ pub(crate) fn caught_up(repository: &str) {
                 Some("New work landed in this project. Update this checkout when you are ready."),
             );
         }
-        // Manual mode's opt-in covers the target checkout only. It must not
-        // resume automatic changes to lanes left from an earlier workflow.
+
         if !settings.enabled {
             continue;
         }
@@ -695,7 +670,7 @@ pub(crate) fn caught_up(repository: &str) {
             {
                 continue;
             }
-            // A lease held means an agent is working in that lane right now.
+
             if let Ok(_lease) = tokenstat_workspace::writer::Lease::acquire_lane(&path)
                 && !matches!(
                     lane::refresh(&path, &settings.target, Some(remote)),
@@ -791,8 +766,7 @@ pub(super) fn land_ready(
     };
     let source = super::scoped_source::Source::capture(principal)?;
     let client = principal.account_client()?.clone();
-    // A long check outlives the viewer's short connection ticket. The host
-    // renews its own authority, just as it does during an agent's landing.
+
     let mut authority = client
         .admit_host_run_authority(
             &format!("runlease_{:032x}", rand::random::<u128>()),
@@ -855,7 +829,6 @@ pub(super) fn land_ready(
     Ok(json!({"landed":landed,"message":message}))
 }
 
-/// Words for the last catch-up of a checkout, kept for the owner to see.
 fn record_catch_up(checkout: &str, outcome: &lane::CatchUp) {
     let note = match outcome {
         lane::CatchUp::Updated | lane::CatchUp::Current => None,
@@ -998,8 +971,7 @@ pub(super) fn discard(
     super::lane_check::recover_manual(&path).map_err(|_| DispatchError::new("team_lane_busy", "This lane's previous check needs recovery. Restart the publishing computer before trying again."))?;
     let _lease = tokenstat_workspace::writer::Lease::acquire_lane(&path)
         .map_err(|_| DispatchError::new("team_lane_busy", "This lane is in use right now."))?;
-    // Git runs inside the lane only while its pointer is still tokenstat's.
-    // Otherwise the lane goes through the main repository alone.
+
     if lane::pointer(&path).ok().as_deref() == Some(about.pointer.as_str()) {
         lane::abort_rebase(&path);
     }
@@ -1068,7 +1040,6 @@ pub(super) fn abandon(lane: &mut Lane) {
     mark(&lane.path, false);
 }
 
-/// Record whether a kept lane is ready to land or blocked.
 fn mark(path: &Path, ready: bool) {
     let file = path.with_extension("json");
     if let Some(mut about) = fs::read(&file)
@@ -1100,8 +1071,7 @@ pub(super) fn describe(landing: &Landing, lane: &Lane, settings: &Settings) -> S
             files.join(", "),
             lane.branch
         ),
-        // The output can hold anything the changed code printed. It stays on
-        // this computer and never goes into the shared chat.
+
         Landing::CheckFailed { .. } => format!(
             "Not landed: the check failed. It is kept on branch {}.",
             lane.branch
@@ -1139,7 +1109,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         if params.len() > 64 * 1024 {
             return Err(invalid());
         }
-        // The app's Team client adds its account receipt to every call.
+
         let mut body: Value = serde_json::from_str(params).map_err(|_| invalid())?;
         if let Some(object) = body.as_object_mut() {
             object.remove("_accountScope");
@@ -1250,8 +1220,7 @@ mod tests {
         manual.enabled = false;
         update_settings_at(root.path(), "checkout".into(), manual).unwrap();
         assert!(settings_at(root.path(), "checkout").unwrap().is_none());
-        // Both Ask admission and manual landing use this fallible lookup. A
-        // storage error cannot be mistaken for the explicit Manual setting.
+
         fs::write(root.path().join("settings.json"), b"{broken settings").unwrap();
         for checkout in ["checkout", "unknown-checkout"] {
             assert_eq!(
@@ -1261,7 +1230,6 @@ mod tests {
         }
     }
 
-    // A separate process uses the same transaction as a native host or daemon.
     #[test]
     fn settings_update_child() {
         let Some(root) = std::env::var_os("TOKENSTAT_TEST_LANE_SETTINGS_ROOT") else {
@@ -1284,9 +1252,7 @@ mod tests {
                     settings("main", None, &[]),
                 ) {
                     Ok(_) => break,
-                    // A bounded save can report contention during the other
-                    // process's burst. Test that accepted writes are preserved,
-                    // without requiring ten durable saves to finish in 2s.
+
                     Err(error)
                         if error.code == "team_lanes_busy"
                             && std::time::Instant::now() < deadline =>
@@ -1328,8 +1294,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let both_ready = ready();
-        // The children must reload this entry after they acquire the lease,
-        // even though their requests began before it was saved.
+
         let existing = File {
             version: 1,
             checkouts: BTreeMap::from([("existing".into(), settings("main", None, &[]))]),
@@ -1340,8 +1305,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.path().join("settings.start"), []).unwrap();
-        // Exercise the documented retry response deterministically, rather
-        // than depending on runner load to make one child's burst contend.
+
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let both_busy = || {
             ["first", "second"]
@@ -1353,7 +1317,7 @@ mod tests {
         }
         let both_retried = both_busy();
         drop(lease);
-        // Always release the parent lock and reap children before assertions.
+
         let outputs = children.map(|child| child.wait_with_output().unwrap());
         for output in outputs {
             assert!(
@@ -1391,8 +1355,7 @@ mod tests {
             let _ = sender.send(acquired);
         });
         let contended = result.recv_timeout(std::time::Duration::from_secs(2));
-        // Release and join before asserting: a regressed blocking acquire
-        // must fail the test instead of hanging the whole test runner.
+
         drop(first);
         worker.join().unwrap();
         assert!(matches!(contended, Ok(false)));

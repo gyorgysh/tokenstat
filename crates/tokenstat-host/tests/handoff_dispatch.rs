@@ -17,15 +17,12 @@ fn success(method: &str, params: Value) -> Value {
     response["result"].clone()
 }
 
-/// This is its own test executable: configure process-global roots before any
-/// host singleton exists. No developer registry, identity, chat or account is
-/// touched. Calls exercise production dispatch and persistent Store together.
 #[test]
 fn explicit_handoff_round_trip_through_production_dispatch() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     tokenstat_paths::configure_mobile(&data, root.path().join("cache")).unwrap();
-    // Set before host dispatch can start workers; this executable has one test.
+
     unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", root.path().join("identity")) };
     let folder = root.path().join("project");
     std::fs::create_dir(&folder).unwrap();
@@ -59,8 +56,7 @@ fn explicit_handoff_round_trip_through_production_dispatch() {
     assert_eq!(saved["handoff"]["revision"], 1);
     let identity = success("machine.identity", json!({}));
     assert_eq!(saved["handoff"]["deviceId"], identity["key"]);
-    // Simulate a lost acknowledgement: exact replay returns the same record,
-    // including its timestamp and revision, rather than another write.
+
     assert_eq!(success("work.continuity.put", request.clone()), saved);
     assert_eq!(
         success("work.continuity.get", reference.clone())["handoff"],

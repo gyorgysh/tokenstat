@@ -22,7 +22,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
-/** Lazy rows share bounded decoded previews instead of decoding on every return. */
 internal class ChatImageDecodeCache(
     private val maxBytes: Int,
     private val decode: (File, Int) -> Bitmap = ::decodeChatImage,
@@ -58,8 +57,6 @@ internal class ChatImageDecodeCache(
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { return@withPermit null }
                         coroutineContext.ensureActive()
-                        // A replacement at the same path must never populate
-                        // an older key. Originals on disk stay untouched.
                         if (version(file, edge) != version) return@withPermit null
                         synchronized(lock) {
                             if (generation == stamp && bitmap.allocationByteCount <= maxBytes) {
@@ -79,8 +76,6 @@ internal class ChatImageDecodeCache(
             synchronized(lock) {
                 if (pending[version] === flight && --flight.readers == 0) {
                     pending.remove(version)
-                    // One disappearing row cannot cancel another reader.
-                    // With none left, queued work should leave with the row.
                     flight.task.cancel()
                 }
             }

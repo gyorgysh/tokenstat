@@ -11,11 +11,6 @@ protocol AutomationQueueService: Sendable {
     func runningJobCount() async throws -> Int
 }
 
-/// Host-wide scheduler defaults for one connected computer.
-///
-/// The library is often one folder. These fields are not. A dirty draft stays
-/// on this computer until Save, and a lost reply is checked by reading the
-/// queue back rather than sending the same change twice on a guess.
 @MainActor
 @Observable
 final class AutomationQueueSession {

@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Bounded, in-memory transcript rows. Rendering uses the same view tree as
-/// live content; the caller keeps actions disabled until live state arrives.
 struct ChatRecentMessages<Row> {
     private var entries: [String: [Row]] = [:]
     private var order: [String] = []
-    /// Read ahead, not opened. Prefer dropping these when a project is full.
     private var speculative: Set<String> = []
-    /// Ten warm conversations per project: the whole loop set.
-    /// Counted per project, because one shared ten meant browsing a second
-    /// project pushed the first one's chats out, and coming back reloaded.
     static var perFolderLimit: Int { 10 }
-    /// Across every project, so a long session cannot grow without bound.
-    /// Each conversation is capped by `byteLimit`, so this is about 60 MB on
-    /// a Mac and 24 MB on a phone or tablet.
     static var conversationLimit: Int {
         #if os(iOS)
         24
@@ -22,7 +13,6 @@ struct ChatRecentMessages<Row> {
         60
         #endif
     }
-    /// Raw rows. Three slices fold to a full transcript slice, so the preview matches the live page.
     static var messageLimit: Int { 600 }
     static var byteLimit: Int { 1024 * 1024 }
 
@@ -35,8 +25,6 @@ struct ChatRecentMessages<Row> {
             kept.append(message)
             remaining -= bytes
         }
-        // Nothing to keep leaves an earlier copy alone. A chat left before
-        // its page arrived would otherwise erase the warm copy it opened on.
         guard !kept.isEmpty else { return }
         remove(key)
         entries[key] = kept.reversed()
@@ -54,16 +42,10 @@ struct ChatRecentMessages<Row> {
         }
     }
 
-    /// Whether a conversation is held, without counting as a use of it.
-    /// A warm-up asking this for every chat in a project must not make
-    /// those chats look more recent than the one somebody just left.
     func contains(_ key: String) -> Bool { entries[key] != nil }
 
-    /// The rows, without counting as a use.
     func peek(_ key: String) -> [Row] { entries[key] ?? [] }
 
-    /// The project part of a key: everything up to its last separator. Ids
-    /// are percent-encoded, so a separator never appears inside one.
     private static func folder(of key: String) -> Substring {
         guard let bar = key.lastIndex(of: "|") else { return key[key.startIndex..<key.startIndex] }
         return key[...bar]

@@ -54,20 +54,14 @@ pub mod local_models {
     use std::io::Write;
     use std::path::PathBuf;
 
-    /// Enough for any real machine, small enough that a runaway server
-    /// cannot grow the file without bound.
     const CAP: usize = 2_000;
 
     fn path() -> Option<PathBuf> {
         tokenstat_paths::data_dir().map(|dir| dir.join("local-models.json"))
     }
 
-    /// Explicit local provenance in usage logs or host model selections.
     pub(super) fn qualified_id(model: &str) -> Option<&str> {
         let trimmed = model.trim();
-        // Marked by the machine that served it. The provider may be absent
-        // when only the model name was known, and an LM Studio name can hold
-        // a slash of its own.
         if let Some(rest) = trimmed.strip_prefix("local:") {
             return match rest.split_once('/') {
                 Some(("ollama" | "lmstudio", model)) if !model.is_empty() => Some(model),
@@ -79,8 +73,6 @@ pub mod local_models {
         (matches!(provider, "ollama" | "lmstudio") && !model.is_empty()).then_some(model)
     }
 
-    /// Bumped each time this process remembers a new id, so a long-lived
-    /// price table can tell it is behind without reading the file again.
     static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     pub fn generation() -> u64 {
@@ -161,20 +153,9 @@ struct RawSnapshot {
 pub struct PriceTable {
     pub effective_from: String,
     by_pattern: BTreeMap<String, Rates>,
-    /// Every matchable stem across all patterns (length ≥ 4), longest first,
-    /// built once at parse time.
-    ///
-    /// Matching walks this instead of recomputing `lookup_keys` for every
-    /// pattern on every call. The book is thousands of patterns wide, and
-    /// rebuilding that list per lookup was the single biggest cost in model
-    /// tables.
     stems: Vec<(String, Rates)>,
     catalog: Option<Arc<Catalog>>,
-    /// Models this machine has served from LM Studio or Ollama. They cost
-    /// nothing, and a name that happens to resemble a cloud model must not
-    /// borrow that model's price.
     local: Arc<BTreeSet<String>>,
-    /// The [`local_models::generation`] the `local` set was read at.
     local_generation: u64,
 }
 
@@ -217,8 +198,6 @@ impl PriceTable {
             return true;
         }
         let id = model.trim().to_ascii_lowercase();
-        // Bare historical ids lack provenance. Preserve exact cloud rates,
-        // and never use a price-book alias to infer where a model ran.
         self.local.contains(&id) && self.get_exact(&id).is_none() && !is_cursor_router_id(&id)
     }
 
@@ -277,8 +256,6 @@ impl PriceTable {
     /// Look up a model in the on-disk snapshot only (no estimate fallbacks).
     pub fn table_rates_for(&self, model: &str) -> Option<Rates> {
         let model_keys = lookup_keys(model);
-        // Stems are sorted longest first, so the first match is the most
-        // specific pattern for this model. No need to keep scoring the rest.
         for (stem, rates) in &self.stems {
             if model_keys.iter().any(|mk| mk.starts_with(stem.as_str())) {
                 return Some(*rates);
@@ -311,8 +288,6 @@ impl PriceTable {
             .or_else(|| self.fallback_rates(model))
     }
 
-    /// Rates from outside the price book: a built-in floor, then the catalog's
-    /// canonical offer. Everything here is an estimate by definition.
     fn fallback_rates(&self, model: &str) -> Option<Rates> {
         estimate_rates(model).or_else(|| self.catalog.as_ref()?.estimate_rates(model))
     }
@@ -358,7 +333,6 @@ impl PriceTable {
         self.table_rates_for(model).is_none() && self.fallback_rates(model).is_some()
     }
 
-    /// Value of these counters at list rates, in micros of a dollar.
     fn value_micros(&self, model: &str, c: &Counters) -> Option<i64> {
         Some(EquivalentValue::from_rates(self.rates_for(model)?, c).micros())
     }
@@ -373,8 +347,6 @@ pub enum EstimateSource {
     Catalog,
 }
 
-/// Composer 2.5 standard list rates (cursor.com/blog/composer-2-5), used as a
-/// floor estimate for Cursor Auto / router ids that never name the real model.
 const COMPOSER_STANDARD: Rates = Rates {
     input: 0.5,
     output: 2.5,
@@ -402,10 +374,6 @@ pub fn display_usage_model_id(model: &str) -> String {
     model.trim().to_string()
 }
 
-/// Cursor Auto / router ids only (exact forms after trim + lowercase).
-///
-/// Does not treat an arbitrary path leaf `default`/`auto` as Auto, so a model
-/// id like `other/default` is not re-priced as the Composer floor.
 fn is_cursor_router_id(model: &str) -> bool {
     let raw = model.trim().to_ascii_lowercase();
     matches!(
@@ -421,9 +389,6 @@ fn is_cursor_router_id(model: &str) -> bool {
     )
 }
 
-/// Built-in estimate rates when the local price book has no row.
-/// Cursor Auto is priced at Composer 2.5 standard list rates: mostly Composer
-/// traffic with occasional external models, so this is a floor, not exact.
 fn estimate_rates(model: &str) -> Option<Rates> {
     if is_cursor_router_id(model) {
         return Some(COMPOSER_STANDARD);
@@ -431,32 +396,19 @@ fn estimate_rates(model: &str) -> Option<Rates> {
     None
 }
 
-/// Flatten every pattern's matchable keys into one longest-first list.
-///
-/// A pattern contributes one entry per key it can match, so `claude-opus-5`
-/// and `claude` both point at the same rates. The longest stem that is a
-/// prefix of a model key decides the price, which preserves the old
-/// "longest match wins" rule without recomputing keys on every lookup.
 fn build_stems(by_pattern: &BTreeMap<String, Rates>) -> Vec<(String, Rates)> {
     let mut stems: Vec<(String, Rates)> = Vec::new();
     for (pattern, rates) in by_pattern {
         for pk in lookup_keys(pattern) {
-            // Skip tiny stems that would false-match too widely (`gpt`, `o1`).
             if pk.len() >= 4 {
                 stems.push((pk, *rates));
             }
         }
     }
-    // Stable, so equal-length stems keep pattern order and ties break the way
-    // they always did.
     stems.sort_by_key(|(stem, _)| std::cmp::Reverse(stem.len()));
     stems
 }
 
-/// Keys to try when resolving a log model id against the price book.
-///
-/// Shared with the catalog so a model id resolves the same way in both, and a
-/// row cannot be priced from one book but described from a different model.
 pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     let push = |keys: &mut Vec<String>, s: String| {
@@ -625,8 +577,6 @@ impl fmt::Display for Charged {
 }
 
 impl fmt::Display for EquivalentValue {
-    /// Never renders as a bare amount. A figure that was not charged must not be
-    /// mistakable for one that was.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${:.2} at list rates", self.dollars())
     }
@@ -666,7 +616,6 @@ mod tests {
         let collision = table.with_local_models(["qwen2.5".to_string()].into_iter().collect());
         assert!(!collision.is_local("qwen2.5"));
         assert!(collision.is_local("ollama/qwen2.5"));
-        // A synced row its machine marked, with or without a provider.
         assert!(collision.is_local("local:qwen2.5"));
         assert!(collision.is_local("local:qwen/qwen3-coder"));
         assert!(collision.is_local("local:lmstudio/qwen/qwen3-coder"));
@@ -765,14 +714,12 @@ mod tests {
         assert_eq!(display_usage_model_id("auto"), "cursor-router-auto");
         assert_eq!(display_usage_model_id("cursor/auto"), "cursor-router-auto");
         assert_eq!(display_usage_model_id("gemini-default"), "gemini-default");
-        // Path leaves that are not the Cursor-only bare/prefixed set stay put.
         assert_eq!(display_usage_model_id("other/default"), "other/default");
         assert_eq!(display_usage_model_id("vendor/auto"), "vendor/auto");
 
-        let t = table(); // fixture has no composer / router rows
+        let t = table();
         assert!(t.is_estimate("default"));
         assert!(t.is_estimate("cursor-router-auto"));
-        // Estimates still count as "known" so they do not land in the missing list.
         assert!(t.is_known("default"));
         assert!(t.table_rates_for("default").is_none());
         let r = t.rates_for("default").expect("estimate rates");
@@ -780,9 +727,7 @@ mod tests {
         assert!((r.output - 2.5).abs() < 1e-9);
         assert!((r.cache_read - 0.05).abs() < 1e-9);
         let v = EquivalentValue::price(&t, "auto", &counters(1_000_000, 1_000_000)).unwrap();
-        // 0.5 + 2.5 = $3.00 at list rates for 1M in + 1M out
         assert!((v.dollars() - 3.0).abs() < 0.001);
-        // Unrelated path leaves must not inherit the Composer floor estimate.
         assert!(!t.is_estimate("other/default"));
         assert!(t.rates_for("other/default").is_none());
     }

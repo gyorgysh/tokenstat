@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 #![cfg(all(unix, feature = "local-host"))]
 
 use serde_json::{Value, json};
@@ -14,7 +13,7 @@ impl Drop for Runner {
         if self.0.try_wait().is_ok_and(|status| status.is_some()) {
             return;
         }
-        // Exercise the same signal the PTY manager uses for Stop.
+
         unsafe {
             libc::kill(self.0.id() as libc::pid_t, libc::SIGHUP);
         }
@@ -59,7 +58,7 @@ for line in sys.stdin:
             .unwrap(),
     );
     wait_for(|| root.path().join("ready.json").exists());
-    // Hold the real output pipe so the provider reader has to queue messages.
+
     std::thread::sleep(Duration::from_millis(200));
     let mut stdout = runner.0.stdout.take().unwrap();
     let reader = std::thread::spawn(move || {
@@ -158,8 +157,6 @@ emit({'type':'result','is_error':False})
         std::thread::sleep(Duration::from_millis(20));
     }
     if status.is_none() {
-        // The old writer blocks even the wrapper's signal handler. Retire
-        // only this fixture's still-owned provider group before failing.
         let group: i32 = fs::read_to_string(root.path().join("group"))
             .unwrap()
             .parse()
@@ -350,8 +347,6 @@ fn stop_retires_providers_and_tools_when_stdout_is_not_consumed() {
     }
     impl Drop for StalledRunner {
         fn drop(&mut self) {
-            // The owned tool kills its own group on this private connection;
-            // cleanup never signals a PID read from an old status file.
             let connection = self
                 .tool
                 .take()
@@ -457,7 +452,7 @@ for line in sys.stdin:
         runner.tool = Some(tool.try_clone().unwrap());
         wait_for(|| {
             let mut available: libc::c_int = 0;
-            // SAFETY: stdout is a live pipe and available points to an int.
+
             assert_eq!(
                 unsafe {
                     libc::ioctl(
@@ -554,8 +549,6 @@ for line in sys.stdin:
     }
     let mut samples: std::collections::BTreeMap<&str, Vec<f64>> = Default::default();
     for round in 0..7 {
-        // Alternate order so a before/after comparison shares the same load
-        // and neither executable always gets the first run of a pair.
         if round > 0 {
             programs.reverse();
         }
@@ -593,8 +586,6 @@ fn wait_for(mut ready: impl FnMut() -> bool) {
     }
 }
 
-/// Fake native CLIs exercise initialization, two acknowledged changes during
-/// one turn, final output and cleanup. No authentication or inference occurs.
 #[test]
 fn live_controls_apply_without_restarting_or_resending_a_turn() {
     for backend in ["claude", "codex"] {
@@ -709,8 +700,7 @@ stop_stream()
                 fs::write(root.path().join("streaming"), "").unwrap();
             }
             fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-            // An argument-selecting shim keeps the production launch translator
-            // under test: it does not learn a fake CLI-specific argv convention.
+
             let shim = root.path().join("shim");
             fs::write(
                 &shim,
@@ -1157,8 +1147,6 @@ for line in sys.stdin:
     });
 }
 
-/// Manual compaction is a native operation on the resumed session. It must
-/// never create a normal model turn containing the literal slash command.
 #[test]
 fn compact_uses_the_native_protocol_and_surfaces_unsupported_versions() {
     for (backend, refuse) in [("claude", false), ("codex", false), ("codex", true)] {
@@ -1198,9 +1186,7 @@ for line in sys.stdin:
 "##, refuse=if refuse {"True"} else {"False"})).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let config = root.path().join("config.json");
-        // Exercise the same command constructor as Store::send. Codex plan
-        // mode and changed standing rules both decorate the prompt, but
-        // neither may turn maintenance into a normal inference request.
+
         let mut argv = tokenstat_host::automations::chat_agent_command(
             backend,
             "/compact",

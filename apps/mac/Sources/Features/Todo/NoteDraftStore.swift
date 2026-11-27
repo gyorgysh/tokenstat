@@ -3,7 +3,6 @@
 import Foundation
 import Observation
 
-/// Retains unsaved notes across navigation and drains edits in order per note.
 @MainActor @Observable
 final class NoteDraftStore {
     struct Text: Equatable, Hashable {
@@ -52,8 +51,6 @@ final class NoteDraftStore {
             entries[id]?.error = nil
             do {
                 try await write(snapshot)
-                // Normalize only the submitted version; typing during the
-                // request belongs to the next write and must stay untouched.
                 if entries[id]?.value == entry.value { entries[id]?.value = snapshot }
                 entries[id]?.saved = snapshot
                 entries[id]?.hasSaved = true

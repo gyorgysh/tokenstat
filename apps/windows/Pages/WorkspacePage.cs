@@ -21,7 +21,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private readonly string _id;
     private readonly WorkspaceSection _section;
 
-    /// <summary>Which section this page shows, so the tab bar knows the launcher.</summary>
     internal WorkspaceSection Section => _section;
     private StackPanel _root = new() { Spacing = Theme.SpaceL };
     private bool _changesLoaded;
@@ -43,11 +42,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     private bool _loading;
     private bool _reloadRequested;
 
-    /// <summary>
-    /// A chat's file row opens the current diff beside the conversation. The
-    /// card is pinned by the next load only, so a later push, pull or refresh
-    /// does not fetch that diff again or keep it at the top.
-    /// </summary>
     public void RevealChangedFile(string? path)
     {
         _reviewPath = path;
@@ -75,9 +69,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     public event Action? ToolbarChanged;
 
-    /// <summary>
-    /// The folder this section belongs to.
-    /// </summary>
     public UIElement? ToolbarScope =>
         Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? _section.Label() : _folderName);
 
@@ -98,11 +89,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// The inspector column content: which folder is on screen, its branch,
-    /// and a one line summary of the section. Reloads replace its children,
-    /// so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -137,11 +123,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// Loads build straight into <c>_root</c> across awaits, so two at once
-    /// would interleave their rows. A request during a load runs once that
-    /// load ends instead.
-    /// </summary>
     private async Task LoadAsync()
     {
         if (_loading)
@@ -173,8 +154,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
             _changesLoaded = _section == WorkspaceSection.Changes;
             return;
         }
-        // Build the next live snapshot offscreen. Keep the current review
-        // and reading position visible while remote status and diffs arrive.
         var previous = _root;
         _root = new StackPanel { Spacing = Theme.SpaceL };
         try
@@ -423,11 +402,8 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
 
         if (!string.IsNullOrEmpty(branch))
         {
-            // The branch switch and push dialogs route through the peer, so
-            // a folder on another machine gets the same bar as a local one.
             var bar = BranchBar(branch, upstream, ahead, behind, folderName, null);
             _root.Children.Add(bar);
-            // A forge timeout must not hold the file list or diff preview.
             _ = DecorateBranchBarAsync(bar, branch, upstream, ahead, behind, folderName);
         }
 
@@ -464,9 +440,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 wanted == file.Path.Replace('\\', '/') || wanted.EndsWith("/" + file.Path.Replace('\\', '/'), StringComparison.Ordinal));
             if (!string.IsNullOrEmpty(file.Path))
             {
-                // Open the file in the review browser when a chat workbench
-                // is present. Keep the inline fallback for other workspace
-                // surfaces that do not own a side review.
                 if (WorkspaceTabsPage.Find(this)?.ShowWorkingTreeReview(file.Path) != true)
                 {
                     var diff = await LoadOneDiffAsync(file.Path);
@@ -577,10 +550,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                 await LoadAsync();
             };
             line.Children.Add(check);
-            // The file name first, then what happened to it and where it
-            // lives, each on one trimmed line. The full path wrapped beside
-            // three labelled buttons collapsed to one letter per line in the
-            // inspector's narrow column.
             var slash = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
             var fileName = slash >= 0 ? path[(slash + 1)..] : path;
             var folder = slash > 0 ? path[..slash] : "";
@@ -706,8 +675,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         {
             label += $" ↓{behind}";
         }
-        // No leading icon: the switch button already carries the branch
-        // glyph, and a second identical mark beside it reads as a dead button.
         var row = new FlowPanel { Spacing = Theme.SpaceS };
         var switchButton = ActionIconGlyph.Button(label, ActionIcon.Merge, async (_, _) =>
         {
@@ -761,11 +728,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         await LoadAsync();
     }
 
-    /// <summary>
-    /// The launcher's one column, the Mac's width: what to open, the saved
-    /// servers, then the agents. Everything shares the column so the servers
-    /// line up with the tiles above and below them.
-    /// </summary>
     private const double LauncherColumnWidth = 620;
 
     private const double LauncherTileMinWidth = 150;
@@ -793,7 +755,7 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
     {
         var mark = new FontIcon
         {
-            Glyph = "\uF0E2", // GridView
+            Glyph = "\uF0E2",
             FontSize = 34,
             Foreground = Theme.AccentBrush,
             Opacity = 0.65,
@@ -878,11 +840,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         Padding = new Thickness(Theme.SpaceS, Theme.SpaceM, Theme.SpaceS, Theme.SpaceM),
     };
 
-    /// <summary>
-    /// A tool that is not on the launcher yet: a faint fill and a dashed
-    /// outline, like the Mac, so it reads as something to add rather than
-    /// something to run. The outline sits over the button and takes no input.
-    /// </summary>
     private static Grid DashedTile(Button button)
     {
         button.Background = Theme.Brush(static () => Windows.UI.Color.FromArgb(102, Theme.Panel.R, Theme.Panel.G, Theme.Panel.B));
@@ -944,9 +901,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     : L10n.Text("windows.chatpage.not_available_on_this_computer.ffcbd9b9");
                 if ((!installed || hidden) && !_showingLauncherCatalog) continue;
                 var onLauncher = installed && !hidden;
-                // No status line, like the Mac: the faint mark and the dashed
-                // outline say "not here yet", and the tooltip says what a
-                // click does.
                 var body = TileBody(AgentMark.View(Format.Text(profile, "harnessId", id), 34),
                     Format.Text(profile, "name", id), onLauncher ? 1 : 0.35);
                 async Task RunAsync(Button button, string operation)
@@ -966,9 +920,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                             await LoadLaunchersAsync(host);
                             return;
                         }
-                        // The tool's own bypass flags when the project's switch
-                        // is on, like the Mac launcher. A tool with none (the
-                        // shell) launches the same either way.
                         var args = profile["args"]?.DeepClone() as JsonArray ?? new JsonArray();
                         if (WorkspaceBypass.IsOn(_id) && profile["bypassArgs"] is JsonArray bypassArgs)
                         {
@@ -980,8 +931,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                             ["args"] = args,
                             ["rows"] = 30, ["cols"] = 100, ["dark"] = Theme.IsDark,
                         };
-                        // The project's profile and local model, decided by
-                        // the host beside the rest of each tool's contract.
                         await WorkspaceLaunchChoices.AddToAsync(spawn, _id, id);
                         var session = await AppServices.Host.CallAsync("pty.spawn", spawn);
                         var sessionId = Format.Text(session, "id");
@@ -1052,11 +1001,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         catch (Exception ex) { host.Children.Add(Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important)); }
     }
 
-    /// <summary>
-    /// The live session list, like the Mac session strip: each shell with its
-    /// running state, refreshed on a timer while this section is on screen.
-    /// A quiet pass replaces the rows without rebuilding the page.
-    /// </summary>
     private async Task RefreshSessionsAsync()
     {
         if (_sessionsLoading)
@@ -1102,9 +1046,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
                     {
                         running++;
                     }
-                    // Namespaced to the peer, the way the host renamespaces
-                    // its own answers: the id reads as one of this machine's
-                    // and groups under the remote folder in the sidebar.
                     var openId = peer is null ? id : RemoteWorkspaces.Join(peer, id);
                     list.Children.Add(SessionRow(
                         openId,
@@ -1280,7 +1221,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         var memory = await BrowserProjectMemory.ForAsync(_id);
         if (!operation.IsCurrent || memory is not null && !memory.IsCurrent) return;
         if (browserPeer is null) memory?.Remember(original);
-        // BrowserTab acquires a reference-counted bridge from this original target.
         open(original, host, port, false, browserPeer);
     }
 
@@ -1313,8 +1253,6 @@ internal sealed class WorkspacePage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
         if (n == 0)
         {
-            // The global Tasks board is this PC's only. A folder on another
-            // machine grows its tasks on its own board instead.
             var hint = peer is null
                 ? L10n.Text("windows.workspacepage.add_one_from_tasks.391694bb")
                 : L10n.Text("windows.workspacepage.add_one_on_that_machine_s_board_for_this_f.b2cea4d5");

@@ -12,14 +12,6 @@ import AppKit
 import UIKit
 #endif
 
-/// Small, read-only Markdown for pull-request conversations and chat.
-///
-/// This is deliberately a renderer rather than a web view. GitHub bodies are
-/// untrusted text: supported block HTML is converted to native Markdown,
-/// unknown tags are discarded, and remote images become links, so opening a
-/// conversation never contacts a host the person did not choose. The block
-/// parser owns the handful of shapes these conversations need while
-/// `AttributedString` handles inline emphasis, code spans and links.
 struct MarkdownText: View {
     private let blocks: [MarkdownBlock]
     private let bodyFont: Font
@@ -62,13 +54,6 @@ struct MarkdownText: View {
 }
 
 extension MarkdownText {
-    /// Parse bodies and inline runs off the main thread before lazy rows need
-    /// them. Long pull-request bodies otherwise parse during scroll layout.
-    ///
-    /// Background requests share a worker so overlapping pages and previews
-    /// reuse the cache instead of parsing the same bodies concurrently. A row
-    /// reached before its warm finishes still parses immediately; rendering
-    /// never waits for the worker.
     static func warm(_ sources: [String]) {
         guard !sources.isEmpty else { return }
         Task.detached(priority: .utility) {
@@ -106,18 +91,8 @@ private actor MarkdownWarmup {
     }
 }
 
-/// Whether this markdown is the point of the screen or a note beside it.
-///
-/// `document` is an answer: a document's own title scale, and wide content
-/// gets its own sideways scroller so a table or a long line keeps its shape.
-///
-/// `aside` is reasoning, drawn small and grey. Headings come back to the
-/// surrounding text's size, because `##` at 22pt would make a footnote the
-/// largest thing on screen, and wide content wraps in place rather than
-/// nesting another scroll view inside the transcript's.
 enum MarkdownStyle: String {
     case document
-    /// Chat headings keep their hierarchy without adopting document titles.
     case chat
     case aside
 
@@ -141,15 +116,6 @@ enum MarkdownStyle: String {
     }
 }
 
-/// Parsed markdown, kept between draws.
-///
-/// Both parses here are pure functions of the source text, and a transcript
-/// rebuilds its rows whenever anything about the conversation changes. Parsing
-/// the same paragraph again on every draw is the largest single cost in
-/// showing a long chat, and the answer never differs.
-///
-/// `NSCache` because it is thread safe and gives the memory back under
-/// pressure, which matters when the text being held is a whole conversation.
 private final class ParsedTextCache<Value> {
     private final class Held {
         let value: Value
@@ -170,8 +136,6 @@ private final class ParsedTextCache<Value> {
         return parsed
     }
 
-    /// For an answer that cannot be produced here, such as one that has to be
-    /// asked for.
     func stored(for source: String) -> Value? {
         cache.object(forKey: source as NSString)?.value
     }
@@ -182,74 +146,20 @@ private final class ParsedTextCache<Value> {
 }
 
 private enum MarkdownCache {
-    // Sized for a conversation being read back, not for one being read. A
-    // reader who pages to the beginning and scrolls forward again crosses
-    // every row twice, and a cache that evicted on the way up parses the
-    // whole conversation a second time on the way down. These hold structs,
-    // and `NSCache` gives the memory back under pressure.
-    /// One entry per assistant message and per thinking block, roughly.
-    // Room for ten warm conversations in a few projects. At 1500 the second
-    // project's warming pushed out the first one's parsed text.
     static let blocks = ParsedTextCache<[MarkdownBlock]>(limit: 3000)
     static let inline = ParsedTextCache<AttributedString>(limit: 10000)
-    /// Finished, coloured code, keyed by the fence's digest.
-    ///
-    /// Spans used to be cached here and turned into a `Text` chain inside a
-    /// computed property, which meant every visible fence re-sorted its spans
-    /// and rebuilt its whole string on every pass of the enclosing view's
-    /// body. During a scroll that is once a frame per fence, and it is what
-    /// made a conversation full of code hitch. The colouring is now done once
-    /// and what is kept is the answer.
     static let rendered = ParsedTextCache<[AttributedString]>(limit: 600)
     static let diffs = ParsedTextCache<FileDiff>(limit: 300)
-    /// Finished prose chains per message, keyed by the caller's font set,
-    /// style and markdown (see `MessageMarkdown`). A whole-card hover or a
-    /// scroll re-runs the row's `init`, and without this every one of those
-    /// rebuilt every `Text` chain of the reply from scratch.
     static let segments = ParsedTextCache<[MessageSegment]>(limit: 800)
 
-    /// The rows being written: their last revisions and one parse clock.
-    ///
-    /// A live row cannot share the caches above: its text is a new string on
-    /// every token, so each parse of it misses and what it stores is never
-    /// read again, and hundreds of revisions of one message evict every
-    /// settled row in the conversation.
-    ///
-    /// One revision per row is kept instead, with one clock, and
-    /// `LiveMarkdown.cadence` bounds how often a new one may replace it. A
-    /// token inside the cadence keeps the revision already on screen and comes
-    /// back through the view's task when the interval is up, so a stream that
-    /// arrives faster than a person can read it costs twenty whole-message
-    /// parses a second rather than one per token.
     static var appearanceKey: String { AppAppearance.shared.markdownCacheKey }
 
     static let live = LiveMarkdown()
 }
 
-/// One revision per streaming row, and one clock across all of them.
-///
-/// A turn can stream its prose and its reasoning at the same time, so the
-/// cache cannot be a single slot: each row's identity, scope and style name it,
-/// and a row that finds another row's revision there would draw the wrong
-/// text. Slots hold each row's own last revision, and the shared clock bounds
-/// the total reparses whether one row is streaming or two.
-///
-/// Touched from the main thread only: `MessageMarkdownContent.init` reads it while a
-/// token arrives and the live row's task writes the next revision back.
 private final class LiveMarkdown {
-    /// How long a parsed revision stays on screen.
-    ///
-    /// Thirty to sixty milliseconds is below the point where text arriving
-    /// later reads as a delay, and far above the token rate, so the parse no
-    /// longer runs once per token.
-    ///
-    /// Once the reader has scrolled away from the latest turn nobody is
-    /// watching the words arrive, and every revision still rebuilds and
-    /// redraws the reply underneath a person trying to scroll. It then
-    /// refreshes about once a second instead.
     static var cadence: TimeInterval { readerAway ? 1.0 : 0.05 }
 
-    /// Set by the transcript when the reader leaves or returns to the end.
     static var readerAway = false
 
     private final class Revision {
@@ -271,8 +181,6 @@ private final class LiveMarkdown {
         revisions.countLimit = 4
     }
 
-    /// This slot's revision when there is one, and whether the task should
-    /// replace it once the cadence is up. Nil means parse now.
     func take(slot: String, text: String) -> (segments: [MessageSegment], needsRefresh: Bool)? {
         guard let revision = revisions.object(forKey: slot as NSString) else { return nil }
         if revision.text == text { return (revision.segments, false) }
@@ -290,19 +198,11 @@ private final class LiveMarkdown {
         )
     }
 
-    /// How long the next parse must still wait, for a task that kept its
-    /// revision because it arrived inside the cadence.
     func remaining() -> TimeInterval {
         max(0, Self.cadence - (Date.timeIntervalSinceReferenceDate - lastParse))
     }
 }
 
-/// A short, stable name for a piece of text.
-///
-/// FNV-1a, the same function the host uses for its own stable ids. The point
-/// is length: a fence's key is a dozen characters, so using it as a cache key
-/// or as a `task(id:)` costs nothing, where the fence's own source costs a
-/// walk of the whole thing every time it is compared.
 private enum MarkdownDigest {
     static func key(_ language: String?, _ text: String) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
@@ -340,9 +240,6 @@ private actor MarkdownHighlightLimiter {
     }
 }
 
-/// Turns parsed blocks into the text chains and standalone blocks a message
-/// draws. A value, so a streaming row can keep the state reached after its
-/// settled blocks and carry on from there.
 private struct MessageSegmentBuilder {
     let bodyFont: Font
     let style: MarkdownStyle
@@ -355,9 +252,6 @@ private struct MessageSegmentBuilder {
     private var chainLineBreaks = 0
     private var chainWordCount = 0
     private var chainHasLinks = false
-    /// The chain being built carries on a block the previous chain ended
-    /// inside, such as a long list cut for size. It sits flush under that
-    /// chain, or the cut reads as a paragraph break in the middle of a list.
     private var chainContinues = false
     private var nextContinues = false
 
@@ -454,11 +348,8 @@ private struct MessageSegmentBuilder {
                 )
             }
         case let .list(items):
-            // Short rows can make a text surface too tall long before it
-            // reaches the character cap. Apply both limits to every list.
             for (index, item) in items.enumerated() {
                 let parsed = chunks(item.text)
-                // Empty bullets and checkboxes still have a visible marker.
                 let parts = parsed.isEmpty ? [AttributedString()] : parsed
                 for (part, chunk) in parts.enumerated() {
                     let piece = (part == 0)
@@ -481,8 +372,6 @@ private struct MessageSegmentBuilder {
     }
 }
 
-/// The builder state each streaming row reached after its settled blocks.
-/// Main thread only, like `LiveMarkdown`.
 private final class LiveSegmentPrefix {
     static let shared = LiveSegmentPrefix()
     struct State {
@@ -508,17 +397,8 @@ private struct MarkdownBlock: Identifiable, Equatable {
         case paragraph(String)
         case list([MarkdownListItem])
         case quote(String)
-        /// `key` is a short digest of the language and the source, worked out
-        /// once when the block is parsed. Everything downstream that needs to
-        /// identify this fence uses it, so no drawing pass ever hashes,
-        /// compares or concatenates the fence's whole text again. `widest` is
-        /// the longest line in characters, which decides whether this fence
-        /// needs a scroller of its own.
         case code(language: String?, text: String, key: String, widest: Int)
         case rule
-        /// `overflow` counts rows the parser refused to build: a table wider
-        /// or longer than the caps below is a view-graph bomb, and the count
-        /// is shown as a final "+N more rows" row instead.
         case table(header: [String], rows: [[String]], overflow: Int)
     }
 
@@ -638,10 +518,6 @@ private struct MarkdownListRow: View {
     }
 }
 
-/// One run of inline markdown, parsed once and kept.
-///
-/// Separated from the view so the same work can be done ahead of time, off the
-/// main thread, by `MarkdownText.warm`.
 private enum MarkdownInline {
     static func attributed(_ source: String) -> AttributedString {
         MarkdownLinks.styled(parse(source), color: Theme.accent)
@@ -717,8 +593,6 @@ private struct SettledAwareText: View, Equatable {
     let arrivals: [Int: TimeInterval]
     let wordStart: Int
     let wordEnd: Int
-    /// Characters in the chain. An emphasis closed in a later chunk changes
-    /// an earlier chunk's text without changing its word count.
     let length: Int
     let settled: Bool
 
@@ -741,13 +615,6 @@ private enum MessageSegment {
     case block(MarkdownBlock)
 }
 
-/// Whether the person reading has scrolled away from the streaming reply.
-///
-/// Slows the live reply's refresh while true. See `LiveMarkdown.cadence`.
-///
-/// Each transcript reports for itself. The live reply slows down only when
-/// every transcript on screen is away, so a reply someone is following in
-/// one pane is not slowed by a reader scrolled back in another.
 @MainActor
 enum LiveMarkdownReader {
     private static var away: [ObjectIdentifier: Bool] = [:]
@@ -795,19 +662,15 @@ struct MessageMarkdown: View {
     }
 
     var body: some View {
-        // Larger glyphs reach native text-surface bounds with fewer characters.
         let maximum = typeSize.isAccessibilitySize ? 256 : typeSize > .large ? 1024 : 2048
         MessageMarkdownContent(markdown, bodyFont: bodyFont, codeFont: codeFont, style: style,
             selectable: selectable, cacheScope: cacheScope, live: live, liveID: liveID,
             maximumCharacters: maximum)
-            // Discard any pending refresh and fade state built for another size.
             .id(maximum)
     }
 }
 
 #if os(macOS)
-/// Keep the full text layout and selection while drawing the lines that
-/// intersect the graphics context's clip.
 @available(macOS 15, *)
 private struct VisibleMarkdownLines: TextRenderer {
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
@@ -841,14 +704,7 @@ private struct MessageMarkdownContent: View {
     private let codeFont: Font
     private let style: MarkdownStyle
     private let maximumCharacters: Int
-    /// Selectable text owns a SelectionOverlay per chain and a hit-test
-    /// entry per chain. On the one row that is rewritten on every token
-    /// that is rebuilt 2.5x a second for the whole reply; settled rows
-    /// keep it, the live row gets it back when the turn ends.
     private let selectable: Bool
-    /// The last revision the live row's task parsed, so a token that arrived
-    /// inside the cadence still reaches the screen without waiting for the
-    /// next token to arrive.
     @State private var refreshed: (source: String, segments: [MessageSegment])?
     @State private var wordArrivals = StreamingWordArrivals()
     @AppStorage("chat.smoothStreaming") private var smoothStreaming = true
@@ -901,11 +757,6 @@ private struct MessageMarkdownContent: View {
                 var parser = MarkdownParser(markdown)
                 return parser.blocks()
             }
-            // Built once per message text and held across inits. A whole-card
-            // hover or a scroll re-runs this `init` without changing the text;
-            // rebuilding every `Text` chain there was the per-edge cost that
-            // brought the hitches back. The scope names the caller's font set,
-            // which is baked into the chains and cannot be keyed from `Font`.
             let key = "\(MarkdownCache.appearanceKey):\(cacheScope):\(style.rawValue):\(maximumCharacters):\(markdown)"
             self.liveSlot = ""
             needsRefresh = false
@@ -927,9 +778,6 @@ private struct MessageMarkdownContent: View {
         return builder.finished()
     }
 
-    /// A streaming reply only ever grows at its end, so every block but the
-    /// last is the same as on the previous revision. Resume from the builder
-    /// state saved after those blocks instead of rebuilding the whole reply.
     private static func makeLiveSegments(
         blocks: [MarkdownBlock], slot: String,
         bodyFont: Font, style: MarkdownStyle, maximumCharacters: Int
@@ -951,8 +799,6 @@ private struct MessageMarkdownContent: View {
         return builder.finished()
     }
 
-    /// What to draw: the live task's latest revision when it belongs to this
-    /// text, otherwise the segments built in `init`.
     private var shownSegments: [MessageSegment] {
         if isLive, let refreshed, refreshed.source == source {
             return refreshed.segments
@@ -1007,10 +853,6 @@ private struct MessageMarkdownContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The trailing half of the live cadence. A token that arrived inside
-        // the interval kept the previous revision; this task waits out the
-        // remainder and publishes the one it was created for, so the last
-        // token of a stream still lands when no further token is coming.
         .task(id: source) {
             guard isLive, needsRefresh else { return }
             let wait = MarkdownCache.live.remaining()
@@ -1072,26 +914,18 @@ private struct MarkdownCodeBlock: View {
         typeSize.isAccessibilitySize ? 256 : typeSize > .large ? 1024 : 2048
     }
 
-    // Reuse scrolling chunks across sizes, and separate each wrapping budget.
     private var renderedKey: String { MarkdownCache.appearanceKey + (needsScroller ? "s" : "w\(maximumCharacters)") + key }
 
     private func chunks(_ value: AttributedString) -> [AttributedString] {
         MarkdownTextChunks.splitCode(value, scrollsHorizontally: needsScroller, maximum: maximumCharacters)
     }
 
-    /// One parsed diff per fence, held across the evaluations a scroll causes.
     private static func parsed(_ source: String) -> FileDiff {
         MarkdownCache.diffs.value(for: source) {
             FileDiff.fromEditPatch(path: "Change", patch: source)
         }
     }
 
-    /// What to draw right now: the coloured version if it has arrived, the
-    /// plain one otherwise.
-    ///
-    /// Both are looked up by the short key, so a fence that has been on screen
-    /// before costs one small hash and no string work at all. This used to
-    /// build a fresh `Text` chain out of the whole source on every evaluation.
     private var shown: [AttributedString] {
         if let coloured, coloured.key == renderedKey { return coloured.chunks }
         if let done = MarkdownCache.rendered.stored(for: "c" + renderedKey) { return done }
@@ -1129,12 +963,6 @@ private struct MarkdownCodeBlock: View {
                 }
                 #else
                 MarkdownSideways {
-                    // Parsed by the cache rather than here: this ran on every
-                    // evaluation, and a fence is evaluated on every measuring
-                    // pass the transcript makes over the message holding it.
-                    // Not lazy, for the reason on `DiffBody.lazy`: a lazy
-                    // stack nested inside the transcript's own turns one row
-                    // into hundreds of items to re-stamp through the graph.
                     DiffBody(diff: Self.parsed(source), lazy: false)
                         .padding(.vertical, Theme.Space.xs)
                 }
@@ -1159,10 +987,6 @@ private struct MarkdownCodeBlock: View {
                         .background(Theme.accentSoft)
                     }
 
-                    // An aside wraps its code instead of scrolling it. The
-                    // fixed size below is what makes the line keep its shape
-                    // inside a scroller, and it is also what would propose an
-                    // unbounded width to the transcript around it.
                     if needsScroller {
                         ScrollView(.horizontal) {
                             codeText.padding(Theme.Space.m)
@@ -1183,8 +1007,6 @@ private struct MarkdownCodeBlock: View {
         }
         #if os(macOS)
         .overlay(alignment: .topTrailing) {
-            // Fences without a language have no header row; the copy action
-            // lives overlaid instead, on the same block hover.
             if language == nil {
                 RowCopyButton(text: source, help: L10n.text("apple.markdowntext.copy_code.49a0053f"), visible: hovering)
                     .padding(Theme.Space.xs)
@@ -1206,9 +1028,6 @@ private struct MarkdownCodeBlock: View {
                 return
             }
             guard let path = highlightPath else { return }
-            // A flick through a long conversation builds dozens of fences in
-            // a second. Cap concurrent highlights so the scroll, not the
-            // host, gets the thread.
             await MarkdownHighlightLimiter.shared.wait()
             guard !Task.isCancelled else {
                 await MarkdownHighlightLimiter.shared.signal()
@@ -1222,9 +1041,6 @@ private struct MarkdownCodeBlock: View {
             let result = try? await Bridge.highlight(path: path, text: source)
             await MarkdownHighlightLimiter.shared.signal()
             guard !Task.isCancelled, let spans = result?.spans else { return }
-            // An empty answer is still an answer, and it is stored as the
-            // plain text. Otherwise a fence the highlighter has nothing to say
-            // about asks it again every time it scrolls back into view.
             let text = spans.isEmpty
                 ? MarkdownCache.rendered.value(for: "p" + renderedKey) {
                     chunks(AttributedString(source))
@@ -1235,8 +1051,6 @@ private struct MarkdownCodeBlock: View {
         }
     }
 
-    /// The highlighter detects a language from a filename. Common fence names
-    /// are normalised to an extension; an unknown tag stays honest plain text.
     private var highlightPath: String? {
         guard let language = language?.lowercased() else { return nil }
         let extensionByFence = [
@@ -1252,8 +1066,6 @@ private struct MarkdownCodeBlock: View {
         return "pull-request-fence.\(ext)"
     }
 
-    /// Paint the spans onto the source, once. Called from the task that
-    /// fetched them, never from a body.
     private static func colouring(_ source: String, with spans: [SyntaxSpan]) -> AttributedString {
         let string = source as NSString
         let length = string.length
@@ -1279,17 +1091,6 @@ private struct MarkdownCodeBlock: View {
     }
 }
 
-/// A sideways scroller for content that cannot wrap.
-///
-/// A scroll view inside the transcript's scrolling stack is measured against
-/// an unbounded proposal by a parent that has not settled its own height yet,
-/// and a conversation full of them is a layout the engine keeps re-solving.
-/// That is why an aside's code fences wrap in place instead.
-///
-/// A table and a diff cannot wrap, though, so they keep theirs whatever the
-/// style. Clipping them was the alternative and it hid the right-hand columns
-/// of a table with no way to reach them. They are rare inside reasoning,
-/// which is what makes keeping them affordable.
 private struct MarkdownSideways<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -1314,8 +1115,6 @@ private struct MarkdownSelectable: ViewModifier {
 private struct MarkdownTable: View {
     let header: [String]
     let rows: [[String]]
-    /// Rows the parser counted but did not build. Drawn as one caption row so
-    /// a pathological table cannot become tens of thousands of views.
     var overflow: Int = 0
     let bodyFont: Font
     var selectable: Bool = true
@@ -1537,7 +1336,6 @@ private struct MarkdownParser {
             index += 1
         }
         guard !paragraph.isEmpty else {
-            // A malformed construct must not trap the parser on one line.
             let line = lines[index]
             index += 1
             return make(.paragraph(line))
@@ -1548,8 +1346,6 @@ private struct MarkdownParser {
     private func startsBlock(at line: Int) -> Bool {
         guard line < lines.count else { return false }
         let value = lines[line]
-        // Plain prose cannot begin a block marker. Tables still need the
-        // normal parser when the line contains a pipe.
         if let first = value.utf8.first,
            (65...90).contains(first) || (97...122).contains(first),
            !value.utf8.contains(0x7c) { return false }
@@ -1736,7 +1532,6 @@ struct RowCopyButton: View {
             Image(systemName: copied ? "checkmark" : ActionIcon.copy.symbol)
                 .font(Theme.font(11, weight: .medium))
                 .foregroundStyle(copied ? Theme.accent : hovering ? .primary : .secondary)
-                // The copy mark turns into the tick instead of swapping.
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 22, height: 22, alignment: .center)
                 .background {

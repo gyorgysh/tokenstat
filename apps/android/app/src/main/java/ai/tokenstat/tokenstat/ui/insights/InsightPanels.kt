@@ -30,10 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 
-/// One panel per figure, not one card holding every figure. Port of
-/// `ClientStatPanels`: three panels read as three facts. They always sit
-/// in one equal-width row, each keeps its own card, and each says which
-/// fact it is with a mark from the house vocabulary.
 @Composable
 fun InsightStatPanels(panels: List<InsightFactPanel>, modifier: Modifier = Modifier) {
     Row(
@@ -61,10 +57,6 @@ private fun RowScope.panel(item: InsightFactPanel) {
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         Column(Modifier.weight(1f)) {
-            // The shared-row figure, shrinking the way
-            // `minimumScaleFactor(0.5)` lets it on iOS: a compact value
-            // is short by construction, but a narrow phone still has
-            // to fit it beside the mark.
             Text(
                 item.value,
                 style = TsType.numeric(22, FontWeight.SemiBold),
@@ -92,10 +84,6 @@ private fun RowScope.panel(item: InsightFactPanel) {
                 ),
             )
         }
-        // Trailing, not leading. The figure is what the card is for,
-        // and every panel lines its number up on the same left edge.
-        // A mark in front would push each one in by a different
-        // amount. It also fills the room a short number leaves behind.
         FeatureMark(name = item.mark, size = 22)
     }
 }

@@ -3,12 +3,6 @@
 import Observation
 import SwiftUI
 
-/// A feature a newer client can show only when the paired computer speaks the
-/// host methods behind it.
-///
-/// Keep the version beside the feature rather than testing for an error after
-/// loading it. `protocol` is present before either feature and gives a person a
-/// useful update state instead of exposing an implementation error.
 enum RemoteHostFeature: Hashable {
     case chat
     case pulls
@@ -100,41 +94,6 @@ enum RemoteHostFeature: Hashable {
         }
     }
 
-    /// Version 3 introduced the pull-request host methods. Version 4 added
-    /// `chat.eventPage`, which the mobile transcript needs for older pages.
-    /// Version 6 added the `refresh` parameter on `chat.backends`. Version 7
-    /// added `fs.browse` and `fs.mkdir`, `host.provisionStatus` and
-    /// `host.logs`, the invite half of workspace access, and `workspace.clone`.
-    /// Version 9 added agent readiness on `launcher.catalog` and the
-    /// `launcher.signIn` terminal handoff. Version 10 added `clientMessageId`
-    /// on `chat.send` and `chat.receipt`, which is what makes repeating a send
-    /// safe: an older machine ignores the id, so a message must never be sent
-    /// to one twice.
-    /// Version 11 adds explicitly shared continuation records with revision checks.
-    /// Version 12 adds authorized live work search and durable transcript
-    /// positions. Handoff needs those positions to survive history retention.
-    /// Version 13 hardens receipts with recovery states, and version 14 adds
-    /// the send revision: a host below 14 refuses an id without the revision
-    /// the client only sends beside it, so confirmed send needs all of 14.
-    /// Version 15 adds reviewed selected-file commits and outcome recovery.
-    /// Version 16 adds reviewed current-branch Push and outcome recovery.
-    /// Version 17 adds revision-checked task editing.
-    /// Version 18 adds checked task deletion. Version 19 adds create-once tasks.
-    /// Version 20 adds checked task runs, exact-run stops and launch receipts.
-    /// Version 21 adds revision-checked automation edits and create/run receipts.
-    /// Version 22 adds revision-checked workflow edits.
-    /// Version 25 adds a short note that rides the next tool step.
-    /// Version 30 adds the reviewed fast-forward pull, `pulls.branch`, and
-    /// the branch and pull request beside each conversation.
-    /// Version 33 adds `pulls.commitAvatars`, so history can show a public
-    /// picture for every author the forge knows.
-    /// Version 37 adds explicitly requested agent reinstallation.
-    /// Version 54 adds `chat.continueInNew` and the prompt cache record on
-    /// each conversation. Version 55 adds `launcher.updates` and
-    /// `launcher.update` for agent CLI versions and updates. Version 56 adds
-    /// the general folder for chats with no repository. `workspace.list` only
-    /// returns it beside `includeGeneral`, which an older host ignores, so the
-    /// list itself never offers it where the host cannot serve it.
     var minimumProtocol: Int {
         switch self {
         case .worktrees: 24
@@ -156,9 +115,6 @@ enum RemoteHostFeature: Hashable {
         case .confirmedSend: 14
         case .handoff: 12
         case .workSearch: 12
-        // Added inside 14, before any host spoke it. The released hosts are
-        // on 6, so "says 14" and "has this" are the same statement and there
-        // was nothing to bump.
         case .hostUpdate: 14
         case .selectedCommit: 15
         case .reviewedPush: 16
@@ -232,17 +188,6 @@ enum RemoteHostFeature: Hashable {
         }
     }
 
-    /// Does this peer speak the feature? For a control that should simply not
-    /// appear, instead of taking the whole screen over.
-    ///
-    /// `RemoteHostFeatureGate` is the other shape, for a whole surface that
-    /// cannot work at all. A Refresh button is not that: the picker is fine
-    /// without it, and an "update your Mac" panel in place of one button would
-    /// be louder than the thing it is explaining.
-    ///
-    /// This computer is always current. `Bridge.connect` replaces a helper
-    /// whose protocol does not match the app, so a local host cannot be behind
-    /// the app asking.
     func isSupported(peer: String?) async -> Bool {
         guard let peer, !peer.isEmpty else { return true }
         guard let version = try? await Bridge.peerProtocolVersion(peer) else { return false }
@@ -250,10 +195,6 @@ enum RemoteHostFeature: Hashable {
     }
 }
 
-/// Ask a paired computer whether it can serve one feature before that feature
-/// begins loading. A transport error deliberately fails open, preserving the
-/// screen's existing offline and retry behaviour. Only a definite older
-/// protocol becomes the update state.
 struct RemoteHostFeatureGate<Content: View>: View {
     let feature: RemoteHostFeature
     let peer: String?
@@ -284,21 +225,9 @@ struct RemoteHostFeatureGate<Content: View>: View {
         }
         .task(id: "\(peer ?? "local")-\(feature)-\(probe.retry)") {
             guard let peer, !peer.isEmpty else {
-                // A local host is always current, and it must not leave the
-                // previous remote answer behind: remote needsUpdate, a local
-                // interlude, then back to the same remote must re-check rather
-                // than resume the local .available and hide the update prompt.
                 probe.noteLocal()
                 return
             }
-            // Pushing another screen cancels this task and popping restarts it
-            // for the same peer. Clearing to .checking then would unmount the
-            // content and drop its state, so Back from workspace tools landed
-            // on the chat list instead of the open thread. Only a new peer, a
-            // new feature, or an explicit retry is a new question; the
-            // `beginRun` gate keeps the old answer mounted for a restart. This
-            // view can be retained while the person changes the selected
-            // computer, and that still re-checks: a new peer is a new key.
             let key = RemoteHostFeatureProbeKey(peer: peer, feature: feature, retry: probe.retry)
             guard probe.beginRun(key: key) else { return }
             do {
@@ -307,19 +236,12 @@ struct RemoteHostFeatureGate<Content: View>: View {
                 probe.didAnswer(key: key, state: version >= feature.minimumProtocol ? .available : .needsUpdate(version))
             } catch {
                 guard !Task.isCancelled else { return }
-                // Reachability has its own UI. Turning an asleep host into an
-                // "update" instruction sends somebody in the wrong direction.
                 probe.didAnswer(key: key, state: .available)
             }
         }
     }
 }
 
-/// The gate's check state, held across task restarts.
-///
-/// Internal for the standalone probe tests: pushing a screen cancels the
-/// gate's task and popping restarts it, and the tests pin that a restart for
-/// the same peer keeps the old answer instead of clearing it.
 struct RemoteHostFeatureProbeKey: Equatable, Hashable {
     var peer: String
     var feature: RemoteHostFeature
@@ -336,18 +258,9 @@ final class RemoteHostFeatureProbe {
 
     var state: State = .checking
     var retry = 0
-    /// What the last answered run asked. Set only when an answer lands: a run
-    /// cancelled before answering leaves no key, so its restart asks again
-    /// instead of resuming a check that never finished.
     var checkedKey: RemoteHostFeatureProbeKey?
-    /// What the newest begun run asked. A peer switch while the old host is
-    /// still answering must not let the late answer cover the new host, so an
-    /// answer lands only while its key is still the newest one.
     var inflightKey: RemoteHostFeatureProbeKey?
 
-    /// Open a run for this key. A restart for the already-answered key returns
-    /// false and the caller asks nothing, leaving the old answer and its
-    /// content mounted. Anything else returns true and clears to `.checking`.
     func beginRun(key: RemoteHostFeatureProbeKey) -> Bool {
         guard checkedKey != key || inflightKey != key else { return false }
         inflightKey = key
@@ -355,16 +268,12 @@ final class RemoteHostFeatureProbe {
         return true
     }
 
-    /// Record the answer, so a later restart for the same key resumes it. A
-    /// late answer for a superseded peer is dropped: only the newest begun key
-    /// may land.
     func didAnswer(key: RemoteHostFeatureProbeKey, state: State) {
         guard key == inflightKey else { return }
         checkedKey = key
         self.state = state
     }
 
-    /// A local host needs no check and must not leave a remote answer behind.
     func noteLocal() {
         state = .available
         checkedKey = nil
@@ -387,9 +296,6 @@ private struct RemoteHostFeatureCheckingView: View {
     }
 }
 
-/// The paired desktop has answered, but predates a feature on this client.
-/// Reuse the app's living persona rather than a static warning mark: this is a
-/// calm detour while the desktop update installs, not a broken connection.
 struct RemoteHostFeatureUpdateView: View {
     let feature: RemoteHostFeature
     let hostName: String?

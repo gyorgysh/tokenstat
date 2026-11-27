@@ -20,39 +20,20 @@ struct WorkspacesView: View {
     @Bindable var ssh: SSHLibraryModel
     @Bindable var sshSessions: SSHSessionsModel
     var onManageServers: () -> Void
-    /// Workspace destinations live in RootView, outside the terminal surface.
-    /// The launcher names what should open and the root performs the route.
     var onOpenSection: (WorkspaceSection, String) -> Void
-    /// True when this is the front destination. Root keeps the view mounted
-    /// while the user is on Home or elsewhere so terminals are not torn down;
-    /// when false the pane must not claim keyboard focus or poll as focused.
     var isActive: Bool = true
-    /// The signed-in tier, for the screen viewer a remote workspace offers.
-    /// Nil is a tier the viewer refuses, and says so.
     var tier: String?
-    /// Whether the remote folder's owner says View screen can open, per peer.
-    /// Probed live: the account record carries no platform, so there is
-    /// nothing local to gate the viewer on. Keyed by peer because one view
-    /// can show folders from several machines; a single Bool lets the last
-    /// probe win and hides (or shows) View screen on the wrong folder.
     @State private var ownerShowsScreen: [String: Bool] = [:]
     @Environment(\.openWindow) private var openWindow
     #endif
 
     var body: some View {
         VStack(spacing: 0) {
-            // Same leading toggles as every other destination, and the
-            // project's name, branch and sections from the shell. Trailing
-            // is empty because session actions sit on the terminal's row.
             DetailChromeBar {
                 EmptyView()
             }
             if let folder = model.selected {
                 #if os(macOS)
-                // What that computer is doing, where you are working in its
-                // folders. This block only existed on Devices, so somebody who
-                // opened a machine's workspace could see its files and not
-                // whether it was awake or what it was busy with.
                 if folder.isRemote, let peer = folder.machineID, !peer.isEmpty {
                     remoteMachine(folder, peer: peer)
                     ThemeRule()
@@ -60,10 +41,6 @@ struct WorkspacesView: View {
                 #else
                 ThemeRule()
                 #endif
-                // Remote workspaces run the same terminal surface as local
-                // ones: the host forwards every pty call to the machine that
-                // owns the folder, so sessions spawn, stream and close there
-                // and only the rendering happens here.
                 #if os(macOS)
                 TerminalPane(
                     folder: folder,
@@ -106,14 +83,6 @@ struct WorkspacesView: View {
     }
 
     #if os(macOS)
-    /// Power, CPU and memory for the machine this folder lives on, and the way
-    /// on to its screen.
-    ///
-    /// The same readings the Devices page shows, from the same `HostStatsBar`,
-    /// so the two cannot report different things about one computer. The
-    /// header also carries Disconnect, because a folder is where a connected
-    /// machine is actually used and there was no way back from it. The
-    /// auto-connect switch lives on Devices, beside the connection itself.
     private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
         let stale = model.isRemoteStale(peer)
         let title = HStack(spacing: Theme.Space.s) {
@@ -130,7 +99,6 @@ struct WorkspacesView: View {
             }
         }
         let controls = HStack(spacing: Theme.Space.s) {
-            // Only where the host says a screen can be shared.
             if !stale && (ownerShowsScreen[peer] ?? true) {
                 Button(L10n.text("apple.workspacesview.view_screen.56dea3b5"), .preview) {
                     openWindow(value: RemoteScreenTarget(
@@ -169,8 +137,6 @@ struct WorkspacesView: View {
         .frame(minHeight: 48)
         .task(id: "\(peer)-\(!stale)") {
             guard !stale else { return }
-            // An older host that cannot answer leaves the button where it
-            // was rather than hiding a viewer that works.
             if let screen = try? await Bridge.peerCanShowScreen(peer) {
                 ownerShowsScreen[peer] = screen
             }
@@ -242,8 +208,6 @@ struct WorkspacesView: View {
 
 }
 
-/// The Changes tab of the workspace inspector: what changed, grouped by
-/// directory. The tab already says "Changes", so nothing here repeats it.
 struct WorkspaceChangesView: View {
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
@@ -302,13 +266,10 @@ struct WorkspaceChangesView: View {
                         reveal(focus, in: folder, git: git)
                     }
                     .onChange(of: git.files.map(\.path)) { _, _ in
-                        // The chat can name a just-edited file before the
-                        // working-tree refresh has added it to this list.
                         reveal(model.changeFocus, in: folder, git: git)
                     }
                 }
             } else {
-                // All other states (clean tree, not a git repo) are centred.
                 content(folder)
             }
         } else {
@@ -397,8 +358,6 @@ struct WorkspaceChangesView: View {
                     .foregroundStyle(.secondary)
             }
             if git.partial {
-                // Untracked and binary files have no line counts, so saying
-                // "+120" flat would be a number nobody measured.
                 Text(git.hasLineChanges
                     ? L10n.text("apple.workspacesview.some_files_have_no_line_counts_so_these_to.9aa88eb4")
                     : L10n.text("apple.git_status.line_counts_unavailable"))
@@ -444,7 +403,6 @@ struct WorkspaceChangesView: View {
         else { model.reviewWorkingTree(in: folder.id, focusing: path) }
     }
 
-    /// Agent paths may be absolute while Git paths are repository-relative.
     private func reveal(_ focus: WorkspacesModel.ChangeFocus?, in folder: WorkspaceFolder, git: GitStatus) {
         guard let focus, focus.folderID == folder.id,
               let path = ChangePathMatch.path(focus.path, in: git.files.map(\.path)) else { return }
@@ -455,12 +413,6 @@ struct WorkspaceChangesView: View {
 }
 
 #if os(macOS)
-/// Message, commit, push. Pinned to the bottom of the Changes tab, which is
-/// where every tool that does this puts it.
-///
-/// Staging and committing are one action here rather than two buttons. The
-/// index is not something this panel shows, so a half-staged repository left
-/// behind by a click would be a state the user cannot see and did not ask for.
 private struct CommitBox: View {
     @Bindable var model: WorkspacesModel
     @Bindable var automations: AutomationsModel
@@ -504,7 +456,6 @@ private struct CommitBox: View {
         Task { await session.persist() }
     }
 
-    /// Agent backends only. Shell cannot write commit messages from a diff.
     private var commitBackends: [AgentBackend] {
         automations.pickerBackends(keeping: model.autoCommitBackend[folder.id])
             .filter { !$0.models.isEmpty && $0.id != "sh" }
@@ -632,10 +583,6 @@ private struct CommitBox: View {
         .padding(.top, Theme.Space.s)
         .padding(.bottom, Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The sidebar surface, like every other footer in the app. On the
-        // content's own background the rule above separated nothing and the
-        // bar read as loose parts at the bottom of the panel rather than as a
-        // place where the actions live.
         .background(Theme.sidebar)
         .overlay(alignment: .top) { ThemeRule() }
     }
@@ -839,8 +786,6 @@ private struct ChangeRow: View {
                 Text("−\(removed)").font(Theme.numeric(11)).foregroundStyle(Theme.danger)
             }
             if file.added == nil {
-                // A dash, not a zero. The difference matters here as much as it
-                // does for token counters.
                 Text(L10n.text("apple.workspacesview.n_a.a683c5c5")).font(Theme.numeric(11)).foregroundStyle(.tertiary)
             }
         }
@@ -849,11 +794,6 @@ private struct ChangeRow: View {
 }
 
 #if os(macOS)
-/// The machine whose screen the viewer is showing.
-///
-/// A value rather than a pair of `@State` strings, so "which machine" and
-/// "is the viewer up" cannot disagree. `Codable` because this is also the
-/// identity of the viewer's own window: a sheet cannot go full screen.
 struct RemoteScreenTarget: Identifiable, Hashable, Codable {
     var peer: String
     var name: String

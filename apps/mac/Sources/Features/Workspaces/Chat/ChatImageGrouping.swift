@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A presentation pass: archive rows and their identifiers stay intact for
-/// search and caching. Only adjacent images or explicitly attributed tool
-/// files share a gallery; a nearby tool alone is never evidence of ownership.
 enum ChatImageGrouping {
     private struct ToolKey: Hashable { let call: String; let backend: String? }
     static func prepare(_ rows: [ChatDisplayItem]) -> [ChatDisplayItem] {
@@ -33,7 +30,6 @@ enum ChatImageGrouping {
                 result.append(gallery)
             }
         }
-        // A gallery is named after its first image row. See `ChatFoldContinuity`.
         if let continuity = ChatFoldContinuity.current {
             for index in result.indices {
                 guard case .attachment = result[index].kind, !result[index].imageRowIDs.isEmpty else { continue }

@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Hook previews retain the first 360 characters of serde_json's output.
-//! Large tool arguments and image results need no full serialized copy.
-
 use serde::{
     Serialize, Serializer,
     ser::{SerializeMap, SerializeSeq},
@@ -28,8 +24,7 @@ impl Serialize for Preview<'_> {
             Value::Null => serializer.serialize_unit(),
             Value::Bool(value) => serializer.serialize_bool(*value),
             Value::Number(value) => value.serialize(serializer),
-            // Escaping never shortens a string. Any omitted characters, and
-            // the closing quote we introduce, lie beyond the preview boundary.
+
             Value::String(value) => serializer.serialize_str(text_prefix(value)),
             Value::Array(values) => {
                 let mut sequence = serializer.serialize_seq(Some(values.len()))?;
@@ -77,8 +72,7 @@ pub(super) fn json_prefix(value: &Value) -> String {
         bytes: [0; CHARACTERS * 4],
         length: 0,
     };
-    // The bounded writer deliberately stops serialization once it has enough
-    // bytes for 360 Unicode scalar values, even for an array of tiny values.
+
     let _ = serde_json::to_writer(&mut prefix, &Preview(value));
     let bytes = &prefix.bytes[..prefix.length];
     let text = match std::str::from_utf8(bytes) {

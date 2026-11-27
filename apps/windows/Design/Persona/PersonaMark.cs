@@ -12,15 +12,6 @@ using Microsoft.UI.Xaml.Input;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// The face of a conversation. Drawn, not drawn-by-someone: every persona gets
-/// a character built from one number, so a new persona has a face the moment it
-/// is named and there is no asset to ship, scale, or theme. It is one creature
-/// in different moods rather than a set of icons: underneath is a soft body,
-/// and moods push it rather than pose it. Motion stays inside a fixed frame,
-/// so a transcript can pin to this seat while the character bounces inside it
-/// without the row changing height.
-/// </summary>
 internal sealed class PersonaMark : Canvas
 {
     private readonly PersonaEngine _engine;
@@ -57,7 +48,6 @@ internal sealed class PersonaMark : Canvas
         ActualThemeChanged += (_, _) =>
         {
             _needsRedraw = true;
-            // A settled face has stopped its timer, so redraw it here.
             if (!_timer.IsEnabled && IsLoaded && _inViewport) Tick();
         };
         EffectiveViewportChanged += (_, args) =>
@@ -79,7 +69,6 @@ internal sealed class PersonaMark : Canvas
         };
     }
 
-    /// <summary>Stable per persona. Zero falls back to one settled look rather than an empty frame.</summary>
     public ulong Seed
     {
         get => _seed;
@@ -118,14 +107,8 @@ internal sealed class PersonaMark : Canvas
         }
     }
 
-    /// <summary>Whether a click shoves it. Off by default: a face beside a message is not a control.</summary>
     public bool Pokeable { get; set; }
 
-    /// <summary>
-    /// Seconds of motion before the character comes to rest, holding its last
-    /// frame. Null moves for as long as it is on screen. A face beside an old
-    /// message has nothing new to say, and every moving one costs a frame.
-    /// </summary>
     public double? SettlesAfter { get; set; }
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -185,10 +168,6 @@ internal sealed class PersonaMark : Canvas
     private TimeSpan FrameInterval => TimeSpan.FromSeconds(
         1 / Math.Min(_state.FrameRate(), _size <= 28 ? 30 : 60));
 
-    /// <summary>
-    /// Motion is off when the person asked for it to be. Then the engine
-    /// presents the mood's resting pose rather than freezing mid-bounce.
-    /// </summary>
     internal bool MotionAllowed => IsLoaded && _inViewport && Visibility == Visibility.Visible
         && !MainWindow.MotionSuspended && Moving();
 

@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Optional, validated native transcript references. Resume credentials are never a fallback.</summary>
 internal sealed record SessionIdentity(string Backend, string Id, string Status, string? SourceConversationId);
 internal sealed record SessionIdentities(IReadOnlyList<SessionIdentity> Entries, long Total, bool Truncated, string? ArchivePath, string? TranscriptPath)
 {

@@ -4,7 +4,6 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! The protocol every tokenstat front end speaks, and the daemon that serves it.
 //!
 //! # Why this crate exists

@@ -6,11 +6,8 @@
 
 import SwiftUI
 
-/// The right pane: what the period adds up to, and what the selected row is.
 struct InspectorView: View {
     var model: InsightsModel
-    /// Dismisses the pane. Owned by the root view, which is the only place the
-    /// inspector's presence is decided.
     var onClose: () -> Void
 
     var body: some View {
@@ -43,20 +40,11 @@ struct InspectorView: View {
         }
     }
 
-    /// Nothing at all, as opposed to nothing yet or nothing readable.
-    ///
-    /// An archive that has been read and holds no events is a machine where
-    /// nobody has scanned. A load still in flight is not, and neither is one
-    /// that failed, so both of those keep the figures and let the screen's own
-    /// banner do the talking.
     private var isEmptyArchive: Bool {
         guard let totals = model.totals else { return false }
         return totals.events == 0 && model.errorMessage == nil && !model.isLoading
     }
 
-    /// An archive with nothing in it is not an error and not a zero: it is a
-    /// machine where nobody has scanned yet, and every figure on this pane
-    /// reading "$0.00" says the opposite of that.
     private var nothingScanned: some View {
         EmptyState(
             symbol: "tray",
@@ -72,15 +60,9 @@ struct InspectorView: View {
                 value: model.periodValue.formatted,
                 note: L10n.text("apple.inspectorview.not_an_extra_bill.79d2c7ad"),
                 tint: Theme.accent,
-                // 26pt reads at full size; below the display fit it stops
-                // shrinking the value and drops a step instead, which keeps
-                // the headline figure legible in a 960×600 window.
                 size: DisplayFit.factor < 1 ? 22 : 26
             )
 
-            // Side by side where the pane is wide enough, stacked when the
-            // inspector is squeezed by a small window. A fixed pair of rows
-            // was what ran past the pane's edge at a low effective resolution.
             statPair(
                 L10n.text("apple.inspectorview.tokens.a039dfb9"), formatTokens(model.totals?.counters.total ?? 0),
                 L10n.text("apple.inspectorview.sessions.6fa3cbf4"), "\(model.totals?.sessions ?? 0)"
@@ -130,9 +112,6 @@ struct InspectorView: View {
 
             Stat(label: L10n.text("apple.inspectorview.value.8e37953d"), value: row.value.formatted, size: 18)
 
-            // Counters split out one by one. This is the view where the
-            // difference between "not reported" and "zero" is visible, and a
-            // dash is the whole point: it means the tool never said.
             VStack(spacing: Theme.Space.xs) {
                 CounterRow(label: L10n.text("apple.inspectorview.fresh_input.a5156480"), value: row.counters.inputFresh)
                 CounterRow(label: L10n.text("apple.inspectorview.cache_read.0008ce30"), value: row.counters.cacheRead)
@@ -152,8 +131,6 @@ struct InspectorView: View {
                 L10n.text("apple.inspectorview.events.8d14f6e7"), formatTokens(row.events)
             )
 
-            // Which agents produced this project's usage. Only meaningful on
-            // the Projects tab: on any other tab the key is not a project.
             if model.tab == .projects {
                 let harnesses = model.harnesses(inProject: row.key)
                 if !harnesses.isEmpty {
@@ -189,12 +166,6 @@ struct InspectorView: View {
         }
     }
 
-    /// Two headline numbers, side by side when there is room and stacked when
-    /// the pane is squeezed.
-    ///
-    /// The stacked fallback keeps the stats `expands: false` so the label and
-    /// value stay together instead of a value ending up a metre from its label
-    /// in a full-width row.
     private func statPair(
         _ label1: String, _ value1: String,
         _ label2: String, _ value2: String
@@ -229,9 +200,6 @@ struct InspectorView: View {
             if let info = model.info {
                 KeyValue(key: "Timezone", value: info.timezone)
                 KeyValue(key: "Core", value: info.coreVersion)
-                // Worth stating, because it decides whether a terminal survives
-                // quitting the app. In-process means this window owns every
-                // process it starts, and they go when it does.
                 KeyValue(key: "Host", value: Bridge.isHosted ? "daemon" : "in-process")
                 if info.hasPrices {
                     KeyValue(key: "Rates from", value: info.priceBookEffectiveFrom)

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-/// A list started before a note mutation cannot undo its acknowledgment.
-/// Each account, host and project has independent reads and mutation boundaries.
 struct ChatSteerOverlay {
     struct Read {
         let owner: String
@@ -40,8 +38,6 @@ struct ChatSteerOverlay {
                  revision: projects[owner]?.mutations[conversationID] ?? 0)
     }
 
-    /// A removal started for an older note cannot retire a later acceptance,
-    /// even when both notes have identical words or a fresh list retired its overlay.
     @discardableResult
     mutating func remember(owner: String, conversationID: String, note: String?,
                            ifUnchangedSince mutation: Mutation? = nil) -> Bool {
@@ -65,8 +61,6 @@ struct ChatSteerOverlay {
         for index in rows.indices {
             let id = rows[index].id
             guard let change = project.changes[id] else { continue }
-            // A request started after acknowledgment can show consumption or
-            // a note from another client. That is fresh host state.
             if read.sequence > change.through {
                 project.changes[id] = nil
             } else {
@@ -82,8 +76,6 @@ struct ChatSteerOverlay {
 
     mutating func removeAll() { projects = [:] }
 
-    /// Metadata and send replies are disk records. Only chat.list includes
-    /// the ephemeral note, so its absence in a record is not a removal.
     static func preservingNote(in record: ChatConversation, from current: ChatConversation?) -> ChatConversation {
         guard let current, current.id == record.id else { return record }
         var record = record

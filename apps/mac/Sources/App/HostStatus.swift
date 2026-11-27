@@ -8,12 +8,6 @@ import SwiftUI
 
 #if os(macOS)
 
-/// The host's transient state belongs beside sync and update, not in a modal
-/// alert. A successful call removes it automatically.
-///
-/// A network flap used to raise "Could not start session" every time the
-/// background session list timed out waiting on a tunnel redial. That is not
-/// a launch, and it is not something a person can dismiss into being fixed.
 struct HostStatusCard: View {
     @State private var isRecovering = false
     @State private var issue: Issue?
@@ -61,13 +55,6 @@ struct HostStatusCard: View {
         }
     }
 
-    /// The host's own notifications, on the thread this card is drawn on.
-    ///
-    /// `NotificationCenter` delivers on whichever thread posted, and these
-    /// four are raised by the bridge from its call queue. `Bridge` hops to
-    /// the main thread before posting; this is the same rule stated on the
-    /// side that would be damaged if it ever stopped doing so. Writing
-    /// `@State` off the main thread hung the app for ten minutes once.
     private func signal(_ name: Notification.Name) -> AnyPublisher<Notification, Never> {
         NotificationCenter.default
             .publisher(for: name)

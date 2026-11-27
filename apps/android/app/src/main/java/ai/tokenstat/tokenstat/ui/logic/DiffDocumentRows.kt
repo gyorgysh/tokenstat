@@ -6,7 +6,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
-/// Flat, bounded pages let the mobile diff compose only visible rows.
 internal data class DiffDocumentRow(
     val key: String,
     val kind: Kind,
@@ -61,8 +60,6 @@ internal object DiffDocumentRows {
                         val text = line?.string("text").orEmpty()
                         var start = 0
                         var part = 0
-                        // Minified lines can exceed Compose's dimension limit.
-                        // Continuations retain every character without one huge view.
                         do {
                             checkCancellation()
                             var end = minOf(text.length, start + maxLineUnits)

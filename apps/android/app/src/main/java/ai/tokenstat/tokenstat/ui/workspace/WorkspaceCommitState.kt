@@ -20,13 +20,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// P1 operation semantics, ported from `GitCommitSession.swift`.
-///
-/// Selection stays local until the reviewed content is submitted. A review
-/// freezes the selection without staging anything. A lost response never
-/// triggers a retry or a new operation id: the outcome is checked first,
-/// reconciled second, and only a missing recorded outcome allows retrying
-/// the same submission. A success clears the draft.
 class CommitUiState(val peer: String, val workspace: String) {
     var branch by mutableStateOf<String?>(null)
     var files by mutableStateOf<List<JsonObject>>(emptyList())
@@ -135,7 +128,6 @@ class CommitUiState(val peer: String, val workspace: String) {
                 adopt(it, null)
                 save(context)
             }.onFailure {
-                // No rollback, retry or new id follows a lost response.
                 error = L10n.text("android.workspacecommitstate.the_commit_outcome_has_not_been_confirmed.5b129e15", "${TunnelCopy.display(it.message ?: L10n.text("android.workspacecommitstate.the_request_failed.db4fb447"), hostLabel)}")
             }
         } finally {
@@ -169,8 +161,6 @@ class CommitUiState(val peer: String, val workspace: String) {
             } else {
                 canRetry = review != null
                 if (review == null) {
-                    // Older drafts did not persist the frozen review. A
-                    // confirmed missing receipt allows a new explicit review.
                     operationId = null
                     save(context)
                 }

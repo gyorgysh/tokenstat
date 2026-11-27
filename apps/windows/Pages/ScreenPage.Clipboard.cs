@@ -53,8 +53,6 @@ internal sealed partial class ScreenPage
     {
         if (!ScreenClipboardCurrent(session))
         {
-            // Changes made while another window had focus do not carry over
-            // when the viewer takes focus again.
             _clipboardSequence = GetClipboardSequenceNumber();
             return;
         }
@@ -73,7 +71,6 @@ internal sealed partial class ScreenPage
         }
         catch (Exception error) when (error is COMException or UnauthorizedAccessException or InvalidOperationException)
         {
-            // A locked or unavailable Windows clipboard does not stop video.
         }
     }
 
@@ -95,7 +92,6 @@ internal sealed partial class ScreenPage
         }
         catch (Exception error) when (error is COMException or UnauthorizedAccessException or InvalidOperationException)
         {
-            // The host can send a later clipboard change after Windows frees it.
         }
     }
 }

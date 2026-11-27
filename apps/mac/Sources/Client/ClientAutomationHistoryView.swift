@@ -7,8 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Every retained run for one job. Compact layouts push this. Split layouts
-/// present it as a sheet so the transcript stays on the page.
 struct ClientAutomationHistoryView: View {
     @Bindable var session: ClientAutomationSession
     let jobID: String
@@ -142,7 +140,6 @@ struct ClientAutomationHistoryList: View {
 }
 
 struct HistorySheetPresentation: ViewModifier {
-    /// From the presenter: inside the sheet the size classes describe the sheet.
     let hasRoom: Bool
 
     func body(content: Content) -> some View {

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Titles are decrypted only for the visible batch and are never persisted in
-/// preferences. Removal and pin changes use the cache's index invalidation path.
 struct WorkCacheManagementSheet: View {
     let scope: WorkReference.Scope
     @Environment(\.dismiss) private var dismiss
@@ -132,8 +130,6 @@ struct WorkCacheManagementSheet: View {
         failure = nil
         do {
             if remove, record.kind == "searchHistory" {
-                // Clear the shared in-memory history and drain pending saves,
-                // so an open search cannot write the removed entries back.
                 let history = WorkSearchHistory.shared(for: scope)
                 await history.clear()
                 if let message = history.failure {

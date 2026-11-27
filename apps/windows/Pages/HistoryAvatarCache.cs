@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// Shares a bounded, account-scoped forge lookup across history views.
 internal sealed class HistoryAvatarCache
 {
     internal readonly record struct Key(long Owner, string Workspace, string From);
@@ -34,7 +33,7 @@ internal sealed class HistoryAvatarCache
     {
         JsonNode? result = null;
         try { result = await fetch(); }
-        catch { /* A later open may retry a failed lookup. */ }
+        catch { }
         if (result is null)
         {
             lock (_gate)

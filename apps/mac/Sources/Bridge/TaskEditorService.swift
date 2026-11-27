@@ -10,7 +10,6 @@ protocol TaskEditorService: Sendable {
     func edit(id: String, revision: UInt64, draft: TaskEditorDraft) async throws -> TodoCard
 }
 
-/// Task identity is host-wide and survives moving the task to another folder.
 struct TaskEditorTarget: Hashable, Sendable, TaskEditorService {
     let peer: String?
 

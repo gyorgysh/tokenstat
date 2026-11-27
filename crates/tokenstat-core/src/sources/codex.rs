@@ -57,7 +57,6 @@ fn session_dirs(primary: Option<PathBuf>, data: Option<&Path>) -> Vec<PathBuf> {
     if let Some(data) = data
         && let Ok(chats) = std::fs::read_dir(data.join("chat"))
     {
-        // Only inspect the known layout, never walk arbitrary project folders.
         for chat in chats.filter_map(Result::ok) {
             if chat.file_type().is_ok_and(|kind| kind.is_dir()) {
                 let sessions = chat.path().join("codex-hook").join("sessions");
@@ -108,13 +107,10 @@ struct Row<'a> {
 struct Payload<'a> {
     #[serde(rename = "type")]
     kind: Option<&'a str>,
-    // session_meta
     id: Option<&'a str>,
     cwd: Option<&'a str>,
     model_provider: Option<&'a str>,
-    // turn_context
     model: Option<&'a str>,
-    // token_count
     info: Option<Info>,
     rate_limits: Option<RateLimits<'a>>,
 }
@@ -139,7 +135,6 @@ struct RateLimits<'a> {
 }
 
 impl Usage {
-    /// Map onto disjoint buckets, undoing the subset relationship.
     fn counters(&self) -> Counters {
         Counters {
             // Clamped: a vendor bug or schema change that made cached exceed
@@ -158,9 +153,6 @@ impl Usage {
         }
     }
 
-    /// Reasoning already counted inside the output, never above it. A vendor
-    /// row that reports more reasoning than generated tokens is corrupt or a
-    /// schema change, and the reading that cannot inflate a total wins.
     fn reasoning(&self) -> Option<u64> {
         self.reasoning_output_tokens
             .filter(|&r| r > 0)
@@ -219,9 +211,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     let mut billing = BillingMode::Unknown;
     let mut ordinal: u32 = 0;
 
-    // Both figures are tracked so they can be checked against each other at the
-    // end of the file. Trusting the vendor's delta without verifying it against
-    // its own running total would mean a regression in either one goes unseen.
     let mut summed_deltas = Delta(Counters::default());
     let mut final_total: Option<Cumulative> = None;
     let mut previous_total: Option<Usage> = None;
@@ -243,12 +232,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
 
         match row.kind {
             Some("session_meta") => {
-                // The fallback below replaces the current session's rows with
-                // the vendor's own total, so the index of its first row must
-                // move exactly when the session does: on an id change. A
-                // repeated header for the same session (a rewrite that
-                // restates the meta) must not move it, or the fallback would
-                // keep earlier rows it already judged inconsistent.
                 if let Some(id) = payload.id
                     && session != id
                 {
@@ -267,8 +250,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
                         .to_string();
                 }
             }
-            // The model can change mid-session, so it is tracked as the file is
-            // walked rather than read once.
             Some("turn_context") => {
                 if let Some(m) = payload.model {
                     model = match payload.model_provider.or(provider) {
@@ -288,7 +269,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         if let Some(rl) = &payload.rate_limits
             && rl.plan_type.is_some()
         {
-            // A plan is in force, so this usage was not billed per token.
             billing = BillingMode::Plan;
         }
 
@@ -342,9 +322,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         ordinal += 1;
     }
 
-    // The deltas should reconstruct the running total. If they do not, the file
-    // is missing records or the vendor changed what these fields mean, and the
-    // running total is the more trustworthy of the two.
     if let Some(Cumulative(total)) = final_total {
         let summed = summed_deltas.0;
         if summed.total() != total.total() && total.total() > 0 {
@@ -353,9 +330,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
                 summed: summed.total(),
                 reported: total.total(),
             });
-            // Replace the per-request rows with a single record carrying the
-            // vendor's own total, rather than publishing a figure known to
-            // disagree with the source.
             out.events.truncate(first_index);
             out.events.push(UsageEvent {
                 profile_id: None,
@@ -373,8 +347,6 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
         }
     }
 
-    // Timestamps only exist on the records themselves, so a rebuilt total row
-    // inherits the last one seen rather than the epoch.
     if let Some(last_ts) = contents
         .lines()
         .rev()
@@ -414,7 +386,6 @@ mod tests {
                 std::fs::canonicalize(&second).unwrap()
             ]
         );
-        // CODEX_HOME can itself name one of these private homes.
         assert_eq!(
             session_dirs(Some(first.clone()), Some(data)),
             vec![
@@ -463,10 +434,8 @@ mod tests {
         let out = parse_file(&p(), &input);
         assert_eq!(out.events.len(), 1);
         let c = out.events[0].counters;
-        // The cached portion is inside input_tokens here, unlike Anthropic.
         assert_eq!(c.input_fresh, Some(12454 - 4992));
         assert_eq!(c.cache_read, Some(4992));
-        // Adding them back must reproduce the vendor's own input figure.
         assert_eq!(c.input_fresh.unwrap() + c.cache_read.unwrap(), 12454);
         assert_eq!(c.output, Some(277));
     }
@@ -482,7 +451,6 @@ mod tests {
 
     #[test]
     fn deltas_are_used_rather_than_the_running_total() {
-        // Two requests: totals grow, deltas do not.
         let input = format!(
             "{META}\n{CTX}\n{}\n{}\n",
             tc(12454, 4992, 277, 12454, 4992, 277),
@@ -491,14 +459,12 @@ mod tests {
         let out = parse_file(&p(), &input);
         assert_eq!(out.events.len(), 2);
         assert!(out.warnings.is_empty());
-        // Summing must give the running total, not double it.
         let total: u64 = out.events.iter().map(|e| e.counters.total()).sum();
         assert_eq!(total, 25393 + 307);
     }
 
     #[test]
     fn a_delta_that_disagrees_with_the_total_falls_back_to_the_total() {
-        // Second delta understates: the file is missing a record.
         let input = format!(
             "{META}\n{CTX}\n{}\n{}\n",
             tc(100, 0, 10, 100, 0, 10),
@@ -628,9 +594,6 @@ mod tests {
 
     #[test]
     fn a_restated_session_header_does_not_narrow_the_fallback() {
-        // The file restates its own header, then understates a delta. The
-        // fallback must replace every per-request row with the vendor total,
-        // not just the rows after the repeated header.
         let input = format!(
             "{META}\n{CTX}\n{}\n{META}\n{}\n",
             tc(100, 0, 10, 100, 0, 10),

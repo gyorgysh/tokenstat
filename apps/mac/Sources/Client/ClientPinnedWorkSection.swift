@@ -4,8 +4,6 @@
 import SwiftUI
 
 extension PinnedWorkStore.Pin {
-    /// The row navigates the way a Continue row does: the destination owns
-    /// reachability, and a machine that is asleep says so there.
     var place: ClientRecentPlaces.Place? {
         let kind: ClientRecentPlaces.Kind
         switch reference.kind {
@@ -21,27 +19,11 @@ extension PinnedWorkStore.Pin {
     }
 }
 
-/// The shelf: up to eight folders and conversations, newest first.
-///
-/// Empty collapses to nothing and keeps its arranged position: an empty
-/// section is not an error, and the editor still shows where it sits. Rows
-/// open through the same destination Continue uses, so a pin to work on a
-/// sleeping machine says so there rather than here.
 struct ClientPinnedWorkSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
-    /// Observed, so pinning from a thread or unpinning here redraws the card
-    /// without leaving Home and coming back.
     @State private var pinsStore = PinnedWorkStore.shared
 
-    /// One row, with the identity it is drawn under.
-    ///
-    /// **Never a position.** The shelf is rebuilt from the store on every
-    /// read, and a row keyed by index can be asked to draw itself after that
-    /// store has changed: pinning from a thread and unpinning from this card
-    /// both do it, and `pins[index]` then reaches past the end of a shorter
-    /// list, which crashes rather than drawing a stale row. Rows keyed by the
-    /// pin's own key simply disappear instead.
     private struct Row: Identifiable {
         let id: String
         let pin: PinnedWorkStore.Pin
@@ -56,9 +38,6 @@ struct ClientPinnedWorkSection: View {
     }
 
     var body: some View {
-        // Read once for the whole pass. The store decodes on every access, and
-        // reading it again inside the loop is what let the list change shape
-        // underneath the rows being built from it.
         let shelf = rows
         if !shelf.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -134,11 +113,6 @@ struct ClientPinnedWorkSection: View {
     }
 }
 
-/// One pin toggle for rows that already name their destination.
-///
-/// The pin glyph fills with the theme accent when set; unfilled and quiet
-/// when not. Full shelves refuse with words: the row says the shelf holds
-/// eight, rather than the oldest pin silently going.
 struct PinToggleButton: View {
     var reference: WorkReference?
     var label: String

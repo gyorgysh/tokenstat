@@ -4,8 +4,6 @@ import SwiftUI
 struct WorkSearchSheet: View {
     @Bindable var model: WorkSearchModel
     let open: (WorkReference) -> Bool
-    /// Screens and settings this front end can be sent to, searched beside the
-    /// work. Left out on the Mac, where search is about work alone.
     var places: WorkSearchPlaceSource? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -28,9 +26,6 @@ struct WorkSearchSheet: View {
                         .textFieldStyle(.plain)
                         .font(Theme.body)
                         .focused($fieldFocused)
-                        // A query is a name, a word from a thread or a screen,
-                        // never a sentence: an autocorrected first word finds
-                        // nothing and a capital hides nothing.
                         #if !os(macOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -110,15 +105,11 @@ struct WorkSearchSheet: View {
             : L10n.text("apple.worksearchsheet.find_a_screen_a_setting_or_your_work.e15aaac3")
     }
 
-    /// Screens and settings matching what has been typed. Only for a query:
-    /// an empty field is for what somebody was doing, not a map of the app.
     private var placeHits: [WorkSearchPlace] {
         guard let places, !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         return places.matches(model.query)
     }
 
-    /// Above the work, because a screen is an exact answer and a conversation
-    /// is a likely one. Few enough that the work is still on the first screen.
     @ViewBuilder
     private var placeList: some View {
         let hits = placeHits
@@ -168,11 +159,6 @@ struct WorkSearchSheet: View {
                     }
     }
 
-    /// Nothing typed yet.
-    ///
-    /// What is here is what somebody was doing: recent searches and the places
-    /// they opened. With none of that, the screen says what this field can find
-    /// rather than leaving a blank page under a cursor.
     private var recentWork: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if hasRecentWork {
@@ -319,8 +305,6 @@ struct WorkSearchSheet: View {
             }
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 highlighted(hit.title).font(Theme.body.weight(.semibold)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                // A folder's row is its own name three times over otherwise:
-                // the title, the excerpt the host echoes back, and the trail.
                 if !hit.excerpt.text.isEmpty, hit.excerpt.text != hit.title.text {
                     highlighted(hit.excerpt).font(Theme.callout).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 3)
                 }
@@ -337,19 +321,12 @@ struct WorkSearchSheet: View {
         .contentShape(Rectangle())
     }
 
-    /// Where the hit lives: the folder and the machine, or the machine alone
-    /// when the hit *is* that folder.
     private func place(_ hit: WorkSearchIndex.Hit) -> String {
         hit.folderName == hit.title.text || hit.folderName.isEmpty
             ? hit.machineName
             : "\(hit.folderName) · \(hit.machineName)"
     }
 
-    /// Where it came from, and when it last changed when that is known.
-    ///
-    /// A folder carries no time of its own: a host answers zero for it, which
-    /// printed as "56 years ago" under every folder in the list. Saying
-    /// "Live" and stopping is the honest version.
     private func timing(_ hit: WorkSearchIndex.Hit) -> String {
         let dated = hit.updatedAt.timeIntervalSince1970 > 0
             ? " " + RelativeClock.phrase(for: hit.updatedAt, style: .full)
@@ -382,8 +359,6 @@ struct WorkSearchSheet: View {
             : L10n.text("apple.worksearchsheet.type_to_find_a_screen_a_setting_or_work_yo.14600f0e", "\(live)")
     }
 
-    /// A query with no work behind it. Full width when it is the only answer,
-    /// and one quiet line when screens above it already answered.
     @ViewBuilder
     private var noWorkMatches: some View {
         if placeHits.isEmpty {

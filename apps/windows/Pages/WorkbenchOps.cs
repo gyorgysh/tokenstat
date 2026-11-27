@@ -9,18 +9,8 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Shared operation semantics for the Tasks, Automations, and Workflows pages.
-/// Ports the Mac state machines (receipts, revisions, conflict flows, and the
-/// no-duplicate rules), not just the screens. Host methods are verified by name
-/// in tokenstat-host dispatch; the host protocol stays at 22.
-/// </summary>
 internal static class WorkbenchOps
 {
-    /// <summary>
-    /// Best-effort host protocol version. Null means unknown, and unknown
-    /// means assume the feature is there, matching RemoteFeatureGate.
-    /// </summary>
     public static async Task<long?> ProtocolAsync()
     {
         try
@@ -52,18 +42,8 @@ internal static class WorkbenchOps
     public static bool WorkflowEditing(long? protocol) =>
         RemoteFeatureGate.SupportsProtocol(protocol, RemoteFeatureGate.WorkflowEditingMinProtocol);
 
-    /// <summary>
-    /// Client-owned name for one launch or creation, so an answer lost on the
-    /// way back can be repeated without running the agent twice. Callers mint
-    /// one id per user action and reuse it for every retry of that action.
-    /// </summary>
     public static string NewOperationId(string prefix) => $"{prefix}-{Guid.NewGuid()}";
 
-    /// <summary>
-    /// True when the host refused a checked write because the saved revision
-    /// moved. The Mac detects a conflict by comparing revisions, not by code,
-    /// so match the host sentence instead of an error code.
-    /// </summary>
     public static bool IsConflict(Exception ex) =>
         ex.Message.Contains("changed since", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("revision", StringComparison.OrdinalIgnoreCase);
@@ -103,10 +83,6 @@ internal static class WorkbenchOps
         _ => string.IsNullOrEmpty(status) ? L10n.Text("common.unknown") : status,
     };
 
-    /// <summary>
-    /// Live runs first so Stop is never behind Earlier runs, then newest first.
-    /// Matches the Mac AutomationRunHistory ordering.
-    /// </summary>
     public static List<JsonNode?> OrderedRuns(JsonArray? runs)
     {
         var list = new List<JsonNode?>();
@@ -139,11 +115,6 @@ internal static class WorkbenchOps
     public const int RunPageSize = 20;
     public const int RunPreviewCount = 5;
 
-    /// <summary>
-    /// IANA zone the host scheduler owns, or null when it is missing. A client
-    /// in another zone must not convert host times into the device clock.
-    /// Matches the Mac HostScheduleClock ownership rule.
-    /// </summary>
     public static string? HostZone(string? identifier)
     {
         var trimmed = identifier?.Trim();
@@ -154,7 +125,6 @@ internal static class WorkbenchOps
         return trimmed;
     }
 
-    /// <summary>Short place name: America/New_York becomes New York.</summary>
     public static string? ZonePlace(string? identifier)
     {
         var zone = HostZone(identifier);
@@ -171,10 +141,6 @@ internal static class WorkbenchOps
         return tail.Replace('_', ' ');
     }
 
-    /// <summary>
-    /// Who owns a wall-clock time. Never prints a host time without saying
-    /// whose clock it is.
-    /// </summary>
     public static string ClockCaption(string hostName, string? timezone, string? subject = null)
     {
         subject ??= L10n.Text("windows.workbenchops.this_time_is.e63a9d6e");
@@ -191,10 +157,6 @@ internal static class WorkbenchOps
             : L10n.Text("windows.workbenchops.0_on_1_not_this_device.4df70e6c", $"{subject}", $"{host}");
     }
 
-    /// <summary>
-    /// Seconds from a value plus a minutes/seconds unit. Null means invalid,
-    /// never zero: zero is No limit and is always explicit.
-    /// </summary>
     public static ulong? BudgetSeconds(string value, string unit, bool noLimit)
     {
         if (noLimit)
@@ -228,12 +190,6 @@ internal static class WorkbenchOps
         return (seconds.ToString(), "seconds", false);
     }
 
-    /// <summary>
-    /// Schedule payload for automation.create/edit and workflow.create/edit.
-    /// Kinds: once, interval, daily, weekdays, weekly, custom. Weekly with a
-    /// single day keeps using weekday; custom and weekdays use the bitset with
-    /// Monday as bit 0 through Sunday as bit 6.
-    /// </summary>
     public static JsonObject SchedulePayload(
         string kind, ulong everySeconds, int hour, int minute, int weekday, int weekdays)
     {
@@ -270,10 +226,6 @@ internal static class WorkbenchOps
     public static readonly string[] DayNames =
         [L10n.Text("windows.workbenchops.monday.6a00dfc1"), L10n.Text("windows.workbenchops.tuesday.7d8af1de"), L10n.Text("windows.workbenchops.wednesday.c0a6cc82"), L10n.Text("windows.workbenchops.thursday.fc266206"), L10n.Text("windows.workbenchops.friday.e21f3f37"), L10n.Text("windows.workbenchops.saturday.dbe35c73"), L10n.Text("windows.workbenchops.sunday.873fef76")];
 
-    /// <summary>
-    /// Merge edited known fields back into the untouched raw object so unknown
-    /// host fields round-trip. Never shown, never edited, written back intact.
-    /// </summary>
     public static JsonObject PreserveUnknown(JsonObject? raw, JsonObject edited)
     {
         var merged = new JsonObject();

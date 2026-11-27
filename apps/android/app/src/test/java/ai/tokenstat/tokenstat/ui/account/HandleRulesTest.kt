@@ -46,7 +46,6 @@ class HandleRulesTest {
     fun profileComesFromTheAccountOrNotAtAll() {
         fun profile(raw: String) = AccountProfile.from(Json.parseToJsonElement(raw).jsonObject)
         assertNull(profile("""{"signedIn":false,"profile":{"public":true}}"""))
-        // An older account service still says whether the page is public.
         val old = profile("""{"signedIn":true,"host":"https://h","handle":"name","profilePublic":true}""")!!
         assertTrue(old.isPublic && old.visible)
         assertNull(old.settings)
@@ -54,13 +53,11 @@ class HandleRulesTest {
         val fresh = profile("""{"signedIn":true,"host":"https://h","handle":null,"profile":{"public":false,"indexable":false,"handleChangeDays":3,"handlePrompted":false}}""")!!
         assertEquals(AccountProfile.Settings(indexable = false, changeDays = 3, prompted = false), fresh.settings)
         assertNull(fresh.handle)
-        // A server that does not track the offer never triggers it.
         assertTrue(profile("""{"signedIn":true,"profile":{"public":true}}""")!!.settings!!.prompted)
     }
 
     @Test
     fun localWorkStaysPutThroughClaimsAndRenames() {
-        // Never activated: the plain rule.
         assertEquals("alice", AccountIdentityPins.identity(" alice ", "acc_a"))
         assertEquals("acc_a", AccountIdentityPins.identity(null, "acc_a"))
 
@@ -71,13 +68,10 @@ class HandleRulesTest {
         assertEquals("alice", AccountIdentityPins.identity("alice", "acc_a"))
         AccountIdentityPins.activate(Memory(store.pins))
         assertEquals("alice", AccountIdentityPins.identity("alicia", "acc_a"))
-        // Somebody else claims the freed name. They never open the first
-        // person's work.
         assertEquals("acc_b", AccountIdentityPins.identity("alice", "acc_b"))
         assertEquals("bob", AccountIdentityPins.identity("bob", null))
         assertNull(AccountIdentityPins.identity(" ", ""))
 
-        // A host is always told the id.
         val account = Json.parseToJsonElement("""{"signedIn":true,"host":"https://h","handle":"alicia","accountId":"acc_a"}""").jsonObject
         assertEquals("acc_a", WatchingOwner.from(account)!!.scope["identity"]!!.jsonPrimitive.content)
     }

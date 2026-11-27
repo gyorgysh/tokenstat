@@ -4,14 +4,6 @@
 
 import SwiftUI
 
-/// Small things worth keeping, and nothing else.
-///
-/// A note can live on a project or stay unassigned. That is a label, not a
-/// column. The field stays focused after each note so the next one is ready.
-///
-/// The same screen serves the global list and one folder's. With a
-/// `workspaceID` the chips go away: a folder's notes are that folder's, and a
-/// filter on top of it would be two answers to one question.
 struct NotesView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
@@ -184,8 +176,6 @@ struct NotesView: View {
         model.notes(in: scope, archived: true).count
     }
 
-    /// Where a new note lands: this folder, the chip you picked, or unassigned
-    /// when looking at everything.
     private var destinationID: String {
         if case let .workspace(id) = scope { return id }
         return ""
@@ -258,7 +248,6 @@ struct NotesView: View {
             .frame(width: 130).help(L10n.text("apple.notesview.sort_notes.ea06e19b"))
     }
 
-    /// Opened from New note; closing it keeps the draft for next time.
     private var composer: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
@@ -430,12 +419,6 @@ struct NotesView: View {
             }
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
-                    // Not selectable any more. Selectable text hit-tests the
-                    // click for a selection, which is most of this card's
-                    // surface: pressing a note where somebody naturally
-                    // presses it did nothing, and only the padding around the
-                    // words opened the pane. The pane is where the text can be
-                    // read and copied now.
                     Text(note.title)
                         .font(Theme.font(15, weight: .semibold))
                         .lineLimit(2)
@@ -479,9 +462,6 @@ struct NotesView: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: 1)
         }
-        // The whole card, not a disclosure control. A note is one paragraph
-        // and the pane beside it is where the rest of it is, so reaching that
-        // pane has to be the ordinary thing pressing a note does.
         .contentShape(.rect)
         .onTapGesture { model.selectCard(note.id) }
         .accessibilityElement(children: .contain)
@@ -500,7 +480,6 @@ struct NotesView: View {
         saving = true
         Task {
             let saved = await model.addNote(text, workspaceID: folderID)
-            // Keep edits made while saving; a failed save keeps the whole draft.
             if saved, draft == text { draft = "" }
             saving = false
             writing = true
@@ -508,14 +487,6 @@ struct NotesView: View {
     }
 }
 
-/// Pick a folder, then the note becomes a card on that board.
-///
-/// Capture stays cheap because this decision happens later, in a panel that
-/// says what it is doing, not a hidden menu of folder names.
-///
-/// Not private: the list offers this on a row and the inspector offers it on
-/// the selected note, and two copies of one sheet is how they end up asking
-/// different questions.
 struct ConvertNoteSheet: View {
     let note: TodoCard
     let folders: [WorkspaceFolder]

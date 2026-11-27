@@ -3,7 +3,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The iPad files section fills the workspace detail, with persistent documents.
 struct ClientFileTabs<Files: View>: View {
     let peer: String
     let workspace: String
@@ -95,14 +94,9 @@ struct ClientFileTabs<Files: View>: View {
         } message: {
             Text(L10n.text("apple.clientfiletabs.0_has_edits_that_are_not_saved_on_that_com.97573681", "\(closing?.id.path ?? L10n.text("apple.clientfiletabs.this_file.eb43df97"))"))
         }
-        // Next/previous match stay discoverable when the bar is hidden: the
-        // same chord opens the bar, and navigates once it is open with
-        // matches. Save and Find ride on their toolbar buttons above.
         .clientShortcuts(findShortcuts)
     }
 
-    /// The find chords for the open tab, routed to the same session the bar
-    /// drives. Hidden presses open the bar; open presses move the match.
     private var findShortcuts: [ClientShortcut] {
         guard selected != nil else { return [] }
         let state = EditorShortcutState(

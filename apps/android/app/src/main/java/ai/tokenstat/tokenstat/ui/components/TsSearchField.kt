@@ -30,12 +30,6 @@ import androidx.compose.ui.unit.dp
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// The filter field, shared so every panel's search looks like the same
-/// control rather than whatever each screen invented. Ported from
-/// `PickerSearchField` in `Sources/Design/SearchablePicker.swift`: a
-/// magnifier, the prompt, and a clear button that appears only while there
-/// is something to clear. The field never capitalizes or autocorrects, so a
-/// branch name or model id stays exactly as typed.
 @Composable
 fun TsSearchField(
     prompt: String,

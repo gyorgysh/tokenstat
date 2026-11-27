@@ -92,13 +92,6 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// A full-screen live remote terminal, the phone counterpart of
-/// `ClientTerminalSession.swift`. The emulator is xterm.js running in a local
-/// WebView (bundled under assets/term — no network needed); bytes travel the
-/// same pty.* tunnel methods the Apple client uses.
-///
-/// The read loop keeps a long-poll (`waitMs`) outstanding so keystrokes and
-/// output feel live without a socket.
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,7 +136,7 @@ fun TerminalScreen(
                     if (ProjectOwner.from(model.state.value.account, peer, workspaceId) != owner) break
                     sessionIdentities = parseTerminalSessionIdentities(info)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (_: Exception) { /* Preserve the last attested IDs during a transient outage. */ }
+                catch (_: Exception) { }
                 delay(5000)
             }
         }
@@ -151,7 +144,6 @@ fun TerminalScreen(
     val displayName = sessionId?.let { names.name(nameOwner, it) }
     var confirmClose by remember { mutableStateOf(false) }
     var rendererFailed by remember { mutableStateOf(false) }
-    // The bar's Ctrl key reads the bridge, which is what spends the flag.
     var controlArmed by remember { mutableStateOf(false) }
     bridge.onControlChanged = { controlArmed = it }
     var keyboardUp by remember { mutableStateOf(false) }
@@ -160,13 +152,9 @@ fun TerminalScreen(
     var readingOutput by remember { mutableStateOf(false) }
     bridge.onReadingChanged = { readingOutput = it }
     ReconcileKeyboard(keyboardUp) { keyboardUp = false; bridge.noteKeyboardHidden() }
-    // A redraw tick for bridge-owned read state (transport error, dropped
-    // output, exit). The loop sets the fields and nudges this.
     var tick by remember { mutableIntStateOf(0) }
     bridge.onProgress = { tick++ }
 
-    // Follow the system appearance the way the Apple client repaints its
-    // terminal view, using the same TerminalPalette shades on both sides.
     LaunchedEffect(dark) { bridge.pushTheme(dark) }
 
     fun fail(message: String) {
@@ -175,8 +163,6 @@ fun TerminalScreen(
         bridge.onProgress()
     }
 
-    /// A fresh shell after a dead session or a failed spawn. The page
-    /// reload re-runs the bind flow from the top.
     fun retryFreshShell() {
         bridge.stopJobs()
         sessionId = null
@@ -194,11 +180,6 @@ fun TerminalScreen(
         sessionId = id
         onSessionOpened(id)
         scope.launch {
-            // The header names the process and folder, like the Apple screen.
-            // A failed info call is a transport hiccup: the read loop owns
-            // that case with its backoff. But an answer that names a dead
-            // session ends here with a way out, instead of the blank
-            // terminal a dead attach used to draw.
             bridge.runForPage(page, request = {
                 model.workspaceSection(peer, "pty.info", ptyViewerParams(id))
             }) { result ->
@@ -246,8 +227,6 @@ fun TerminalScreen(
                 TextButton(onClick = onClose) { Text(L10n.text("common.done")) }
             },
         )
-        // Bridge fields are plain volatiles; keying on the tick it nudges is
-        // what redraws these when the read loop reports.
         key(tick) {
             if (bridge.outputPaused) {
                 Text(
@@ -294,12 +273,6 @@ fun TerminalScreen(
             factory = { ctx ->
                 TerminalWebView(ctx, bridge).apply {
                     onRendererGone = { rendererFailed = true }
-                    // Match the space Compose gives this view, explicitly.
-                    // `AndroidView` leaves a child on wrap-content, and a
-                    // WebView measured that way lays its page out against a
-                    // containing block of zero height: `html { height: 100% }`
-                    // computes to 0px, so the terminal can never fit itself to
-                    // the screen and never follows the keyboard.
                     layoutParams = android.view.ViewGroup.LayoutParams(
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -309,23 +282,11 @@ fun TerminalScreen(
                     settings.allowContentAccess = false
                     settings.blockNetworkLoads = true
                     settings.domStorageEnabled = false
-                    // The page is sized to this view and cannot overflow it,
-                    // so there is nothing to scroll to and no bar to show.
-                    // A scrollable page pans to follow the focused textarea
-                    // at the cursor, which is what jumped the picture.
                     isVerticalScrollBarEnabled = false
                     isHorizontalScrollBarEnabled = false
                     overScrollMode = android.view.View.OVER_SCROLL_NEVER
-                    // Both, explicitly. A WebView inside Compose is not given
-                    // focus by the focus system, and without focus the page's
-                    // textarea cannot be what the keyboard types into.
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    // The size the page fits to arrives with layout, not with
-                    // the page load, so every layout asks it to measure again.
-                    // The measured view size travels with the ask: with the
-                    // keyboard open the window pans instead of resizing, so
-                    // the page's own viewport stays tall behind a short view.
                     addOnLayoutChangeListener { view, l, t, r, b, ol, ot, or_, ob ->
                         if (r - l == or_ - ol && b - t == ob - ot) return@addOnLayoutChangeListener
                         val density = view.resources.displayMetrics.density
@@ -400,15 +361,6 @@ fun TerminalScreen(
                 val id = sessionId
                 view.shutdown()
                 if (id != null && !bridge.killed) {
-                    // Stop showing a session without stopping its process on
-                    // the Mac (`pty.detach`). Close is what ends the process.
-                    //
-                    // On the view model's scope, not the composable's: this
-                    // runs as the screen leaves, and the remembered scope is
-                    // cancelled in the same breath, so the request was a coin
-                    // toss. Losing it means the phone keeps its claim on the
-                    // session's geometry until the host's lease expires, and
-                    // the Mac stays at the phone's width in the meantime.
                     model.viewModelScope.launch {
                         runCatching {
                             model.workspaceSection(peer, "pty.detach", ptyViewerParams(id))
@@ -467,9 +419,6 @@ private fun copyToClipboard(context: Context, text: String) {
     manager.setPrimaryClip(ClipData.newPlainText("terminal", text))
 }
 
-/// Forwards the xterm page's console to logcat. A blank terminal with a
-/// JavaScript error used to be undiagnosable; now the reason is one grep
-/// away under the TermWeb tag.
 private object TermChromeClient : android.webkit.WebChromeClient() {
     override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
         android.util.Log.d("TermWeb", "${message.lineNumber()}: ${message.message()}")
@@ -486,11 +435,6 @@ private fun bridgeSubtitle(bridge: TerminalBridge): String {
     return bridge.cwd.ifBlank { "" }
 }
 
-/// An SSH session on this phone: same xterm surface, local `ssh.session.*`.
-///
-/// Done leaves the session running on the server, End session stops it,
-/// with the same confirm the Apple screen asks. A session that has ended
-/// keeps its last screenful and says so.
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -531,8 +475,6 @@ fun SshTerminalScreen(
     var rendererFailed by remember { mutableStateOf(false) }
     var showingSessionDetails by remember(sessionId) { mutableStateOf(false) }
     var filling by remember { mutableStateOf<JsonObject?>(null) }
-    // On-connect commands, once the shell is there to hear them. The channel
-    // is buffered, so this survives the page still loading.
     LaunchedEffect(sessionId, rendererFailed) {
         if (!rendererFailed && startup.isNotEmpty()) {
             delay(600)
@@ -602,12 +544,6 @@ fun SshTerminalScreen(
             factory = { ctx ->
                 TerminalWebView(ctx, bridge).apply {
                     onRendererGone = { rendererFailed = true }
-                    // Match the space Compose gives this view, explicitly.
-                    // `AndroidView` leaves a child on wrap-content, and a
-                    // WebView measured that way lays its page out against a
-                    // containing block of zero height: `html { height: 100% }`
-                    // computes to 0px, so the terminal can never fit itself to
-                    // the screen and never follows the keyboard.
                     layoutParams = android.view.ViewGroup.LayoutParams(
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -617,23 +553,11 @@ fun SshTerminalScreen(
                     settings.allowContentAccess = false
                     settings.blockNetworkLoads = true
                     settings.domStorageEnabled = false
-                    // The page is sized to this view and cannot overflow it,
-                    // so there is nothing to scroll to and no bar to show.
-                    // A scrollable page pans to follow the focused textarea
-                    // at the cursor, which is what jumped the picture.
                     isVerticalScrollBarEnabled = false
                     isHorizontalScrollBarEnabled = false
                     overScrollMode = android.view.View.OVER_SCROLL_NEVER
-                    // Both, explicitly. A WebView inside Compose is not given
-                    // focus by the focus system, and without focus the page's
-                    // textarea cannot be what the keyboard types into.
                     isFocusable = true
                     isFocusableInTouchMode = true
-                    // The size the page fits to arrives with layout, not with
-                    // the page load, so every layout asks it to measure again.
-                    // The measured view size travels with the ask: with the
-                    // keyboard open the window pans instead of resizing, so
-                    // the page's own viewport stays tall behind a short view.
                     addOnLayoutChangeListener { view, l, t, r, b, ol, ot, or_, ob ->
                         if (r - l == or_ - ol && b - t == ob - ot) return@addOnLayoutChangeListener
                         val density = view.resources.displayMetrics.density
@@ -668,12 +592,6 @@ fun SshTerminalScreen(
             },
             onRelease = { view ->
                 view.shutdown()
-                // Done only stops watching. Only an ended session closes.
-                //
-                // The view model's scope for the same reason the pty detach
-                // uses it: a teardown call launched on the composable's scope
-                // races the cancellation of that scope, and the one that loses
-                // leaves a session open on the server.
                 if (bridge.killed) {
                     model.viewModelScope.launch {
                         runCatching {
@@ -780,8 +698,6 @@ private fun SnippetKey(
     }
 }
 
-/// Fill in a snippet's placeholders before it is typed into the terminal.
-/// Values are asked for every time and never stored.
 @Composable
 private fun SnippetFillSheet(
     item: JsonObject,
@@ -822,8 +738,6 @@ private fun SnippetFillSheet(
     )
 }
 
-/// The WebView ↔ tunnel plumbing: JS hands us input bytes, we hand JS output
-/// bytes. Everything crosses as base64 so no escaping can corrupt a stream.
 class TerminalBridge {
     var lifecycle: Lifecycle? = null
 
@@ -834,21 +748,15 @@ class TerminalBridge {
     @Volatile var webView: WebView? = null
     @Volatile var alive = true
     @Volatile var sessionBound = false
-    /// Set once `pty.close` ended the process, so release does not detach a
-    /// session that is already gone.
     @Volatile var killed = false
     @Volatile var droppedOutput = false
     @Volatile var outputPaused = false
     @Volatile var transportError: String? = null
-    /// A spawn or attach that failed before any output. The screen shows
-    /// this with a retry instead of a blank terminal that explains nothing.
     @Volatile var fatalError: String? = null
     @Volatile var exitCode: Int? = null
     @Volatile var command = ""
     @Volatile var cwd = ""
-    /// The screen nudges its redraw tick through here when read state moves.
     var onProgress: () -> Unit = {}
-    /// A selection in the emulator leaves for the system clipboard.
     var onCopy: (String) -> Unit = {}
     private val inbound = Channel<String>(capacity = 256)
     private val inputLock = Any()
@@ -857,11 +765,9 @@ class TerminalBridge {
     @Volatile private var pageEpoch = 0L
 
     fun stopJobs() {
-        // A fresh shell can reuse the WebView. Its pending output and focus
-        // requests still belong to the previous stream.
         synchronized(inputLock) {
             pageEpoch++
-            while (inbound.tryReceive().isSuccess) { /* Do not type old input into a new shell. */ }
+            while (inbound.tryReceive().isSuccess) { }
         }
         readJob?.cancel()
         inputJob?.cancel()
@@ -918,19 +824,10 @@ class TerminalBridge {
         postToPage { "termSetTheme(${if (dark) "true" else "false"});" }
     }
 
-    /// Ask the page to measure itself again.
-    ///
-    /// Called from the view's own layout, because that is the moment the page
-    /// finally has a height. A WebView inside Compose loads before it is
-    /// measured, and a terminal fitted against no height is one row tall.
     fun fit() {
         postToPage { "termFit();" }
     }
 
-    /// Fit to the measured view size, in CSS pixels. The page sizes its
-    /// terminal box to this rather than to its own viewport, which stays
-    /// tall behind a short view while the keyboard is open. See
-    /// `termViewport` in term.html.
     fun fitSize(wCss: Int, hCss: Int) {
         if (wCss < 1 || hCss < 1) {
             fit()
@@ -970,18 +867,9 @@ class TerminalBridge {
         ) onProgress()
     }
 
-    /// The armed Ctrl.
-    ///
-    /// The key bar has no letter keys: the letters arrive through the
-    /// emulator's own input path, so a fold that lives in the bar applies to
-    /// everything except the keys it is for. Ctrl+C typed on the soft keyboard
-    /// went to the shell as a plain `c` and nothing could be interrupted. The
-    /// bridge holds the flag and folds the next byte from either source, the
-    /// way `ClientTerminalSession.send` does on Apple.
     @Volatile var controlArmed = false
         private set
 
-    /// Raised when the fold spends the flag, so the bar can unlight its key.
     var onControlChanged: (Boolean) -> Unit = {}
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -989,8 +877,6 @@ class TerminalBridge {
     fun armControl(on: Boolean) {
         if (controlArmed == on) return
         controlArmed = on
-        // The fold can happen on the JavaScript bridge's thread, and the bar
-        // that reads this is Compose state.
         main.post { onControlChanged(on) }
     }
 
@@ -1002,8 +888,6 @@ class TerminalBridge {
         var out = bytes
         if (controlArmed) {
             armControl(false)
-            // One byte only. A paste under an armed Ctrl is a paste, not a
-            // control code, and a cursor key is already an escape sequence.
             if (out.size == 1) {
                 TerminalKeysLogic.controlCode(out[0].toInt() and 0xFF)?.let {
                     out = byteArrayOf(it.toByte())
@@ -1017,9 +901,6 @@ class TerminalBridge {
         if (keyboardUp) hideKeyboard() else showKeyboard()
     }
 
-    /// Whether the keyboard was last asked for. The WebView holds focus in
-    /// both states, so `hasFocus` cannot answer this. The key bar reads it to
-    /// say which way its key points.
     @Volatile var keyboardUp = false
         private set
 
@@ -1065,8 +946,6 @@ class TerminalBridge {
         }
     }
 
-    /// The window says the keyboard is gone although nothing here hid it: a
-    /// system dismissal. Records it so the key bar points at Show again.
     fun noteKeyboardHidden() {
         if (!keyboardUp) return
         keyboardUp = false
@@ -1100,10 +979,6 @@ class TerminalBridge {
                 }.getOrNull()
                 currentCoroutineContext().ensureActive()
                 if (chunk == null) {
-                    // A failed read is a transport outage, not proof the
-                    // process is gone. Back off like the Apple poll loop, and
-                    // ask the host whether the process is still running on a
-                    // steady drumbeat rather than on every failure.
                     failures++
                     if (transportError == null) {
                         transportError = L10n.text("android.terminalscreen.connection_lost_retrying.7bb52793")
@@ -1132,8 +1007,6 @@ class TerminalBridge {
                 val obj = chunk as? JsonObject ?: continue
                 val data = (obj["data"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
                 if (data.isNotEmpty()) output(data)
-                // The host answers `nextOffset`: asking from any other key
-                // replays the buffer from the wrong place forever.
                 val next = (obj["nextOffset"] as? kotlinx.serialization.json.JsonPrimitive)
                     ?.content?.toLongOrNull()
                 if (next != null && next > offset) offset = next
@@ -1160,8 +1033,6 @@ class TerminalBridge {
                     transportError = null
                     onProgress()
                 }
-                // Successful empty reads are also how a quiet command ends.
-                // Bound status checks to once a second while it is idle.
                 val now = System.nanoTime()
                 if (data.isEmpty() && !reportsExit && alive && exitCode == null &&
                     (lastInfoAt == null || now - lastInfoAt >= 1_000_000_000L)
@@ -1175,8 +1046,6 @@ class TerminalBridge {
                     currentCoroutineContext().ensureActive()
                     if (info != null) readInfo(info)
                 }
-                // Process exit can arrive before the final buffered pages.
-                // New hosts report output EOF; older hosts use the first empty read.
                 val outputDrained = !reportsEnd || (outputEnd != null && offset >= outputEnd)
                 if (data.isEmpty() && (exitCode != null || !alive) && outputDrained) break
             }
@@ -1194,11 +1063,6 @@ class TerminalBridge {
                     val parts = message.removePrefix("__resize__:").split(":")
                     val rows = parts.getOrNull(0)?.toIntOrNull() ?: continue
                     val cols = parts.getOrNull(1)?.toIntOrNull() ?: continue
-                    // Sending the ask rather than a command means the host
-                    // picks the smaller geometry and the Mac is not left
-                    // narrow after the phone closes. The viewer id is what
-                    // makes it an ask: without one the host resizes the
-                    // session outright. See `TerminalViewer`.
                     runCatching {
                         model.workspaceSection(peer, "pty.resize", ptyViewerParams(id) {
                             put("rows", rows); put("cols", cols)
@@ -1224,8 +1088,6 @@ class TerminalBridge {
         @JavascriptInterface
         fun onInput(base64: String) {
             if (pageEpoch != epoch) return
-            // Decoded rather than forwarded, so an armed Ctrl can fold the
-            // key that was actually typed.
             val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return
             synchronized(inputLock) { if (pageEpoch == epoch) enqueue(bytes) }
         }
@@ -1242,16 +1104,12 @@ class TerminalBridge {
             main.post { if (pageEpoch == epoch) this@TerminalBridge.onCopy(text) }
         }
 
-        /// A tap on the emulator asks for the keyboard, the way a tap on any
-        /// other text surface does.
         @JavascriptInterface
         fun onWantsKeyboard() {
             main.post { if (pageEpoch == epoch) showKeyboard() }
         }
     }
 
-    /// Set when the host reports the session closed. The screen shows it
-    /// rather than pretending the shell is still there.
     @Volatile var ended = false
 
     fun startSshLoop(model: AppViewModel, id: String, scope: CoroutineScope) {
@@ -1267,8 +1125,6 @@ class TerminalBridge {
                     })
                 }.getOrNull()
                 if (chunk == null) {
-                    // A failed read is a transport outage, not proof the
-                    // session ended. Back off and keep polling.
                     if (transportError == null) {
                         transportError = L10n.text("android.terminalscreen.connection_lost_retrying.7bb52793")
                         onProgress()
@@ -1328,27 +1184,17 @@ class TerminalBridge {
     }
 }
 
-/// The bridge knows when it asked, the window knows what happened. A
-/// system dismissal leaves the bar's key pointing at Hide until the two
-/// are reconciled.
 @Composable
 private fun ReconcileKeyboard(keyboardUp: Boolean, onHidden: () -> Unit) {
     val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     LaunchedEffect(imeVisible) {
         if (!imeVisible) {
-            // Past the show animation: without the wait a keyboard still
-            // rising would be read as dismissed.
             delay(600)
             if (keyboardUp) onHidden()
         }
     }
 }
 
-/// The keys a phone keyboard does not have. Shift+Tab is CSI Z, not a shifted tab byte.
-///
-/// `leading` carries keys one session has that others do not: an SSH session
-/// offers its saved snippets there, an agent session offers nothing. Same
-/// slot as Apple `ClientTerminalKeys.leading`.
 @Composable
 fun TerminalKeys(
     onSend: (ByteArray) -> Unit,
@@ -1357,21 +1203,14 @@ fun TerminalKeys(
     scrolls: Boolean = false,
     readingOutput: Boolean = false,
     onFollowOutput: () -> Unit = {},
-    /// Whether Ctrl is armed. Owned by the session that receives typed keys,
-    /// because that is the path the letters arrive on. Twin of the `control`
-    /// binding in `ClientTerminalKeys`.
     control: Boolean = false,
     onControl: (Boolean) -> Unit = {},
-    /// Which way the keyboard key points. Mirrors `keyboardUp` in
-    /// `ClientTerminalKeys`, where one key carries both directions.
     keyboardUp: Boolean = false,
     leading: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
     var shift by remember { mutableStateOf(false) }
     fun fire(bytes: ByteArray) {
-        // No fold here. Every byte goes the one way, and the session folds an
-        // armed Ctrl into whichever one arrives first.
         onSend(bytes)
         shift = false
     }
@@ -1459,5 +1298,3 @@ private fun KeyCap(
     )
 }
 
-/// Fold lives in [TerminalKeysLogic] so unit tests pin the same answers as
-/// Apple `TerminalControlCode.fold`.

@@ -4,11 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>
-/// Remote feature gate. Mirrors Apple ClientRemoteFeatureGate: a phone may
-/// update before its paired host, so check the peer's sessionless protocol
-/// before mounting a host-owned feature instead of showing unknown-method.
-/// </summary>
 internal static class RemoteFeatureGate
 {
     public const int TeamsMinProtocol = 38;
@@ -25,7 +20,6 @@ internal static class RemoteFeatureGate
     public const int PullsMinProtocol = 3;
     public const int FolderPickerMinProtocol = 7;
     public const int CloneRepositoryMinProtocol = 7;
-    /// Version 33 adds `pulls.commitAvatars`.
     public const int CommitAvatarsMinProtocol = 33;
 
     public static long? ProtocolOf(JsonNode? status)
@@ -34,8 +28,6 @@ internal static class RemoteFeatureGate
         {
             return null;
         }
-        // The sessionless host response uses protocolVersion as a string.
-        // Also accept numeric versions and older cached status field names.
         foreach (var key in new[] { "protocolVersion", "protocol", "version" })
         {
             if (status[key] is not JsonValue value)
@@ -63,14 +55,6 @@ internal static class RemoteFeatureGate
     public static bool SupportsChat(long? protocol) => protocol is null || protocol >= ChatMinProtocol;
     public static bool SupportsPulls(long? protocol) => protocol is null || protocol >= PullsMinProtocol;
 
-    /// <summary>
-    /// Workbench gates. Mirrors the Apple minimumProtocol table: 17 adds
-    /// revision-checked task editing, 18 adds checked task deletion, 19 adds
-    /// create-once tasks, 20 adds checked task runs with launch receipts, 21
-    /// adds revision-checked automation edits with create/run receipts, 22
-    /// adds revision-checked workflow edits, and 25 adds a short note that
-    /// rides the next tool step.
-    /// </summary>
     public const int TaskEditingMinProtocol = 17;
     public const int TaskDeletionMinProtocol = 18;
     public const int TaskCreationMinProtocol = 19;

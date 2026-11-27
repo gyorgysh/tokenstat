@@ -8,7 +8,6 @@ fn split_tcp_uses_nonblocking_io_instead_of_winsock_timeouts() {
     let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (_server, _) = listener.accept().unwrap();
     let mut probe = client.try_clone().unwrap();
-    // Bound a broken implementation so this regression cannot hang CI.
     probe
         .set_read_timeout(Some(Duration::from_millis(200)))
         .unwrap();
@@ -289,7 +288,7 @@ fn stalled_or_failed_writes_and_flushes_retire_both_halves() {
         let steps = match case {
             0 => vec![Step::Wait],
             1 => vec![Step::Bytes(1), Step::Wait],
-            2 => vec![], // Stall during flush after all frames were written.
+            2 => vec![],
             3 => vec![Step::Zero],
             _ => vec![Step::Bytes(1), Step::Error(std::io::ErrorKind::BrokenPipe)],
         };

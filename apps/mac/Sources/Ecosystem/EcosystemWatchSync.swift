@@ -37,7 +37,7 @@ final class EcosystemWatchSync: NSObject, WCSessionDelegate {
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled,
               let snapshot = pending, let data = packet(snapshot) else { return }
         do { try session.updateApplicationContext(["snapshot": data]); pending = nil }
-        catch { /* Activation and subsequent successful loads retry the latest state. */ }
+        catch { }
     }
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {

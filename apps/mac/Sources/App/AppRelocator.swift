@@ -34,19 +34,11 @@ import Foundation
 /// is not a nag: declining is remembered, and the ordinary case where the app
 /// already lives in a normal place says nothing at all.
 enum AppRelocator {
-    /// Set when the user has said no. Asking again on the next launch would be
-    /// the same question with the same answer.
     private static let declinedKey = "AppRelocator.declined"
 
-    /// Move to /Applications if this copy is somewhere it should not be.
-    ///
-    /// Returns `true` when the relaunch has been started, in which case the
-    /// caller must do nothing else: this process is on its way out and any work
-    /// it starts now belongs to a bundle that is about to be replaced.
     @MainActor
     static func relocateIfNeeded() -> Bool {
         #if DEBUG
-        // A development build lives in DerivedData and belongs there.
         return false
         #else
         let bundle = Bundle.main.bundleURL
@@ -56,16 +48,10 @@ enum AppRelocator {
         let destinationDirectory = URL(fileURLWithPath: "/Applications", isDirectory: true)
         let destination = destinationDirectory.appendingPathComponent(bundle.lastPathComponent)
 
-        // Nothing to offer if the folder cannot be written and no authorisation
-        // is going to be asked for. Better a working app in the wrong place
-        // than a dialog the user cannot act on.
         guard FileManager.default.isWritableFile(atPath: destinationDirectory.path) else {
             return false
         }
 
-        // An open copy in /Applications is the one that should be in front.
-        // Moving over a running bundle would leave that process running an
-        // image that no longer exists on disk.
         if let running = runningCopy(at: destination) {
             running.activate()
             NSApp.terminate(nil)
@@ -85,9 +71,6 @@ enum AppRelocator {
         do {
             try move(bundle, to: destination)
         } catch {
-            // Carry on from where it is. A failed tidy-up is not a reason to
-            // refuse to open, and the alert says so rather than leaving the
-            // user with an app that did nothing.
             report(error)
             return false
         }
@@ -97,12 +80,7 @@ enum AppRelocator {
         #endif
     }
 
-    // MARK: - Deciding
 
-    /// True when this copy is running from somewhere it cannot update itself.
-    ///
-    /// `~/Applications` counts as a real home: a user who keeps applications
-    /// there did that on purpose, and it is writable, so updates work.
     private static func needsRelocation(_ bundle: URL) -> Bool {
         if isTranslocated(bundle) { return true }
         let path = bundle.path
@@ -123,13 +101,6 @@ enum AppRelocator {
             && bundle.path.contains("/AppTranslocation/")
     }
 
-    /// Another copy of this app already running from the destination.
-    ///
-    /// Matched by path, not by bundle identifier. The identifier was
-    /// `ai.tokenstat.Tokenstat` and is now `ai.tokenstat.tokenstat`, so a build
-    /// from before the rename running out of /Applications is a different
-    /// identifier and asking for our own would not have found it. What matters
-    /// is that something is running from the folder we are about to replace.
     private static func runningCopy(at destination: URL) -> NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first { other in
             other != .current
@@ -137,7 +108,6 @@ enum AppRelocator {
         }
     }
 
-    // MARK: - Asking
 
     private enum Answer {
         case move
@@ -171,20 +141,13 @@ enum AppRelocator {
         alert.runModal()
     }
 
-    // MARK: - Moving
 
     private static func move(_ bundle: URL, to destination: URL) throws {
         let manager = FileManager.default
 
-        // Copy, then remove the original, rather than a move. A translocated
-        // bundle cannot be moved at all, and a copy that fails part way through
-        // has not destroyed the only copy the user has.
         let staged = destination.deletingLastPathComponent()
             .appendingPathComponent("\(destination.lastPathComponent).incoming")
         try? manager.removeItem(at: staged)
-        // A copy that fails part way through leaves a partial bundle beside
-        // the destination. It is never the one on disk, so it is only ever
-        // litter, and litter in /Applications is remembered.
         var placed = false
         defer { if !placed { try? manager.removeItem(at: staged) } }
         try manager.copyItem(at: bundle, to: staged)
@@ -205,9 +168,6 @@ enum AppRelocator {
         try? clear.run()
         clear.waitUntilExit()
 
-        // The original, only when there is one to delete and it is ours to
-        // delete. A translocated path is a mount, not the download, and the
-        // real bundle behind it is not reachable from here.
         if !isTranslocated(bundle) {
             try? manager.trashItem(at: bundle, resultingItemURL: nil)
         }
@@ -219,9 +179,6 @@ enum AppRelocator {
         configuration.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: destination, configuration: configuration) { _, error in
             Task { @MainActor in
-                // Quitting on a failed open would take away the only window
-                // with nothing to say why. Stay running and point at the copy
-                // that was moved.
                 if let error {
                     reportOpenFailure(error)
                     return

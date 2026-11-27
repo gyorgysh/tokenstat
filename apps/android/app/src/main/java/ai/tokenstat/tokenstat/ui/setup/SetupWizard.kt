@@ -67,18 +67,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/// How somebody gets a machine, asked once and answerable forever after.
-///
-/// Ported from `ClientSetupWizard.swift`. Not a modal that traps anybody:
-/// every step can be left, and leaving lands on the numbers. Skip sits below
-/// the three doors as a quiet button rather than a fourth card, so it never
-/// reads as a fourth way to set up.
-///
-/// The server door walks the six provisioning steps (`SetupServerSteps`,
-/// ported from `ClientSetupServerSteps`): which server, how to sign in, the
-/// host key, the check, the install, and the wait. The draft resume card is
-/// absent: setup left half-finished restarts from the address, and every
-/// remote step re-asks the server rather than assuming.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupWizard(
@@ -138,8 +126,6 @@ private fun SetupStepBody(
     onPush: (SetupStep) -> Unit,
     onPath: (List<SetupStep>) -> Unit,
 ) {
-    // A changed key is re-established from scratch: it has to be looked at,
-    // not carried forward from a record that no longer fits the server.
     val onRecover: (SetupAction) -> Unit = { action ->
         if (action == SetupAction.REVIEW_FINGERPRINT) connect.resetServer()
         connect.failure = null
@@ -227,10 +213,6 @@ private fun SetupStepBody(
 
 private const val SETUP_DOWNLOAD_URL = "https://tokenstat.ai/download"
 
-/// For somebody who does not have a server yet. Ported from
-/// `ClientSetupServerGuide.swift`: what it has to be, who takes the money,
-/// and where to go and get one. tokenstat does not create servers and does
-/// not bill for them.
 @Composable
 private fun SetupServerGuide(onHaveServer: () -> Unit) {
     val colors = LocalTsColors.current
@@ -356,11 +338,6 @@ private fun GuideBullet(text: String) {
     }
 }
 
-/// Door two: a server somebody already has.
-///
-/// Two routes: the provisioning steps, which ask which server and how to
-/// sign in before anything is written, or the install line run by hand for
-/// a server where handing over a key is not on.
 @Composable
 private fun SetupServerDoor(onConnect: () -> Unit, onByHand: () -> Unit) {
     val colors = LocalTsColors.current
@@ -399,11 +376,6 @@ private fun SetupServerDoor(onConnect: () -> Unit, onByHand: () -> Unit) {
     }
 }
 
-/// The same install, run by the person instead of by the app. Ported from
-/// `ClientSetupByHand.swift`.
-///
-/// The pairing code is on screen here, and that is acceptable only because
-/// it is single use and short lived.
 @Composable
 private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
     val colors = LocalTsColors.current
@@ -422,8 +394,6 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
         scope.launch {
             error = null
             runCatching {
-                // This device's public key, granted at install time. Absent
-                // on a fresh install, and the line works without it.
                 val allow = runCatching {
                     model.core("machine.identity").jsonObject["key"]?.jsonPrimitive?.contentOrNull
                 }.getOrNull()
@@ -538,17 +508,6 @@ private fun SetupByHand(model: AppViewModel, onRanIt: () -> Unit) {
 
 private class CoreClientFailure(message: String) : Exception(message)
 
-/// Step eight: the project, which is the point of all of it. Ported from
-/// `ClientSetupProjectStep.swift`.
-///
-/// Setup used to end on a machine and an empty folder list. This ends inside
-/// a project. Cloning and picking a folder are the same two screens the
-/// workspace list offers, reached from here so that nobody has to find them
-/// afterwards.
-///
-/// Gap: the Apple client opens the folder with a first tour task already
-/// typed and not sent. This client has no composer prefill, so the folder
-/// opens with an empty message box.
 @Composable
 private fun SetupProjectStep(
     model: AppViewModel,
@@ -715,9 +674,6 @@ private fun SetupDoors(
             icon = { Icon(Icons.Default.Cloud, null, tint = colors.accent, modifier = Modifier.size(25.dp)) },
             onClick = { onDoor(SetupStep.CLOUD) },
         )
-        // Leaving, without pretending it is a setup choice. A fourth card
-        // wore the same surface as the three doors and read as a fourth way
-        // to set up. A quiet bordered button says what it is.
         TsSecondaryButton(
             label = L10n.text("android.setupwizard.skip_for_now.b58eb52c"),
             onClick = onClose,
@@ -769,11 +725,6 @@ private fun SetupDoorCard(
     }
 }
 
-/// Door one: the computer somebody already works on.
-///
-/// The phone cannot do any of the three steps, so this screen's job is to be
-/// checkable rather than instructive. It watches the account, and each step
-/// ticks itself off as it happens.
 @Composable
 private fun SetupMacDoor(model: AppViewModel, state: ai.tokenstat.tokenstat.ClientState) {
     val context = LocalContext.current
@@ -892,9 +843,6 @@ private fun SetupNumberedStep(
     }
 }
 
-/// Door three: a machine somebody already rents. Reading an inventory, and
-/// nothing else. Creating a machine is out of scope: a write-scoped provider
-/// token on a phone can spend somebody's money.
 @Composable
 private fun SetupCloudDoor(
     model: AppViewModel,
@@ -1001,8 +949,6 @@ private fun SetupCloudDoor(
                             if ((count ?: 0) <= 0) {
                                 error = L10n.text("android.setupwizard.no_servers_were_found_check_the_account_to.e590f2d6")
                             } else {
-                                // The token was a credential and its job is
-                                // done. It is never written to the archive.
                                 token = ""
                                 imported = count
                             }

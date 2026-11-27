@@ -3,9 +3,6 @@
 import SwiftUI
 
 #if os(macOS)
-/// The desktop entry to the same SSH provisioning model used by iOS.
-/// The model owns fingerprints, secrets, checkpoints and the install session;
-/// this view only advances after the host has confirmed each step.
 struct MacServerSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AccountModel.self) private var account

@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Muse and both OpenCode launchers use native credentials in an otherwise
-//! empty home. Only connection/model metadata crosses from native settings.
-//! OpenCode V2 keeps its own credential database and OAuth refresh lifecycle;
-//! every invocation creates a new session with only the Team MCP available.
-
 use super::{Path, PathBuf, Program, RunHome, fs, io, json, write_new};
 use crate::opencode_cli::Generation;
 use serde_json::{Map, Value};
@@ -104,8 +98,6 @@ pub(super) fn version_supported(backend: &str, executable: &str) -> bool {
     }
 }
 
-// This is the oldest release exercised against the Team plugin/config APIs,
-// rather than a claim about when each individual native feature appeared.
 fn tested_v2_version(text: &str) -> bool {
     text.split_whitespace()
         .find_map(|word| {
@@ -169,8 +161,6 @@ fn route(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 fn route_muse_credential(source: &Path, target: &Path) -> io::Result<()> {
-    // Muse resolves symbolic links before atomically replacing the native
-    // target. A hard link would lose that refresh on private-home teardown.
     #[cfg(windows)]
     {
         if let Some(parent) = target.parent() {
@@ -223,9 +213,7 @@ fn prepare_native(
             &config_home.join("muse/auth.json"),
             &directory.join("auth.json"),
         )?;
-        // MUSE_AUTH_PATH belongs to Muse's shell downloader, not the native
-        // model credential store. A custom downloader account must not
-        // replace the native file/keychain account selected by Muse itself.
+
         if let Some(selector) = env("MUSE_AUTH_PATH").filter(|value| !value.is_empty()) {
             let source = native_path(Some(selector), PathBuf::new(), native_folder);
             let target = home.file("muse-launcher-auth.json");
@@ -274,8 +262,7 @@ fn prepare_native(
             );
         }
         let mut settings = Value::Object(settings);
-        // The native Rust HTTP client opens these paths from its working
-        // directory. Preserve that source before moving to the private cwd.
+
         if let Some(transport) = settings
             .get_mut("endpoint_transport")
             .and_then(Value::as_object_mut)
@@ -378,7 +365,7 @@ fn prepare_native(
     let args = object.remove("args").expect("MCP arguments");
     object.insert("command".into(), json!([helper, args[0]]));
     object.insert("type".into(), "local".into());
-    // OpenCode inherits the environment before applying these overrides.
+
     let mut environment = object.remove("env").expect("MCP env");
     for key in program.env.keys().filter(|key| {
         !super::SDK_VARS.contains(&key.as_str())
@@ -450,8 +437,7 @@ fn prepare_native(
         "OPENCODE_CONFIG_DIR".into(),
         directory.display().to_string(),
     );
-    // Keep bounded connection metadata (which may contain a native API key)
-    // in the private 0600 config rather than a large process environment.
+
     let config_path = home.file("opencode.json");
     write_new(&config_path, config.to_string().as_bytes())?;
     program
@@ -517,8 +503,7 @@ pub(super) fn command(
     }
     let prompt = argv.pop().expect("prompt after marker");
     argv.pop();
-    // A fixed full user turn, passed via a file/stdin, cannot become argv flags
-    // or exceed Windows' argv limit during conflict repair.
+
     write_new(&program.input, prompt.as_bytes())?;
     if backend == "muse" {
         let mut env = super::SDK_VARS
@@ -563,8 +548,6 @@ pub(super) fn command(
         ]);
     }
     if let Some(generation) = program.env.get("TOKENSTAT_TEAM_OPENCODE_GENERATION") {
-        // Keep the generation whose config and plugin were prepared, also
-        // while the native launcher is being upgraded between repair turns.
         argv.retain(|arg| arg != "--standalone");
         if generation == "2" {
             argv.push("--standalone".into());
@@ -584,8 +567,6 @@ fn read_json(path: &Path) -> io::Result<Option<Value>> {
     let mut file = match options.open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            // A dangling selector or an uninspectable ancestor is not an
-            // absent native profile. Falling back could change its account.
             return match super::startup_source_metadata(path)? {
                 None => Ok(None),
                 Some(_) => Err(error),
@@ -786,9 +767,6 @@ fn merge(target: &mut Value, source: &Value) {
     }
 }
 
-// Native environment substitutions in connection settings remain native. File
-// interpolation is deliberately refused: it could import private instructions
-// or other files into request headers/model configuration.
 fn import_references(
     value: &mut Value,
     program: &mut Program,
@@ -841,8 +819,7 @@ fn import_references(
         }
         _ => {}
     }
-    // Provider env declarations select native sign-in variables; they cannot
-    // import guardian capabilities or executable configuration selectors.
+
     if let Some(names) = value.get_mut("env").and_then(Value::as_array_mut) {
         for name in names {
             let source = name
@@ -879,8 +856,7 @@ fn alias(
     }
     let alias = format!("TOKENSTAT_TEAM_PROVIDER_ENV_{index}");
     let value = env(name).unwrap_or_default();
-    // OpenCode expands file placeholders after environment placeholders.
-    // An opaque key/header value must not introduce a second interpolation.
+
     if value.len() > 32 * 1024 || value.contains("{file:") || value.contains("{env:") {
         return Err(unsupported());
     }
@@ -888,9 +864,6 @@ fn alias(
     Ok(alias)
 }
 
-// Native OpenCode currently gives managed machine settings precedence over
-// every CLI config override. Refuse those installations rather than allow
-// machine plugins/MCP servers or permission overrides into a scoped run.
 fn refuse_managed_config(env: &dyn Fn(&str) -> Option<String>) -> io::Result<()> {
     refuse_managed_paths(&managed_config_paths(env)?)
 }
@@ -958,9 +931,6 @@ fn prepare_native_database(
     }
     let path = native_path(Some(selector), PathBuf::new(), native_data);
     if !path.try_exists()? {
-        // A fresh private DB is fine for an environment/config API key, but
-        // must not mark the person's legacy native sign-in migration complete
-        // while its source auth.json is hidden by the private XDG home.
         if native_data.join("auth.json").try_exists()? {
             return Err(migration_required());
         }
@@ -983,8 +953,6 @@ fn migration_required() -> io::Error {
     )
 }
 
-/// Only inspect schema and remote-configuration metadata. Credential values,
-/// private conversations and their transcripts are never queried here.
 fn ensure_native_database(path: &Path) -> io::Result<()> {
     use rusqlite::{Connection, OpenFlags, OptionalExtension};
     let mut options = fs::OpenOptions::new();
@@ -1006,8 +974,7 @@ fn ensure_native_database(path: &Path) -> io::Result<()> {
     connection
         .busy_timeout(std::time::Duration::from_millis(250))
         .map_err(|_| migration_required())?;
-    // An older database must complete its native migration with its original
-    // XDG home before we let the native process open it from the private home.
+
     for (table, columns) in [
         (
             "credential",

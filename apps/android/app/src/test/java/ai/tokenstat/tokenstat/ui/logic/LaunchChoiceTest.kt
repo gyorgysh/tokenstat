@@ -8,8 +8,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/// What a new conversation opens with. Twin of the `createChat` call in
-/// `ChatModel.startChat`.
 class LaunchChoiceTest {
     private fun backend(json: String): JsonObject = Json.parseToJsonElement(json).jsonObject
 
@@ -28,9 +26,6 @@ class LaunchChoiceTest {
         autonomy: String = "bypass",
     ) = LaunchChoice(backend, model, effort, mode, autonomy, personaId = null)
 
-    /// The one the correction was about. The host falls back to plan for a
-    /// record that does not say, which is the safe reading of an unknown
-    /// conversation. A chat somebody just asked for is not unknown.
     @Test
     fun `a first chat opens in execute, never plan`() {
         assertEquals("execute", LaunchDefaults.mode(null))
@@ -52,8 +47,6 @@ class LaunchChoiceTest {
         assertEquals("bypass", LaunchDefaults.autonomy(choice(autonomy = "standard"), false))
     }
 
-    /// An agent with no approval protocol of its own runs on Bypass or not at
-    /// all, whatever was last used.
     @Test
     fun `a bypass-only agent is put on bypass`() {
         assertEquals("bypass", LaunchDefaults.autonomy(choice(autonomy = "standard"), true))
@@ -81,8 +74,6 @@ class LaunchChoiceTest {
         assertEquals("claude", LaunchDefaults.backend(null, list))
     }
 
-    /// The last resort skips uninstalled agents too: answering one the
-    /// catalog says is not there is worse than the hardcoded fallback.
     @Test
     fun `the fallback never answers an uninstalled agent`() {
         val list = listOf(
@@ -100,8 +91,6 @@ class LaunchChoiceTest {
         assertEquals("codex", LaunchDefaults.backend(null, list))
     }
 
-    /// A model and an effort belong to the agent that offers them. Carrying
-    /// one across is stale setup, not a preference.
     @Test
     fun `a saved model only travels to an agent that offers it`() {
         val muse = backends.first { it["id"].toString().contains("muse") }

@@ -13,7 +13,6 @@ import androidx.core.graphics.createBitmap
 import ai.tokenstat.tokenstat.R
 import java.text.NumberFormat
 
-/** Allowance widgets share the verified account cache and refresh worker with activity. */
 class LimitsWidgetProvider : UsageWidgetProvider() {
     companion object {
         internal fun preferences(context: Context) = context.getSharedPreferences("usage-widget", Context.MODE_PRIVATE)
@@ -38,7 +37,6 @@ class LimitsWidgetProvider : UsageWidgetProvider() {
         internal fun cells(readings: List<QuotaProvider>, selection: QuotaWindowSelection, now: Long): List<Cell> = readings.flatMap { provider ->
             selection.windows(provider, now).map { Cell(provider, it) }.ifEmpty { listOf(Cell(provider, null)) }
         }
-        /** Render bounded native gauges at the actual allocated size, including one-row cards. */
         fun renderSize(context: Context, snapshot: UsageSnapshot?, readings: List<QuotaProvider>, id: Int,
                        rings: Boolean, width: Int, height: Int, refresh: PendingIntent? = null, refreshing: Boolean = false): RemoteViews {
             val now = System.currentTimeMillis()

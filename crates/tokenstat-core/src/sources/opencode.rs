@@ -85,7 +85,6 @@ struct MessageData {
     model_id: Option<String>,
     #[serde(rename = "providerID")]
     provider_id: Option<String>,
-    /// OpenCode 2 nests what version 1 kept at the top level.
     model: Option<ModelRef>,
     role: Option<String>,
     tokens: Option<Tokens>,
@@ -187,7 +186,6 @@ pub fn parse_db_in_as(
     out
 }
 
-/// Which pair of tables a query reads.
 #[derive(Clone, Copy)]
 enum Layout {
     V1,
@@ -210,11 +208,6 @@ impl Layout {
     }
 }
 
-/// Read one schema's messages into `out`.
-///
-/// A missing table is not a warning. An install that has only ever run one
-/// major version has only that version's tables, and saying so on every poll
-/// would turn the normal case into a complaint.
 #[allow(clippy::too_many_arguments)]
 fn read_layout(
     conn: &rusqlite::Connection,
@@ -229,8 +222,6 @@ fn read_layout(
     if !has_table(conn, layout.messages()) {
         return;
     }
-    // Built rather than matched, because the two narrowings are independent
-    // and the four-way match this used to be would only grow.
     let mut sql = format!(
         "SELECT m.id, m.session_id, m.time_created, m.data,
                 COALESCE(s.directory, s.path, '')
@@ -299,9 +290,6 @@ fn read_layout(
         let (id, session, time_created, data, directory) = match row {
             Ok(row) => row,
             Err(e) => {
-                // Surface the first unreadable row: the scan still advances
-                // this file's watermark, so silence would make a truncated
-                // read indistinguishable from a complete one.
                 if !row_failed {
                     out.warnings.push(Warning::Unreadable {
                         path: path.to_path_buf(),
@@ -363,9 +351,6 @@ fn read_layout(
         // and keep the split in extras for transparency.
         out.events.push(UsageEvent {
             profile_id: None,
-            // The tool's own name in the id, so a machine that runs both
-            // OpenCode and a fork of it cannot collide on a message id that is
-            // only unique inside one database.
             id: EventId::derive(&[source.as_str(), &id]),
             source,
             ts: Timestamp::from_ms(ts_ms),
@@ -384,7 +369,6 @@ fn read_layout(
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
-            // A zero cost on a non-zero token row usually means plan coverage.
             billing: match msg.cost {
                 Some(0.0) => BillingMode::Plan,
                 Some(_) => BillingMode::Metered,
@@ -438,7 +422,6 @@ pub fn session_births(path: &Path, directory: &str) -> Vec<(i64, String)> {
     born.into_iter().map(|(id, at)| (at, id)).collect()
 }
 
-/// Whether this database has that table, so a one-version install is quiet.
 fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -576,9 +559,6 @@ mod tests {
 
     #[test]
     fn version_two_messages_are_read() {
-        // No `role`, no `modelID`: the role is a column and the model is
-        // nested. Read against the version 1 query this row counts as zero,
-        // which is exactly what an OpenCode 2 session used to report.
         let data = r#"{"model":{"id":"gpt-5.6-luna","providerID":"opencode-go"},"tokens":{"input":3,"output":44,"reasoning":0,"cache":{"read":13182,"write":135}},"cost":0.00035}"#;
         let dir = "/Users/me/git/www";
         let path = temp_db_v2(&[("msg1", "ses1", 10, data, dir)]);
@@ -596,9 +576,6 @@ mod tests {
         assert!(out.warnings.is_empty());
     }
 
-    /// Upgrading copies version 1 rows into the version 2 tables under the
-    /// same ids. Counted once, or every migrated turn is worth double in a
-    /// live session's reading.
     #[test]
     fn a_message_in_both_schemas_is_counted_once() {
         let dir = "/Users/me/git/www";
@@ -649,7 +626,6 @@ mod tests {
         let mine = parse_db_in(&path, Some("/Users/me/git/tokenstat"), None);
         assert_eq!(mine.events.len(), 1);
         assert_eq!(mine.events[0].project, "tokenstat");
-        // Whole path, not a label: a basename cannot tell two checkouts apart.
         assert!(
             parse_db_in(&path, Some("tokenstat"), None)
                 .events

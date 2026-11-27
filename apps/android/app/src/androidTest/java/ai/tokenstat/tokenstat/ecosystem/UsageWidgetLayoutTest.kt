@@ -26,7 +26,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.serialization.json.*
 
-/** Inflate real RemoteViews at widget sizes, with privacy and overflow cases. */
 @RunWith(AndroidJUnit4::class)
 class UsageWidgetLayoutTest {
     @Test fun launcherMetadataKeepsUsageConfigurationAndCompactLimitResizing() {
@@ -47,8 +46,6 @@ class UsageWidgetLayoutTest {
         try {
             UsageWidgetStore.verify(context, account, UsageWidgetStore.epoch(), fromApp = true)!!
             assertNotNull(UsageWidgetStore.read(context))
-            // Model a prior process's sign-out marker with an otherwise
-            // unblocked in-memory session and an old cache still on disk.
             assertTrue(privacy.edit().putBoolean("blocked", true).commit())
             assertNull(UsageWidgetStore.read(context))
             assertNull(UsageWidgetStore.verify(context, account, UsageWidgetStore.epoch()))

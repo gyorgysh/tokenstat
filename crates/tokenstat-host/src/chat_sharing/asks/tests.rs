@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -190,8 +189,7 @@ fn proven_recovery_clears_running_only_after_durable_writer_release() {
     let fence = owned.binding.fence.clone();
     drop(owned);
     assert!(f.chat().running);
-    // This storage fixture has no child. Process-proof acceptance is covered
-    // separately through the real guardian crash/recovery transport test.
+
     assert!(
         f.store
             .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, true, || Err(
@@ -437,7 +435,7 @@ fn interrupted_admission_never_replays_a_missing_or_written_ask() {
         ));
         assert_eq!(error.code, "fixture_interruption");
         assert!(f.chat().team_run_fence.is_some());
-        // A fresh store simulates a process restart without retained handles.
+
         let store = Store::load_at(f.store.root.clone());
         let retried = store.prepare_team_ask(
             f.target(),
@@ -620,7 +618,7 @@ fn request_cannot_supply_actor_path_resume_grant_or_execution_settings() {
         raw[key] = json!("forged");
         assert!(serde_json::from_value::<AskInput>(raw).is_err(), "{key}");
     }
-    // The fixture lifetime owns all canonical and checkout files.
+
     assert!(f.root.path().is_dir());
 }
 
@@ -839,8 +837,7 @@ fn an_unwritten_reserved_ask_can_be_recovered_without_replaying_it() {
         "team_run_unavailable"
     );
     let fence = f.chat().team_run_fence.unwrap();
-    // A failed writer-release step happens after the recovered receipt has
-    // been persisted. The same source fence must survive and remain retryable.
+
     assert_eq!(
         f.store
             .recover_orphaned_run(&f.chat.workspace_id, &f.chat.id, &fence, false, || {

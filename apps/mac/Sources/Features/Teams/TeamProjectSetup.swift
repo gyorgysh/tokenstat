@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Host-owned progress; opening this review never resumes a write.
 struct TeamProjectSetup: Decodable, Sendable, Identifiable {
     let id: String
     let organizationId: String

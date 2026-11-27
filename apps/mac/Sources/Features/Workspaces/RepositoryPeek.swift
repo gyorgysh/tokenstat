@@ -3,8 +3,6 @@
 #if os(macOS)
 import SwiftUI
 
-/// The inspector beside the repositories page: a closer look at one of them
-/// without leaving the page.
 struct RepositoryPeek: View {
     @Bindable var model: RepositoryOverviewModel
     let folders: [WorkspaceFolder]
@@ -202,8 +200,6 @@ struct RepositoryPeek: View {
         }
     }
 
-    /// Three named, the rest as one. A bar of seven slivers names nobody.
-    /// Nor does one that rounds to nothing.
     private static func grouped(_ all: [RepositoryOverviewModel.Agent]) -> [RepositoryOverviewModel.Agent] {
         let total = all.reduce(0.0) { $0 + Double($1.tokens) }
         let agents = all.filter { Double($0.tokens) >= total * 0.005 }

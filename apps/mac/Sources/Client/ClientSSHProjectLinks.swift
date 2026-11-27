@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Device-local SSH handles only appear under projects they were attached to.
-/// The account, verified computer and workspace identify each association.
 @MainActor @Observable
 final class ClientSSHProjectLinks {
     private struct Record: Codable, Equatable {
@@ -66,8 +64,6 @@ final class ClientSSHProjectLinks {
         }
     }
 
-    /// Call only after a successful reconciliation. Ended terminals retained
-    /// for their final scrollback are still included in `available`.
     func prune(available: Set<String>) {
         update { record in
             record.projects = record.projects.compactMapValues { ids in
@@ -97,8 +93,6 @@ final class ClientSSHProjectLinks {
 
     private func update(_ change: (inout Record) -> Void) {
         guard isOwnerCurrent(), let namespace else { return }
-        // Merge from disk so another window's associations and other accounts
-        // survive a write from a model that was mounted earlier.
         let all = stored()
         var next = all[namespace] ?? Record()
         change(&next)

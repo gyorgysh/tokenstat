@@ -8,8 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Which picture an onboarding page draws. The titles live next door, so a
-/// page can change its words without this file knowing the pitch.
 enum OnboardingArtKind {
     case intro
     case agents
@@ -52,7 +50,6 @@ struct ClientOnboardingArt: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 200)
-        // The art is decorative; the page's accessible text scales separately.
         .dynamicTypeSize(.medium)
         .accessibilityHidden(true)
     }
@@ -96,8 +93,6 @@ private struct IntroArt: View {
     }
 }
 
-/// An illustrative conversation, with the review step visible rather than a
-/// picture of an agent silently making changes.
 private struct AgentsArt: View {
     var reduceMotion: Bool
     @State private var shown = false

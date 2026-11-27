@@ -154,7 +154,6 @@ fn client() -> Result<reqwest::blocking::Client, UpdateError> {
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
-        // Listing requests can attach a GitHub credential. Never forward it.
         .redirect(reqwest::redirect::Policy::none())
         .build()?)
 }
@@ -287,8 +286,6 @@ pub fn oldest_installed<'a>(installed: &[&'a str]) -> &'a str {
 /// machine that rebuilt hostd from tip still gets offered the update when the
 /// app bundle lags the release, and the reverse is true too.
 pub fn check_latest_against(installed: &[&str]) -> Result<UpdateCheck, UpdateError> {
-    // The public edge snapshot needs no account or GitHub credential. A GitHub
-    // cooldown must not prevent reading it, only the direct fallback below.
     if let Some(release) = cached_site_release() {
         return release_check(oldest_installed(installed).to_owned(), release);
     }
@@ -402,8 +399,6 @@ fn release_check(current: String, release: GhRelease) -> Result<UpdateCheck, Upd
         .assets
         .iter()
         .find(|a| a.name == "SHA256SUMS" || a.name.ends_with("SHA256SUMS"));
-    // Matched by extension rather than an exact name, so the image can be
-    // renamed without an installed build losing the ability to find a new one.
     let image = release.assets.iter().find(|a| a.name.ends_with(".dmg"));
     let win = release
         .assets
@@ -423,9 +418,6 @@ fn release_check(current: String, release: GhRelease) -> Result<UpdateCheck, Upd
         sums_api_url: sums
             .map(|a| a.url.clone())
             .filter(|u: &String| !u.is_empty()),
-        // Matched by extension rather than by an exact file name, so the
-        // naming of the image can change without an old build losing the
-        // ability to point at a new one.
         app_dmg_name: image.map(|a| a.name.clone()),
         app_dmg_url: image.map(|a| a.browser_download_url.clone()),
         app_win_name: win.map(|a| a.name.clone()),
@@ -459,8 +451,6 @@ struct ReleaseManifest {
 }
 
 fn cached_site_release() -> Option<GhRelease> {
-    // No redirects, cookies, credentials or identifying query parameters.
-    // Keep fallback latency bounded when the website is unavailable.
     let client = crate::http::client_builder()
         .timeout(Duration::from_secs(5))
         .connect_timeout(Duration::from_secs(3))
@@ -537,7 +527,6 @@ fn validated_manifest(bytes: &[u8], now: u64) -> Option<GhRelease> {
             return None;
         }
     }
-    // An incomplete publish must not advertise an update with no integrity file.
     if !release
         .assets
         .iter()
@@ -585,8 +574,6 @@ fn read_cooldown(path: &Path, now: u64) -> Option<u64> {
 }
 
 fn save_cooldown(path: &Path, retry_at: u64) {
-    // A reader in another process must never see a truncated deadline.
-    // The in-memory deadline still protects this process if disk is unwritable.
     let _ = atomicwrites::AtomicFile::new(path, atomicwrites::AllowOverwrite)
         .write(|file| file.write_all(retry_at.to_string().as_bytes()));
 }
@@ -645,9 +632,6 @@ pub fn is_windows_app_zip(name: &str, arch: &str) -> bool {
 /// not prove the release is ours, which is what the app's `codesign` and
 /// `spctl` checks are for. Neither check replaces the other.
 pub fn download_app_image() -> Result<PathBuf, UpdateError> {
-    // The caller already compared the installed bundle and host versions.
-    // This process may be current while the app is older, so check.newer
-    // (which only describes this process) must not veto the bundle download.
     let check = check_latest()?;
     let url = check.app_dmg_url.as_deref().ok_or_else(|| {
         UpdateError::Message(format!(
@@ -685,7 +669,7 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
-    cleanup.0 = None; // The native installer owns the successful download.
+    cleanup.0 = None;
     Ok(path)
 }
 
@@ -739,7 +723,7 @@ fn download_windows_zip(check: UpdateCheck) -> Result<PathBuf, UpdateError> {
             "checksum mismatch for {name}: expected {expected}, got {actual}"
         )));
     }
-    cleanup.0 = None; // The native installer owns the successful download.
+    cleanup.0 = None;
     Ok(path)
 }
 
@@ -887,7 +871,6 @@ fn require_cli_path(dest: &Path) -> Result<(), UpdateError> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    // Case-insensitively on Windows, where two spellings are one path.
     let matches = if cfg!(windows) {
         name.eq_ignore_ascii_case(expected)
     } else {
@@ -1034,9 +1017,6 @@ pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
             dest.display()
         )));
     }
-    // A previous cycle may have been unable to delete the binary it replaced
-    // (Windows keeps a running image locked against deletion). Clear it now,
-    // while nothing is holding it, rather than leaving it forever.
     sweep_replaced_binary(dest);
 
     make_runnable(&extracted)?;
@@ -1049,11 +1029,6 @@ pub fn apply_update_to(dest: &Path) -> Result<ApplyReport, UpdateError> {
         let _ = Command::new("xattr").args(["-cr"]).arg(&extracted).status();
     }
 
-    // The checksum proves we downloaded what the release published. It says
-    // nothing about whether that binary runs on this machine: a bad build, a
-    // wrong-architecture asset, or a missing system library all pass a hash and
-    // then fail on first use, by which point the working binary is gone. So run
-    // the candidate and make it prove itself before it replaces anything.
     verify_candidate(&extracted, &check.latest, dest)?;
 
     let host_binary_updated = cfg!(unix) && extracted.with_file_name("tokenstat-hostd").is_file();
@@ -1082,8 +1057,6 @@ fn replace_unix_release(candidate: &Path, dest: &Path, version: &str) -> Result<
     let daemon = candidate.with_file_name("tokenstat-hostd");
     let installed_daemon = dest.with_file_name("tokenstat-hostd");
     if !daemon.is_file() {
-        // Older releases contained only the CLI. They remain installable only
-        // where doing so cannot strand an existing daemon on another version.
         if installed_daemon.exists() {
             return Err(UpdateError::Message("release is missing tokenstat-hostd. The installed CLI and host were kept unchanged".into()));
         }
@@ -1092,9 +1065,6 @@ fn replace_unix_release(candidate: &Path, dest: &Path, version: &str) -> Result<
     make_runnable(&daemon)?;
     #[cfg(target_os = "macos")]
     let _ = Command::new("xattr").arg("-cr").arg(&daemon).status();
-    // Pin the daemon to the installed daemon's team when there is one, not to
-    // the CLI's: `verify_candidate` ends in `verify_signature(candidate,
-    // current)`, and the daemon replaces the daemon.
     let baseline = if installed_daemon.exists() {
         &installed_daemon
     } else {
@@ -1154,9 +1124,6 @@ fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Stri
         }
     }
     let dir = ProbeDir(tempfile_dir()?);
-    // Unique per call: two probes overlapping in one process (the preflight pair,
-    // or a caller doing this concurrently) must not read each other's output or
-    // delete a file still being written.
     static PROBE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = PROBE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let out_path = dir.0.join(format!(
@@ -1201,8 +1168,6 @@ fn spawn_probe(
 ) -> Result<std::process::Child, UpdateError> {
     let mut delay = Duration::from_millis(10);
     for attempt in 0..8 {
-        // Recreate stdio each attempt: a failed spawn may have consumed the
-        // previous File handles.
         let out = fs::File::create(out_path)?;
         let err = out.try_clone()?;
         match Command::new(bin)
@@ -1283,8 +1248,6 @@ fn verify_candidate(
         )));
     }
 
-    // --help exercises argument parsing, which is where a broken build usually
-    // shows itself, and it is the one command guaranteed to need no state.
     let (ok, out) = run_probe(candidate, &["--help"], PROBE_TIMEOUT)?;
     if !ok {
         return Err(UpdateError::Message(format!(
@@ -1366,15 +1329,6 @@ fn verify_signature(candidate: &Path, current: &Path) -> Result<(), UpdateError>
                 .into(),
         ));
     }
-    // Match the Mac app: any real Authority is not enough. The replacement has
-    // to come from the same publisher as the binary it replaces, or a validly
-    // signed build from anybody at all would pass.
-    //
-    // The team is read from the installed binary rather than written down here.
-    // Self-pinning is the stronger check and the tidier one: the rule is "never
-    // replace this with something signed by somebody else", it survives a change
-    // of publisher without an edit, and no identifier belonging to a real
-    // organisation sits in source that anybody can read.
     let Some(team) = developer_id_team(current) else {
         // The current binary is signed but not by a Developer ID, so there is
         // no team to hold the replacement to. `has_signing_authority` already
@@ -1486,9 +1440,6 @@ pub fn maybe_auto_update(auto_apply: bool) -> Result<Option<UpdateOutcome>, Upda
         return Ok(Some(UpdateOutcome::UpToDate(check)));
     }
     if auto_apply && is_safe_replace_path(&std::env::current_exe().unwrap_or_default()) {
-        // The stamp records a successful check, so it is written only after
-        // the apply verifies: stamping first would silence the next run after
-        // a failed update left the old binary in place.
         let report = apply_update()?;
         touch_check_stamp()?;
         return Ok(Some(UpdateOutcome::Applied(report)));
@@ -1584,9 +1535,6 @@ pub fn scheduled_update_to(dest: &Path) -> Result<ScheduledUpdate, UpdateError> 
             path: dest.to_path_buf(),
         });
     }
-    // As above: only a verified apply counts as a check, so a failure keeps
-    // the stamp stale and the next timer tick retries instead of sleeping out
-    // the 24h window on a broken install.
     let report = apply_update_to(dest)?;
     touch_check_stamp()?;
     Ok(ScheduledUpdate::Applied(report))
@@ -1618,17 +1566,11 @@ fn expected_sha256(sums: &str, asset_name: &str) -> Option<String> {
         if line.is_empty() {
             continue;
         }
-        // "hash  filename" or "hash *filename". A malformed line is skipped:
-        // one bad line must not hide the entry further down.
         let mut parts = line.split_whitespace();
         let (Some(hash), Some(raw_name)) = (parts.next(), parts.next()) else {
             continue;
         };
         let name = raw_name.trim_start_matches('*');
-        // Exact filename match only. A suffix match would let
-        // `evil-tokenstat-...tar.gz` claim the checksum of the real asset, so
-        // compare the whole field, or its basename for sums files that record
-        // a relative path (`./name`, `subdir/name`).
         let base = name.rsplit('/').next().unwrap_or(name);
         if name == asset_name || base == asset_name {
             return Some(hash.to_ascii_lowercase());
@@ -1770,9 +1712,6 @@ fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
     for entry in tar.entries()? {
         let mut entry = entry?;
         let kind = entry.header().entry_type();
-        // Links are never followed or recreated: a symlink pointing outside
-        // the sandbox would turn a later entry (or the candidate search) into
-        // a write or exec outside it. Devices and fifos have no place here.
         if kind.is_symlink() || kind.is_hard_link() {
             return Err(UpdateError::Message(
                 "archive contains a link; refusing to extract".into(),
@@ -1799,8 +1738,6 @@ fn extract_tar_gz(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
         if let Some(parent) = out.parent() {
             fs::create_dir_all(parent)?;
         }
-        // Default permissions, never the archive's mode: nothing extracted
-        // here should arrive executable or setuid on its own say-so.
         let mut out_file = fs::File::create(&out)?;
         let remaining = EXTRACT_MAX_BYTES.saturating_sub(total);
         if let Err(e) = copy_capped(&mut entry, &mut out_file, remaining, &mut total, "archive") {
@@ -1862,9 +1799,6 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<(), UpdateError> {
             UpdateError::Message("zip entry escapes its directory; refusing to extract".into())
         })?;
         reject_unsafe_archive_path(&name)?;
-        // A symlink stored as a regular file would pass the traversal check
-        // and then be skipped by the candidate search; refuse it up front so a
-        // hostile archive cannot plant one for a later step to follow.
         if entry
             .unix_mode()
             .is_some_and(|mode| mode & 0o170_000 == 0o120_000)
@@ -1922,8 +1856,6 @@ fn walkdir_shallow(dir: &Path) -> Result<Vec<PathBuf>, UpdateError> {
         for e in fs::read_dir(dir)? {
             let e = e?;
             let file_type = e.file_type()?;
-            // A symlink in the archive could point at a binary outside the
-            // private extraction directory, so it is never a candidate.
             if file_type.is_symlink() {
                 continue;
             }
@@ -1948,7 +1880,6 @@ fn is_safe_replace_path(path: &Path) -> bool {
     if s.starts_with("/usr/") || s.starts_with("/bin/") {
         return false;
     }
-    // Homebrew prefixes (Apple Silicon, Intel, and Linuxbrew).
     if s.starts_with("/opt/homebrew/")
         || s.starts_with("/usr/local/Cellar/")
         || s.starts_with("/usr/local/bin/")
@@ -1958,7 +1889,6 @@ fn is_safe_replace_path(path: &Path) -> bool {
     {
         return false;
     }
-    // Must be writable (or parent writable for replace).
     path.parent().map(p_writable).unwrap_or(false)
 }
 
@@ -2020,9 +1950,6 @@ fn replace_executable(src: &Path, dest: &Path) -> Result<(), UpdateError> {
         )));
     }
 
-    // Verified from its final path, because that is where it will actually be
-    // run from: a wrong permission bit, a signature broken by the move, or a
-    // path-sensitive loader problem only shows up here.
     match run_probe(dest, &["--version"], PROBE_TIMEOUT) {
         Ok((true, _)) => {
             let _ = fs::remove_file(&old);
@@ -2119,7 +2046,6 @@ mod tests {
             ("/release/assets", serde_json::json!([])),
         ] {
             let mut value = valid.clone();
-            // Add optional booleans before addressing them by JSON pointer.
             value["release"]["draft"] = serde_json::json!(false);
             value["release"]["prerelease"] = serde_json::json!(false);
             *value.pointer_mut(pointer).unwrap() = bad;
@@ -2205,9 +2131,6 @@ mod tests {
         use super::require_cli_path;
         use std::path::Path;
 
-        // The binary's own name is platform shaped, so the paths under test
-        // have to be as well: a Unix path is the wrong answer on Windows and
-        // the test would assert a refusal it never meant.
         let (ok, wrong);
         if cfg!(windows) {
             ok = vec![
@@ -2311,10 +2234,8 @@ mod tests {
     #[test]
     fn sums_matching_is_exact_not_suffix() {
         let asset = "tokenstat-0.1.0-aarch64-apple-darwin.tar.gz";
-        // A longer name ending in the asset's must not claim its checksum.
         let evil = format!("abc123  evil-{asset}\n");
         assert_eq!(expected_sha256(&evil, asset), None);
-        // Relative paths recorded by sha256sum still resolve to the file.
         for line in [
             format!("abc123  ./{asset}\n"),
             format!("abc123 *{asset}\n"),
@@ -2367,7 +2288,6 @@ mod tests {
 
     #[cfg(unix)]
     fn write_tar_gz(path: &Path, entries: &[TarTestEntry<'_>]) {
-        // (name, file bytes or None for symlink, link target for symlinks)
         let file = fs::File::create(path).unwrap();
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
@@ -2406,8 +2326,6 @@ mod tests {
 
     #[cfg(unix)]
     fn write_raw_tar_gz(path: &Path, name: &[u8], data: &[u8]) {
-        // One hand-built tar entry: the `tar` builder refuses `..` and
-        // absolute paths itself, so a hostile archive has to be raw bytes.
         use std::io::Write;
         let mut block = [0u8; 512];
         block[..name.len()].copy_from_slice(name);
@@ -2449,7 +2367,6 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&dir);
         }
-        // A symlink pointing outside the sandbox is refused, not followed.
         let dir = scratch("tar-link");
         let archive = dir.join("rel.tar.gz");
         write_tar_gz(&archive, &[("tokenstat", None, Some("/etc/passwd"))]);
@@ -2483,9 +2400,6 @@ mod tests {
             );
             let _ = fs::remove_dir_all(&dir);
         }
-        // A symlink entry is refused, not written. The writer masks
-        // permissions to 0o777, so the link bit is patched into the central
-        // directory the way a Unix zip tool would have written it.
         let dir = scratch("zip-link");
         let archive = dir.join("rel.zip");
         let file = fs::File::create(&archive).unwrap();
@@ -2623,7 +2537,6 @@ mod tests {
             .windows(4)
             .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
             .unwrap();
-        // Zstandard is deliberately not enabled in the updater's zip build.
         bytes[8..10].copy_from_slice(&93u16.to_le_bytes());
         bytes[central + 10..central + 12].copy_from_slice(&93u16.to_le_bytes());
         fs::write(&archive, &bytes).unwrap();
@@ -2777,8 +2690,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_candidate_reporting_the_wrong_version_is_refused() {
-        // The case this whole gate exists for: the hash matched, so the bytes are
-        // the release's, but the build inside is not the version it claims.
         let dir = scratch("mismatch");
         let bin = fake_binary(&dir, "tokenstat", "echo tokenstat 0.0.1");
         let current = fake_binary(&dir, "current", "echo tokenstat 0.0.1");
@@ -2831,11 +2742,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_broken_swap_restores_the_previous_binary() {
-        // The candidate passes preflight but cannot run from its final path.
-        // What matters is that `dest` still works afterwards.
         let dir = scratch("rollback");
         let dest = fake_binary(&dir, "tokenstat", "echo tokenstat 0.1.0");
-        // A script whose interpreter line is nonsense: runs nowhere.
         let candidate = dir.join("candidate");
         fs::write(&candidate, "#!/nonexistent/interpreter\ntrue\n").unwrap();
 

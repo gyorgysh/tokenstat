@@ -8,7 +8,6 @@
 import SwiftUI
 import UIKit
 
-/// One session, presented as a phone list or an iPad workbench.
 struct ClientWorkflowWorkspace: View {
     let peer: String
     let workspaceID: String

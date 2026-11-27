@@ -5,8 +5,6 @@ import CoreSpotlight
 import WidgetKit
 import AppIntents
 
-/// The app is the sole snapshot writer. A lease prevents an asynchronous load
-/// from publishing across sign-out, including signing back into the same account.
 @MainActor
 enum EcosystemPublisher {
     private static let store = EcosystemSnapshotStore()
@@ -29,7 +27,6 @@ enum EcosystemPublisher {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         guard let data = try? encoder.encode(scope) else { return nil }
-        // Navigation and entity identifiers must not disclose account identity.
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -55,7 +52,6 @@ enum EcosystemPublisher {
         if cachedLimitsTask == nil {
             cachedLimitsTask = Task {
                 while !Task.isCancelled {
-                    // Read the daemon's dated cache, without polling vendors again.
                     let requested = PlanLimitsStore.shared.settingsRead()
                     if let lease, let settings = try? await Bridge.limitsSync(), isCurrent(lease) {
                         PlanLimitsStore.shared.acceptCachedSettings(settings, requested: requested)
@@ -76,7 +72,7 @@ enum EcosystemPublisher {
             do {
                 let grid = try await Bridge.activityCalendar(scope: activityScope)
                 publish(calendar: grid, lease: lease)
-            } catch { /* Keep the last successful snapshot while offline. */ }
+            } catch { }
             await refreshLimits(lease: lease)
             #if os(macOS)
             if let folders = try? await Bridge.workspaces() {
@@ -114,8 +110,6 @@ enum EcosystemPublisher {
 
     static func isAuthorizedPeer(_ peer: String) -> Bool { verifiedOwner != nil && allowedPeers.contains(peer) }
 
-    /// Runs in the containing app, even when invoked from a widget. No peer
-    /// dial, agent execution or foreground navigation is needed for usage.
     static func refresh() async throws {
         if let refreshTask { return try await refreshTask.value }
         let task = Task { try await refreshWithFeedback(.usage) { try await performRefresh() } }
@@ -145,8 +139,6 @@ enum EcosystemPublisher {
             throw error
         }
         func finishFeedback(success: Bool) {
-            // Clearing/changing accounts removes the operation ID. Initial
-            // verification of the same cached account can change generation.
             guard let id else { return }
             var current = store.read()
             guard current.owner == startingOwner, current.finishRefresh(kind, id: id, success: success) else { return }
@@ -258,8 +250,6 @@ enum EcosystemPublisher {
         guard isCurrent(lease), let lease else { return }
         var snapshot = store.read()
         guard snapshot.owner == lease.owner else { return }
-        // The source is explicit so an empty successful response removes its
-        // previous projects without removing another machine's cached list.
         snapshot.replaceProjects(projects.filter { authorized($0) && source.contains($0.id) }, from: source)
         save(snapshot)
         updateProjectDiscovery(snapshot)
@@ -273,7 +263,6 @@ enum EcosystemPublisher {
             guard snapshot.owner == nil || isCurrent(requestedLease) else { return }
             if #available(iOS 18.0, macOS 15.0, *) {
                 let index = CSSearchableIndex.default()
-                // Serialize deletion/indexing so a late index cannot outlive sign-out.
                 try? await index.deleteAppEntities(ofType: TokenstatProjectEntity.self)
                 if let owner = snapshot.owner, isCurrent(requestedLease) {
                     try? await index.indexAppEntities(snapshot.projects.map { TokenstatProjectEntity(project: $0, owner: owner) })

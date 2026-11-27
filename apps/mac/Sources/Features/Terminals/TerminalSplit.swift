@@ -8,10 +8,6 @@
 import AppKit
 import SwiftUI
 
-/// How the workspace terminal column is arranged.
-///
-/// Stored per folder. Session pairing is not: the focused tab and the other
-/// half are live, and a persisted client id would be stale after a relaunch.
 enum TerminalSplitLayout: String, Sendable, Equatable {
     case single
     case side
@@ -28,7 +24,6 @@ enum TerminalSplitLayout: String, Sendable, Equatable {
     }
 }
 
-/// Shared by project, chat and server split menus.
 struct TerminalSwapButton: View {
     let layout: TerminalSplitLayout
     let onSwap: () -> Void
@@ -155,7 +150,6 @@ struct TerminalSplitHandle: View {
     }
 }
 
-/// Empty half: a session has not been placed here yet.
 struct TerminalSplitPlaceholder: View {
     var body: some View {
         VStack(spacing: Theme.Space.s) {

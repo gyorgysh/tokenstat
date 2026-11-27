@@ -7,21 +7,15 @@ import UniformTypeIdentifiers
 enum SidebarAppearancePreferences {
     static let enabledKey = "appearance.sidebarGlass"
     static let washKey = "appearance.sidebarWash"
-    /// Extra light drawn on the glass: a sheen along the top, a glare
-    /// streak and a lit edge.
     static let highlightsKey = "appearance.sidebarHighlights"
     static let defaultWash = 0.95
 
-    /// The least wash OLED allows. The glass keeps its edge and its light,
-    /// but the rows sit on something close enough to black that the theme
-    /// still reads as black rather than as a grey frost.
     static let oledMinimumWash = 0.8
 
     static func normalized(_ value: Double) -> Double {
         value.isFinite ? min(1, max(0, value)) : defaultWash
     }
 
-    /// The wash actually drawn, after the theme has had its say.
     static func effective(_ value: Double) -> Double {
         let wash = normalized(value)
         return AppAppearance.shared.mode == .oled ? max(wash, oledMinimumWash) : wash

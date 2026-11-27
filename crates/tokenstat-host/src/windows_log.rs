@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Persist daemon diagnostics even when launched without a console.
-
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
@@ -10,7 +8,7 @@ fn open_log(directory: &Path) -> std::io::Result<File> {
     if std::fs::metadata(&path).is_ok_and(|meta| meta.len() >= 5 * 1024 * 1024) {
         let previous = directory.join("hostd.previous.log");
         let _ = std::fs::remove_file(&previous);
-        // An older process may still hold the file. Append if rotation fails.
+
         let _ = std::fs::rename(&path, previous);
     }
     OpenOptions::new().create(true).append(true).open(path)
@@ -33,8 +31,7 @@ pub fn initialize() {
         return;
     };
     let file = LOG.get_or_init(|| file);
-    // Retain the handle for the lifetime of the process. Rust's stderr uses
-    // the standard handle, so startup failures and panic reports land here.
+
     if unsafe { SetStdHandle(-12_i32 as u32, file.as_raw_handle()) } != 0 {
         eprintln!(
             "\n{} hostd starting pid={} version={}",
@@ -60,8 +57,7 @@ mod tests {
             std::fs::read_to_string(logs.join("hostd.log")).unwrap(),
             "first start\nsecond start\n"
         );
-        // Windows append-only handles cannot resize a file. Use a separate
-        // writable fixture handle; the daemon needs only append access.
+
         OpenOptions::new()
             .write(true)
             .open(logs.join("hostd.log"))

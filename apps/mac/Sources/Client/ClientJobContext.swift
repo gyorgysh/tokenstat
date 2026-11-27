@@ -2,14 +2,11 @@
 
 import Foundation
 
-/// A host-local folder ID is only unique on its owning computer.
 struct ClientJobWorkspaceID: Hashable {
     let peer: String
     let workspace: String
 }
 
-/// Unsent starting prompts belong to a graph, not to the currently visible
-/// text field. Changing selection must not carry a prompt to another graph.
 struct ClientWorkflowInputs {
     private var values: [String: String] = [:]
 

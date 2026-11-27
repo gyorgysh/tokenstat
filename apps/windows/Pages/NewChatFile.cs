@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// Private local bytes, independent of the source screenshot or file. Upload
-/// happens only after explicit Send creates and owns the new conversation.
 internal sealed record NewChatFile(string Path, string Name, long Size, DateTime ModifiedUtc)
 {
     internal const int MaximumCount = 20;
@@ -75,8 +73,6 @@ internal sealed record NewChatFile(string Path, string Name, long Size, DateTime
 
     internal void Discard()
     {
-        // This type must never delete the user's source, even if a malformed
-        // in-memory record is passed to a remove or cleanup action.
         var directory = System.IO.Path.GetDirectoryName(Path);
         if (directory is null || System.IO.Path.GetDirectoryName(directory) != StagingRoot) return;
         try { File.Delete(Path); Directory.Delete(directory); } catch (IOException) { } catch (UnauthorizedAccessException) { }

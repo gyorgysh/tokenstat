@@ -109,7 +109,6 @@ enum SeatStep {
         return L10n.text("common.chat.approval.tool_scope", "\(name)")
     }
 
-    /// Same rule as the host: a shell tool is never remembered by its name.
     static func isShell(verb: String?) -> Bool {
         let name = trimVerb(verb).lowercased()
         if name.contains("bash") || name.contains("shell")
@@ -146,8 +145,6 @@ enum SeatStep {
         return String(text[..<range.lowerBound])
     }
 
-    /// Space and tab only. A newline is already gone, and other whitespace
-    /// stays so a name is not quietly rewritten.
     private static func trimEdges(_ text: String) -> String {
         var start = text.startIndex
         var end = text.endIndex

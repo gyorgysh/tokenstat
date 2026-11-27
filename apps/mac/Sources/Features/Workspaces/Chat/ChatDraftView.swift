@@ -206,8 +206,6 @@ struct ChatDraftView: NSViewRepresentable {
             guard !applyingUpdate,
                   let textView = notification.object as? ChatDraftTextView
             else { return }
-            // Observation does not compare before it notifies, and a caret
-            // that landed where it already was is most of this traffic.
             let range = textView.selectedRange()
             guard selection.wrappedValue != range else { return }
             selection.wrappedValue = range
@@ -246,10 +244,6 @@ final class ChatDraftScrollView: NSScrollView {
         let width = contentSize.width
         if abs(textView.frame.width - width) > 0.5 {
             textView.setFrameSize(NSSize(width: width, height: max(textView.frame.height, contentSize.height)))
-            // A different width rewraps the draft, which is the one other way
-            // the height changes. Nothing else asks again, and the guard
-            // above means this settles on the next pass rather than driving
-            // one of its own.
             textView.invalidateIntrinsicContentSize()
             invalidateIntrinsicContentSize()
         }
@@ -281,9 +275,6 @@ final class ChatDraftTextView: NSTextView {
     private var observesDragSession = false
     private(set) var handlingComposition = false
 
-    /// Whether this draft view gives up the arrow keys to chat switching:
-    /// only when there is no text to move through and no composition to
-    /// steer. Anything typed, or an IME session in progress, keeps them.
     static func yieldsArrowKeys(_ responder: NSResponder?) -> Bool {
         guard let view = responder as? ChatDraftTextView,
               !view.hasMarkedText()
@@ -379,9 +370,6 @@ final class ChatDraftTextView: NSTextView {
         return super.performDragOperation(sender)
     }
 
-    /// Snapshot the drag's own representations before its pasteboard goes
-    /// away. File URLs stay metadata; the inbox prepares their files later.
-    /// Keep pixel alternatives alongside a URL for transient screenshots.
     static func attachmentProviders(from pasteboard: NSPasteboard) -> [NSItemProvider] {
         (pasteboard.pasteboardItems ?? []).compactMap { item in
             let provider = NSItemProvider()
@@ -447,8 +435,6 @@ final class ChatDraftTextView: NSTextView {
             return
         }
         if commandKey(event.keyCode) { return }
-        // Return (36) and keypad Enter (76). Command+Return also sends.
-        // Escape (53) stops a running turn.
         if event.keyCode == 36 || event.keyCode == 76 {
             if event.modifierFlags.contains(.shift) {
                 insertNewlineIgnoringFieldEditor(nil)

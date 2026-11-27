@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 
 #[test]
@@ -78,7 +77,7 @@ fn an_unresolved_run_keeps_private_operations_fenced_after_publication_metadata_
         serde_json::to_vec(&index).unwrap(),
     )
     .unwrap();
-    // The Store still has its old in-memory copy, without a sharing marker.
+
     assert_eq!(
         store.require_private_chat(&chat.id).unwrap_err().code,
         "team_run_recovery_required"
@@ -329,8 +328,7 @@ fn shared_reads_require_the_exact_marker_and_reject_late_private_writes() {
             .shared_history(&chat.workspace_id, &chat.id, &share, &"ab".repeat(32))
             .is_err()
     );
-    // Model a legacy binary that has no Team mutation guard. The reader must
-    // refuse the whole response, not label this new private note historical.
+
     store
         .append(
             &chat.id,

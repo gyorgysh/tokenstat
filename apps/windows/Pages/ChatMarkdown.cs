@@ -20,15 +20,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// An agent's reply as formatted text, like the Mac chat: headings, lists,
-/// quotes, tables, links and code, in native selectable text. Agents write
-/// markdown, so plain text left `##` and `**` on screen as punctuation.
-///
-/// HTML is not rendered and images are not fetched: a reply is read, it
-/// does not make requests. Code blocks are drawn by the caller so they keep
-/// the chat's own copy menu and horizontal scrolling.
-/// </summary>
 internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? openWebLink, int fadeFrom)
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
@@ -137,8 +128,6 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
                     panel.Children.Add(new Border { Background = Theme.BorderBrush, Height = 1, Margin = new Thickness(0, 4, 0, 4) });
                     break;
                 case LinkReferenceDefinitionGroup:
-                    // `[1]: https://…` lines are targets for links above,
-                    // not text. Rendering the group left an empty gap.
                     break;
                 case LeafBlock leaf when leaf.Inline is not null:
                     panel.Children.Add(ParagraphText(leaf));
@@ -310,8 +299,6 @@ internal sealed class ChatMarkdown(bool allowDesktopActions, Func<Uri, Task>? op
         }
         var split = Math.Max(0, fadeFrom - literal.Span.Start);
         if (split > 0 && literal.Span.Length != value.Length) split = value.Length;
-        // A token can extend a word. Keep the complete word together so
-        // splitting a run never divides a grapheme or changes its shaping.
         while (split > 0 && split < value.Length && !char.IsWhiteSpace(value[split - 1])) split++;
         if (split >= value.Length)
         {

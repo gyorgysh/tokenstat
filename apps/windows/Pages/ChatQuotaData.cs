@@ -20,11 +20,6 @@ internal static class ChatQuotaData
         return null;
     }
 
-    /// <summary>
-    /// The 5h and 7d figures an agent row shows, as the Mac and Android pickers
-    /// do. Codex reports an account week beside the model's own, so its general
-    /// windows come first.
-    /// </summary>
     internal static IReadOnlyList<(string Tag, double Percent)> Headline(JsonObject provider)
     {
         var windows = (provider["windows"] as JsonArray ?? new()).OfType<JsonObject>().ToList();

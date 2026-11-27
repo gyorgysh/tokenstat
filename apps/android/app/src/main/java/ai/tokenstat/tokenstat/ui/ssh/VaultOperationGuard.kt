@@ -5,7 +5,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-/** Retire each awaited vault step before it can publish or start a later write. */
 internal class VaultOperationGuard(private val isCurrentOwner: () -> Boolean) {
     suspend fun check() {
         currentCoroutineContext().ensureActive()

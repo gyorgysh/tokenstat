@@ -11,24 +11,10 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// A flat tab strip, flush with the top of the pane, reading as part of the
-/// chrome. Mirrors the Mac TabStrip, which is the source of truth: 28 points
-/// high, equal shares, the selected tab in accent on an accent-soft fill with
-/// a 2.5 point capsule along its top edge rather than an underline, so the
-/// strip reads as tabs attached to the pane below instead of as a toolbar.
-/// </summary>
 internal static class TabStrip
 {
-    /// <summary>The strip height. Fixed, like the Mac: the marker belongs to its tab.</summary>
     public const double Height = 28;
 
-    /// <summary>
-    /// Build the strip. A null glyph draws the label alone, for a strip narrow
-    /// enough that icons would push the labels into truncation. Tapping the
-    /// selected tab does nothing. When showsChrome is false only the tab row
-    /// is drawn and the parent owns the fill and the rule.
-    /// </summary>
     public static Grid View(
         IList<(string Value, string Label, ActionIcon? Glyph)> tabs,
         string selected,
@@ -52,10 +38,6 @@ internal static class TabStrip
                 Width = new GridLength(1, GridUnitType.Star),
             });
         }
-        // The strip owns its selection. A tap repaints first and then runs
-        // the handler, so the highlight and the content cannot disagree while
-        // a load is in flight, and tapping the lit tab stays a no-op. Callers
-        // that rebuild the strip in their handler get the same end state.
         string current = selected;
         var paints = new List<(string Value, Action<bool> Paint)>();
         int column = 0;
@@ -147,7 +129,6 @@ internal static class TabStrip
             BorderThickness = new Thickness(0),
             Padding = new Thickness(Theme.SpaceXs, 0, Theme.SpaceXs, 0),
             CornerRadius = new CornerRadius(0),
-            // The native minimum is 32 high, which would push the strip open.
             MinWidth = 0,
             MinHeight = 0,
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -170,9 +151,6 @@ internal static class TabStrip
             marker.Background = now
                 ? Theme.AccentBrush
                 : Theme.ClearBrush;
-            // The native hover and pressed fills are grey, which on a dark strip
-            // is the same colour as everything around it. Pin them to the resting
-            // fills so the selected tab stays the only accent on the row.
             Brush resting = now
                 ? Theme.AccentSoftBrush
                 : Theme.ClearBrush;

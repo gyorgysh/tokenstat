@@ -418,9 +418,6 @@ private struct ChatRoutingSheet: View {
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    /// A saved pin that no longer equals any route, such as one whose effort
-    /// was edited since. It still decides where the chat returns, so the
-    /// picker shows it rather than claiming the current preference is kept.
     private var pinnedOutsideRoutes: ChatRouteDestination? {
         guard let preferred = policy.preferred, !policy.routes.contains(preferred) else { return nil }
         return preferred
@@ -550,7 +547,6 @@ private struct ChatRoutingSheet: View {
     }
 }
 
-/// The full header is the expansion target, including its empty space.
 private struct ChatRoutingDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {

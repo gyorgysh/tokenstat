@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>Bound text layout without losing any UTF-16 or splitting a surrogate pair.</summary>
 internal static class DiffTextChunks
 {
     public const int MaxUnits = 256;

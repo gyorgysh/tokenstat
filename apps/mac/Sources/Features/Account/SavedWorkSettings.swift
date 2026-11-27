@@ -213,9 +213,6 @@ struct SavedWorkSettings: View {
             : L10n.text("apple.savedworksettings.0_saved_items_1_2_on_this_device.7c9fd44c", "\(records)", "\(size)", "\(kept)")
     }
 
-    /// Re-read totals when the management sheet goes away. A named function
-    /// rather than an inline closure: `onDismiss` takes no view, and an inline
-    /// `Task` would read as the sheet's content to the surface gate.
     private func refreshAfterDismiss() {
         Task { await refresh() }
     }

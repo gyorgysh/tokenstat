@@ -150,7 +150,6 @@ private sealed interface ManagementEdit {
                     if (!repository.teamShared()) Text(L10n.text("common.teams.repository_not_shared"), color = colors.textSecondary)
                     if (model.manager || repository.teamString("role") == "maintainer") TsSecondaryButton(L10n.text("common.teams.repository_access"), enabled = !model.busy,
                         icon = ActionIcon.Security.vector, onClick = { accessRepository = repository; accessMembers = TeamManagementPage(); scope.launch { loadAccess(repository, false) } })
-                    // The server refuses while any computer still shares it, so a live checkout is never cut off from here.
                     if (calls.canArchiveRepositories && model.active && model.manager && !repository.teamShared()) TsDangerButton(L10n.text("common.teams.remove_project"), enabled = !model.busy,
                         icon = ActionIcon.Delete.vector, onClick = { edit = ManagementEdit.RemoveProject(repository) })
                 }

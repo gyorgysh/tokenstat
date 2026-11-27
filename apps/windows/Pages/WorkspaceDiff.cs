@@ -12,13 +12,6 @@ using Tokenstat.Design;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// File diffs in the D1 palette: added lines in the muted added green,
-/// removed lines in the muted removed red, context in the primary text,
-/// washes behind the changed rows, hunk headers tertiary on panel.
-/// One horizontal scroll per file, lines never wrap: a wrapped line loses
-/// its place against the gutter.
-/// </summary>
 internal static class WorkspaceDiff
 {
     internal static OperationEpoch.Operation BeginReviewRequest(UIElement owner)
@@ -121,7 +114,6 @@ internal static class WorkspaceDiff
         return stack;
     }
 
-    /// <summary>A bounded diff in the Changes inspector, with the full review one press away.</summary>
     public static UIElement PreviewFile(UIElement owner, string path, JsonNode? diff)
     {
         var file = Parse(diff);
@@ -132,10 +124,6 @@ internal static class WorkspaceDiff
         return stack;
     }
 
-    /// <summary>
-    /// One commit as a workbench document: header then every file's diff,
-    /// like the Mac CommitView. Uses the diffs already on workspace.show.
-    /// </summary>
     public static Task ShowCommitAsync(UIElement owner, JsonNode detail)
     {
         var diffs = detail["diffs"] as JsonArray;
@@ -168,12 +156,6 @@ internal static class WorkspaceDiff
             CommitHeader(detail));
     }
 
-    /// <summary>
-    /// Every changed file's diff on one screen, for the final read before a
-    /// commit. Bounded: at most twenty files, sixty lines each, with a full
-    /// diff per file for the rest. Selection and draft live above this
-    /// screen and are untouched by opening it.
-    /// </summary>
     public static async Task ShowReviewAllAsync(
         UIElement owner,
         IList<(string Path, string Kind, long? Added, long? Removed)> files,

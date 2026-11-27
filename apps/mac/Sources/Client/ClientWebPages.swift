@@ -41,20 +41,14 @@ enum ClientWebPages {
         return parts.url ?? withMobileFlag(url(host))
     }
 
-    /// A URL built from account data, or the site itself when the pieces do
-    /// not form one. `host` and `handle` are not constants, and a phone must
-    /// not trap because one of them arrived odd.
     private static func url(_ string: String) -> URL {
         URL(string: string) ?? fallback
     }
 
-    /// The site root, and a non-failing last resort beside it. A file URL is
-    /// a URL, and the browser sheet refuses anything that is not http/https.
     private static var fallback: URL {
         URL(string: host) ?? URL(fileURLWithPath: "/")
     }
 
-    /// Idempotent: a URL that already carries `mobile=1` is left alone.
     static func withMobileFlag(_ url: URL) -> URL {
         guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url

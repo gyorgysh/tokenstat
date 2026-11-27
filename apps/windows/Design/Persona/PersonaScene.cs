@@ -8,11 +8,6 @@ using ShapesPath = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// A persona owns its visual slots for its lifetime. Repainting updates those
-/// slots instead of detaching and allocating every Path on every timer tick.
-/// Surplus slots collapse when a mood uses fewer marks, and are reused later.
-/// </summary>
 internal sealed class PersonaScene(Canvas canvas)
 {
     private readonly List<ShapesPath> _paths = new();
@@ -52,9 +47,6 @@ internal sealed class PersonaScene(Canvas canvas)
         return path;
     }
 
-    // Face masks (eye glints and tongue) move with their paint. The body
-    // silhouette stays fixed; transforming only Path.Data leaves those small
-    // masks at their old position after a turn.
     public void TransformFace(int index, Transform transform)
     {
         _paths[index].Data!.Transform = CopyTransform(transform);
@@ -125,8 +117,6 @@ internal sealed class PersonaScene(Canvas canvas)
         return copy;
     }
 
-    // A TransformGroup is also a native object with one owner. Sampling its
-    // affine basis preserves yaw, roll and translation without sharing it.
     public static MatrixTransform CopyTransform(Transform source)
     {
         var zero = source.TransformPoint(new Point(0, 0));
@@ -139,9 +129,6 @@ internal sealed class PersonaScene(Canvas canvas)
         };
     }
 
-    // A slot can hold an eye in one frame and a prop in the next. ClearValue
-    // drops the fill, stroke, and clip. The same call leaves RenderTransform
-    // set, so the turn is written back to null on UIElement.
     private static void ClearLocalValues(ShapesPath path)
     {
         path.ClearValue(ShapesPath.DataProperty);

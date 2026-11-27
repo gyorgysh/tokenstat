@@ -5,7 +5,6 @@ import ai.tokenstat.tokenstat.core.CoreFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
-/** A fresh process can dial before its relay session finishes starting. */
 internal suspend fun <T> retryTunnelStartup(
     wakeTunnel: suspend () -> Unit,
     pause: suspend (Long) -> Unit = { delay(it) },
@@ -26,7 +25,6 @@ internal suspend fun <T> retryTunnelStartup(
     }
 }
 
-/** Retry only failures known to happen before a request reaches the host. */
 internal fun isTunnelStarting(error: Exception): Boolean {
     if (error !is CoreFailure) return false
     val message = error.message.lowercase()

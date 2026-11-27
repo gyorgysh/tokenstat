@@ -2,7 +2,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The live terminal stays mounted while the workbench underneath rearranges.
 struct ClientTerminalPresentation: ViewModifier {
     let model: ClientWorkspacesModel
     @Environment(AccountModel.self) private var account

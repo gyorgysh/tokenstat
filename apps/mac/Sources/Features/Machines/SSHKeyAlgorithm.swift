@@ -25,8 +25,6 @@ enum SSHKeyAlgorithm: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Native generation avoids requiring a newer host protocol. The existing
-    /// inspect method converts this PEM into the host's supported SSH format.
     static func makeP256PEM() -> String {
         P256.Signing.PrivateKey().pemRepresentation
     }

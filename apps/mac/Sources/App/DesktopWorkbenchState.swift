@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-/// Tool selection belongs to the workspace, independently of chat navigation.
 struct DesktopWorkbenchState: Equatable {
     enum Tool: String, CaseIterable, Identifiable {
         case changes, browser, terminal, inspector
@@ -28,12 +27,9 @@ struct DesktopWorkbenchState: Equatable {
         if tabs.isEmpty { isPresented = false }
     }
 
-    /// Hiding the workbench preserves its tabs and their native surfaces.
     mutating func hide() { isPresented = false }
 }
 
-/// Visibility and the selected tool follow the window's chat navigation.
-/// Each project keeps its own open tabs and review/browser/terminal contents.
 struct DesktopWorkbenchSession {
     private var workspaces: [String: DesktopWorkbenchState] = [:]
     private(set) var isPresented = false
@@ -46,8 +42,6 @@ struct DesktopWorkbenchSession {
         return state
     }
 
-    /// Persist the tool inherited on navigation before a hide or another
-    /// selection can remove it from the retained pane hierarchy.
     mutating func activate(in workspace: String) {
         let state = state(in: workspace)
         if workspaces[workspace] != state { workspaces[workspace] = state }
@@ -73,7 +67,6 @@ struct DesktopWorkbenchSession {
     mutating func retain(workspaces ids: Set<String>) { workspaces = workspaces.filter { ids.contains($0.key) } }
 }
 
-/// Chat needs reading room beside review, including on laptop-sized windows.
 enum DesktopWorkbenchLayout {
     static let detailMinimum = 480.0
     static let toolMinimum = 320.0

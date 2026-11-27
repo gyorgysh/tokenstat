@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Count-bound small updates and byte-bound large provider messages.
 use serde_json::Value;
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
 use std::time::Duration;
@@ -25,8 +24,6 @@ struct Permit {
 
 impl Budget {
     fn reserve(self: &Arc<Self>, bytes: usize) -> Option<Permit> {
-        // A frame larger than the budget can proceed on its own. The protocol
-        // reader still enforces the separate per-frame limit.
         let bytes = bytes.min(self.limit);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         while !state.closed && state.used + bytes > self.limit {
@@ -85,9 +82,6 @@ pub(super) struct Messages {
 }
 
 pub(super) fn channel() -> (Sender, Messages) {
-    // Up to 32 small messages need no budget lock and occupy at most 128 KiB
-    // of input bytes. Larger messages share 8 MiB; a single oversized frame
-    // may use the whole budget. This counts encoded input, not JSON heap cost.
     channel_with_limits(32, 4 * 1024, 8 * 1024 * 1024)
 }
 

@@ -469,7 +469,6 @@ pub fn commit(dir: &Path, id: &str, reviewed: &Review, message: &str) -> Result<
     let index = index_path(dir)?;
     let _writer = crate::writer::Lease::acquire(dir).map_err(|error| error.to_string())?;
     let _lease = lease::Lease::acquire(&index.with_file_name("tokenstat-git-operation.lock"))?;
-    // Recheck after taking the lock, including another request with this ID.
     if let Some(previous) = receipt(dir, id)? {
         if previous.request_digest != request_digest {
             return Err("This operation identifier belongs to another commit.".into());
@@ -576,8 +575,6 @@ fn perform(
         .map_err(|e| e.to_string())?
         .trim()
         .to_owned();
-    // Prepare the post-commit real index before changing a ref. Reset only the
-    // chosen paths to the committed tree, retaining unrelated staged entries.
     let merged = temp.join("merged");
     let original = index_bytes(index)?;
     if original.is_empty() {
@@ -601,8 +598,6 @@ fn perform(
     result.index_lock_identity = Some(lease::identity(&lock.file)?);
     result.message = "The commit is prepared. Confirm its recorded outcome before retrying.".into();
     save(receipt_path, result)?;
-    // After this point a crash must leave the index lock for recovery. A later
-    // request cannot race ahead with an index that predates the new commit.
     lock.keep = true;
     let zero = "0".repeat(commit.len());
     let updated = advance_head(
@@ -617,7 +612,6 @@ fn perform(
     result.state = "succeeded".into();
     result.message = "Committed the selected files.".into();
     save(receipt_path, result)?;
-    // post-commit is informational. Its failure cannot undo a created commit.
     let _ = output(command(
         dir,
         &["hook", "run", "--ignore-missing", "post-commit"],

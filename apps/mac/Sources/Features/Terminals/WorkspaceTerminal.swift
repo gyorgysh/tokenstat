@@ -3,8 +3,6 @@
 #if os(macOS)
 import SwiftTerm
 
-/// A tab references the existing session and emulator; it does not create a
-/// second connection or read loop when a server joins a project split.
 @MainActor
 final class WorkspaceTerminal: TerminalPresentable {
     nonisolated let id: String

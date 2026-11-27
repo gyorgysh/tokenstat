@@ -8,9 +8,6 @@ import Observation
     private(set) var busy = false
     private(set) var stopping = false
     private(set) var error: String?
-    /// The sharing computer is holding this request until its owner answers.
-    /// The same request is sent again until it starts, is declined, or the
-    /// owner's window to answer has passed.
     private(set) var awaitingApproval = false
     private var approvalSince: Date?
     private var statusUnconfirmed = false
@@ -53,15 +50,12 @@ import Observation
                 let record = try TeamAskRecord(input: ["text": .string(text.trimmingCharacters(in: .whitespacesAndNewlines)),
                     "review": review["review"] ?? .null, "clientMessageId": .string(UUID().uuidString.lowercased()),
                     "clientMessageCreatedAtMs": .int(Int64(Date().timeIntervalSince1970 * 1000))])
-                // No network mutation is allowed until this exact request is durable.
                 saved = try await storage.replace(target, record: record, expected: nil, location: location)
                 text = record.text
             }
             guard current(), let original = saved else { return }
             let response = try await call("team.chat.ask", original.record.input)
             if case let .object(body) = response, body["state"] == .string("running"), let running = body["fence"], TeamAskRecord.validFence(running) {
-                // Keep Stop even if persisting the running reply fails. The
-                // original durable request can recover this fence on reopening.
                 fence = running
                 saved = try await storage.replace(target, record: TeamAskRecord(input: original.record.input, fence: running), expected: original)
                 text = ""
@@ -85,14 +79,9 @@ import Observation
             }
             return
         } catch let refusal as TeamAskNotAccepted {
-            // The host settles an existing immutable receipt before checking
-            // a fresh review. Only its explicit validation refusal permits a
-            // new review; transport and authority errors retain the attempt.
             do { saved = try await storage.replace(target, record: nil, expected: saved); error = refusal.localizedDescription }
             catch { self.error = L10n.text("common.teams.ask_save_failed") }
         } catch is CancellationError {} catch {
-            // An error never proves that an earlier delivery was rejected.
-            // Keep its ID and reviewed text until a bound receipt or fence does.
             self.error = error is TeamCommentDraftFailure ? L10n.text("common.teams.ask_save_failed") : error.localizedDescription
         }
     }
@@ -103,7 +92,6 @@ import Observation
             guard current(), fence == running else { return }
             guard case let .object(fields) = status, case let .bool(active)? = fields["running"] else { throw TeamAskRecoveryFailure.unconfirmed }
             if !active {
-                // A stale window cannot remove a newer saved Ask.
                 saved = try await storage.replace(target, record: nil, expected: saved)
                 fence = nil; stopping = false; text = ""; error = nil
             } else if statusUnconfirmed { error = nil }
@@ -116,8 +104,6 @@ import Observation
         do {
             let reply = try await call("team.chat.ask.stop", ["fence": running])
             guard case let .object(body) = reply, case .bool? = body["stopping"] else { throw TeamAskRecoveryFailure.unconfirmed }
-            // Stopping is an acknowledgement, not completion. Only status
-            // with running:false may remove the saved run.
         } catch { self.error = error.localizedDescription; stopping = false }
     }
 }

@@ -3,7 +3,6 @@ using System.Text.Json;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Project associations hold session IDs only; SSH remains owned by hostd.</summary>
 internal static class WorkspaceSshTabs
 {
     private static readonly string PathName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "tokenstat", "workspace-ssh-tabs.json");
@@ -47,7 +46,7 @@ internal static class WorkspaceSshTabs
             File.WriteAllText(PathName + ".tmp", JsonSerializer.Serialize(Tabs));
             File.Move(PathName + ".tmp", PathName, true);
         }
-        catch { /* The running window still retains its project associations. */ }
+        catch { }
         Changed?.Invoke();
     }
 }

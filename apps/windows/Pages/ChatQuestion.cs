@@ -4,10 +4,6 @@
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// A question the agent asked in its reply, and the answer once there is one.
-/// Port of ChatQuestion.swift. The host finds the block and records it.
-/// </summary>
 internal sealed record ChatQuestionItem(
     string Id,
     string Question,
@@ -17,22 +13,15 @@ internal sealed record ChatQuestionItem(
     bool Blocking)
 {
     public string? Answer { get; init; }
-    /// <summary><c>note</c>, <c>queued</c> or <c>sent</c>: how the answer travelled.</summary>
     public string? Delivery { get; init; }
 }
 
 internal static class ChatQuestionText
 {
     public const string Fence = "tokenstat-question";
-    /// <summary>A plan the agent wrote for the activity panel. The host reads it, so the reply drops it.</summary>
     public const string PlanFence = "tokenstat-plan";
-    // Match the host scanner, including the newline before the closing fence.
     private const int BlockMaxBytes = 64 * 1024;
 
-    /// <summary>
-    /// The reply without its question blocks, which the card shows instead. A
-    /// block still streaming is cut from its opening line.
-    /// </summary>
     public static string Strip(string text, bool streaming = true)
     {
         if (!text.Contains(Fence, StringComparison.Ordinal) && !text.Contains(PlanFence, StringComparison.Ordinal)) return text;
@@ -127,15 +116,12 @@ internal static class ChatQuestionText
             var rest = trimmed[name.Length..];
             if (!char.IsWhiteSpace(rest[0])) continue;
             var body = rest.TrimStart();
-            // Prose after the language tag is not a block. The body is a JSON
-            // object, so a same-line body must open one.
             if (body.Length == 0 || body[0] != '{') continue;
             return new FenceMatch(name, body, isPlan);
         }
         return null;
     }
 
-    /// <summary>True when still inside a block after this line.</summary>
     private static bool? CloseBodyLine(string line, List<string> block, ref bool isPlan, List<string> kept)
     {
         if (ClosingFence(line) is not { } closed) return null;
@@ -155,11 +141,6 @@ internal static class ChatQuestionText
         catch (System.Text.Json.JsonException) { }
         var next = closed.Trailing.Trim(' ', '\t');
         var nextInfo = next.StartsWith("```", StringComparison.Ordinal) ? FenceBody(next[3..]) : null;
-        // The next block can reopen anywhere in the trailing text, not only at
-        // its start: a close glued to prose that itself ends in a new opening
-        // (` ```Next works.```tokenstat-plan`) hides both blocks. `Opening`
-        // scans the whole fragment, mirroring the host scanner, which resumes
-        // mid-line after a close.
         var reopen = Opening(closed.Trailing);
         var opensNext = nextInfo is not null || reopen is not null;
         if (!valid)

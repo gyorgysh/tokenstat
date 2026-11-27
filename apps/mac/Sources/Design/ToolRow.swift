@@ -2,13 +2,7 @@
 
 import SwiftUI
 
-/// A tool call on a transcript: verb, target, optional snippet, and how it ended.
-///
-/// Shared by automations and chat so a Read in either place is the same row.
-/// Chat adds running and failure; automation transcripts use compact rows.
 struct ToolRow: View {
-    /// The same figure the phone's edit row draws. This row and that one sit
-    /// in one transcript, and they were two sizes apart.
     #if os(macOS)
     private static let diffFigure = Theme.mono(11, weight: .medium)
     #else
@@ -21,33 +15,19 @@ struct ToolRow: View {
     var time: String? = nil
     var running: Bool = false
     var failed: Bool = false
-    /// Whether this row is the one carrying the transcript's spinner. A
-    /// running row that is not turns its verb glyph in the accent instead:
-    /// see `TranscriptFollow.spinningRow`, which is where the count of
-    /// animating platform views in a transcript is held at one.
     var animatesRunning: Bool = true
-    /// The chat's Detailed level: open every finished output, not only a
-    /// small diff. A hand toggle still wins.
     var expandsOutput: Bool = false
-    /// A single activity line, for steps opened under a Minimal or
-    /// Compact chat line.
     var compact: Bool = false
     var onToggleOutput: () -> Void = {}
     @State private var showSnippet = false
-    /// Set once the person toggles the snippet by hand. Auto-expand must
-    /// not overrule it: lazy rows re-run `onAppear` scrolling back, and a
-    /// diff that streams in after appear must still open on its own.
     @State private var snippetToggled = false
 
-    /// A failed step keeps the chat's density. Agents retry all the time,
-    /// so a failed read is a step like any other, marked rather than boxed.
     private var usesCompactStyle: Bool { compact }
 
     private var snippetIsOutput: Bool {
         snippet.contains { $0.hasPrefix("|") }
     }
 
-    /// Red/green lines the host attached to an edit's end event.
     private var hasDiff: Bool {
         ["Edit", "NotebookEdit", "Diff"].contains(verb) && diffAdded + diffRemoved > 0
     }
@@ -60,7 +40,6 @@ struct ToolRow: View {
         snippet.filter { Self.isDiffLine($0, added: false) }.count
     }
 
-    /// A unified or old/new body line. File headers ("+++ b/…") stay out.
     private static func isDiffLine(_ line: String, added: Bool) -> Bool {
         guard let first = line.first else { return false }
         let want: Character = added ? "+" : "-"
@@ -68,31 +47,19 @@ struct ToolRow: View {
         return !(line.hasPrefix("+++ ") || line.hasPrefix("--- "))
     }
 
-    /// Few-line edits open on their own; anything bigger stays a stat with
-    /// the full diff one tap away.
     private static let autoExpandLines = 10
 
-    /// Open a small diff on arrival. Never overrules a hand toggle, and runs
-    /// on changes as well as appear: the diff only arrives in the end event,
-    /// after appear, and lazy rows re-appear on every scroll back.
     private func autoExpand() {
-        // A two-line change reads better open. A hundred-line one stays
-        // shut behind its stat until asked.
         guard !snippetToggled, !running else { return }
         if expandsOutput, !snippet.isEmpty {
             showSnippet = true
         } else if !usesCompactStyle, hasDiff, snippet.count <= Self.autoExpandLines {
             showSnippet = true
         } else if !expandsOutput {
-            // Detailed was switched off: what it opened closes again.
             showSnippet = false
         }
     }
 
-    /// One line shown while collapsed so a row is never just "Tool".
-    /// The header already shows the target (command/path); this is the
-    /// first output line beneath it. Diffs skip this: their +/− stat lives
-    /// in the header instead.
     private var preview: String? {
         guard !hasDiff else { return nil }
         for line in snippet {
@@ -165,9 +132,6 @@ struct ToolRow: View {
                     outputToggle.fixedSize()
                 }
             }
-            // Collapsed but with something to show: a shell command's first
-            // output line, an edit's +/- line. Without this a target-less
-            // row is just "Tool" + a button and reads as empty space.
             if !usesCompactStyle, !showSnippet, !running, let preview {
                 Text(preview)
                     .font(Theme.mono(11))
@@ -282,7 +246,6 @@ struct ToolRow: View {
     private var showLabel: String { hasDiff ? L10n.text("apple.toolrow.show_edit.8da806e1") : snippetIsOutput ? L10n.text("apple.toolrow.show_output.9dbbb249") : L10n.text("apple.toolrow.show_edit.8da806e1") }
     private var hideLabel: String { hasDiff ? L10n.text("apple.toolrow.hide_edit.e9dbd4f5") : snippetIsOutput ? L10n.text("apple.toolrow.hide_output.64876c47") : L10n.text("apple.toolrow.hide_edit.e9dbd4f5") }
 
-    /// A snippet line as drawn: output loses its "| " marker.
     static func displaySnippet(_ line: String) -> String {
         if line.hasPrefix("| ") { return String(line.dropFirst(2)) }
         if line == "| …" { return "…" }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
-//! This executable has one test so environment changes cannot race other tests.
 use std::fs;
 
 use tokenstat_core::{
@@ -23,7 +22,6 @@ fn scans_private_homes_with_repeats_copies_and_appended_usage() {
     let home = dir.path().join("home");
     let data = dir.path().join("data");
     fs::create_dir_all(&home).unwrap();
-    // This test process owns its environment and cannot see the user's logs.
     unsafe {
         std::env::set_var("HOME", &home);
         std::env::set_var("USERPROFILE", &home);
@@ -70,11 +68,9 @@ fn scans_private_homes_with_repeats_copies_and_appended_usage() {
     assert_eq!(events.len(), 4);
     assert_eq!(events.iter().map(|e| e.counters.total()).sum::<u64>(), 380);
 
-    // The workaround can point CODEX_HOME at an already discovered chat.
     unsafe { std::env::set_var("CODEX_HOME", private.parent().unwrap().parent().unwrap()) };
     assert_eq!(scan::scan(&mut store, &tz).unwrap().files_read, 0);
     assert_eq!(store.events(&Query::default()).unwrap().len(), 4);
-    // Equivalent spellings share watermarks on Unix and Windows alike.
     unsafe {
         std::env::set_var(
             "CODEX_HOME",

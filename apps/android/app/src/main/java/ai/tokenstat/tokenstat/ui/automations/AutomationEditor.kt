@@ -62,15 +62,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// New and Edit automation in one Writing/Settings editor. Port of
-/// `AutomationEditorView` plus `AutomationFieldsView`.
-///
-/// Save rules, ported from `AutomationEditorSession`: on protocol 21+
-/// hosts the edit is `automation.edit` with the baseline revision and one
-/// checked edit can win, with the computer-version conflict flow; below
-/// that it is `automation.update` with the overwrite notice. Creation is
-/// `automation.createOnce` with a receipt check and retry-same where the
-/// host offers it, plain `automation.create` below that.
 @Composable
 fun AutomationEditorDialog(
     model: AppViewModel,
@@ -104,7 +95,6 @@ fun AutomationEditorDialog(
     }
 }
 
-/// The automation editor as a full page on the app background.
 @Composable
 fun AutomationEditorScreen(
     model: AppViewModel,
@@ -619,9 +609,6 @@ private fun AutomationBackendChips(
     }
 }
 
-/// Frequency editor with the host scheduler timezone. Schedule values stay
-/// exact until a picker is touched. Port of the schedule half of
-/// `AutomationFieldsView` over `JobScheduleEditing`.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ScheduleEditor(

@@ -8,7 +8,6 @@ using Windows.Foundation;
 
 namespace Tokenstat.Design;
 
-/// <summary>The picture keeps its own colors; only its surrounding ring becomes vivid.</summary>
 internal static class ProfileHoverRing
 {
     private sealed class Ring

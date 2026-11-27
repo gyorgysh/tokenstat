@@ -251,16 +251,10 @@ private enum class Destination(val id: String, val label: String, val icon: Imag
     Home("home", L10n.text("common.home"), Icons.Default.GridView, L10n.text("android.tokenstatapp.spend_activity_and_limits.c9d9e601")),
     Workspaces("workspaces", L10n.text("common.projects"), Icons.Default.Folder, L10n.text("android.tokenstatapp.folders_and_sessions_on_your_machines.4b93afd1")),
     Insights("insights", L10n.text("common.insights"), Icons.Default.BarChart, L10n.text("android.tokenstatapp.breakdowns_by_model_and_project.9846e926")),
-    // The id is `machines`, like the iOS raw value, so the two tab stores
-    // stay comparable. SSH stays last: entries order is the default bar.
     Devices("machines", L10n.text("common.devices"), Icons.Default.Laptop, L10n.text("android.tokenstatapp.computers_on_your_account.232226fe")),
     Ssh("ssh", "SSH", Icons.Default.Terminal, L10n.text("android.tokenstatapp.saved_servers_and_keys.47db8e47")),
 }
 
-/// Five doors after onboarding, not three: still checking, could not check
-/// (usually offline), an honest signed-out answer, and the app. Folding a
-/// failed check into "signed out" is the cold-start bug that flashed Sign in
-/// at a phone that still had a token.
 private enum class Door { Onboarding, Loading, AuthRetry, Login, SignedIn }
 
 @Composable
@@ -275,13 +269,6 @@ fun TokenstatApp(model: AppViewModel) {
             }.getOrDefault(false),
         )
     }
-    // A pending notification tap belongs to the account that was signed in
-    // when it arrived. Signing out drops it, the way the Apple root clears
-    // its tap on a scope change, so it cannot open somebody else's work. A
-    // sign-in drops an unnamed one for the same reason: a named tap only
-    // resolves when its machine is in the new account's directory, but an
-    // unnamed tap falls back to the connected host and could open the wrong
-    // account's chat.
     var wasSignedIn by remember { mutableStateOf<Boolean?>(null) }
     val tapScope = rememberCoroutineScope()
     LaunchedEffect(Unit) { ReviewPrompt.noteLaunch(context) }
@@ -289,9 +276,6 @@ fun TokenstatApp(model: AppViewModel) {
         if (wasSignedIn == true && !state.signedIn) NotificationOpen.take()
         if (wasSignedIn == false && state.signedIn) {
             if (NotificationOpen.request.value?.machineID == null) NotificationOpen.take()
-            // The cold-start half of the foreground tunnel nudge. `onResume`
-            // fires before the account lands, so it cannot cover a fresh
-            // process, and this transition is where the sign-in completes.
             tapScope.launch { model.nudgeTunnelOnForeground() }
         }
         wasSignedIn = state.signedIn
@@ -304,10 +288,6 @@ fun TokenstatApp(model: AppViewModel) {
                 val door = when {
                     state.signedIn -> Door.SignedIn
                     !hasOnboarded -> Door.Onboarding
-                    // Above the loading clause on purpose: a retry keeps its
-                    // screen and shows Checking, instead of swapping to the
-                    // spinner and back. The first check has no error yet, so it
-                    // still falls through to Loading.
                     state.authNeedsRetry -> Door.AuthRetry
                     state.loading && state.account == null -> Door.Loading
                     state.authPending -> Door.Loading
@@ -351,11 +331,7 @@ fun TokenstatApp(model: AppViewModel) {
     }
 }
 
-/// The cold-launch flow: the mark rising on paper, not a spinner in an empty pane.
 @Composable
-/// What a cold start shows while the account check runs: the mark alone
-/// on the window paper, the port of iOS `LaunchSplashView`. The wordmark
-/// stays off, like there, and the screens behind it load as skeletons.
 private fun LoadingScreen() {
     val reduceMotion = rememberReduceMotion()
     val colors = LocalTsColors.current
@@ -368,12 +344,6 @@ private fun LoadingScreen() {
     }
 }
 
-/// The account could not be checked, which is not the same thing as being
-/// signed out. Port of `ClientAuthRetryView`.
-///
-/// `account.status` asks the account service, so no internet means no answer,
-/// and a phone holding a valid token must not be shown the Sign in door for
-/// it. The mark, the app's own words for the failure, and one button.
 @Composable
 private fun AuthRetryScreen(
     message: String?,
@@ -398,9 +368,6 @@ private fun AuthRetryScreen(
         ) {
             LogoMark(size = 46, animated = false)
             Text(
-                // Offline rewrites this whatever the call happened to say. A
-                // device with no internet produces a different sentence per
-                // subsystem, and all of them have one cause and one answer.
                 if (offline) L10n.text("android.tokenstatapp.you_are_offline.4d5c9439") else friendly.title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -442,11 +409,6 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
     fun openPage(url: String) {
         CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
     }
-    // The shape of `ClientLoginView`: the mark and the name centred in the
-    // room above the actions, the actions themselves against the bottom
-    // edge. Full width on a tablet, the way the iPad draws it, rather than a
-    // narrow card in the middle of a wide screen.
-    //
     // Edge-to-edge draws behind the status bar, so safeDrawing keeps the top
     // clear of the clock and the bottom clear of the gesture bar.
     Column(
@@ -457,10 +419,6 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        // Mark, name, sentence. No "Sign in" heading: the button at the
-        // bottom of the same screen says it, and saying it twice made the
-        // product's own name look like a subtitle to the word above it.
-        // The mark rising once and landing: an intro page, not a spinner.
         LogoMark(size = 52, animated = !reduceMotion, loops = false)
         Spacer(Modifier.height(Space.m))
         Wordmark(size = 28, showsMark = false)
@@ -482,10 +440,6 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             if (pending != null) {
-                // The approval is happening in the browser tab. Shown for the
-                // same reason iOS shows it: the tab can be dismissed while the
-                // sign-in is alive underneath, and without this the screen would
-                // look exactly as it did before the tap.
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -527,19 +481,12 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                     }
                 }
             } else {
-                // Prominent, and the only prominent button on the screen:
-                // this is the door, and everything under it is a footnote to
-                // it. Same weight the iPhone gives it.
                 TsProminentButton(
                     label = L10n.text("common.sign_in"),
                     icon = ActionIcon.SignIn.vector,
                     onClick = { model.signIn(::openPage) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                // There is no separate "create account" button, and that is
-                // not an omission: an account is made the first time somebody
-                // signs in with a provider they already have. This line says
-                // what happens instead of offering a fake choice.
                 Text(
                     L10n.text("android.tokenstatapp.no_password_to_make_signing_in_with_github.06825264"),
                     style = TsType.caption,
@@ -556,10 +503,6 @@ private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Un
                     textAlign = TextAlign.Center,
                 )
             }
-            // A way back to the intro, for anyone who skipped it and then
-            // wondered what this is. A plain line of text like the iPhone's,
-            // not a bordered box: a box here reads as a second offer beside
-            // the one button this screen is for.
             TextButton(onClick = onReboard, modifier = Modifier.padding(top = Space.xs)) {
                 Icon(
                     ActionIcon.Help.vector,
@@ -580,8 +523,6 @@ private fun LegalLine(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
     val terms = L10n.text("android.tokenstatapp.terms.ede54899")
     val privacy = L10n.text("android.tokenstatapp.privacy_policy.ba445cff")
-    // Word for word with the iPhone's line, which reads it as one sentence
-    // with two links in it rather than a sentence about two documents.
     val text = L10n.text("android.tokenstatapp.by_signing_in_you_accept_the_0_and_1.78bf1e2f", "${terms}", "${privacy}")
     val annotated = remember(text, terms, privacy, colors.accent, onOpen) {
         buildAnnotatedString {
@@ -647,14 +588,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
     val context = LocalContext.current
     ai.tokenstat.tokenstat.ui.workspace.PullOpenerHost(model)
-    // The automatic rating ask: Play's own card, on Home with nothing open
-    // over it and after a short settle. `ReviewPrompt` decides whether it is
-    // due. Leaving Home, or opening anything, cancels the wait.
     val askOwner = state.account?.get("machines") as? JsonArray
     var handleOfferOpen by rememberSaveable { mutableStateOf(false) }
     val homeQuiet = selected == Destination.Home && !accountOpen && !teamOpen && !wizardOpen && !searchOpen
-    // A handle, offered once to an account that has none. Closing the sheet
-    // any way at all is an answer, for every device on the account.
     val handleOfferDue = homeQuiet && !handleOfferOpen &&
         ai.tokenstat.tokenstat.ui.account.HandleOffer.isDue(context, state.account)
     LaunchedEffect(handleOfferDue) {
@@ -683,9 +619,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         ReviewPrompt.requestPlayReview(activity)
     }
     val homeStores = remember { HomeStores(context) }
-    // Warm the last approved host while Home is visible. The session belongs
-    // to the model, so Workspaces consumes these lists without another dial.
-    // A saved Disconnect turns auto-connect off in this same account store.
     val warmOwner = HomeStores.pinIdentity(state.account)
     val warmStore = remember(context, warmOwner) { WorkspaceLayoutStore(context, warmOwner) }
     val warmSession = model.workspacesConnection
@@ -698,9 +631,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     val warmScope = rememberCoroutineScope()
     var warmFailures by remember(warmOwner) { mutableIntStateOf(0) }
     LaunchedEffect(warmMachines) { warmFailures = 0 }
-    // A cold launch can race the tunnel's first route. Retry briefly from
-    // Home, without making a transient failure a red card or a tight loop.
-    // A later foreground return gets a fresh budget after connectivity moves.
     ForegroundEffect(warmOwner) { warmFailures = 0 }
     LaunchedEffect(warmOwner, warmMachines, state.canRemote, warmConnected, warmConnecting, warmAllowed, warmFailures) {
         if (!state.canRemote || warmConnected != null || warmConnecting != null || warmAllowed == false) return@LaunchedEffect
@@ -731,8 +661,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 if (!current()) return@launch
                 warmSession.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) return@launch
-                // Access is confirmed now; the host's workspace scan may
-                // still spend seconds collecting Git status for every folder.
                 warmSession.setLoadingFolders(true)
                 warmSession.setConnected(last, true)
                 warmSession.setError(null)
@@ -743,9 +671,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 warmSession.setLists(folders, JsonArray(emptyList()), JsonArray(emptyList()))
                 warmSession.setLoadingFolders(false)
                 warmFailures = 0
-                // The explicit picker or Disconnect can supersede even these
-                // background summaries. Keep that ticket check after each
-                // remote call and before publishing anything account-scoped.
                 if (!current()) return@launch
                 ai.tokenstat.tokenstat.ecosystem.SystemProjects.replace(
                     context, last, folders, ai.tokenstat.tokenstat.ecosystem.SystemProjects.owner
@@ -786,9 +711,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
         }
     }
-    // The tunnel redials on a network route change. Recheck the selected
-    // host's access and lists after that redial, even if the account's machine
-    // directory is unchanged and the user never opens Repositories.
     LaunchedEffect(warmPathEpoch, warmOwner, state.canRemote) {
         if (warmPathEpoch == 0L || !state.canRemote || warmOwner.isBlank()) return@LaunchedEffect
         val peer = warmSession.connectedPeer.value ?: return@LaunchedEffect
@@ -839,16 +761,11 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
         }
     }
-    // The selected host's warmup above owns one slot. Load the other saved
-    // hosts in at most three more slots, without changing the selected host or
-    // its visible lists. One sleeping or denied host cannot hold up the rest.
     ForegroundEffect(warmOwner, warmMachines, state.canRemote, warmPathEpoch) {
         if (!state.canRemote || warmOwner.isBlank()) return@ForegroundEffect
         var forceRefresh = warmPathEpoch != seenWarmPathEpoch
         val slots = Semaphore(3)
         while (true) {
-            // Refresh saved peers while the app stays open, too. A host may
-            // wake without this phone changing networks or leaving the app.
             val latestAccount = model.state.value.account
             val machines = (latestAccount?.get("machines") as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
             val thisId = latestAccount?.string("thisMachineId")
@@ -934,16 +851,10 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         billing.start()
         onDispose { billing.close() }
     }
-    // The real window width, not the rounded Configuration value: the rail
-    // appears exactly when the window is wide enough to carry both panes.
     val density = LocalDensity.current
     val expanded = with(density) {
         LocalWindowInfo.current.containerSize.width.toDp() >= 840.dp
     }
-    // This device's tabs, arranged by the person holding it. Every tab is
-    // shown to begin with, SSH included, which is the bar the iPhone gets.
-    // Somebody who does not live in servers can still put it away in the tab
-    // editor, and a phone that already stored a choice keeps it.
     val customization = remember(context) {
         TabCustomization(
             SharedPrefsTabs(context),
@@ -953,28 +864,14 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
     val displayed = customization.displayed(selected.id)
         .mapNotNull { id -> Destination.entries.find { it.id == id } }
-    // Hiding the open tab lands on the first visible one rather than on a
-    // blank bar. The editor refuses the last tab, so this is a move, never
-    // a guess at nothing.
     LaunchedEffect(customization.visibleTabs) {
         if (displayed.none { it == selected }) selected = displayed.first()
     }
     val tabBar = rememberTabBarMinimizeState()
     val tabBarScroll = rememberTabBarMinimizeScroll(tabBar)
-    // A pushed screen (a conversation) takes the bar off the screen, the
-    // way `clientTabBarHidden` does on iOS. Held here so the bar can read it
-    // and any depth of screen can claim it.
     val tabBarPresence = remember { TabBarPresence() }
-    // What the floating bar is glass over. Recorded from the tab content
-    // only: the bar is its sibling, never its child, or the blur would be
-    // sampling itself.
     val backdrop = rememberBackdrop()
     LaunchedEffect(selected) { tabBar.expand() }
-    // A notification tap heads for Workspaces, like the Apple root: every
-    // notification is about work on a machine, so the machine list is both
-    // where the tap was heading and the screen that resolves it. Without
-    // remote access there is nothing to resolve, so the tap is dropped and
-    // the app simply stays where it is.
     val pushTap by NotificationOpen.request.collectAsStateWithLifecycle()
     LaunchedEffect(pushTap, state.canRemote) {
         if (pushTap == null) return@LaunchedEffect
@@ -992,8 +889,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         topBar = {
             if (teamOpen || tabBarPresence.topHidden) return@Scaffold
             TopAppBar(
-                // Avatar leading, wordmark centred: the same chrome shape as
-                // the Apple client's toolbar.
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.background,
                     titleContentColor = colors.textPrimary,
@@ -1015,9 +910,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     )
                 },
                 actions = {
-                    // A chip, not a naked glyph. On iPhone this is a circular
-                    // raised surface and it reads as a control; the bare icon
-                    // beside a wordmark read as part of the decoration.
                     IconButton(onClick = { searchOpen = true }) {
                         Box(
                             Modifier
@@ -1040,9 +932,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             )
         },
     ) { padding ->
-        // The bar floats over the tab content like the iOS 26 dock: rows
-        // scroll behind its glass, and every scrollable under it ends at
-        // `TabBarChrome.contentBottomInset` so the last row rests clear of it.
         Box(
             Modifier.fillMaxSize()
                 .padding(padding)
@@ -1074,9 +963,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                // Tab switches crossfade like the iOS TabView: a short
-                // fade with the door easing. A fade stays readable under
-                // Reduce Motion, so no second path is needed.
                 AnimatedContent(
                     targetState = selected,
                     transitionSpec = {
@@ -1222,16 +1108,8 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     if (accountOpen) AccountDialog(state, model, billing, customization,
         onDismiss = { accountOpen = false },
         onTeam = { accountOpen = false; teamOpen = true })
-    // The one paywall for every gate outside the account sheet. Hosted here
-    // so a lock anywhere in the app reaches the plans in one tap instead of
-    // opening Account and asking somebody to find the card. See `Plans`.
     val planRequests by Plans.openRequests.collectAsStateWithLifecycle()
     var planRequestSeen by rememberSaveable { mutableStateOf(planRequests) }
-    // Greater, not different: the counter resets to zero when the process
-    // dies while the seen mark restores, and `!=` would open the sheet on
-    // its own on the next launch.
-    // Saved UI state can outlive the process-local request counter. Rebase
-    // it after process recreation so the next request opens the sheet.
     SideEffect { if (planRequestSeen > planRequests) planRequestSeen = planRequests }
     val planSheetOpen = planRequests > planRequestSeen
     if (planSheetOpen && !accountOpen) {
@@ -1274,8 +1152,6 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     }
 }
 
-/// An unavailable account or a signed-out device needs account recovery,
-/// not a plan upgrade. Personal remote access is included on every plan.
 @Composable
 private fun RemoteGateScreen(signedIn: Boolean, onRetry: () -> Unit, onSignIn: () -> Unit) {
     Column(
@@ -1331,8 +1207,6 @@ private fun HomeScreen(
         (row as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
     }
     var selectedDay by remember { mutableStateOf<JsonObject?>(null) }
-    // A hold is picking a day out of the grid: the page holds still while
-    // it does, or the page fights the finger. Mirrors `pickingADay`.
     var pickingDay by remember { mutableStateOf(false) }
     var customizing by rememberSaveable { mutableStateOf(false) }
     val reduceMotion = rememberReduceMotion()
@@ -1348,16 +1222,11 @@ private fun HomeScreen(
 
     val accountHandle = state.account?.string("handle")
         ?: state.account?.string("displayName") ?: ""
-    // Device furniture scopes to the account's host and identity, the same
-    // key the Apple client reads and writes.
     val accountIdentity = RecentPlaces.accountIdentity(
         state.account?.string("handle"),
         state.account?.string("accountId"),
     )
     val accountHost = state.account?.string("host").orEmpty()
-    // Read once for the whole pass. The stores decode on every access, and
-    // reading them again inside the rows is what lets a list change shape
-    // underneath.
     stores.revision.value
     val (order, hidden) = stores.layout()
     val sections = order.filter { it !in hidden }
@@ -1429,8 +1298,6 @@ private fun HomeScreen(
         userScrollEnabled = !pickingDay,
     ) {
         item {
-            // Same line the website and the Apple home use: a local-clock
-            // phrase, the first name, and the tier mark next to it.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
                     homeGreeting(state.account, cells.isNotEmpty()),
@@ -1445,9 +1312,6 @@ private fun HomeScreen(
                 }
             }
         }
-        // Outside the arrangement, deliberately. Whether the account could
-        // be read at all is the screen talking, not a card somebody chose
-        // to keep, and hiding Activity must not hide "you are offline".
         if (calendar == null && !state.loading) {
             if (state.error == null && state.signedIn) {
                 item {
@@ -1540,8 +1404,6 @@ private fun HomeScreen(
                                             style = TsType.caption,
                                             color = LocalTsColors.current.textSecondary,
                                         )
-                                        // The host sends the fetch stamp, not
-                                        // the sentence: the client phrases it.
                                         calendarFreshness(
                                             calendar.long("fetchedAtMs"),
                                             calendar.string("noticeCode"),
@@ -1585,9 +1447,6 @@ private fun HomeScreen(
                             )
                         }
                     }
-                    // Only providers with an actual reading. A host posts
-                    // readings only when sharing is on, so windowless rows
-                    // stay off this screen the way they do on the Apple one.
                     val sorted = LimitLogic.closestToFullFirst(
                         state.limits.mapNotNull { it as? JsonObject }.filter { reading ->
                             ((reading["windows"] as? JsonArray).orEmpty()).isNotEmpty()
@@ -1600,8 +1459,6 @@ private fun HomeScreen(
                     }
                     if (sorted.isEmpty() && planError == null) {
                         item {
-                            // Not an error. Until a host shares readings the
-                            // honest line is empty, not zero.
                             Text(
                                 L10n.text("android.tokenstatapp.no_readings_yet_on_a_mac_open_plan_limits.467d1c76"),
                                 style = TsType.subheadline,
@@ -1618,8 +1475,6 @@ private fun HomeScreen(
         if (sections.isEmpty()) {
             item { ClearHomeCard() }
         }
-        // A sentence the host sent about why this is not the answer that
-        // was asked for, with a sign-in button when signing in is the fix.
         val notice = calendar?.string("notice")
         if (calendar != null && notice != null) {
             item {
@@ -1642,9 +1497,6 @@ private fun HomeScreen(
     DayDetailSheet(selectedDay, onDismiss = { selectedDay = null })
 }
 
-/// A sentence the host sent about why this is not the answer that was asked
-/// for, with a sign-in button when signing in is the fix. Ported from
-/// `NoticeCard` in `ClientHomeView.swift`.
 @Composable
 private fun NoticeCard(text: String, showSignIn: Boolean, onSignIn: () -> Unit) {
     val colors = LocalTsColors.current
@@ -1674,8 +1526,6 @@ private fun NoticeCard(text: String, showSignIn: Boolean, onSignIn: () -> Unit) 
     }
 }
 
-/// The `smoothIn` arrival of loaded content replacing its skeleton: a short
-/// fade with a small rise, collapsing to a plain fade under Reduce Motion.
 @Composable
 fun Arrive(reduceMotion: Boolean, staggerIndex: Int = 0, content: @Composable () -> Unit) {
     val visibleState = remember { MutableTransitionState(false).apply { targetState = true } }
@@ -1686,17 +1536,6 @@ fun Arrive(reduceMotion: Boolean, staggerIndex: Int = 0, content: @Composable ()
     AnimatedVisibility(visibleState = visibleState, enter = smoothEnter(reduceMotion)) { content() }
 }
 
-/// The Free-tier history-lock note under the heatmap
-/// (`HistoryLockBanner.swift`).
-///
-/// Not a wall. The year is already on screen. This says why the older squares
-/// are muted and offers the sheet that unlocks them.
-///
-/// **One paragraph, not two labels in a row.** The lead-in and the
-/// explanation are one sentence that wraps, the way the Apple banner
-/// concatenates its two runs. Side by side in a `Row` they cannot wrap into
-/// each other, so on a narrow phone the second one was squeezed to a column
-/// of single words or clipped off the edge entirely.
 @Composable
 private fun HistoryLockBanner(days: Int = 30) {
     val colors = LocalTsColors.current
@@ -1720,9 +1559,6 @@ private fun HistoryLockBanner(days: Int = 30) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(note, style = TextStyle(fontSize = 12.sp))
-        // The in-app sheet, not the pricing page. A plan on this platform is
-        // a Play subscription, and a link out of the app is a route nobody
-        // can buy from. See `Plans`.
         Text(
             L10n.text("android.tokenstatapp.see_plans.d9898933"),
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
@@ -1735,8 +1571,6 @@ private fun HistoryLockBanner(days: Int = 30) {
     }
 }
 
-/// Spend across the trailing `days` ending on `last`, the way the Apple
-/// client's Today and This week tiles read the same grid.
 private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long {
     if (last == null) return 0
     val window = cells.mapNotNull { it.string("date") }
@@ -1758,14 +1592,10 @@ private fun InsightsScreen(
 ) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
-    // Three cuts only — Models/Harnesses/Days — the privacy boundary the iOS
-    // client draws: the account holds no projects and no sessions.
     var cut by rememberSaveable { mutableStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
     val cutNames = listOf(L10n.text("android.tokenstatapp.models.d17d2d78"), L10n.text("android.tokenstatapp.coding_tools.6032f740"), L10n.text("android.tokenstatapp.days.e08c0aa8"))
     val cutKeys = listOf("model", "source", "day")
-    // Rows per cut. Null means "not asked yet", which is not the same as an
-    // empty account and must not draw like one.
     val cached = remember { mutableStateMapOf<String, List<JsonObject>>() }
     val loadingCuts = remember { mutableStateListOf<Int>() }
     val isLoading = cut in loadingCuts
@@ -1803,14 +1633,10 @@ private fun InsightsScreen(
         }
     }
     LaunchedEffect(cut) {
-        // Each cut keeps its own rows, so going back to one already seen is
-        // instant and costs nothing.
         if (!cached.containsKey(cutKeys[cut])) fetch(cut)
     }
     fun refresh() {
         scope.launch {
-            // Drop everything rather than the current cut alone: they are
-            // three views of one series.
             cached.clear()
             fetch(cut)
         }
@@ -1834,14 +1660,6 @@ private fun InsightsScreen(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         item {
-            // The field first, then the cut: long identifiers are exactly
-            // the thing worth filtering. The prompt names the cut in
-            // lowercase, where "Filter models" reads as a description of
-            // the field and "Filter Models" would read as a command.
-            // The app's own search field, not a bare Material box: every
-            // other place you type a filter here has a magnifier in front of
-            // it and a clear button once there is something to clear, and
-            // this one looked like a stray text input beside them.
             TsSearchField(
                 prompt = L10n.text("android.tokenstatapp.filter_0.50ee55cd", "${cutNames[cut].lowercase()}"),
                 query = query,
@@ -1863,8 +1681,6 @@ private fun InsightsScreen(
                 item {
                     val offline = state.connection.offline
                     EmptyState(
-                        // Refused and unreachable are different answers and
-                        // must not read alike.
                         kind = if (needsSignIn) EmptyKind.NeedsAccount else EmptyKind.Unreachable,
                         title = if (offline) L10n.text("android.tokenstatapp.you_are_offline.4d5c9439") else L10n.text("android.tokenstatapp.could_not_load_your_usage.45467004"),
                         message = if (offline) {
@@ -2158,8 +1974,6 @@ private fun DevicesScreen(
     }
     val unsorted = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
     val thisId = state.account?.string("thisMachineId")
-    // Each host's share of spend, fetched once when the screen opens like
-    // `ClientDevicesModel`: one request per device on the host's side.
     val tierDays = deviceHistoryDays(state.account?.string("tier"))
     var usageByMachine by remember(unsorted, tierDays) { mutableStateOf<Map<String, DeviceUsage>>(emptyMap()) }
     var usageError by remember(unsorted, tierDays) { mutableStateOf<String?>(null) }
@@ -2194,15 +2008,10 @@ private fun DevicesScreen(
             } }.toMap()
             usageError = null
         }.onFailure {
-            // The list still drew. What failed is the share of spend beside
-            // each name, which is worth one quiet line and not an error card
-            // where the devices should be.
             usageError = L10n.text("android.tokenstatapp.could_not_work_out_what_each_device_spent.5f9efc51")
         }
         usageLoading = false
     }
-    // This device first, then awake machines by spend, then everyone else by
-    // recency: the same order the Apple devices list reads in.
     val machines = remember(unsorted, usageByMachine) {
         sortMachines(
             unsorted.mapNotNull { it as? JsonObject },
@@ -2210,9 +2019,6 @@ private fun DevicesScreen(
         ) { machine -> machine.string("id")?.let { usageByMachine[it]?.valueMicros } }
     }
     val selected = machines.find { it.string("id") == selectedId }
-    // The iPhone leads this screen with a search field. Eight devices fit;
-    // the limit is ten and people run more than one account's worth of
-    // machines, so the list is one the eye has to hunt through without it.
     var deviceQuery by rememberSaveable { mutableStateOf("") }
     val shownMachines = remember(machines, deviceQuery, thisId) {
         val q = deviceQuery.trim()
@@ -2321,8 +2127,6 @@ private fun DevicesScreen(
                         hasKey = !value.string("publicIdentity").isNullOrEmpty(),
                         lastSeenText = formatRelativeDate(value.string("lastSeenAt")),
                     )
-                    // Phones, tablets and "this device" never upload an archive.
-                    // A $0.00 figure there is noise, not a measurement.
                     val showsSpend = isHost && !isThis
                     val colors = LocalTsColors.current
                     TsCard(Modifier.clickable { selectedId = value.string("id") }) {
@@ -2353,9 +2157,6 @@ private fun DevicesScreen(
                             }
                             if (showsSpend) {
                                 val micros = value.string("id")?.let { usageByMachine[it]?.valueMicros }
-                                // Not zero. A device whose share has not been
-                                // fetched has not been shown to have spent
-                                // nothing.
                                 Text(
                                     if (micros != null) money(micros) else L10n.text("android.tokenstatapp.n_a.a683c5c5"),
                                     style = TsType.numeric(15, FontWeight.SemiBold),
@@ -2410,8 +2211,6 @@ internal fun NoComputerConnected(onSetupWizard: () -> Unit) {
     )
 }
 
-// Typed confirmation rather than one tap. This is the one control in the
-// app that destroys data for every device on the account at once.
 @Composable
 private fun VaultDeleteDialog(
     model: AppViewModel,
@@ -2432,8 +2231,6 @@ private fun VaultDeleteDialog(
     var keyCheckFailed by remember { mutableStateOf(false) }
     val ownerGuard = remember { ai.tokenstat.tokenstat.ui.ssh.VaultOperationGuard(isCurrentOwner) }
     LaunchedEffect(Unit) {
-        // Keys whose private half only ever lived in the vault. Nothing
-        // recovers these, so they are named before the button, not after.
         runCatching {
             val answer = ownerGuard.run {
                 model.core(
@@ -2558,8 +2355,6 @@ private fun AndroidSSHScreenForAccount(
     var addSnippet by remember { mutableStateOf(false) }
     var addKey by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf<JsonObject?>(null) }
-    // Shells live in the host process and outlast this screen: the model
-    // holds them, so leaving SSH and coming back finds them still listed.
     val connections = model.sshConnections
     val openSessions by connections.sessions.collectAsState()
     val selectedSessionId by connections.selectedId.collectAsState()
@@ -2614,11 +2409,7 @@ private fun AndroidSSHScreenForAccount(
             if (currentVaultOwner()) error = it.message
             return
         }
-        // An unlocked vault syncs on every arrival, like the iOS library:
-        // without the pull a second device unlocks into empty lists.
         if (!vaultAllowed || vault?.bool("created") != true || vault?.bool("locked") == true) return
-        // A list reload from another library action cannot start a sync
-        // while a vault mutation is reserved. Setup's own follow-up may.
         if (vaultWorking && !syncAsked) return
         val tier = state.account?.string("tier")?.lowercase() ?: "legend"
         vaultSyncCount += 1
@@ -2647,8 +2438,6 @@ private fun AndroidSSHScreenForAccount(
         }
     }
 
-    // Discard a vault that was just created here and never confirmed. No
-    // typing: there is nothing in it no other device could rebuild.
     suspend fun dropFreshVault() {
         vaultOwnerGuard.check()
         if (vaultWorking || vaultSyncing || vaultSyncCount > 0 || recoveryWords == null || recoveryOrigin?.allowsDiscard != true) return
@@ -2714,10 +2503,6 @@ private fun AndroidSSHScreenForAccount(
                 if (onBack != null) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, L10n.text("common.back")) }
                 }
-                // No title: the tab that opened this already says SSH, and
-                // repeating it cost a row the host list wanted. The pushed
-                // form (reached from Devices) still needs one, because there
-                // the tab bar says Devices.
                 if (onBack != null) {
                     Text(L10n.text("android.tokenstatapp.ssh.01c4d3c2"), style = MaterialTheme.typography.headlineSmall)
                 }
@@ -2756,9 +2541,6 @@ private fun AndroidSSHScreenForAccount(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
         Spacer(Modifier.height(Space.s))
-        // Search across the width and Add as a button beside it. A bare text
-        // link next to a labelled Material field sat on a different baseline
-        // and read as a caption rather than the way to add a host.
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -2783,8 +2565,6 @@ private fun AndroidSSHScreenForAccount(
         }
         Spacer(Modifier.height(Space.s))
         val all = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
-        // Searching looks at everything a person might remember about a record:
-        // its name, where it points, and what it runs.
         val rows = if (query.isBlank()) all else JsonArray(
             all.filter { value ->
                 val item = value.jsonObject
@@ -3132,8 +2912,6 @@ private fun SSHHostDialog(
     var directory by remember { mutableStateOf(existing?.string("initialDirectory") ?: "~") }
     var port by remember { mutableStateOf(existing?.get("port")?.toString() ?: "22") }
     var folderId by remember { mutableStateOf(existing?.string("folderId")) }
-    // Which key this host connects with, like the iOS host editor. Empty is
-    // the password, asked for at connect time and never saved.
     var credentialId by remember { mutableStateOf(existing?.string("credentialId") ?: "") }
     var authOpen by remember { mutableStateOf(false) }
     val savedKeys = remember(keys) { keys.filterIsInstance<JsonObject>() }
@@ -3197,9 +2975,6 @@ private fun SSHHostDialog(
         Button(
             enabled = !working && label.isNotBlank() && host.isNotBlank() && user.isNotBlank() && port.toIntOrNull() in 1..65535,
             onClick = {
-                // An edit keeps what it does not show: the id, the trusted
-                // server keys, the folder depth. A save that dropped the
-                // host keys would ask for trust again on next connect.
                 val map = existing?.toMutableMap() ?: mutableMapOf()
                 map["id"] = JsonPrimitive(existing?.string("id") ?: "")
                 map["label"] = JsonPrimitive(label)
@@ -3223,8 +2998,6 @@ private fun SSHHostDialog(
 private fun SSHSnippetDialog(existing: JsonObject? = null, working: Boolean, error: String?, onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
     var title by remember { mutableStateOf(existing?.string("title") ?: "") }
     var command by remember { mutableStateOf(existing?.string("command") ?: "") }
-    // Placeholders are read back the same way every client reads them, so a
-    // snippet written here asks for the same values on a Mac.
     val variables = Regex("\\{\\{\\s*([^}]+?)\\s*\\}\\}")
         .findAll(command)
         .map { it.groupValues[1] }
@@ -3331,9 +3104,6 @@ private fun WorkspacesScreen(
     var newChatOpen by rememberSaveable(navigationOwner) { mutableStateOf(false) }
     var newChatRequestedPeer by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
     var newChatRequest by remember(navigationOwner) { mutableStateOf<ai.tokenstat.tokenstat.ui.workspace.NewChatRequest?>(null) }
-    // The host list the iOS model keeps: hosts only, without this phone
-    // (by account id and by its own key, for records that predate kinds),
-    // and without keyless records, which cannot be dialled.
     var selfKey by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         runCatching { model.machineIdentity() }
@@ -3352,11 +3122,6 @@ private fun WorkspacesScreen(
     layoutStore.migrateLegacyHost(hosts.mapNotNull { it.string("publicIdentity") }.toSet())
     var layoutOrder by remember { mutableStateOf(layoutStore.order()) }
     var layoutHidden by remember { mutableStateOf(layoutStore.hidden()) }
-    // The session lives on the model, so leaving the tab does not dial
-    // again on return. The tunnel underneath never dropped; only the screen
-    // went away. The stored host is re-resolved against the live account
-    // list, so a rename or a presence flip behind our back still reads
-    // current the moment it arrives.
     val session = model.workspacesConnection
     val storedHost by session.host.collectAsStateWithLifecycle()
     val connectedPeer by session.connectedPeer.collectAsStateWithLifecycle()
@@ -3390,11 +3155,6 @@ private fun WorkspacesScreen(
     var localConnectingPeer by remember { mutableStateOf<String?>(null) }
     var connectionEpoch by remember { mutableIntStateOf(0) }
     var requesting by remember { mutableStateOf(false) }
-    // Automatic dials fail silently into the log until they settle. The
-    // account refreshes every couple of minutes and each one redials, so a
-    // transient first failure used to flash red for a frame on its way to a
-    // connection nobody could read. Three in a row is stable, and stable
-    // failures surface with a retry.
     var autoFailures by remember { mutableStateOf(0) }
     var search by remember { mutableStateOf("") }
     var customizing by remember { mutableStateOf(false) }
@@ -3402,17 +3162,9 @@ private fun WorkspacesScreen(
     var newChatAddScope by remember(navigationOwner) { mutableStateOf<Pair<String?, String?>?>(null) }
     var choosingFor by remember { mutableStateOf<String?>(null) }
     var initialSection by remember { mutableStateOf<String?>(null) }
-    // A navigation that names a conversation opens exactly it, and arriving
-    // to start work opens the conversation worth returning to. Plain folder
-    // taps clear both, so an old destination cannot hijack a later visit.
     var pendingChatId by remember { mutableStateOf<String?>(null) }
     var pendingOpenConversation by remember { mutableStateOf(false) }
     var autoTick by remember { mutableStateOf(0) }
-    // The open folder by id, resolved against the session's folder list, so
-    // leaving the tab neither closes the workspace nor dials again on
-    // return: the tunnel underneath never dropped, and a reconnect
-    // re-reading the same folders reopens it. Saveable, so a process death
-    // restores it once the folders reload.
     var selectedFolderId by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
     var selectedFolderPeer by rememberSaveable(navigationOwner) { mutableStateOf<String?>(null) }
     val selectedFolder = if (selectedFolderPeer == connectedPeer) {
@@ -3443,9 +3195,6 @@ private fun WorkspacesScreen(
 
     suspend fun connect(machine: JsonObject, automatic: Boolean = false, forceRefresh: Boolean = false) {
         val peer = machine.string("publicIdentity") ?: return
-        // Switching back to a host that has already loaded is immediate. The
-        // lists remain keyed by peer in the model, so a raw folder id from
-        // another machine can never be shown under this host.
         if (!forceRefresh && !automatic &&
             machine.get("online")?.jsonPrimitive?.booleanOrNull != false &&
             session.activateConnectedHost(machine)) {
@@ -3501,9 +3250,6 @@ private fun WorkspacesScreen(
                 }
             } else if (HomeStores.pinIdentity(model.state.value.account) == owner &&
                 session.connectedPeer.value == peer) {
-                // A cached list is not proof that access still exists. If the
-                // check could not answer, make a fresh foreground dial rather
-                // than leaving unverified work marked as connected.
                 session.setConnected(null, null)
                 session.clearLists()
                 connect(machine, forceRefresh = true)
@@ -3515,34 +3261,18 @@ private fun WorkspacesScreen(
         val epoch = ++connectionEpoch
         fun current() = epoch == connectionEpoch && session.isCurrentConnection(connectionTicket)
         localConnectingPeer = peer
-        // Cleared in `finally`, because this dial does not always run to
-        // the last line. Setting `connectingPeer` changes a key of the
-        // effect that starts an automatic dial, so that effect cancels
-        // the very coroutine it just started, and leaving the screen
-        // cancels a manual one. Either way the clear used to be skipped,
-        // the card kept saying "Connecting…" for the rest of the
-        // session, and the guard above then refused every later tap for
-        // every host.
         try {
             session.setHost(machine)
             session.setConnected(null, null)
             session.setAllowed(null)
             session.setLoadingFolders(false)
-            // An explicit dial clears the readable failure it retries. An
-            // automatic one leaves it: clearing on every account refresh is
-            // what made failures flash past unreadably.
             if (!automatic) {
                 session.setError(null)
                 autoFailures = 0
             }
             session.setRequestNotice(null)
-            // The work still on screen belongs to the previous host; showing it
-            // beside the new host's name is one lie waiting to be clicked.
             session.clearLists()
             runCatching {
-                // The first dial can beat tunnel startup on a newly signed-in
-                // phone. Wake it and retry that transport failure before
-                // presenting an error or asking the person to tap again.
                 val check = retryTunnelStartup(wakeTunnel = { model.nudgeTunnelOnForeground() }) {
                     model.prepareHost(peer, machine.string("label") ?: L10n.text("android.tokenstatapp.computer.76ed42d2"))
                     model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject
@@ -3550,10 +3280,6 @@ private fun WorkspacesScreen(
                 if (!current()) return@runCatching
                 session.setAllowed(check?.bool("allowed"))
                 if (check?.bool("allowed") != true) {
-                    // The host may grant the request before this call returns
-                    // (and the App Review demo grants it immediately). Keep
-                    // this tap moving into the workspace instead of making
-                    // the person tap Connect again or wait for the poll.
                     val granted = session.requestNotice.value == null && requestAccess(peer)
                     if (!current() || !granted) return@runCatching
                     session.setAllowed(true)
@@ -3594,8 +3320,6 @@ private fun WorkspacesScreen(
                 }
             }.onFailure {
                 if (!current()) return@onFailure
-                // Leaving the screen mid-dial cancels the scope. That is not a
-                // failure worth recording: the session keeps whatever it had.
                 if (it is CancellationException) throw it
                 android.util.Log.e("ts-workspaces", "connect failed: ${it::class.java.name}", it)
                 if (automatic) {
@@ -3638,32 +3362,16 @@ private fun WorkspacesScreen(
         host?.let { scope.launch { connect(it, forceRefresh = true) } }
     }
 
-    // The one place that dials without being asked: the last host, when it
-    // is awake and its switch is on. Fires as the host list arrives and as
-    // machines wake, which is what makes "keep trying until online" work.
     LaunchedEffect(hosts, connectedPeer, connectingPeer, autoFailures, allowed) {
         if (connectedPeer != null || connectingPeer != null) return@LaunchedEffect
-        // A refused host is waiting for its owner, not another automatic
-        // dial. That dial created a fresh pending request and consumed the
-        // host's ask limit each time `connectingPeer` cleared.
         if (allowed == false) return@LaunchedEffect
-        // Three silent failures already surfaced as a readable error with a
-        // retry. Dialling on behind it would flash that card on every
-        // account refresh; the next dial is the user's tap.
         if (autoFailures >= 3) return@LaunchedEffect
         val last = layoutStore.lastConnectedHost() ?: return@LaunchedEffect
         if (!layoutStore.isAutoConnectEnabled(last)) return@LaunchedEffect
         val machine = hosts.find { it.string("publicIdentity") == last } ?: return@LaunchedEffect
         if (machine.get("online")?.jsonPrimitive?.booleanOrNull == false) return@LaunchedEffect
-        // On the composition scope, not this effect's: the first thing the
-        // dial does is move `connectingPeer`, which is a key here, and an
-        // effect cannot survive cancelling itself halfway through its own
-        // work.
         scope.launch { connect(machine, automatic = true) }
     }
-    // Somebody who walks over, approves and comes back is not looking at the
-    // same refusal with no sign that anything changed: while refused, ask
-    // again every few seconds and load when the answer lands.
     ForegroundEffect(connectedPeer, allowed, host) {
         if (allowed != false) return@ForegroundEffect
         val machine = host ?: return@ForegroundEffect
@@ -3674,8 +3382,6 @@ private fun WorkspacesScreen(
                 (model.workspaceSection(peer, "workspace.access.check", buildJsonObject {}) as? JsonObject)?.bool("allowed")
             }.getOrNull()
             if (now == true) {
-                // Same reason as the automatic dial above: `connect` clears
-                // `allowed` on its way in, and `allowed` is a key here.
                 scope.launch { connect(machine, automatic = true) }
                 return@ForegroundEffect
             }
@@ -3721,9 +3427,6 @@ private fun WorkspacesScreen(
         }
         onPendingConsumed()
     }
-    // Home reads device history: opening a folder files it on the continue
-    // shelf. String keys, so an account refresh re-reading the same folder
-    // does not count as another visit.
     val peerKey = host?.string("publicIdentity")
     val folderId = selectedFolder?.string("id")
     val folderName = selectedFolder?.string("name")
@@ -3755,9 +3458,6 @@ private fun WorkspacesScreen(
     val boundFolder = selectedFolder
     val request = terminalSession
     val browsing = browser
-    // Home reads device history: opening a chat or terminal files it on the
-    // continue shelf beside folders, the way the Apple client records what
-    // is on screen. Labels only: chat titles can contain the first prompt.
     val placesIdentity = RecentPlaces.accountIdentity(
         state.account?.string("handle"),
         state.account?.string("accountId"),
@@ -3812,21 +3512,12 @@ private fun WorkspacesScreen(
         pendingChatId = chat.string("id")
         pendingOpenConversation = false
     }
-    // A tap on a push opens the conversation it names, the way the iOS
-    // workspaces view fulfills it: the tap already re-read the account on
-    // its way in, so this waits for the pieces (hosts, connection, recent
-    // chats) and opens the chat once they resolve. Peek first, consume only
-    // once the tap resolves. Anything unresolvable is dropped at patience,
-    // landing on this list, never a crash and never a second move.
     val pushTap by NotificationOpen.request.collectAsStateWithLifecycle()
     var tapDialled by remember(pushTap) { mutableStateOf<String?>(null) }
     LaunchedEffect(pushTap, hosts, connectedPeer, connectingPeer, chats, folders) {
         val tap = pushTap ?: return@LaunchedEffect
         val target = NotificationOpen.pickHost(hosts, tap.machineID, connectedPeer)
         if (target == null) {
-            // The named machine is not in the directory, or there are no
-            // hosts at all: the account refresh may still be landing. Keep
-            // the tap while it is fresh.
             NotificationOpen.dropIfStale()
             return@LaunchedEffect
         }
@@ -3836,19 +3527,12 @@ private fun WorkspacesScreen(
             return@LaunchedEffect
         }
         if (connectedPeer != peer) {
-            // A dial already in flight finishes on its own and reruns this.
-            // One dial per tap otherwise: a failure surfaces on the list
-            // with its retry, and tapping retry still completes the tap.
             if (connectingPeer != null) return@LaunchedEffect
             if (tapDialled == peer) {
                 NotificationOpen.dropIfStale()
                 return@LaunchedEffect
             }
             tapDialled = peer
-            // On the composition scope, not this effect's: the first thing
-            // the dial does is move `connectingPeer`, which is a key here,
-            // and an effect cannot survive cancelling itself halfway through
-            // its own work.
             scope.launch { connect(target) }
             return@LaunchedEffect
         }
@@ -3860,10 +3544,6 @@ private fun WorkspacesScreen(
             NotificationOpen.dropIfStale()
             return@LaunchedEffect
         }
-        // Compare before consuming: `take` always clears, so a newer tap
-        // that arrived mid-resolve would otherwise be swallowed with this one.
-        // Still fresh, too: a tap that sat past patience resolving must not
-        // yank the user into its chat now that the data happens to be here.
         if (NotificationOpen.request.value != tap) return@LaunchedEffect
         if (NotificationOpen.dropIfStale()) return@LaunchedEffect
         NotificationOpen.take()
@@ -4098,7 +3778,6 @@ private fun WorkspacesScreen(
         )
     } else if (boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
-            // Keep the same composition and chat owner when the window resizes.
             androidx.compose.runtime.key(boundHost.string("publicIdentity"), boundFolder.string("id")) {
                 WorkspaceDetail(
                     model, boundHost, boundFolder, Modifier.weight(1f),
@@ -4182,9 +3861,6 @@ private fun WorkspaceList(
     model: AppViewModel,
     hosts: List<JsonObject>,
     thisMachine: JsonObject?,
-    /// The machine this screen is about, which is the one being dialled and
-    /// not always the one in `connectedPeer`. A refused dial leaves the
-    /// previous host connected, so the two disagree exactly when it matters.
     dialledHost: JsonObject?,
     connectedPeer: String?,
     retainedHosts: Set<String>,
@@ -4277,9 +3953,6 @@ private fun WorkspaceList(
         renameError?.let { message -> item { ErrorCard(message) } }
         error?.let { message ->
             item {
-                // A stable failure stays readable with its retry, the way
-                // `ClientErrorCard` does. Transient dials never land here,
-                // so this card cannot flash past on the way to a connection.
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     ErrorCard(friendlyError(message).message)
                     if (onRetry != null) {
@@ -4339,8 +4012,6 @@ private fun WorkspaceList(
                 )
             }
         }
-        // The local device belongs immediately after the host list. With
-        // several hosts its row is inside CompactHostList's shared surface.
         thisMachine?.let { machine ->
             item {
                 val name = DeviceCopy.displayName(machine.string("label"), machine.string("platform"), false)
@@ -4375,9 +4046,6 @@ private fun WorkspaceList(
             }
         }
         if (multiHost) {
-            // Under the computer that was tapped and above the work lists.
-            // After every computer's work it was off screen, so asking looked
-            // like it had done nothing.
             if (allowed == false) {
                 (dialledHost ?: connectedHost)?.let { refused ->
                     item { RequestAccessCard(
@@ -4547,13 +4215,6 @@ private fun WorkspaceList(
                     onOpen = { onOtherSession(machine, info) })
             }
         }
-        // Above the `connectedHost` gate, and resolved against the dialled
-        // host: a refused dial leaves `connectedPeer` on the host before it,
-        // so reading the name off that one put another computer's name on
-        // this card and pointed Request access at that computer. It cannot
-        // replace the gate either. `disconnect` clears `connectedPeer` and
-        // leaves the dialled host set on purpose, so a list gated on the
-        // dialled host would offer Choose folder for a host nobody is on.
         if (allowed == false) {
             val refused = dialledHost ?: connectedHost
             if (refused != null) {
@@ -4793,10 +4454,6 @@ private fun AccountDialog(
         runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
     }
     var pane by rememberSaveable { mutableStateOf(0) }
-    // Full height, not half. The Apple sheet fills the screen, and the panes
-    // behind these tabs are long: relay usage alone is a card with a progress
-    // bar, five rows and a disclosure. Opening halfway put every one of them
-    // in the bottom third and made the sheet a scroll inside a scroll.
     ai.tokenstat.tokenstat.ui.components.TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -4829,9 +4486,6 @@ private fun AccountDialog(
                     AccountPlanCard(state = state, onPlans = { paywall = true })
                     RelayUsageCard(state.account, onRefresh = { scope.launch { TsRefresh.run("relay") { model.refresh() } } })
                     RelayFallbackCard(model)
-                    // Sync privacy lives under Legal now, with the documents
-                    // it belongs to. Leaving a copy here would be the same
-                    // claim in two places, free to drift apart.
                     AccountLastSyncCard(state)
                     AccountDevicesCard(state)
                     TsDangerButton(
@@ -4840,9 +4494,6 @@ private fun AccountDialog(
                         onClick = { model.signOut(); onDismiss() },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    // Ending the account, kept apart from everything above
-                    // it. It is not a document, so it lives at the end of
-                    // the account rather than under Legal.
                     HorizontalDivider(color = colors.border)
                     Text(
                         L10n.text("android.tokenstatapp.danger_zone.fd8b8dae"),
@@ -4877,10 +4528,6 @@ private fun AccountDialog(
                     }
                 }
                 1 -> {
-                    // Notifications, Tabs, then this machine's traffic: the
-                    // order the Apple sheet uses, and each in a card with a
-                    // mark. The switch used to be a bare row above the cards,
-                    // so the pane opened on an unlabelled toggle.
                     DeviceNotificationsCard()
                     ai.tokenstat.tokenstat.ui.components.AppearanceCard()
                     ai.tokenstat.tokenstat.ui.workspace.PullOpenCard()
@@ -4909,8 +4556,6 @@ private fun AccountDialog(
                 }
                 else -> {
                     var sampleOpen by remember { mutableStateOf(false) }
-                    // "Help" is the card's title, not a label floating above
-                    // it, which is how the Apple sheet builds this pane.
                     TsCard(title = L10n.text("common.help")) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -4930,10 +4575,6 @@ private fun AccountDialog(
                         }
                     }
                     if (sampleOpen) SampleSheet(onDismiss = { sampleOpen = false })
-                    // One card with two rows, named the way the documents are
-                    // named. Two full-width buttons labelled "Terms" and
-                    // "Privacy" said less and looked like actions rather than
-                    // links off the device.
                     TsCard(title = L10n.text("android.tokenstatapp.terms_and_privacy.8d60f3a9"), mark = "mark_license") {
                         Column {
                             LegalLinkRow(L10n.text("android.tokenstatapp.privacy_policy.ba445cff")) { open("https://tokenstat.ai/privacy?mobile=1") }
@@ -4950,8 +4591,6 @@ private fun AccountDialog(
                     var licensesOpen by remember { mutableStateOf(false) }
                     LicensesCard(onOpen = { licensesOpen = true })
                     if (licensesOpen) LicensesSheet(onDismiss = { licensesOpen = false })
-                    // Where the Apple sheet keeps it: the privacy claim reads
-                    // as part of the documents, not as a footnote under them.
                     SyncPrivacyCard()
                 }
             }
@@ -4968,9 +4607,6 @@ private fun AccountDialog(
             billing = billing,
             onDismiss = { paywall = false },
             currentTier = state.account?.string("tier"),
-            // The server names a monthly interval and leaves a yearly one
-            // unsaid, the way the account card reads it: paid and not
-            // monthly means yearly.
             currentInterval = run {
                 val serverBilling = state.account?.get("billing") as? JsonObject
                 when {
@@ -5033,10 +4669,6 @@ private fun RelayUsageCard(account: JsonObject?, onRefresh: () -> Unit) {
                     .mapNotNull { it as? JsonObject }
                     .filter { (it.long("bytes") ?: 0L) > 0L }
                     .reversed()
-                // Thirty rows of bytes are a reference, not a headline, and
-                // laid out flat they pushed the caption that dates the whole
-                // card off the screen. Collapsed to start, like the
-                // `DisclosureGroup` the Apple clients wrap it in.
                 var daysExpanded by remember { mutableStateOf(false) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -5167,8 +4799,6 @@ private fun LocalTrafficCard(model: AppViewModel) {
 
 @Composable
 private fun SyncPrivacyCard() {
-    // This phone does not upload an archive; the boundary is what the
-    // computers put on the account and what a remote session carries.
     TsCard(title = L10n.text("android.tokenstatapp.sync_privacy.9f408670")) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
@@ -5200,9 +4830,6 @@ private fun UsageRow(label: String, bytes: Long) {
 
 private fun binaryBytes(n: Long): String = ai.tokenstat.tokenstat.ui.connection.formatTrafficBytes(n)
 
-/// One headline figure with its label and period mark, top trailing the way
-/// every other figure card on the client carries its mark. Ported from
-/// `TotalTile` in `ClientHomeView.swift`.
 @Composable
 private fun TotalTile(label: String, value: String, mark: String, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -5215,8 +4842,6 @@ private fun TotalTile(label: String, value: String, mark: String, modifier: Modi
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label, style = TsType.subheadline, color = colors.textSecondary)
-            // Shrinks to fit rather than clipping. "$1,110.16" cut to "$1,11"
-            // on a narrow phone is not a smaller number, it is a wrong one.
             TsFitFigure(
                 value,
                 style = TsType.numeric(22, FontWeight.SemiBold),
@@ -5227,16 +4852,11 @@ private fun TotalTile(label: String, value: String, mark: String, modifier: Modi
     }
 }
 
-/// One provider reading with its windows, the shape `usage.limits` actually
-/// returns: `windows[{label, percent, resetsAtMs}]` under a `source`. The
-/// generic row card this replaces could not reach any of it.
 @Composable
 internal fun LimitCard(reading: JsonObject) {
     val colors = LocalTsColors.current
     val windows = reading["windows"] as? JsonArray ?: JsonArray(emptyList())
     val stale = reading.bool("stale")
-    // A reading with no date is not a reading. The wire speaks camelCase;
-    // the snake key stays as a fallback for older hosts.
     val observedAt = (reading.long("observedAtMs") ?: reading.long("observed_at_ms"))?.takeIf { it > 0 }
     val observed = when {
         observedAt == null -> L10n.text("android.tokenstatapp.no_date.89be6303")
@@ -5250,10 +4870,6 @@ internal fun LimitCard(reading: JsonObject) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 HarnessMark(id = source, size = 24.dp)
-                // Both sides weighted, and both allowed to wrap. Only the
-                // name column had a weight, so on a narrow phone the
-                // freshness took its full natural width first and left the
-                // provider a few letters, clipped mid-glyph: "OpenCod".
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         title,
@@ -5273,9 +4889,6 @@ internal fun LimitCard(reading: JsonObject) {
                 )
             }
             if (windows.isEmpty()) {
-                // "We could not look" is a different answer from "nothing is
-                // used", and the two must not render alike. The note shows
-                // only here, never beside windows.
                 reading.string("note")?.let {
                     Text(it, style = TsType.caption, color = colors.textSecondary)
                 }
@@ -5288,23 +4901,15 @@ internal fun LimitCard(reading: JsonObject) {
     }
 }
 
-/// One limit window, ported from `WindowGauge`: the label and the percent
-/// on one row, a capsule bar under it, and the reset date when the host
-/// sends one. Vertical, so a three-digit percent never wraps.
 @Composable
 private fun LimitGauge(value: JsonObject) {
     val colors = LocalTsColors.current
     val percent = value.doubleOrNull("percent") ?: 0.0
-    // Severity is the renderer's decision, taken from the core's
-    // thresholds rather than reinvented here.
     val gauge = when (LimitLogic.severityOf(value.string("severity"), percent)) {
         LimitLogic.Severity.CRITICAL -> colors.danger
         LimitLogic.Severity.WARNING -> colors.warning
         LimitLogic.Severity.NORMAL -> colors.accent
     }
-    // Codex reports the account's own allowance beside the running
-    // model's, and both are weekly. Without the scope the two rows read
-    // as one limit stated twice. The same mapping `displayLabel` draws.
     val label = value.string("label") ?: ""
     val scope = value.string("scope")
     val shown = when (scope?.lowercase()) {
@@ -5360,9 +4965,6 @@ private fun LimitGauge(value: JsonObject) {
     }
 }
 
-/// The cross-device SSH vault, on a plan that does not include it. The same
-/// card every other empty screen uses, so a plan gate is told in one voice
-/// across the app. Port of `vaultUpgrade` in `SSHLibraryView`.
 @Composable
 private fun VaultUpgradeCard(onPlans: () -> Unit) {
     EmptyState(
@@ -5397,12 +4999,6 @@ private fun JsonObject.doubleOrNull(key: String): Double? = this[key]?.jsonPrimi
 private fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
 
 
-/// Who is signed in, as a card. Port of `identityCard` in
-/// `ClientAccountSheet.swift`.
-///
-/// It was a bare row with a tier chip and a device count, which said less
-/// than the Apple sheet and said it in a shape that did not match anything
-/// else on the screen. Tapping it opens the profile window.
 @Composable
 private fun AccountIdentityCard(state: ClientState, model: AppViewModel, onOpen: (String) -> Unit) {
     val colors = LocalTsColors.current
@@ -5463,8 +5059,6 @@ private fun AccountIdentityCard(state: ClientState, model: AppViewModel, onOpen:
     }
 }
 
-/// One row, like the profile above it: the whole card opens Team. Port of
-/// `ClientTeamAccountLink`.
 @Composable
 private fun AccountTeamCard(onTeam: () -> Unit) {
     val colors = LocalTsColors.current
@@ -5499,12 +5093,6 @@ private fun AccountTeamCard(onTeam: () -> Unit) {
     }
 }
 
-/// What the account is paying for, and where that is managed. Port of
-/// `planCard`.
-///
-/// The sheet used to jump straight from the identity row to a "See plans"
-/// button, so somebody on a paid plan could not see which plan, when it
-/// renews, or that it is managed on the web rather than by Apple.
 @Composable
 private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
     val colors = LocalTsColors.current
@@ -5536,13 +5124,6 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
                 style = TextStyle(fontSize = 14.sp),
                 color = colors.textSecondary,
             )
-            // Where it is managed decides what can be done from here, so it
-            // is a sentence rather than a guess at a button. Mirrors
-            // `isAppleBilled` / `isPaddleBilled` / `isWebManagedPlan` in
-            // `Models.swift`, with Google Play standing where the App Store
-            // stands on the iPhone: a provider alone is not enough, the
-            // subscription also has to be live, or founder and family access
-            // reads as a store purchase nobody can cancel.
             val live = billing?.bool("hasLiveSub") == true ||
                 billing?.string("status") in listOf("active", "trialing", "past_due") ||
                 billing?.bool("entitled") == true
@@ -5597,10 +5178,6 @@ private fun AccountPlanCard(state: ClientState, onPlans: () -> Unit) {
 }
 
 
-/// "Aug 26, 2026" from an ISO instant, in the reader's own zone. Port of
-/// `ClientAccountSheet.shortDay`. Taking the first ten characters of the
-/// string instead reads the UTC day, which is the wrong one either side of
-/// midnight.
 private fun shortDay(iso: String): String = runCatching {
     val instant = java.time.Instant.parse(iso)
     java.time.format.DateTimeFormatter
@@ -5631,11 +5208,6 @@ private fun LegalLinkRow(label: String, onOpen: () -> Unit) {
 }
 
 
-/// When anything last put numbers on the account. Port of `lastSync`.
-///
-/// A phone reads the archive and never writes one, and this card is where
-/// that is said. Without it the Account pane went from the relay allowance
-/// straight to Sign out.
 @Composable
 private fun AccountLastSyncCard(state: ClientState) {
     val colors = LocalTsColors.current
@@ -5659,9 +5231,6 @@ private fun AccountLastSyncCard(state: ClientState) {
     }
 }
 
-/// Every machine on the account, with the one in your hand marked. Port of
-/// `devices`. The Devices tab lists them too, but somebody checking what is
-/// linked to an account is in the account, not in a tab about machines.
 @Composable
 private fun AccountDevicesCard(state: ClientState) {
     val colors = LocalTsColors.current
@@ -5724,9 +5293,6 @@ private fun AccountDevicesCard(state: ClientState) {
     }
 }
 
-/// The window behind the app and the bars over it, in the theme on screen.
-/// The system's own night mode may say otherwise, and the activity is not
-/// remade when either changes.
 @Composable
 private fun SystemBars(colors: ai.tokenstat.tokenstat.ui.theme.TsColors) {
     val view = androidx.compose.ui.platform.LocalView.current

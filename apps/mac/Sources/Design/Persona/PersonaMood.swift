@@ -6,86 +6,30 @@
 
 import SwiftUI
 
-/// What the character is doing, which is what the conversation is doing.
-///
-/// A mood is not a picture. It is three pure functions of elapsed time: the
-/// forces to apply, where the face is looking, and what is in the air around
-/// it. Nothing here positions a node, so every mood inherits weight, overshoot
-/// and settle from the soft body underneath, and switching mood mid-bounce
-/// carries the bounce across instead of cutting.
-///
-/// **Every activity is a story, not a loop.** A sine wave is alive for about
-/// four seconds and then it is wallpaper, because the eye has learnt it. So
-/// each one here runs a cycle with something in it: an idea arrives, the tea
-/// is too hot, the balance goes, the bubble pops. `beat` and `ramp` are how
-/// those are written, and `stalledClock` is how a character stops doing one
-/// thing long enough to react to another. The physics is the same physics, the
-/// difference is that there is now something to watch for.
 enum PersonaMood: Hashable, CaseIterable {
-    /// Alive and doing nothing. Breathes, sways, blinks, and every so often
-    /// has an enormous yawn about it.
     case idle
-    /// A ball. Real gravity, a real floor, squash on landing, and a fresh
-    /// kick whenever it runs out of bounce.
     case bouncing
-    /// Something is turning over inside. Churn, a lean back, eyes up on a
-    /// thought that orbits, and now and then the thought lands.
     case thinking
-    /// A tiny construction worker: hard hat on, hauling itself left and right
-    /// and hammering the ground with overly serious little thuds, then
-    /// standing back to admire the hole.
     case working
-    /// Talking. The body pulses with the mouth, so a streaming reply has a
-    /// voice rather than a spinner.
     case speaking
-    /// Keeping a ball up, leaning left and right to meet it, and every fourth
-    /// throw very nearly losing it.
     case juggling
-    /// On the beat: squash down, spring up, sway, a hop every fourth, and a
-    /// full spin every eighth.
     case dancing
-    /// A tool is waiting on a person. Leans in, eyes wide, taps its foot,
-    /// sighs, and wears the colour that already means "your turn" everywhere
-    /// else.
     case waiting
-    /// It worked. One big jump, a stretch at the top, sparks, confetti, and a
-    /// second smaller hop because one was not enough.
     case ok
-    /// It failed. A hard shake, then the whole thing gives up and melts into
-    /// a puddle that keeps trying to stand back up.
     case failed
-    /// Out cold. Flat, slow, closed, with z's and the occasional good dream.
     case sleeping
-    /// Reading the paper. Eyes scan a line at a time, and what is on the page
-    /// is sometimes startling and sometimes very funny.
     case reading
-    /// Playing something handheld. Wins occasionally, loses occasionally, and
-    /// takes both far too seriously.
     case gaming
-    /// Walking the floor and thinking about it, until it stops dead because
-    /// it has got it.
     case pacing
-    /// It ricochets between the floor and a tiny keyboard, trying to type by
-    /// landing on the keys. The small liquid squashes are the whole joke.
     case typing
-    /// Tea. The first sip is always too hot and it never learns.
     case sipping
-    /// Painting directly onto the floor with a comically large brush, then
-    /// standing back to look at what it has done.
     case sketching
-    /// Looking up. Something crosses the sky and it makes a wish on it.
     case stargazing
-    /// Tending a tiny sprout until it flowers, which it finds overwhelming.
     case gardening
-    /// Blowing a bubble, watching it get too big, and being startled by the
-    /// entirely predictable consequence.
     case bubbling
-    /// A biscuit, in three bites, with an unreasonable amount of pleasure.
     case snacking
 
-    // MARK: - Forces
 
-    /// The forces for this instant. `clock` is seconds since the mood began.
     func drive(clock: CGFloat, traits: PersonaTraits) -> PersonaDrive {
         var drive = PersonaDrive()
         drive.damping = 3.4 * traits.firmness
@@ -112,15 +56,10 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.gravity = 3.1
             drive.restitution = 0.62
             drive.friction = 0.94
-            // Loose and underdamped on purpose. A bouncing ball that holds its
-            // shape is a bouncing ball, and this one should be a bouncing
-            // water balloon.
             drive.damping = 1.25 * traits.firmness
             drive.pressure = 58 * traits.firmness
             drive.shapeStiffness = 118 * traits.firmness
             drive.anchorPull = 2.4
-            // A little smaller in the air, which buys the headroom the hop
-            // needs without the resting character being smaller than it was.
             drive.radius = PersonaStage.restRadius * 0.90
             drive.stretch = CGSize(width: 1, height: 1)
 
@@ -145,9 +84,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.damping = 4.4 * traits.firmness
             drive.pressure = 50 * traits.firmness
             drive.radius = PersonaStage.restRadius * 0.96
-            // It stands over the job rather than pacing past it. The swing is
-            // the motion, and a character walking while it hammers is a
-            // character doing two things badly.
             drive.anchorX = PersonaStage.centreX - 0.06
             drive.anchorPull = 12
             drive.lean = 0.10 + job.strike * 0.30 - job.lift * 0.16 - job.admire * 0.34
@@ -172,8 +108,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let swing = (ball.point.x - PersonaStage.centreX)
             drive.gravity = 1.0
             drive.damping = (3.0 - ball.panic * 0.9) * traits.firmness
-            // The body chases the ball rather than swinging on a fixed sine,
-            // so the fourth throw going wide drags the whole creature after it.
             drive.anchorX = PersonaStage.centreX + swing * (0.55 + ball.panic * 0.55)
             drive.lean = swing * (1.5 + ball.panic * 1.4)
             drive.anchorPull = 9 + ball.panic * 7
@@ -186,10 +120,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.gravity = 1.35
             drive.restitution = 0.30
             drive.damping = 3.0 * traits.firmness
-            // Small. This is somebody enjoying a song where they are standing,
-            // not a routine: a light bob, a shift of weight left and right,
-            // and that is the whole dance. The full spin that used to be in
-            // here read as a performance and drowned the mood it belonged to.
             drive.stretch = CGSize(width: 1 + pump * 0.045, height: 1 - pump * 0.042)
             drive.anchorX = PersonaStage.centreX + sway * 0.075
             drive.radius = PersonaStage.restRadius * 0.95
@@ -218,8 +148,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.stretch = CGSize(width: 1 - rise * 0.20, height: 1 + rise * 0.28)
 
         case .failed:
-            // Three phases in one expression: a shake it cannot absorb, a
-            // collapse, then a puddle that has not entirely given up.
             let melt = min(max((clock - 0.34) / 0.85, 0), 1)
             let eased = melt * melt * (3 - 2 * melt)
             let retry = PersonaMood.failedRetry(clock)
@@ -228,7 +156,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.damping = (3.0 + eased * 1.4) * traits.firmness
             drive.pressure = (44 - eased * 18) * traits.firmness
             drive.shapeStiffness = (150 - eased * 88) * traits.firmness
-            // A puddle is allowed to feel its own weight. That is the point.
             drive.support = 1 - eased * 0.7
             drive.stretch = CGSize(
                 width: 1 + eased * 0.34 - retry * 0.22,
@@ -243,8 +170,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.damping = (3.9 - gag.laugh * 1.6) * traits.firmness
             drive.lean = 0.07 + sway * 0.035 - gag.shock * 0.20
             drive.anchorX = PersonaStage.centreX - 0.012 + sway * 0.008
-            // The laugh is a fast wobble on top of the read, which is what
-            // somebody trying not to laugh at a newspaper actually does.
             let chuckle = gag.laugh * sin(clock * 2 * .pi * 7.5)
             drive.stretch = CGSize(
                 width: 1 + sway * 0.016 - gag.shock * 0.08 - chuckle * 0.05,
@@ -252,8 +177,6 @@ enum PersonaMood: Hashable, CaseIterable {
             )
 
         case .gaming:
-            // Rocking, not swaying: two rates beating against each other, so
-            // the lean never settles into a metronome.
             let rock = sin(clock * 2 * .pi * 1.15) * 0.65 + sin(clock * 2 * .pi * 0.43) * 0.35
             let round = PersonaMood.gamingRound(clock)
             drive.gravity = 1.15
@@ -261,8 +184,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.lean = rock * 0.26 * (1 - round.loss) + round.loss * 0.14
             drive.anchorX = PersonaStage.centreX + rock * 0.030
             drive.anchorPull = 9
-            // Losing is played entirely in the body: it deflates, and the
-            // ground stops holding it up.
             drive.support = 1 - round.loss * 0.35
             drive.stretch = CGSize(
                 width: 1 + round.loss * 0.16 - round.win * 0.10,
@@ -277,8 +198,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.damping = 3.4 * traits.firmness
             drive.anchorX = walk.x
             drive.radius = PersonaStage.restRadius * 0.88
-            // Leaning into the direction of travel, and standing up straight
-            // at the turns, which is where the lean crosses zero anyway.
             drive.lean = walk.direction * 0.20 * (1 - idea) - idea * 0.10
             drive.anchorPull = 13
             drive.stretch = CGSize(width: 1 - idea * 0.12, height: 1 + idea * 0.18)
@@ -288,9 +207,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.gravity = 1.35
             drive.damping = 3.4 * traits.firmness
             drive.pressure = 42 * traits.firmness
-            // Leaning over a keyboard that is on the floor, which is where a
-            // keyboard is. It used to ricochet off one in mid-air, and a
-            // character that cannot reach its own desk is a bug, not a joke.
             drive.anchorX = PersonaStage.centreX - 0.055
             drive.anchorPull = 12
             drive.lean = 0.24 * (1 - keys.pause) - keys.pause * 0.12 + keys.nod * 0.10
@@ -305,9 +221,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let tea = PersonaMood.tea(clock)
             drive.gravity = 0.95
             drive.damping = 4.2 * traits.firmness
-            // The still one. A long slow breathe, a sip now and then, and
-            // nothing else asking for attention. The body tips back a little
-            // into the sip, which is the only way a ball can drink.
             let breathe = sin(clock * 2 * .pi / 5.2)
             drive.lean = breathe * 0.020 - tea.lift * 0.16
             drive.anchorX = PersonaStage.centreX - 0.020 * tea.lift
@@ -320,8 +233,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let work = PersonaMood.sketch(clock)
             drive.gravity = 1.55
             drive.damping = 3.6 * traits.firmness
-            // Leaning down and across at the sheet on the floor, and following
-            // its own hand from one side of it to the other.
             drive.lean = 0.20 + work.sweep * 0.12 - work.look * 0.30
             drive.anchorX = PersonaStage.centreX - 0.09 + work.sweep * 0.030 - work.look * 0.045
             drive.anchorPull = 11
@@ -345,8 +256,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let pat = max(0, sin(clock * 2 * .pi / 1.15)) * (1 - plot.joy)
             drive.gravity = 1.35
             drive.damping = 3.8 * traits.firmness
-            // Leaning towards its own patch, which is on the floor to its
-            // right, so the patting lands on the soil.
             drive.lean = (0.16 + pat * 0.08) * (1 - plot.joy) - plot.joy * 0.10
             drive.stretch = CGSize(
                 width: 1 + pat * 0.025 - plot.joy * 0.10,
@@ -358,8 +267,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let bubble = PersonaMood.bubble(clock)
             drive.gravity = 1.0
             drive.damping = (3.4 - bubble.blow * 0.8) * traits.firmness
-            // Cheeks first, then the flinch. The body inflates while it blows
-            // and loses all of it in three frames when the thing pops.
             drive.pressure = (44 + bubble.blow * 16 - bubble.pop * 22) * traits.firmness
             drive.shapeStiffness = (150 - bubble.pop * 70) * traits.firmness
             drive.stretch = CGSize(
@@ -376,8 +283,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.damping = 3.5 * traits.firmness
             drive.lean = -0.10 - snack.bite * 0.30 + snack.chew * 0.05
             drive.anchorX = PersonaStage.centreX - 0.02
-            // Chewing is a fast small squash, which is the whole difference
-            // between eating and holding food.
             let jaw = snack.chew * sin(clock * 2 * .pi * 4.6)
             drive.stretch = CGSize(
                 width: 1 + snack.bite * 0.09 + jaw * 0.045 + snack.happy * 0.06,
@@ -398,8 +303,6 @@ enum PersonaMood: Hashable, CaseIterable {
             drive.wobble = 0.03
             drive.wobblePhase = clock * 0.12
         }
-        // Plush stuffing yields gently; emotions never melt the character
-        // into a different silhouette. Apply this to resting poses too.
         drive.stretch.width = min(max(drive.stretch.width, 0.88), 1.12)
         drive.stretch.height = min(max(drive.stretch.height, 0.88), 1.12)
         drive.shapeStiffness = max(drive.shapeStiffness, 145 * traits.firmness)
@@ -409,9 +312,7 @@ enum PersonaMood: Hashable, CaseIterable {
         return drive
     }
 
-    // MARK: - Face
 
-    /// Where the face is, before the body's own motion pushes it around.
     func face(clock: CGFloat, traits: PersonaTraits) -> PersonaFacePose {
         var face = PersonaFacePose()
         switch self {
@@ -454,8 +355,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.mouthWidth = 0.70 + idea * 0.35
             face.mouthOpen = idea * 0.55
             if idea > 0.45 {
-                // The moment it lands, and the only moment. Held any longer
-                // and having an idea stops being an event.
                 face.openness = 1.15
                 face.squint = 0
                 face.eyeScale = 1.10
@@ -466,8 +365,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.openness = 0.62 + job.admire * 0.30
             face.squint = 0.32 * (1 - job.admire)
             face.brow = 0.40 - job.admire * 0.55
-            // Eyes on the nail, all the way down. It is what makes the swing
-            // land somewhere rather than merely happen.
             face.gaze = CGPoint(x: 0.45 - job.admire * 0.20, y: 0.60 - job.admire * 0.85)
             face.lift = -0.02
             face.mouthCurve = -0.1 + job.admire * 1.0 + job.strike * 0.2
@@ -479,9 +376,6 @@ enum PersonaMood: Hashable, CaseIterable {
         case .speaking:
             let syllable = PersonaMood.speechEnvelope(clock)
             face.openness = 1.0 + syllable * 0.16
-            // Brows up, never down, and the mouth kept to a talking size. A
-            // wide-open mouth under a lowered brow with marks flying off the
-            // side of the head is a cackle, whatever the code meant by it.
             face.brow = -0.16 - syllable * 0.10
             face.mouthOpen = 0.24 + syllable * 0.62
             face.mouthCurve = 0.38
@@ -499,7 +393,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.mouthOpen = 0.22 + ball.panic * 0.7
             face.blinks = false
             if ball.panic > 0.35 {
-                // It is going to be fine. It does not know that.
                 face.openness = 1.12 + ball.panic * 0.45
                 face.eyeScale = 1 + ball.panic * 0.40
                 face.brow = -0.4
@@ -517,8 +410,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.blinks = false
 
         case .waiting:
-            // Big round eyes, but relaxed brows and a tiny smile: eager is
-            // friendlier than an unblinking, alarmed stare.
             let sigh = PersonaMood.waitingSigh(clock)
             face.openness = 1.12
             face.eyeScale = 1.06
@@ -555,8 +446,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.blinks = false
 
         case .reading:
-            // A saccade, not a sweep: eyes jump along a line, drop to the
-            // next one, and jump back. Reading is what that looks like.
             let gag = PersonaMood.readingGag(clock)
             let line = clock / 2.1
             let across = line - floor(line)
@@ -567,7 +456,6 @@ enum PersonaMood: Hashable, CaseIterable {
             face.openness = 0.86
             face.squint = 0.22
             face.brow = 0.16
-            // Eyes up on the body, so they clear the top edge of the paper.
             face.lift = 0.07
             face.mouthCurve = 0.10
             face.mouthWidth = 0.7
@@ -603,7 +491,6 @@ enum PersonaMood: Hashable, CaseIterable {
             if round.win > 0.45 {
                 face.eyes = .happyArc
             } else if round.loss > 0.3 {
-                // Sad, not dead. Half-shut eyes under a heavy brow.
                 face.openness = 0.55
                 face.squint = 0.45
             }
@@ -750,11 +637,7 @@ enum PersonaMood: Hashable, CaseIterable {
         return face
     }
 
-    // MARK: - What is in the air
 
-    /// Everything that is not the creature: a thought, a ball, sparks, notes,
-    /// z's, a drip. Written into a buffer the engine owns, so a frame of
-    /// motion allocates nothing.
     func motes(clock: CGFloat, traits: PersonaTraits, at anchors: PersonaAnchors, into motes: inout [PersonaMote]) {
         let crown = anchors.crown
         switch self {
@@ -785,10 +668,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 opacity: 0.5 * (1 - idea)
             ))
             guard idea > 0.55 else { break }
-            // The thought arriving, drawn as the two dots it was already
-            // circling flying apart. A light bulb was tried here and it is
-            // somebody else's shorthand: this creature has been turning two
-            // dots over for six seconds, so the two dots are what should go.
             for index in 0..<4 {
                 let angle = CGFloat(index) * (.pi / 2) - .pi / 4
                 let burst = (idea - 0.55) / 0.45
@@ -821,10 +700,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let showing = max(1 - job.sunk * 0.78, 0.12)
             let head = CGPoint(x: nail.x, y: PersonaStage.floor - 0.10 * showing)
             motes.append(PersonaMote(kind: .nail, position: nail, scale: showing, opacity: 1))
-            // The swing is aimed rather than posed: the angle is worked out
-            // from where the hammer is held to where the nail head currently
-            // is, so the blow lands on it, and keeps landing on it as the nail
-            // goes in. A fixed angle missed by a tenth of the frame.
             let grip = CGPoint(x: anchors.hands.x + 0.01, y: anchors.hands.y - 0.02)
             let aim = atan2(head.y - grip.y, max(head.x - grip.x, 0.01))
             motes.append(PersonaMote(
@@ -874,8 +749,6 @@ enum PersonaMood: Hashable, CaseIterable {
                     angle: angle
                 ))
             }
-            // Confetti outlives the sparks by a couple of seconds, so the
-            // celebration has a tail on it rather than stopping dead.
             for index in 0..<9 {
                 let seed = CGFloat(index)
                 let life = min(max((clock - seed * 0.045) / 2.4, 0), 1)
@@ -904,8 +777,6 @@ enum PersonaMood: Hashable, CaseIterable {
                     kind: .note,
                     position: CGPoint(
                         x: min(0.86, max(0.14, crown.x + side * (0.13 + sin(life * .pi * 1.5) * 0.04))),
-                        // The note itself has a tall stem. Leave it room at
-                        // the top, rather than merely keeping its centre in.
                         y: max(0.16, crown.y - 0.01 - life * 0.18)
                     ),
                     scale: 0.8 + life * 0.3,
@@ -974,10 +845,6 @@ enum PersonaMood: Hashable, CaseIterable {
             ))
 
         case .reading:
-            // One sheet, held, drifting. There was a page turn here and it
-            // was not worth it: the interesting part of somebody reading is
-            // that they are absorbed and barely moving, and an event every few
-            // seconds argues with that. What is on the page is the event.
             let gag = PersonaMood.readingGag(clock)
             let sway = sin(clock * 2 * .pi / 5.3)
             motes.append(PersonaMote(
@@ -1000,9 +867,6 @@ enum PersonaMood: Hashable, CaseIterable {
 
         case .gaming:
             let round = PersonaMood.gamingRound(clock)
-            // The screen faces him, so what reaches us is the light off it.
-            // Drawn under the face rather than over the body, which is what
-            // makes it read as a screen rather than a lamp.
             motes.append(PersonaMote(
                 kind: .glow,
                 position: CGPoint(x: anchors.hands.x, y: anchors.hands.y - 0.03),
@@ -1014,8 +878,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 position: anchors.hands,
                 scale: 1,
                 opacity: 1,
-                // Three rates: a rock, a lean, and the small fast jitter of
-                // somebody actually working the buttons.
                 angle: sin(clock * 2 * .pi * 1.15) * 0.15
                     + sin(clock * 2 * .pi * 0.43) * 0.10
                     + sin(clock * 2 * .pi * 6.3) * 0.028
@@ -1078,10 +940,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 opacity: 0.7 * (1 - idea)
             ))
             guard idea > 0.5 else { break }
-            // The thought it has been walking round with, arriving. It used to
-            // be a light bulb, which is somebody else's shorthand and did not
-            // say what this character had been doing for the last nine
-            // seconds. The dot it was circling is what should go.
             let burst = (idea - 0.5) / 0.5
             for index in 0..<3 {
                 let angle = -CGFloat.pi / 2 + (CGFloat(index) - 1) * 0.8
@@ -1107,8 +965,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 angle: keys.lit
             ))
             if keys.pause > 0.25 {
-                // Stopped mid-word with nothing to say next, which is the most
-                // honest thing this whole cast does.
                 motes.append(PersonaMote(
                     kind: .mark,
                     position: CGPoint(x: crown.x + 0.16, y: max(0.12, crown.y - 0.07)),
@@ -1128,26 +984,16 @@ enum PersonaMood: Hashable, CaseIterable {
 
         case .sipping:
             let tea = PersonaMood.tea(clock)
-            // From the hands to the mouth, and no further. It used to travel a
-            // fixed distance upward, which on a tall body put the cup level
-            // with the eyes: a character drinking through its face.
             let mouth = anchors.mouth
             let rest = anchors.hands
             motes.append(PersonaMote(
                 kind: .mug,
                 position: CGPoint(
-                    // Held out to the side, and brought *in* towards the face
-                    // to drink. It was moving out and tipping away, which is
-                    // the same gesture performed for somebody standing behind
-                    // the character.
                     x: rest.x + 0.080 - tea.lift * 0.062,
                     y: rest.y + (mouth.y + 0.020 - rest.y) * tea.lift
                 ),
                 scale: 1,
                 opacity: 1,
-                // Negative, so the rim tips towards the mouth rather than away
-                // from it. The mug sits to the right of the face, so the tip
-                // has to go anticlockwise.
                 angle: -tea.lift * 0.80
             ))
             for step in 0..<2 {
@@ -1175,10 +1021,6 @@ enum PersonaMood: Hashable, CaseIterable {
             let work = PersonaMood.sketch(clock)
             let sheet = CGPoint(x: 0.66, y: PersonaStage.floor)
             motes.append(PersonaMote(kind: .sheet, position: sheet, scale: 1, opacity: 1))
-            // The wet end of the brush and the mark it is making, and that is
-            // all. There was a painting building up here stroke by stroke,
-            // which is a different and much longer story than the one this
-            // mood is telling.
             let tip = CGPoint(x: sheet.x + work.sweep * 0.10, y: sheet.y - 0.055)
             for step in 0..<3 {
                 let age = CGFloat(step) * 0.13
@@ -1194,8 +1036,6 @@ enum PersonaMood: Hashable, CaseIterable {
             guard work.look < 0.5 else { break }
             motes.append(PersonaMote(
                 kind: .brush,
-                // Bristles down on the paper, handle up and back towards the
-                // character, which is the only way anybody holds a brush.
                 position: CGPoint(x: tip.x, y: tip.y - 0.085),
                 scale: 1,
                 opacity: 1 - work.look * 2,
@@ -1240,9 +1080,6 @@ enum PersonaMood: Hashable, CaseIterable {
 
         case .gardening:
             let plot = PersonaMood.garden(clock)
-            // Planted in the floor, in its own patch of soil, off to one side.
-            // It used to hang in front of the character's middle, which read
-            // as a plant stuck to its front rather than a plant in the ground.
             let root = CGPoint(x: 0.72, y: PersonaStage.floor)
             if plot.bloom < 0.5 {
                 motes.append(PersonaMote(
@@ -1298,8 +1135,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 ))
             }
             guard bubble.pop > 0.02 else { break }
-            // The bubble is not there any more, only the argument about where
-            // it went.
             for index in 0..<6 {
                 let angle = CGFloat(index) * (2 * .pi / 6)
                 let reach = 0.04 + (1 - bubble.pop) * 0.16
@@ -1329,7 +1164,6 @@ enum PersonaMood: Hashable, CaseIterable {
                 ))
             }
             if snack.bite > 0.4 {
-                // Crumbs. Nobody eats a biscuit tidily and neither does this.
                 for index in 0..<3 {
                     let seed = CGFloat(index)
                     motes.append(PersonaMote(
@@ -1357,10 +1191,7 @@ enum PersonaMood: Hashable, CaseIterable {
         }
     }
 
-    // MARK: - Meaning
 
-    /// An outline and ink colour that overrides the persona's own, for the two
-    /// states that carry a meaning the app already has a colour for.
     var tint: Color? {
         switch self {
         case .waiting: return Theme.warning
@@ -1369,12 +1200,6 @@ enum PersonaMood: Hashable, CaseIterable {
         }
     }
 
-    /// Frames per second worth spending. Half rate is invisible on a slow
-    /// breathe and halves the cost of a transcript full of faces.
-    ///
-    /// Reading and tea used to be on the cheap list and are not any more:
-    /// both now have a fast shake in them, a laugh and a scalded mouth, and
-    /// anything above about four cycles a second turns to mush at thirty.
     var frameRate: Double {
         switch self {
         case .idle, .sleeping, .waiting, .stargazing, .gardening: return 30
@@ -1382,14 +1207,6 @@ enum PersonaMood: Hashable, CaseIterable {
         }
     }
 
-    /// How long one telling of this mood takes, in seconds.
-    ///
-    /// A pastime is held for one or two of these rather than for a fixed
-    /// number of seconds. Some of these stories are three seconds long and
-    /// some are eleven, so a flat "show it for fifteen seconds" ran the short
-    /// ones five times over while cutting the long ones off before their
-    /// point. Nought means the mood has no story: it can be held for as long
-    /// as anybody likes.
     var storyLength: Double {
         switch self {
         case .idle: return 11.5
@@ -1440,36 +1257,21 @@ enum PersonaMood: Hashable, CaseIterable {
         }
     }
 
-    // MARK: - Shaping a cycle
 
-    /// Where we are in a repeating cycle, nought to one.
     static func phase(_ clock: CGFloat, _ period: CGFloat) -> CGFloat {
         clock.truncatingRemainder(dividingBy: period) / period
     }
 
-    /// A single rise and fall inside a window of a cycle: nought outside it,
-    /// one at the middle of it.
-    ///
-    /// Every gag in this file is one of these. A thing that happens, and then
-    /// is over, which is the difference between a character and a loop.
     static func beat(_ phase: CGFloat, _ from: CGFloat, _ to: CGFloat) -> CGFloat {
         guard phase > from, phase < to else { return 0 }
         return sin((phase - from) / (to - from) * .pi)
     }
 
-    /// Nought before a window and one after it, eased across. For anything
-    /// that happens once and stays happened, like a sprout growing.
     static func ramp(_ phase: CGFloat, _ from: CGFloat, _ to: CGFloat) -> CGFloat {
         let t = min(max((phase - from) / max(to - from, 1e-4), 0), 1)
         return t * t * (3 - 2 * t)
     }
 
-    /// A clock that stops inside a window of its own cycle and carries on
-    /// afterwards from where it stopped.
-    ///
-    /// This is what lets a character stop walking to have a thought. Slowing
-    /// the sine down instead would make it drift backwards, and cutting to a
-    /// held pose would throw away everything the springs are for.
     static func stalledClock(_ clock: CGFloat, period: CGFloat, from: CGFloat, to: CGFloat) -> CGFloat {
         let cycles = floor(clock / period)
         let inside = clock - cycles * period
@@ -1479,17 +1281,11 @@ enum PersonaMood: Hashable, CaseIterable {
         return cycles * (period - held) + min(inside, start) + max(0, inside - stop)
     }
 
-    // MARK: - Shared timing
 
     static let rallyPeriod: CGFloat = 0.78
-    /// 125bpm. Fast enough to read as a beat at 26pt, slow enough not to buzz.
     static let beatPeriod: CGFloat = 0.48
     static let stridePeriod: CGFloat = 2.6
 
-    /// Where a pacing character is and which way it is going.
-    ///
-    /// A cosine rather than a triangle wave, so it slows into each turn and
-    /// speeds up across the middle, which is what walking a floor looks like.
     static func pacingWalk(_ clock: CGFloat) -> (x: CGFloat, direction: CGFloat) {
         let turn = clock * .pi / stridePeriod
         return (
@@ -1498,8 +1294,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// The pacing cycle: it walks, and once every nine seconds it stops dead
-    /// because it has worked something out.
     static let paceThinkPeriod: CGFloat = 9.1
     static func pacingClock(_ clock: CGFloat) -> CGFloat {
         stalledClock(clock, period: paceThinkPeriod, from: 0.72, to: 0.88)
@@ -1509,11 +1303,6 @@ enum PersonaMood: Hashable, CaseIterable {
         beat(phase(clock, paceThinkPeriod), 0.72, 0.90)
     }
 
-    /// One nail, in four blows, and then a moment of being pleased about it.
-    ///
-    /// `lift` is how far back the hammer is drawn, `strike` is the blow
-    /// landing, `sunk` is how much of the nail is left showing. The swing has
-    /// to be slow going up and fast coming down or it reads as a vibration.
     static let nailPeriod: CGFloat = 4.2
     static let blowPeriod: CGFloat = 0.66
 
@@ -1525,7 +1314,6 @@ enum PersonaMood: Hashable, CaseIterable {
         }
         let blows = floor(cycle * nailPeriod / blowPeriod)
         let swing = phase(clock, blowPeriod)
-        // Three quarters of the beat drawing back, a quarter coming down.
         let lift = swing < 0.74 ? ramp(swing, 0, 0.74) : 1 - ramp(swing, 0.74, 1)
         return (
             lift: lift,
@@ -1535,40 +1323,29 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// Down tools, look at the work. Every four seconds or so, which is
-    /// roughly how long anybody can hammer without checking.
     static func workAdmire(_ clock: CGFloat) -> CGFloat {
         hammering(clock).admire
     }
 
-    /// The thought lands. Rare enough that it is worth waiting for, and short
-    /// enough that it is over before it can become a pose.
     static func thinkingIdea(_ clock: CGFloat) -> CGFloat {
         beat(phase(clock, 7.2), 0.80, 0.97)
     }
 
-    /// The long slow breath out of somebody who has been waiting a while.
     static func waitingSigh(_ clock: CGFloat) -> CGFloat {
         beat(phase(clock, 5.6), 0.70, 0.92)
     }
 
-    /// A puddle that keeps trying to stand back up, every four and a bit
-    /// seconds, and cannot.
     static func failedRetry(_ clock: CGFloat) -> CGFloat {
         guard clock > 1.5 else { return 0 }
         return beat(phase(clock - 1.5, 4.4), 0.55, 0.80)
     }
 
-    /// Typing: bursts of keys, a pause where it reconsiders, and a small nod
-    /// at whatever it decided.
     static let typePeriod: CGFloat = 6.4
 
     static func typing(_ clock: CGFloat) -> (tap: CGFloat, lit: CGFloat, pause: CGFloat, nod: CGFloat) {
         let cycle = phase(clock, typePeriod)
         let pause = ramp(cycle, 0.62, 0.70) * (1 - ramp(cycle, 0.84, 0.90))
         let nod = beat(cycle, 0.88, 0.99)
-        // Two rates against each other, so the patter is uneven the way real
-        // typing is rather than a drum roll.
         let patter = max(0, sin(clock * 2 * .pi * 6.4)) * (0.7 + 0.3 * sin(clock * 2 * .pi * 1.7))
         return (
             tap: patter * (1 - pause) * (1 - nod),
@@ -1578,8 +1355,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// A cup of tea, drunk properly: lift, small sip, down, and a while of
-    /// being warm about it. Twice a cycle.
     static let teaPeriod: CGFloat = 7.4
 
     static func tea(_ clock: CGFloat) -> (lift: CGFloat, warm: CGFloat) {
@@ -1590,9 +1365,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// A round of the game, won or lost, alternating. Losing needs to be in
-    /// here as much as winning: a character that only ever wins is a trophy,
-    /// and a character that reacts to both is a player.
     static let gamePeriod: CGFloat = 10.4
 
     static func gamingRound(_ clock: CGFloat) -> (win: CGFloat, loss: CGFloat) {
@@ -1602,12 +1374,6 @@ enum PersonaMood: Hashable, CaseIterable {
         return round.isMultiple(of: 2) ? (event, 0) : (0, event)
     }
 
-    /// The brush going back and forth across the sheet, and now and then a
-    /// pause to look at what it has done.
-    ///
-    /// `sweep` is minus one to one across the paper. It is a cosine rather
-    /// than a triangle so the brush slows at each end and lifts, which is what
-    /// a hand doing this actually does.
     static let sketchPeriod: CGFloat = 8.6
 
     static func sketchSweep(_ clock: CGFloat) -> CGFloat {
@@ -1624,8 +1390,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// Something crosses the sky, it gasps, and then it makes a wish, which is
-    /// the correct order of operations.
     static func sky(_ clock: CGFloat) -> (crossing: CGFloat, starX: CGFloat, gasp: CGFloat, wish: CGFloat) {
         let period: CGFloat = 9.4
         let phase = phase(clock, period)
@@ -1638,8 +1402,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// One sprout, grown and then flowered. The whole cycle is the point: a
-    /// plant that is always the same size is a decoration.
     static func garden(_ clock: CGFloat) -> (growth: CGFloat, bloom: CGFloat, joy: CGFloat) {
         let period: CGFloat = 11.2
         let phase = phase(clock, period)
@@ -1650,7 +1412,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// Blow, blow, blow, pop, be surprised, pretend that was the plan.
     static func bubble(_ clock: CGFloat) -> (size: CGFloat, blow: CGFloat, pop: CGFloat, sheepish: CGFloat) {
         let period: CGFloat = 5.4
         let phase = phase(clock, period)
@@ -1663,8 +1424,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// A biscuit in three bites, with chewing in between and no dignity at
-    /// any point.
     static func snack(_ clock: CGFloat) -> (bite: CGFloat, chew: CGFloat, happy: CGFloat, left: CGFloat, bites: CGFloat) {
         let period: CGFloat = 7.6
         let phase = phase(clock, period)
@@ -1688,8 +1447,6 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// The two things that happen to somebody reading: something appalling,
-    /// and something very funny. They alternate, so neither becomes the joke.
     static func readingGag(_ clock: CGFloat) -> (shock: CGFloat, laugh: CGFloat) {
         let period: CGFloat = 8.4
         let round = Int(floor(clock / period))
@@ -1697,7 +1454,6 @@ enum PersonaMood: Hashable, CaseIterable {
         return round.isMultiple(of: 2) ? (event, 0) : (0, event)
     }
 
-    /// Breathing, asleep, and the occasional good dream.
     static func snore(_ clock: CGFloat) -> (breath: CGFloat, dream: CGFloat) {
         (
             breath: sin(clock * 2 * .pi / 4.6),
@@ -1705,20 +1461,12 @@ enum PersonaMood: Hashable, CaseIterable {
         )
     }
 
-    /// Speech as an envelope rather than a metronome: a fast syllable rate
-    /// under a slow phrase rate, so it pauses for breath on its own.
     static func speechEnvelope(_ clock: CGFloat) -> CGFloat {
         let syllable = sin(clock * 2 * .pi * 5.1)
         let phrase = 0.55 + 0.45 * sin(clock * 2 * .pi * 0.41)
         return max(0, syllable) * phrase
     }
 
-    /// The ball's parabola. Launched off the crown, apex alternating sides, so
-    /// the body has a reason to lean one way and then the other.
-    ///
-    /// Every fourth throw goes wrong: higher, wider, and very nearly not
-    /// caught. The rally is the same three seconds otherwise, and it is the
-    /// fourth one that makes anybody watch the first three.
     static func rallyBall(clock: CGFloat) -> (point: CGPoint, panic: CGFloat) {
         let period = rallyPeriod
         let index = floor(clock / period)
@@ -1729,7 +1477,6 @@ enum PersonaMood: Hashable, CaseIterable {
         let from = PersonaStage.centreX - side * (wild ? 0.17 : reach)
         let to = PersonaStage.centreX + side * reach
         let x = from + (to - from) * t
-        // A parabola between the two crowns, apex near the top of the frame.
         let top: CGFloat = wild ? 0.03 : 0.06
         let launch: CGFloat = 0.22
         let y = launch - 4 * (launch - top) * t * (1 - t)
@@ -1737,84 +1484,36 @@ enum PersonaMood: Hashable, CaseIterable {
     }
 }
 
-/// Where the face is and what it is doing, independent of where the body is.
-///
-/// Every field is a number rather than a case, so the engine can ease one pose
-/// into the next and a mood change reads as an expression changing rather than
-/// a mask being swapped.
 struct PersonaFacePose {
-    /// What the eyes are, when they are not eyes.
-    ///
-    /// A shape is a decision rather than a quantity, so these do not
-    /// interpolate: they change at the midpoint of a mood shift, under the
-    /// blink the engine fires there. Half a star is not an expression.
     enum Eyes {
-        /// This creature's own eyes, from its traits.
         case normal
-        /// Two upward arcs. Pleased.
         case happyArc
-        /// Two downward arcs. Asleep, or content with its own company.
         case contentArc
     }
 
-    // There were star eyes here for a while, on winning, on an idea, on a
-    // spin, on a flower. Four moods wearing the same loud face is not four
-    // expressions, it is one sticker, and it buried the quieter ones this
-    // cast is actually good at. Delight is wide eyes, high brows and a big
-    // mouth, the way it was.
-
-    // A whites-of-the-eyes shape, a spiral and a cross all lived here and all
-    // three are gone. They read as creepy rather than funny: this cast has one
-    // solid mark per eye, so the moment a pupil appears inside a white circle
-    // it stops being a drawing of a creature and starts being a stare.
-    // Surprise is the creature's own eyes, wider, with the brows up.
 
     var eyes: Eyes = .normal
-    /// Eyelid. Zero is shut, one is normal, above one is wide.
     var openness: CGFloat = 1
-    /// Lower lid. Concentration, not sleep.
     var squint: CGFloat = 0
-    /// Where it is looking, in eye-radii.
     var gaze = CGPoint(x: 0, y: 0)
-    /// Eyes higher or lower on the body than usual.
     var lift: CGFloat = 0
-    /// Eye separation multiplier.
     var spread: CGFloat = 1
-    /// Negative raises the brows, positive lowers the inner ends.
     var brow: CGFloat = 0
-    /// Minus one is a frown, plus one a smile.
     var mouthCurve: CGFloat = 0
     var mouthOpen: CGFloat = 0
     var mouthWidth: CGFloat = 1
     var blinks = true
-    /// Both eyes, bigger or smaller. Saucer eyes are half of surprise and the
-    /// eyelid is only the other half.
     var eyeScale: CGFloat = 1
-    /// Two warm patches under the eyes. Pleased with itself, or caught out.
     var blush: CGFloat = 0
-    /// How far the tongue is out of an open mouth. Effort, delight, or a
-    /// deliberate raspberry, depending on the rest of the face.
     var tongue: CGFloat = 0
-    /// How far the lower lids have pushed up into a smile, nought to one.
-    /// At one the eyes are two crescents, the shape `happyArc` names. Being a
-    /// number rather than a shape is what lets an eye smile slowly.
     var cheer: CGFloat = 0
-    /// How far the outer ends of the upper lids have dropped. Sorry, tired,
-    /// or let down, depending on the mouth.
     var droop: CGFloat = 0
 
-    /// The same expression with its named eye shapes turned into lid
-    /// positions. A pleased crescent is a lower lid pushed all the way up and
-    /// a contented arc is a shut eye, so both can be eased into and out of
-    /// like any other number instead of swapping under a blink.
     func expressed() -> PersonaFacePose {
         var out = self
         switch eyes {
         case .normal: break
         case .happyArc:
-            // Moods that asked for arcs also narrowed the lid, because an arc
-            // used to be drawn inside whatever the lid left. A crescent is
-            // the whole eye with the lower lid up, so it wants the lid open.
             out.cheer = 1
             out.squint = 0
             out.openness = 1
@@ -1827,9 +1526,6 @@ struct PersonaFacePose {
         return out
     }
 
-    /// One expression part way into another. Used while a mood is changing,
-    /// so the face is crossfading at the same time as the body rather than
-    /// chasing a target that has already jumped.
     static func blend(_ from: PersonaFacePose, _ to: PersonaFacePose, by amount: CGFloat) -> PersonaFacePose {
         let t = max(0, min(1, amount))
         let k = t * t * (3 - 2 * t)
@@ -1849,14 +1545,10 @@ struct PersonaFacePose {
         out.tongue = mix(from.tongue, to.tongue)
         out.cheer = mix(from.cheer, to.cheer)
         out.droop = mix(from.droop, to.droop)
-        // Eye shape is a decision, not a quantity. Half a star is not an
-        // expression, so it changes at the midpoint, under the blink.
         out.eyes = k < 0.5 ? from.eyes : to.eyes
         return out
     }
 
-    /// Component-wise ease toward a target. Runs every step with a time
-    /// constant, so a face never snaps and never lags noticeably either.
     mutating func ease(towards target: PersonaFacePose, rate: CGFloat) {
         let k = min(rate, 1)
         openness += (target.openness - openness) * k
@@ -1879,7 +1571,6 @@ struct PersonaFacePose {
     }
 }
 
-/// One thing in the air. Positions are in the same unit space as the body.
 struct PersonaMote {
     enum Kind {
         case dot
@@ -1889,45 +1580,24 @@ struct PersonaMote {
         case zed
         case drop
         case puff
-        /// An open newspaper, held.
         case paper
-        /// The back of something handheld. The screen faces the character,
-        /// not us.
         case console
-        /// The light that screen throws back onto its face.
         case glow
-        /// A keyboard lying on the floor, near edge on the floor line.
         case keyboard
-        /// A sheet of paper on the floor, in the same shallow perspective.
         case sheet
-        /// A warm mug held at chest height.
         case mug
-        /// A tiny plant which makes an excellent desk companion.
         case sprout
-        /// What the sprout becomes if somebody keeps watering it.
         case flower
-        /// A punctuation mark in the air. `angle` picks it: nought is an
-        /// exclamation, anything else a question.
         case mark
-        /// The bead of sweat every cartoon has used for a hundred years,
-        /// because it works.
         case sweat
         case heart
-        /// A star with a tail, crossing the top of the frame.
         case shootingStar
-        /// One scrap of paper, tumbling. `angle` is its spin.
         case confetti
-        /// A wet stroke of paint left on the floor.
         case stroke
-        /// Blown, growing, and about to be a mistake.
         case bubble
-        /// A round biscuit, with as many bites out of it as `scale` allows.
         case cookie
-        /// A hammer, swung. `angle` is where it is in the swing.
         case hammer
-        /// A nail in the floor. `scale` is how much of it is still showing.
         case nail
-        /// A comically large paint brush dragged along the floor.
         case brush
     }
 

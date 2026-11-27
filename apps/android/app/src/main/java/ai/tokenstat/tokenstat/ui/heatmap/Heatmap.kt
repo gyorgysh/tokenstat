@@ -99,24 +99,17 @@ private val monthRowHeight = 13.dp
 
 private data class FocusCell(val col: Int, val row: Int, val day: JsonObject)
 
-/// `YYYY-MM-DD` as a person reads it. "11 August", with the year only when it
-/// is not this one: a column of dates all carrying the same year is a column
-/// of noise. Falls back to the raw string rather than to today's date.
 fun shortDate(iso: String, today: LocalDate = LocalDate.now()): String {
     val date = runCatching { LocalDate.parse(iso) }.getOrNull() ?: return iso
     val pattern = if (date.year == today.year) "d MMMM" else "d MMMM yyyy"
     return date.format(DateTimeFormatter.ofPattern(pattern, Locale.getDefault()))
 }
 
-/// "11 August 2026". Used where the year matters, because a sheet saying an
-/// ISO date says nothing.
 fun spokenDate(iso: String): String {
     val date = runCatching { LocalDate.parse(iso) }.getOrNull() ?: return iso
     return date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.getDefault()))
 }
 
-/// How current the account grid is, in the same words the limit cards use.
-/// Nil when the host never said, so the header shows the day count alone.
 fun calendarFreshness(
     fetchedAtMs: Long?,
     noticeCode: String?,
@@ -127,15 +120,6 @@ fun calendarFreshness(
     return if (noticeCode == "stale") "stale, last updated $ago" to true else "updated $ago" to false
 }
 
-/// The phone's year heatmap, a direct port of `PhoneHeatmap.swift`: fixed cell
-/// size, horizontally scrolling grid opened on the most recent week, month
-/// marks offset across the top, locked days muted, and hold-to-read with
-/// lift-to-open detail.
-///
-/// Fitting 53 weeks to a phone width shrinks a day below anything a finger can
-/// hit, which is why the Apple client scrolls the year too. The cell size is
-/// deliberately not fitted to the width: a fitted cell makes the view measure
-/// itself and drags every card on Home off the screen.
 @Composable
 fun YearHeatmap(
     rows: JsonArray,
@@ -157,9 +141,6 @@ fun YearHeatmap(
 
     val heat = remember(colors) { phoneHeat(colors) }
 
-    // Shades for cells whose host never sent a level. The grid's own values
-    // are all here even then: only the levels are missing, so the breaks
-    // come from the same days on screen.
     val fallbackScale = remember(rows) {
         heatFallbackScale(
             rows.flatMap { row ->
@@ -170,8 +151,6 @@ fun YearHeatmap(
         )
     }
 
-    // Open on the latest week, which is the part anybody wants first.
-    // maxValue is zero until the grid has been laid out, so follow it.
     LaunchedEffect(rows) {
         snapshotFlow { scroll.maxValue }.collect { max ->
             if (max > 0 && scroll.value < max) scroll.scrollTo(max)
@@ -186,9 +165,6 @@ fun YearHeatmap(
         label = "heatmapFocus",
     )
 
-    /// Which day a touch landed on, using the same packing the canvas drew
-    /// with. Points between squares round to the square they are nearest, so
-    /// a finger dragged across the grid never lands on nothing.
     fun hit(px: Float, py: Float): FocusCell? {
         val col = (px / stepPx).toInt()
         val row = (py / stepPx).toInt()
@@ -201,11 +177,6 @@ fun YearHeatmap(
     }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // The line above the grid: what the finger is on, or how to use it.
-        // The readout lives here rather than beside the square it names,
-        // because a bubble by the cell is a bubble under the hand pointing
-        // at it. Above the whole grid it is always visible, always in the
-        // same place, and never behind a finger.
         AnimatedContent(
             targetState = focus?.day?.get("date")?.jsonPrimitive?.contentOrNull,
             transitionSpec = { fadeIn(tween(120)) togetherWith fadeOut(tween(120)) },
@@ -268,10 +239,6 @@ fun YearHeatmap(
                     Modifier.width(gutterWidth),
                     verticalArrangement = Arrangement.spacedBy(cellGap),
                 ) {
-                    // Pushed down by the month row so the letters line up
-                    // with the rows. The width matters: without it the clear
-                    // spacer stretches across the card and squeezes the grid
-                    // into what is left.
                     Spacer(Modifier.width(gutterWidth).height(monthRowHeight))
                     listOf(L10n.text("android.heatmap.m.08f27188"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap.w.fcb5f40d"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap.f.f67ab10a"), L10n.text("android.heatmap..e3b0c442"), L10n.text("android.heatmap..e3b0c442")).forEach { letter ->
                         Box(Modifier.height(cellSize), contentAlignment = Alignment.CenterStart) {
@@ -292,8 +259,6 @@ fun YearHeatmap(
                 ) {
                     Box(Modifier.height(monthRowHeight).width(gridWidthDp)) {
                         months.forEach { month ->
-                            // Objects from current hosts ({column, name}),
-                            // arrays from older ones ([column, name]).
                             val column: Int?
                             val name: String?
                             when (month) {
@@ -330,11 +295,6 @@ fun YearHeatmap(
                             .pointerInput(rows, stepPx) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown()
-                                    // Phase one: wait up to 200ms for the
-                                    // hold, watching for a lift or for the
-                                    // finger wandering into a scroll. Nothing
-                                    // is consumed here, so the grid keeps
-                                    // scrolling under an ordinary drag.
                                     var liftedAt: Offset? = null
                                     var wandered = false
                                     withTimeoutOrNull(200) {
@@ -351,14 +311,11 @@ fun YearHeatmap(
                                             }
                                         }
                                     }
-                                    // A scroll owns the gesture from here.
                                     if (wandered) return@awaitEachGesture
                                     val lifted = liftedAt
                                     if (lifted != null) {
                                         hit(lifted.x, lifted.y)?.let { onSelectDay(it.day) }
                                     } else {
-                                        // Held past 200ms: scrub until the
-                                        // lift, then open the day named.
                                         try {
                                             scrubbing = true
                                             onScrub(true)
@@ -433,31 +390,16 @@ fun YearHeatmap(
     }
 }
 
-/// Where the four shades change when the host sent values but no levels.
-///
-/// Quartile breaks over the positive daily values, the same bands the core
-/// `Scale` draws: a quarter of the days worked sit in each shade whatever
-/// the amounts are, so one outlier day cannot flatten the grid to a single
-/// shade. With fewer than four active days there are no quartiles to take,
-/// so the shade is the value's share of the largest day instead.
 sealed interface HeatFallbackScale {
-    /// Upper bound of levels 1, 2 and 3. A day above the last one is level 4.
     data class Quartiles(val breaks: List<Long>) : HeatFallbackScale
-    /// Too few active days for quartiles: shade by value over this maximum.
     data class MaxRatio(val max: Long) : HeatFallbackScale
-    /// No active day at all. Every cell is quiet.
     data object Empty : HeatFallbackScale
 }
 
-/// The fallback scale for a grid of day values in microdollars, newest or
-/// oldest first, zeros included. Positive values only set the breaks: quiet
-/// days are level 0 under every scale.
 fun heatFallbackScale(values: List<Long>): HeatFallbackScale {
     val active = values.filter { it > 0 }.sorted()
     if (active.isEmpty()) return HeatFallbackScale.Empty
     if (active.size < 4) return HeatFallbackScale.MaxRatio(active.last())
-    // Nearest-rank quartiles, rank for rank what `Scale::from_days` takes:
-    // the ceiling of n*q, one-indexed into the ascending values.
     fun at(q: Double): Long {
         val rank = kotlin.math.ceil(active.size * q).toInt()
         return active[(rank - 1).coerceIn(0, active.lastIndex)]
@@ -465,9 +407,6 @@ fun heatFallbackScale(values: List<Long>): HeatFallbackScale {
     return HeatFallbackScale.Quartiles(listOf(at(0.25), at(0.5), at(0.75)))
 }
 
-/// A day's shade under a fallback scale. Zero is quiet; otherwise the first
-/// quartile break at or above the value wins, and anything past the last
-/// break is level 4, exactly like `Scale::level`.
 fun fallbackLevel(value: Long, scale: HeatFallbackScale): Int {
     if (value <= 0) return 0
     return when (scale) {
@@ -489,48 +428,26 @@ fun fallbackLevel(value: Long, scale: HeatFallbackScale): Int {
     }
 }
 
-/// The activity ramp, with a quiet day that can actually be seen.
-///
-/// Port of `PhoneHeatmap.heatPalette`: step zero of the shared ramp all but
-/// vanishes on a white card at arm's length, so the phone overrides it; the
-/// four active steps stay the brand's own, so a busy week on the phone is
-/// the same colour as a busy week on the site.
 fun phoneHeat(colors: TsColors): List<Color> =
     if (colors.ownsHeat) colors.heat else colors.heat.toMutableList().also {
         it[0] = if (colors.isDark) Color(0xFF221E36) else Color(0xFFDEDAEA)
     }
 
-/// Params for the `activity.day` call behind the tapped-day sheet: the same
-/// scope and weeks the grid was drawn with, so the answer describes the
-/// squares on screen. See `Bridge.dayDetail` on the Apple client.
 fun dayDetailParams(date: String): JsonObject = buildJsonObject {
     put("date", date)
     put("weeks", 53)
     put("scope", "account")
 }
 
-/// A count with locale grouping, port of Swift's `.formatted()` on the day
-/// sheet's totals line: "1,214,203 tokens" in the reader's own grouping.
 fun groupedCount(count: Long): String =
     NumberFormat.getIntegerInstance(Locale.getDefault()).format(count)
 
-/// "12 events, 1,214,203 tokens": the sheet's totals line, in the Apple
-/// client's shape. Events stay ungrouped there, tokens are grouped.
 fun dayTotalsLine(events: Long, tokens: Long): String =
     L10n.text("android.heatmap.0_events_1_tokens.e35a47c3", "${events}", "${groupedCount(tokens)}")
 
-/// The `model x harness` rows of an `activity.day` answer. Null (a quiet day,
-/// which the host answers with JSON null) and a missing rows array both mean
-/// no rows, and anything that is not an object is skipped rather than
-/// crashing the sheet.
 fun dayPartRows(detail: JsonObject?): List<JsonObject> =
     (detail?.get("rows") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
 
-/// One day, tapped out of the heatmap.
-///
-/// A port of `DayDetailSheet.swift`: the date, the day's total at list rates,
-/// the event plus token counts, and one row per model. Sized to its content,
-/// scrolling when a day has more models than fit.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
@@ -546,9 +463,6 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
         if (locked) { isLoading = false; return@LaunchedEffect }
         isLoading = true
         failed = false
-        // Account scope, because the grid this was tapped out of is the
-        // account's. A local answer here would describe a machine whose
-        // squares are not the ones on screen.
         try {
             detail = CoreClient.call("activity.day", dayDetailParams(date)) as? JsonObject
         } catch (e: CancellationException) {
@@ -584,8 +498,6 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
             } else {
                 val rows = dayPartRows(detail)
                 if (rows.isEmpty()) {
-                    // A quiet day is an answer. It must not read as a
-                    // failure to look.
                     Text(
                         L10n.text("android.heatmap.nothing_recorded_on_this_day.5ad77ba8"),
                         style = TsType.subheadline,
@@ -600,9 +512,6 @@ fun DayDetailSheet(day: JsonObject?, onDismiss: () -> Unit) {
     }
 }
 
-/// The sheet's header: the day's total at list rates, then the event plus
-/// token counts once the detail lands. The figure comes from the grid cell,
-/// so it is on screen before the fetch finishes.
 @Composable
 private fun DayDetailHeader(day: JsonObject, detail: JsonObject?) {
     val colors = LocalTsColors.current

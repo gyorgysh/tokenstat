@@ -162,9 +162,6 @@ internal class ModelWebSurface(context: Context) : WebView(context) {
         }
     }
 
-    // The chat list scrolls on a vertical drag and took one that started on
-    // the model, so the model only turned sideways and the page moved
-    // instead. A touch that lands here belongs to the model until it lifts.
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
@@ -184,8 +181,6 @@ internal class ModelWebSurface(context: Context) : WebView(context) {
     fun render(data: String, extension: String, background: String) {
         if (stopped) return
         val previous = pending
-        // Compose may update this view for every streamed message. Keep the
-        // unchanged payload instead of rebuilding up to 16 MiB of JavaScript.
         if (previous?.data == data && previous.extension == extension && previous.background == background) return
         pending = Render(data, extension, background)
         revision++
@@ -217,8 +212,6 @@ internal class ModelWebSurface(context: Context) : WebView(context) {
     companion object {
         private const val BASE = "https://models.tokenstat.invalid/"
         private const val PAGE = BASE + "model.html"
-        // Android WebView can report innerHeight while CSS 100vh is still zero
-        // during its first layout. Set the canvas height in CSS pixels before loading.
         private const val VIEWPORT_SCRIPT = "var modelHeight=Math.max(1,innerHeight); document.documentElement.style.height=modelHeight+'px'; document.body.style.height=modelHeight+'px'; document.getElementById('model').style.height=modelHeight+'px';"
     }
 }

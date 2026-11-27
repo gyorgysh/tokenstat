@@ -74,9 +74,7 @@ internal static class NavigationRows
         return row;
     }
 
-    /// <summary>Refresh row-owned behavior when its navigation container is retained.</summary>
     public static event Action<NavigationViewItem, NavigationViewItem>? Reconciled;
-    /// <summary>Update live content while retaining navigation containers and scroll anchors.</summary>
     public static void Reconcile(IList<object> items, IReadOnlyList<NavigationViewItem> desired, string prefix, int start = -1, NavigationView? owner = null)
     {
         var tags = desired.Select(row => row.Tag as string).ToHashSet();
@@ -93,7 +91,6 @@ internal static class NavigationRows
             var existing = items.OfType<NavigationViewItem>().FirstOrDefault(row => Equals(row.Tag, fresh.Tag));
             if (existing is not null)
             {
-                // Keep the navigation container and its scroll anchor alive.
                 var unchanged = existing.Content is FrameworkElement { Tag: not null } oldView
                     && fresh.Content is FrameworkElement newView && Equals(oldView.Tag, newView.Tag);
                 if (!unchanged)

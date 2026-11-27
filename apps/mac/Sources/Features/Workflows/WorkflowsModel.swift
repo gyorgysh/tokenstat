@@ -13,17 +13,10 @@ enum WorkflowFocus: Sendable {
     case run
 }
 
-/// Host-owned workflow graphs and the runs they have produced.
-///
-/// Everything lives in the daemon. The app lists graphs, edits a working
-/// copy on the canvas, starts a run, and tails the selected step. Save
-/// writes the same IR the runner and MCP already use.
 @MainActor
 @Observable
 final class WorkflowsModel {
     private(set) var graphs: [WorkflowGraph] = []
-    /// Which workspace this screen is showing. Nil is every workspace, and a
-    /// global scope shows the graphs that are not bound to a folder.
     var scope: String?
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var backends: [AgentBackend] = []
@@ -33,15 +26,12 @@ final class WorkflowsModel {
     var errorMessage: String?
     var noticeMessage: String?
 
-    /// Unsaved design. Never auto-run.
     var draft: WorkflowGraph?
     var designTranscript: String = ""
     var isDesigning = false
     private(set) var isSaving = false
 
-    /// The graph open on the canvas. A copy until Save.
     private var document = WorkflowGraphDocument()
-    /// Automations a node can run. Same list as the Automations screen.
     private(set) var jobs: [Automation] = []
 
     var working: WorkflowGraph? { document.graph }
@@ -51,7 +41,6 @@ final class WorkflowsModel {
     var isEditing: Bool { document.isOpen }
     var canUndo: Bool { document.canUndo }
     var canRedo: Bool { document.canRedo }
-    /// Bumped when the canvas should fit the graph (open, design, revert).
     private(set) var editorEpoch = 0
 
     private(set) var selectedGraphID: String?
@@ -65,9 +54,6 @@ final class WorkflowsModel {
     private var pollingKey: String?
     private var noticeGeneration = 0
     private var isVisible = false
-    /// The screen left while a tail was in flight. The host can compact the
-    /// readable file meanwhile, so the next poll has to start from zero rather
-    /// than append at an offset that now points at different bytes.
     private var transcriptNeedsReset = false
 
     func appeared() async {
@@ -117,7 +103,6 @@ final class WorkflowsModel {
         }
     }
 
-    /// Sidebar and list stay current while this screen is off.
     func refreshList() async {
         do {
             async let g = Bridge.workflows()
@@ -128,7 +113,6 @@ final class WorkflowsModel {
             RunNotifications.shared.settle(workflows: runs)
             #endif
         } catch {
-            // The next tick tries again.
         }
     }
 
@@ -143,9 +127,6 @@ final class WorkflowsModel {
         runs.filter { $0.workflowID == graph.id }
     }
 
-    /// The graphs of the current scope. The sidebar lists live runs bound
-    /// to the folder. A workspace shows graphs bound to it. The global board
-    /// shows unbound graphs only.
     var scoped: [WorkflowGraph] {
         guard let scope else { return graphs.filter { $0.scope == .global } }
         return graphs.filter { $0.scope == .workspace && $0.workspaceID == scope }
@@ -163,7 +144,6 @@ final class WorkflowsModel {
         return runs.filter { $0.workspaceID == scope }
     }
 
-    /// What the sidebar counts: runs in flight, or the graphs waiting to run.
     func count(in workspaceID: String) -> Int {
         let live = liveRuns(in: workspaceID).count
         if live > 0 { return live }
@@ -187,7 +167,6 @@ final class WorkflowsModel {
         return runs.first { $0.id == selectedRunID }
     }
 
-    /// Drop a graph, run or draft the new scope would hide.
     func dropOutOfScopeSelection() {
         if let draft, !graphIsInScope(draft) {
             discardDraft()
@@ -266,8 +245,6 @@ final class WorkflowsModel {
         document.open(graph, dirty: graph.id.isEmpty)
         selectedGraphID = graph.id.isEmpty ? nil : graph.id
         selectedFocus = .graph
-        // A run from another graph must not keep feeding the inspector its
-        // steps and transcript after the canvas switched away.
         if selectedRun?.workflowID != graph.id {
             clearForeignRunSelection()
         }
@@ -290,7 +267,6 @@ final class WorkflowsModel {
         document.close()
     }
 
-    /// Drop unsaved edits of a saved graph and reload it. A new draft is discarded.
     func revertWorking() {
         endGroupedEdit()
         guard let id = working?.id, !id.isEmpty, let fresh = graphs.first(where: { $0.id == id }) else {
@@ -326,7 +302,6 @@ final class WorkflowsModel {
         syncDraft()
     }
 
-    /// Write the working copy without a new undo. Pair with `beginGroupedEdit`.
     func writeWorking(_ body: (inout WorkflowGraph) -> Void) {
         document.writeWorking(body)
         syncDraft()
@@ -364,7 +339,6 @@ final class WorkflowsModel {
         document.beginNodeMove()
     }
 
-    /// Live drag. Undo was captured at `beginNodeMove`.
     func moveNode(id: String, x: Double, y: Double) {
         document.moveNode(id: id, x: x, y: y)
     }
@@ -430,7 +404,6 @@ final class WorkflowsModel {
         syncWatching()
     }
 
-    /// True when Library Design or Blank would overwrite a stashed dirty graph.
     var canStartNewDraft: Bool {
         !isDirty && draft == nil && !isDesigning && !isSaving
     }
@@ -460,8 +433,6 @@ final class WorkflowsModel {
         }
     }
 
-    /// Replace the working graph with a local recipe. Does not call Design
-    /// and does not run.
     func applyRecipe(_ recipe: WorkflowRecipe) {
         guard working != nil else { return }
         document.replaceSteps(nodes: recipe.nodes, edges: recipe.edges, nameIfUntitled: recipe.name)
@@ -532,8 +503,6 @@ final class WorkflowsModel {
                 do {
                     saved = try await Bridge.editWorkflow(graph, revision: graph.revision)
                 } catch {
-                    // A stale working copy must not overwrite the computer.
-                    // Show the refusal and re-read what is actually saved.
                     await load()
                     errorMessage = error.localizedDescription
                     return
@@ -724,7 +693,6 @@ final class WorkflowsModel {
                 }
             }
         } catch {
-            // The next tick tries again.
         }
     }
 
@@ -761,7 +729,6 @@ final class WorkflowsModel {
             }
             transcriptOffset = chunk.nextOffset
         } catch {
-            // The next tick tries again.
         }
     }
 

@@ -80,7 +80,6 @@ struct TokenstatLimitsProvider: AppIntentTimelineProvider {
     }
     func timeline(for configuration: TokenstatLimitsConfiguration, in context: Context) async -> Timeline<TokenstatLimitsEntry> {
         let current = entry(configuration)
-        // A quota reset never means zero used without a new provider reading.
         let transitions = current.readings.flatMap { reading in
             [reading.observedAt.addingTimeInterval(15 * 60)] + reading.windows.compactMap(\.resetsAt)
         } + (1...3).map { current.date.addingTimeInterval(Double($0) * 5 * 60) }

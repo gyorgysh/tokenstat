@@ -105,8 +105,6 @@ fn reviewed_push_transfers_lfs_objects_with_the_commit() {
     fs::write(dir.join("asset.bin"), &body).unwrap();
     text(dir, &["add", ".gitattributes", "asset.bin"]).unwrap();
     text(dir, &["commit", "-qm", "LFS asset"]).unwrap();
-    // An executable hook that does not run LFS must still upload the asset,
-    // and the original hook must still run during the Git push.
     let hook = dir.join(".git/hooks/pre-push");
     let hook_body = "#!/bin/sh\nprintf ran > custom-hook-ran\n";
     fs::write(&hook, hook_body).unwrap();
@@ -136,7 +134,6 @@ fn reviewed_push_transfers_lfs_objects_with_the_commit() {
         fs::read_to_string(dir.join("custom-hook-ran")).unwrap(),
         "ran"
     );
-    // A missing LFS payload fails before any Git ref or user hook is sent.
     fs::write(dir.join("missing.bin"), "A different missing large file").unwrap();
     text(dir, &["add", "missing.bin"]).unwrap();
     text(dir, &["commit", "-qm", "Missing LFS payload"]).unwrap();

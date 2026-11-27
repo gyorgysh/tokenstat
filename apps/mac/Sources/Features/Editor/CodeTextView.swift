@@ -25,10 +25,7 @@ import SwiftUI
 /// re-read from disk.
 struct CodeTextView: NSViewRepresentable {
     let document: EditorDocument
-    /// The shared find session behind the in-app find bar. Nil hides find.
     var find: EditorFindSession?
-    /// Called when the user asks to save, so the shortcut works with focus in
-    /// the text view rather than only on the button.
     let onSave: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -104,19 +101,9 @@ struct CodeTextView: NSViewRepresentable {
         weak var textView: NSTextView?
         weak var ruler: LineNumberRuler?
 
-        /// The spans version already applied, so a redraw does not re-attribute
-        /// the whole file.
         private var appliedSpans = -1
-        /// Set while this class is editing the text itself, so the edit is not
-        /// reported back as if the user had typed it.
         private var isApplyingEdit = false
 
-        /// What the text view holds, as this class last saw it.
-        ///
-        /// Kept so `sync` can tell whether the model has moved without reading
-        /// the buffer back out of the text storage. It is not a second source
-        /// of truth: every path that changes the view updates it in the same
-        /// breath.
         private var syncedText = ""
 
         init(document: EditorDocument, onSave: @escaping () -> Void) {
@@ -124,7 +111,6 @@ struct CodeTextView: NSViewRepresentable {
             self.onSave = onSave
         }
 
-        // MARK: - Find
 
         private var find: EditorFindSession?
         private var appliedFindRevision = -1
@@ -140,10 +126,6 @@ struct CodeTextView: NSViewRepresentable {
             }
         }
 
-        /// Match backgrounds over the buffer. Foreground colours belong to
-        /// the syntax pass, which never touches the background, so the two
-        /// do not fight. The current match needs no paint: the selection
-        /// itself is its highlight.
         private func applyFindHighlights(to textView: NSTextView, force: Bool) {
             guard let find else { return }
             guard !textView.hasMarkedText() else { return }
@@ -184,7 +166,6 @@ struct CodeTextView: NSViewRepresentable {
                 }
             case .replaceAll:
                 guard !textView.hasMarkedText(), !find.matches.isEmpty else { return }
-                // One undo for the whole scope, which is this open document.
                 textView.undoManager?.beginUndoGrouping()
                 for range in find.matches.reversed() {
                     guard range.location + range.length <= (textView.string as NSString).length else {
@@ -197,8 +178,6 @@ struct CodeTextView: NSViewRepresentable {
             }
         }
 
-        /// Push an edit the view already holds into the document and
-        /// recompute the matches around it.
         private func findAfterEdit(_ textView: NSTextView) {
             let text = textView.string
             syncedText = text
@@ -208,7 +187,6 @@ struct CodeTextView: NSViewRepresentable {
             refreshRuler(textView)
         }
 
-        // MARK: - Loading
 
         func load(_ document: EditorDocument, into textView: NSTextView) {
             self.document = document
@@ -285,14 +263,7 @@ struct CodeTextView: NSViewRepresentable {
             refreshRuler(textView)
         }
 
-        // MARK: - Attributes
 
-        /// Font and colour for the whole file, under the syntax colours.
-        ///
-        /// Applied whenever the text is replaced wholesale. Without it, text
-        /// typed after a span keeps that span's colour, because an
-        /// `NSTextStorage` carries attributes forward from the character before
-        /// the insertion point.
         private func applyBaseAttributes(to textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
             let all = NSRange(location: 0, length: storage.length)
@@ -319,9 +290,6 @@ struct CodeTextView: NSViewRepresentable {
                 range: NSRange(location: 0, length: length)
             )
             for span in document.spans {
-                // A span measured against text that has since changed would
-                // otherwise raise, and an out of range exception in an editor
-                // loses the file the user was typing into.
                 guard span.start >= 0, span.len > 0, span.start + span.len <= length else {
                     continue
                 }
@@ -336,10 +304,6 @@ struct CodeTextView: NSViewRepresentable {
 
         private var lineCount = 1
         private var countedLength = -1
-        /// Set by `textDidChange`, so an edit that happens to leave the length
-        /// alone still forces a recount. Replacing a character with a newline
-        /// is exactly that case, and a gutter that misses it is wrong until
-        /// the next unrelated edit.
         private var textChangedSinceCount = true
 
         func refreshRuler(_ textView: NSTextView) {
@@ -361,8 +325,6 @@ struct CodeTextView: NSViewRepresentable {
             let length = storage.length
             guard textChangedSinceCount || length != countedLength else { return lineCount }
 
-            // Newlines plus one, which is the same rule the gutter has always
-            // used: a trailing newline means a real empty row at the bottom.
             var count = 1
             let text = storage.mutableString
             var from = 0
@@ -383,13 +345,10 @@ struct CodeTextView: NSViewRepresentable {
             return lineCount
         }
 
-        // MARK: - NSTextViewDelegate
 
         func textDidChange(_ notification: Notification) {
             guard !isApplyingEdit, let textView = notification.object as? NSTextView else { return }
             textChangedSinceCount = true
-            // One bridge of the buffer into a Swift string per keystroke, not
-            // two. `refreshRuler` used to take its own copy to count lines.
             let text = textView.string
             syncedText = text
             document.setText(text)
@@ -401,20 +360,11 @@ struct CodeTextView: NSViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            // The gutter marks the caret's line, so it redraws when the caret
-            // moves rather than only when the text does.
             guard let textView = notification.object as? NSTextView else { return }
             ruler?.needsDisplay = true
             textView.needsDisplay = true
         }
 
-        /// Newline handling: keep the indentation of the line being left, and
-        /// add one level after an opening brace.
-        ///
-        /// Done here rather than by overriding `insertNewline` so that the
-        /// replacement is a single undo step with the newline itself. Splitting
-        /// them means Cmd+Z removes the indent and leaves the line break, which
-        /// takes two undos to do what looks like one thing.
         func textView(
             _ textView: NSTextView,
             shouldChangeTextIn range: NSRange,
@@ -445,9 +395,6 @@ struct CodeTextView: NSViewRepresentable {
                 return false
             }
 
-            // Wrap a selection in brackets or quotes rather than replacing it.
-            // Typing a quote over selected text meaning "delete it" is a thing
-            // nobody wants and every editor stopped doing.
             if range.length > 0, let closing = Self.pairs[text] {
                 let selected = string.substring(with: range)
                 replace(range, with: text + selected + closing, in: textView)
@@ -457,8 +404,6 @@ struct CodeTextView: NSViewRepresentable {
                 return false
             }
 
-            // Type over a closing bracket the editor inserted, rather than
-            // adding a second one.
             if range.length == 0, Self.closers.contains(text), range.location < string.length,
                string.substring(with: NSRange(location: range.location, length: 1)) == text
             {
@@ -475,9 +420,6 @@ struct CodeTextView: NSViewRepresentable {
             return true
         }
 
-        /// Only pair when the caret is at the end of a line or before something
-        /// that closes. Pairing in front of a word turns `foo` into `(foo` plus
-        /// a stray `)`, which is worse than not helping at all.
         private func shouldPair(at location: Int, in string: NSString) -> Bool {
             guard location < string.length else { return true }
             let next = string.substring(with: NSRange(location: location, length: 1))
@@ -489,7 +431,6 @@ struct CodeTextView: NSViewRepresentable {
         ]
         private static let closers: Set<String> = [")", "]", "}", "\"", "'", "`"]
 
-        // MARK: - Commands from the text view
 
         func save() {
             onSave()
@@ -500,14 +441,12 @@ struct CodeTextView: NSViewRepresentable {
             find?.showing.toggle()
         }
 
-        /// The menu's Hide command, which is a close rather than a toggle.
         func hideFind() {
             if find?.showing == true {
                 find?.showing.toggle()
             }
         }
 
-        /// Cmd+G moves to the next match, opening the bar when it is hidden.
         func findNext() {
             guard let find else { return }
             if find.showing {
@@ -517,7 +456,6 @@ struct CodeTextView: NSViewRepresentable {
             }
         }
 
-        /// Shift+Cmd+G mirrors it backwards.
         func findPrevious() {
             guard let find else { return }
             if find.showing {
@@ -527,20 +465,12 @@ struct CodeTextView: NSViewRepresentable {
             }
         }
 
-        /// Comment or uncomment every line the selection touches.
-        ///
-        /// Uncomments when *every* touched line is already commented, which is
-        /// what makes the key a toggle rather than two keys. A language with no
-        /// line comment does nothing, rather than inserting a token that would
-        /// not parse.
         func toggleComment() {
             guard let textView, let token = document.rules.lineComment else { return }
             let string = textView.string as NSString
             let selection = textView.selectedRange()
             let lineRange = string.lineRange(for: selection)
             let block = string.substring(with: lineRange)
-            // A trailing newline would otherwise become an empty final line and
-            // pick up a comment token of its own.
             let hasTrailingNewline = block.hasSuffix("\n")
             let body = hasTrailingNewline ? String(block.dropLast()) : block
             let lines = body.components(separatedBy: "\n")
@@ -556,8 +486,6 @@ struct CodeTextView: NSViewRepresentable {
                     guard let found = line.range(of: token) else { return line }
                     var stripped = line
                     stripped.removeSubrange(found)
-                    // The space this method adds when commenting comes back off
-                    // when uncommenting, so a round trip is the identity.
                     if stripped[found.lowerBound...].hasPrefix(" ") {
                         stripped.remove(at: found.lowerBound)
                     }
@@ -598,11 +526,6 @@ struct CodeTextView: NSViewRepresentable {
             )
         }
 
-        /// Replace text so it lands on the undo stack as one action.
-        ///
-        /// `shouldChangeTextIn` before and `didChangeText` after is what
-        /// registers the undo grouping. Setting `string` directly skips both,
-        /// which is how an editor ends up with a Cmd+Z that does nothing.
         private func replace(_ range: NSRange, with text: String, in textView: NSTextView) {
             guard textView.shouldChangeText(in: range, replacementString: text) else { return }
             textView.textStorage?.replaceCharacters(in: range, with: text)
@@ -640,7 +563,6 @@ private final class CodeNSTextView: NSTextView {
             MainActor.assumeIsolated { coordinator?.save() }
             return true
         case "f":
-            // The in-app find bar, themed, in place of the native grey one.
             MainActor.assumeIsolated { coordinator?.toggleFind() }
             return true
         case "g":
@@ -676,11 +598,6 @@ private final class CodeNSTextView: NSTextView {
         }
     }
 
-    /// A wash across the line the caret is on.
-    ///
-    /// Drawn behind the text rather than as a background attribute on the
-    /// range, which would be one more thing fighting the syntax attributes and
-    /// would have to be removed and reapplied on every cursor move.
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard selectedRange().length == 0,

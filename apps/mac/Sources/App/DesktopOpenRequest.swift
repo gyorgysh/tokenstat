@@ -2,7 +2,6 @@
 #if os(macOS)
 import Foundation
 
-/// Explicit, workspace-owned desktop navigation. Links accept no command text.
 struct DesktopOpenRequest: Equatable {
     enum InspectorTab: String { case files, changes, history }
     let tool: DesktopWorkbenchState.Tool
@@ -56,8 +55,6 @@ struct DesktopOpenRequest: Equatable {
         }
     }
     private static func validWorkspaceID(_ value: String) -> Bool {
-        // Registered IDs are canonical paths, including Windows verbatim
-        // paths and remote prefixes. Routing checks exact inventory ownership.
         !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.utf8.count <= 4096
             && value.unicodeScalars.allSatisfy { $0.value >= 32 && !(127...159).contains($0.value) }
     }

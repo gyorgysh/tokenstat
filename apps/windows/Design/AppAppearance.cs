@@ -13,16 +13,11 @@ internal sealed class AppearanceImportException(AppearanceImportError error) : E
     public AppearanceImportError Error { get; } = error;
 }
 
-/// <summary>One side of a theme. The seven colours every client names the same way.</summary>
 internal sealed record AppearanceColors(
     uint Background, uint Sidebar, uint Panel, uint Border, uint Accent, uint Secondary, uint Selection);
 
 internal sealed record AppearancePalette(string Id, string Name, AppearanceColors Light, AppearanceColors Dark);
 
-/// <summary>
-/// How the app looks on this computer: a mode and a theme. The same values as the Apple and Android apps. Free of WinUI, so
-/// the choice and its file can be checked anywhere.
-/// </summary>
 internal sealed class AppAppearance
 {
     internal const int MaximumImportBytes = 16_384;
@@ -65,7 +60,6 @@ internal sealed class AppAppearance
         }
         catch
         {
-            // A damaged file only costs the remembered look.
         }
     }
 
@@ -75,11 +69,9 @@ internal sealed class AppAppearance
     public AppearancePalette Palette { get; private set; } = Palettes[0];
     public IReadOnlyList<AppearancePalette> Custom => _custom;
 
-    /// <summary>A theme other than the brand's own.</summary>
     public bool IsThemed => Palette.Id != "default";
     public bool IsOled => Mode == AppearanceMode.Oled;
 
-    /// <summary>Null follows the system.</summary>
     public bool? Dark => Mode switch
     {
         AppearanceMode.Light => false,
@@ -205,7 +197,6 @@ internal sealed class AppAppearance
         }
         catch
         {
-            // Remembering is a courtesy. This session keeps the choice.
         }
         Changed?.Invoke();
     }

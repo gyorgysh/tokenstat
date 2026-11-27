@@ -44,8 +44,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// Pull beside Push. Drawing it reads nothing remote: the dialog it opens is
-/// what fetches, because a person pressed it. Port of GitPullView.swift.
 @Composable
 fun PullButton(
     model: AppViewModel,
@@ -151,8 +149,6 @@ internal fun PullSheet(
                 onPulled()
             }.onFailure {
                 if (it is kotlinx.coroutines.CancellationException) throw it
-                // A refused pull would refuse again with the same review.
-                // Drop it so the dialog offers Check again, not the same Pull.
                 review = null
                 error = TunnelCopy.display(it.message ?: L10n.text("android.gitpull.failed"), hostLabel)
             }
@@ -251,7 +247,6 @@ internal fun PullSheet(
     }
 }
 
-/// The branch's pull request, or the way to open one, beside Pull and Push.
 @Composable
 fun BranchPullButton(
     model: AppViewModel,
@@ -310,7 +305,6 @@ internal fun branchPullState(pull: JsonObject): String = when (pull.str("state")
     else -> if (pull.bol("draft")) L10n.text("android.branchpull.draft") else L10n.text("android.branchpull.open")
 }
 
-/// The project's current changes and pull request, above the composer.
 @Composable
 fun ChatGitStrip(model: AppViewModel, peer: String, workspace: String, chat: JsonObject?,
     protocol: Long?, owner: Any?, offline: Boolean, running: Boolean, onReview: () -> Unit) {

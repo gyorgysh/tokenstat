@@ -2,30 +2,14 @@
 
 import SwiftUI
 
-/// The account-wide spend the root already holds, used when the selected
-/// folder has no history of its own on this machine.
 struct ChatStartGlanceData {
-    /// The last seven days at list rates, oldest first, in microdollars.
     var week: [UInt64]
 }
 
-/// Three equal panels under the composer, all about what you are about to
-/// start: the repository, what work in it has cost lately, and the limits of
-/// the agent you picked.
-///
-/// They follow the composer's choices. Pick another repository and the first
-/// two follow it; pick another agent and the third shows that agent's
-/// windows. Where a panel has nothing specific to say it falls back to
-/// something true rather than to a zero: all projects for spend, the
-/// tightest limits for an agent that reports none. The three keep one size,
-/// so the row reads as a row whatever is in it.
 struct ChatStartGlance: View {
     let repository: WorkspaceFolder?
     let data: ChatStartGlanceData?
-    /// The agent picked in the composer, as a chat backend id.
     let backend: String?
-    /// The composer's model, when it runs on a local server. Such a chat
-    /// spends no plan, so the panel says that instead of another tool's limits.
     var localProvider: String? = nil
     @State private var limits = PlanLimitsStore.shared
     @State private var projectWeek: [UInt64]?
@@ -42,7 +26,6 @@ struct ChatStartGlance: View {
         .task(id: repository?.id) { await loadProjectWeek() }
     }
 
-    // MARK: Repository
 
     private var repositoryPanel: some View {
         GlancePanel(label: L10n.text("apple.chatglance.repository"), symbol: "arrow.triangle.branch",
@@ -83,11 +66,7 @@ struct ChatStartGlance: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    // MARK: Spend
 
-    /// The selected folder's last seven days on this Mac. The archive labels
-    /// a project by its folder's name, so that is the filter. Remote folders
-    /// keep their history on their own machine and use the account series.
     private func loadProjectWeek() async {
         projectWeek = nil
         guard let folder = repository, !folder.isGeneral, folder.machineID == nil else { return }
@@ -127,10 +106,7 @@ struct ChatStartGlance: View {
         }
     }
 
-    // MARK: Limits
 
-    /// The picked agent's own windows, or, when it reports none, the two
-    /// closest to running out across every tool.
     private var limitRows: [(provider: ProviderLimits, window: UsageWindow)] {
         let source = backend.map(harnessCanonicalID)
         if let source, let provider = limits.visible.first(where: { $0.source == source }), !provider.windows.isEmpty {
@@ -161,8 +137,6 @@ struct ChatStartGlance: View {
 
     private var planLimitsPanel: some View {
         let rows = limitRows
-        // Named for the agent when the windows are its own, so "60%" is not
-        // left to guess whose.
         let title = limitsForPickedAgent
             ? L10n.text("apple.chatglance.agent_limits", harnessName(harnessCanonicalID(backend ?? "")))
             : L10n.text("apple.chatglance.plan_limits")
@@ -201,9 +175,6 @@ struct ChatStartGlance: View {
     }
 }
 
-/// One glance card. A quiet fill a step off the page, a hairline edge, a
-/// small uppercase label, and one fixed height, so three side by side read
-/// as one row of facts rather than three competing buttons.
 private struct GlancePanel<Content: View>: View {
     let label: String
     let symbol: String
@@ -242,7 +213,6 @@ private struct GlanceLabelStyle: LabelStyle {
     }
 }
 
-/// Seven days as seven bars, today last and in the accent.
 private struct GlanceBars: View {
     let values: [UInt64]
 

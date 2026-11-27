@@ -109,9 +109,6 @@ pub fn limits() -> ProviderLimits {
             summary = quota_summary_windows(&response);
         }
     }
-    // The quota summary is the IDE's own account of its group limits, the
-    // same 5-hour and weekly windows it shows. Per-model quota is only an
-    // approximation of those, kept for servers that predate the summary.
     if !summary.is_empty() {
         return ProviderLimits {
             profile_id: None,
@@ -272,8 +269,6 @@ fn collect_quota_windows(
             .and_then(Value::as_str)
             .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
             .map(|timestamp| timestamp.as_millisecond());
-        // The Pro Argon bucket is weekly even in its final hours. The
-        // legacy IDE reading omits period metadata for the shared buckets.
         let window = if argon
             || resets_at_ms.is_some_and(|reset| reset - observed_at_ms > 10 * 60 * 60 * 1000)
         {
@@ -320,8 +315,6 @@ pub fn sync_sessions(force: bool) -> anyhow::Result<IdeSyncReport> {
 
     let summaries = list_trajectory_summaries(&connections)?;
     if summaries.is_empty() {
-        // Do not stamp: an empty miss must not block a later real session
-        // inside the TTL window.
         return Ok(IdeSyncReport {
             connections: connections.len(),
             message: format!(
@@ -405,16 +398,11 @@ fn detect_connections() -> anyhow::Result<Vec<Connection>> {
     let mut connections = Vec::new();
 
     for candidate in candidates {
-        // A stale hub file can name a process that has exited, and lsof
-        // fails for that. Skip such a file rather than the whole search.
         let listening = if candidate.hub_ports.is_empty() {
             find_listening_ports(candidate.pid)?
         } else {
             find_listening_ports(candidate.pid).unwrap_or_default()
         };
-        // A hub file is only a hint. Its server may be gone and its port
-        // taken by another program, which must never receive the token, so
-        // a hub port is used only while the named process listens on it.
         let mut ports: Vec<u16> = candidate
             .hub_ports
             .iter()
@@ -1097,7 +1085,6 @@ fn parse_timestamp_value(value: &Value) -> Option<i64> {
             seconds.checked_mul(1000)?.checked_add(nanos / 1_000_000)
         })
         .map(|ms| {
-            // Heuristic: values that look like seconds rather than ms.
             if (1_000_000_000..100_000_000_000).contains(&ms) {
                 ms.saturating_mul(1000)
             } else {

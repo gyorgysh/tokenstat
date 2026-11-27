@@ -6,23 +6,10 @@
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// The stage a persona lives on, in unit coordinates with y pointing down.
-/// Everything is a fraction of the mark's frame, so one simulation serves a
-/// small seat beside a message and a large hero from the same numbers.
-/// </summary>
 internal static class PersonaStage
 {
-    /// <summary>
-    /// Where the body rests. Below it there is a shadow, above it a hop has
-    /// room to travel without leaving the frame.
-    /// </summary>
     public const double Floor = 0.95;
 
-    /// <summary>
-    /// The highest a node may go. A hard stop, not a spring: a bounce that
-    /// escapes the frame is a bounce the transcript sees as a jump.
-    /// </summary>
     public const double Ceiling = 0.02;
 
     public const double LeftRail = 0.02;
@@ -31,86 +18,48 @@ internal static class PersonaStage
 
     public const double CentreX = 0.5;
 
-    /// <summary>
-    /// Radius at rest, so the body fills a little under three quarters of the
-    /// frame. What is left over is the headroom a hop, an antenna and a
-    /// thought dot need.
-    /// </summary>
     public const double RestRadius = 0.355;
 
     public static PPoint RestCentre => new(CentreX, Floor - RestRadius);
 }
 
-/// <summary>
-/// Everything the simulation needs for one instant, produced by the mood.
-/// A pose is a set of goals, never positions. A mood says "be this wide, pull
-/// this way, push this hard" and the springs decide how the body gets there,
-/// so every change of mood arrives with overshoot and settle already in it.
-/// </summary>
 internal struct PersonaDrive
 {
-    /// <summary>Downward acceleration. Zero floats, one falls at a cartoon rate.</summary>
     public double Gravity = 0.95;
 
-    /// <summary>The rest ellipse, as multipliers on the radius. Squash and stretch.</summary>
     public PSize Stretch = new(1, 1);
 
     public double Radius = PersonaStage.RestRadius;
     public double Roll;
 
-    /// <summary>
-    /// How hard the body resists losing volume. This is what makes it read as
-    /// a water balloon rather than a rubber band loop.
-    /// </summary>
     public double Pressure = 44;
 
     public double RingStiffness = 210;
 
-    /// <summary>
-    /// How hard the body insists on being its own shape. High snaps back, low
-    /// lets a squash linger.
-    /// </summary>
     public double ShapeStiffness = 150;
 
-    /// <summary>Velocity bleed per second. Low is sloppy slime, high is a firm gel.</summary>
     public double Damping = 3.4;
 
-    /// <summary>A couple: the top half is pushed one way, the bottom half the other. A lean, not a rotation.</summary>
     public double Lean;
 
-    /// <summary>Tangential churn. Thinking looks like something turning over inside.</summary>
     public double Swirl;
 
-    /// <summary>Where the body wants to stand. Moving this is how a persona travels.</summary>
     public double AnchorX = PersonaStage.CentreX;
 
     public double AnchorPull = 7;
 
     public double Floor = PersonaStage.Floor;
 
-    /// <summary>
-    /// How much of its own weight the ground carries once the body is resting
-    /// on it. One means all of it. Without this, gravity is paid for twice: it
-    /// is what makes a landing squash, and also a steady downward pull on every
-    /// node of a body that has already landed, which flattens a resting
-    /// character. Cancelling it on contact keeps the two apart.
-    /// </summary>
     public double Support = 1;
 
     public double Restitution = 0.34;
 
     public double Friction = 0.82;
 
-    /// <summary>Per-node radial ripple. Deterministic, driven by WobblePhase.</summary>
     public double Wobble;
 
     public double WobblePhase;
 
-    /// <summary>
-    /// The second ripple channel, owned by the engine. Wobble is character, a
-    /// mood's choice. This one is consequence: switched on by a hard landing
-    /// and ringing down on its own.
-    /// </summary>
     public double Jiggle;
 
     public double JigglePhase;
@@ -119,16 +68,8 @@ internal struct PersonaDrive
     {
     }
 
-    /// <summary>
-    /// One set of forces on its way to becoming another. Every field is a
-    /// number, so a mood change is a crossfade rather than a cut: for half a
-    /// second the body is pulled by both moods at once and by neither
-    /// completely.
-    /// </summary>
     public static PersonaDrive Blend(PersonaDrive from, PersonaDrive to, double amount)
     {
-        // Smoothstep, so the crossfade has no corner at either end. A linear
-        // blend starts and stops abruptly and reads as a cut with a ramp.
         double t = Math.Clamp(amount, 0, 1);
         double k = t * t * (3 - 2 * t);
         double Mix(double a, double b) => a + (b - a) * k;
@@ -151,20 +92,12 @@ internal struct PersonaDrive
         out_.Friction = Mix(from.Friction, to.Friction);
         out_.Wobble = Mix(from.Wobble, to.Wobble);
         out_.Jiggle = Mix(from.Jiggle, to.Jiggle);
-        // Phases are clocks, not amounts. Blending two of them walks the
-        // ripple backwards; the incoming one simply takes over.
         out_.WobblePhase = to.WobblePhase;
         out_.JigglePhase = to.JigglePhase;
         return out_;
     }
 }
 
-/// <summary>
-/// A pressure soft body: a closed ring of point masses held out by internal
-/// pressure and held in shape by springs. Fourteen masses give the thing
-/// weight: it lands heavier when it falls further, it keeps ringing after a
-/// hit, and a shove on one side travels round the rim.
-/// </summary>
 internal sealed class PersonaSoftBody
 {
     internal struct Node
@@ -175,7 +108,6 @@ internal sealed class PersonaSoftBody
 
     private readonly List<Node> _nodes;
 
-    /// <summary>Scratch, kept around so a step allocates nothing.</summary>
     private readonly PVector[] _forces;
 
     private readonly double[] _ripple;
@@ -189,10 +121,6 @@ internal sealed class PersonaSoftBody
 
     private readonly double[] _lumps;
 
-    /// <summary>
-    /// The hardest a node hit the floor since the engine last looked, and
-    /// where. Zero when nothing has landed.
-    /// </summary>
     private double _impactSpeed;
 
     private double _impactX = PersonaStage.CentreX;
@@ -259,12 +187,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// The body's travel, with its own ringing left out. Energy counts every
-    /// node, so a slack blob quivering on the floor looks energetic to it. This
-    /// is the mean velocity, where an internal wobble cancels itself and only
-    /// the creature actually going somewhere survives.
-    /// </summary>
     public PVector Momentum
     {
         get
@@ -281,7 +203,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>Sum of squared speeds. The sleep test.</summary>
     public double Energy
     {
         get
@@ -295,11 +216,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// The landing since this was last called, and forget it. Consumed rather
-    /// than read, so one landing pays for one splat however many steps the
-    /// frame spent.
-    /// </summary>
     public (double Speed, double X)? TakeImpact()
     {
         if (_impactSpeed <= 0)
@@ -330,10 +246,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// Shove the whole body. Momentum is conserved, so a kick launches it and
-    /// the jelly catches up: squash on the way out, stretch at the top.
-    /// </summary>
     public void Impulse(PVector vector)
     {
         for (int i = 0; i < _nodes.Count; i++)
@@ -344,10 +256,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// A local hit, falling off with distance. What a landed ball does, and
-    /// what makes a catch look like a catch rather than a jump.
-    /// </summary>
     public void Poke(PPoint point, double strength, double reach = 0.22)
     {
         for (int i = 0; i < _nodes.Count; i++)
@@ -368,10 +276,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// Push every node away from the centroid, or pull it in. A gasp, a
-    /// flinch, the pop at the top of a celebration.
-    /// </summary>
     public void Pulse(double strength)
     {
         var centre = Centroid;
@@ -386,7 +290,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>Collapse toward the floor without moving sideways. The failure melt.</summary>
     public void Slump(double strength)
     {
         var centre = Centroid;
@@ -401,10 +304,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// Snap back to a clean ring. Used when motion is off and for the first
-    /// frame, so a paused mark is a settled character rather than a spasm.
-    /// </summary>
     public void Reset(PPoint? centre = null, PSize? stretch = null, double radius = PersonaStage.RestRadius)
     {
         var at = centre ?? PersonaStage.RestCentre;
@@ -424,11 +323,6 @@ internal sealed class PersonaSoftBody
         }
     }
 
-    /// <summary>
-    /// One fixed step. Callers accumulate real time and run this at a fixed
-    /// dt, because a spring integrated at a variable step is a spring that
-    /// explodes the first time a frame is late.
-    /// </summary>
     public void Step(double dt, PersonaDrive drive)
     {
         int n = _nodes.Count;
@@ -462,8 +356,6 @@ internal sealed class PersonaSoftBody
         }
         double area = Math.Abs(doubleArea) * 0.5;
         double target = _restArea * drive.Radius * drive.Radius * drive.Stretch.Width * drive.Stretch.Height;
-        // Clamped: an area that has briefly collapsed must not answer with a
-        // force big enough to turn the body inside out.
         double pressure = drive.Pressure * Math.Clamp(target / Math.Max(area, 2e-4) - 1, -1.5, 3.0);
 
         for (int i = 0; i < n; i++)
@@ -479,21 +371,11 @@ internal sealed class PersonaSoftBody
             _forces[i] += new PVector(spring * dx, spring * dy);
             _forces[next] += new PVector(-spring * dx, -spring * dy);
 
-            // Outward normal for a ring wound in increasing angle with y down.
             double push = pressure * length * 0.5;
             _forces[i] += new PVector(dy * push, -dx * push);
             _forces[next] += new PVector(dy * push, -dx * push);
         }
 
-        // Shape matching, and it is what holds the creature together. A ring
-        // of springs has no bending stiffness: edge lengths and area can all
-        // be satisfied by a teardrop, so gravity and a floor turn the blob
-        // into a tent within a second and it stays there. This pulls each node
-        // toward where it would be on the target ellipse, drawn around
-        // wherever the body currently is. Because the goals are built on the
-        // live centroid, they sum to zero and add no momentum: the body is
-        // free to fall, bounce and travel, it just is not free to stop being
-        // this shape.
         double rollSin = Math.Sin(drive.Roll), rollCos = Math.Cos(drive.Roll);
         double offsetX = (_restOffset.X * rollCos - _restOffset.Y * rollSin) * drive.Radius;
         double offsetY = (_restOffset.Y * rollCos + _restOffset.X * rollSin) * drive.Radius;
@@ -531,9 +413,6 @@ internal sealed class PersonaSoftBody
             {
                 double distance = Math.Max(Math.Sqrt(dx * dx + dy * dy), 1e-4);
                 double amount = drive.Wobble * Math.Sin(drive.WobblePhase * 2 * Math.PI + _ripple[i]);
-                // The impact ring runs at its own faster rate and against the
-                // ripple order, so a splat travels up the body rather than
-                // beating with whatever the mood was already doing.
                 amount += drive.Jiggle * Math.Sin(drive.JigglePhase * 2 * Math.PI - _ripple[i] * 1.5);
                 _forces[i] += new PVector(dx / distance * amount, dy / distance * amount);
             }
@@ -557,8 +436,6 @@ internal sealed class PersonaSoftBody
                     node.P = new PPoint(node.P.X, drive.Floor);
                     if (node.V.Y > 0)
                     {
-                        // Only a body that was in the air lands. A node of a
-                        // resting creature grazing the floor is not an event.
                         if (_grounded < 0.55 && node.V.Y > _impactSpeed)
                         {
                             _impactSpeed = node.V.Y;
@@ -600,12 +477,6 @@ internal sealed class PersonaSoftBody
         _grounded += (resting - _grounded) * Math.Min(1, dt * 22);
     }
 
-    /// <summary>
-    /// The silhouette ring, smoothed and mapped into pixels. One pass of
-    /// Laplacian smoothing first: the simulation wants twenty distinct
-    /// masses, the eye wants a curve with no corners in it. The renderer draws
-    /// Catmull-Rom through these, converted to Beziers.
-    /// </summary>
     public PPoint[] Outline(double width, double height, double smoothing = 0.18)
     {
         int n = _nodes.Count;
@@ -622,15 +493,8 @@ internal sealed class PersonaSoftBody
         return points;
     }
 
-    /// <summary>
-    /// Where the body is right now, for anything drawn against it.
-    /// </summary>
     public PersonaAnchors Anchors => new(Crown, Centroid, Bounds);
 
-    /// <summary>
-    /// Where the top of the head is, in unit space. The antenna roots here and
-    /// a caught ball lands here, so both follow the squash.
-    /// </summary>
     public PPoint Crown
     {
         get
@@ -648,29 +512,11 @@ internal sealed class PersonaSoftBody
     }
 }
 
-/// <summary>
-/// Where a character's body is, in unit space, for whatever is drawn against
-/// it.
-/// </summary>
 internal readonly record struct PersonaAnchors(PPoint Crown, PPoint Centroid, PRect Bounds)
 {
-    /// <summary>
-    /// Where a small thing is held: low and forward, straddling the bottom
-    /// edge of the body. A blob has no arms, so a prop drawn wholly inside the
-    /// silhouette reads as being in the creature rather than held by it.
-    /// </summary>
     public PPoint Hands => new(Centroid.X, Bounds.MaxY - Bounds.Height * 0.20);
 
-    /// <summary>
-    /// Where the mouth is, near enough. Anything that comes out of the
-    /// character rather than being held by it starts here.
-    /// </summary>
     public PPoint Mouth => new(Centroid.X, Centroid.Y + Bounds.Height * 0.18);
 
-    /// <summary>
-    /// Where something is held up to be read: high enough to cover the body
-    /// from just under the eyes down, so the character looks over the top of
-    /// it.
-    /// </summary>
     public PPoint Raised => new(Centroid.X, Centroid.Y + Bounds.Height * 0.26);
 }

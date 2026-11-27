@@ -1,27 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Keep a router path open to the direct listener for as long as it listens.
-//!
-//! A single UPnP request at start-up lost the path for good on a router
-//! reboot, a failed renewal or a changed local address, and never reached a
-//! router that speaks only NAT-PMP or PCP. This supervisor owns the path for
-//! one listener generation:
-//!
-//! - it asks PCP first, then NAT-PMP, then UPnP, and keeps whichever answered;
-//! - it maps the address on the interface that reaches the router, not the
-//!   one a VPN's default route would pick;
-//! - it re-checks that route every half minute and on a network nudge, and
-//!   maps again when the address or the router changed;
-//! - a failure retries with backoff instead of ending the thread;
-//! - a router that maps only the same port number, already taken by another
-//!   host, moves this listener off 7878 so it gets a port of its own;
-//! - where the router offers UPnP IPv6 firewall control, it opens a pinhole
-//!   for the host's global IPv6 addresses.
-//!
-//! None of this is authentication. A mapped or pinholed socket enters the same
-//! Noise responder and peer approval as a LAN one, and a stale mapping that
-//! lands on another machine fails the pinned key check on the dialling side.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
@@ -38,7 +15,6 @@ const ROUTE_CHECK: Duration = Duration::from_secs(30);
 const FIRST_RETRY: Duration = Duration::from_secs(30);
 const MAX_RETRY: Duration = Duration::from_secs(600);
 const DESCRIPTION: &str = "tokenstat direct connection";
-/// PCP and NAT-PMP share the router's port 5351.
 const PCP_PORT: u16 = 5351;
 const MAX_PINHOLES: usize = 2;
 
@@ -106,7 +82,7 @@ fn wait(generation: usize, duration: Duration) -> Waited {
         let Some(left) = deadline.checked_duration_since(Instant::now()) else {
             return Waited::Elapsed;
         };
-        // Wake every second regardless, so a stopped listener is noticed.
+
         pending = wake
             .signal
             .wait_timeout(pending, left.min(Duration::from_secs(1)))
@@ -129,9 +105,6 @@ fn route() -> Option<Route> {
     usable_direct_ipv4(local).then_some(Route { gateway, local })
 }
 
-/// The address this machine would send from to reach `gateway`. With a VPN
-/// up, the default route points into the tunnel, but the router stays on the
-/// local link, so this finds the address the router can actually forward to.
 fn local_toward(gateway: Ipv4Addr) -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect((gateway, PCP_PORT)).ok()?;
@@ -156,7 +129,6 @@ struct Lease {
 }
 
 enum Failure {
-    /// The router maps only the same port number and another host has it.
     SamePortTaken,
     Unavailable,
 }
@@ -164,9 +136,6 @@ enum Failure {
 struct Pinhole {
     gateway: Box<igd_next::Gateway>,
     id: u16,
-    /// The IPv6 listener port it was opened for. A pinhole outlives nothing:
-    /// once that listener is gone or moved, the hole is closed, so it never
-    /// lets traffic through to whatever binds the port next.
     port: u16,
 }
 
@@ -194,9 +163,6 @@ fn supervise(generation: usize, port: u16) {
             checked_at = Some(now);
             let fresh = route();
             if fresh != seen {
-                // The address the router forwards to, or the router itself,
-                // changed. The old mapping points somewhere this listener is
-                // not, so take it down and map again now.
                 if let Some(old) = lease.take() {
                     release(&old);
                     publish(generation, None);
@@ -237,8 +203,6 @@ fn supervise(generation: usize, port: u16) {
                 publish(generation, Some(held.external));
                 renew_at = Instant::now() + held.renew_after;
             } else {
-                // Most often a router that rebooted and forgot the lease.
-                // Ask again from the top rather than waiting out a backoff.
                 release(held);
                 lease = None;
                 publish(generation, None);
@@ -294,10 +258,7 @@ fn supervise(generation: usize, port: u16) {
     let Some((external, lease)) = held else {
         return;
     };
-    // A listener restart may already have mapped the same external port
-    // again, and removing it would take the replacement down too. Give a
-    // replacement a moment to publish itself, then only release when nothing
-    // newer advertises that address.
+
     if direct_generation().load(Ordering::Acquire) != generation {
         std::thread::sleep(Duration::from_secs(3));
     }
@@ -328,9 +289,6 @@ fn publish(generation: usize, address: Option<SocketAddr>) {
     }
 }
 
-/// Move the listener to a free port. Runs after this supervisor's generation
-/// has stopped publishing, and only once per process (see
-/// [`avoid_default_port`]).
 fn restart_listener() {
     if avoid_default_port().swap(true, Ordering::AcqRel) {
         return;
@@ -339,8 +297,7 @@ fn restart_listener() {
         .name("direct-rebind".into())
         .spawn(|| {
             super::stop_direct();
-            // The accept loop clears `bound` and then `running`. Starting
-            // between the two would have the old loop switch the new one off.
+
             for _ in 0..100 {
                 if !direct_bound().load(Ordering::Acquire) {
                     break;
@@ -356,8 +313,6 @@ fn acquire(route: Route, port: u16) -> Result<Lease, Failure> {
     if let Some(gateway) = route.gateway {
         let nonce = pcp_nonce();
         match pcp_map(gateway, route.local, port, port, LEASE_SECS, &nonce) {
-            // A zero lifetime grants nothing, so the next method gets a turn
-            // instead of publishing a mapping that is already dead.
             Ok((external, lifetime)) if lifetime > 0 => {
                 return Ok(Lease {
                     method: Method::Pcp { nonce },
@@ -468,8 +423,6 @@ fn release(lease: &Lease) {
 }
 
 fn upnp_gateway(local: Ipv4Addr) -> Option<igd_next::Gateway> {
-    // Bound to the router-facing address so discovery goes out on the LAN
-    // even while a VPN owns the default route.
     let mut options = igd_next::SearchOptions::default();
     options.bind_addr = SocketAddr::from((local, 0));
     options.timeout = Some(Duration::from_secs(3));
@@ -494,8 +447,6 @@ fn upnp_map(route: Route, port: u16) -> Result<Lease, Failure> {
             renew_after: renew_interval(LEASE_SECS),
         }),
         Ok(external) => {
-            // A private "external" address means another NAT sits above this
-            // router. Nobody outside can use the mapping, so do not keep it.
             let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
             Err(Failure::Unavailable)
         }
@@ -504,14 +455,7 @@ fn upnp_map(route: Route, port: u16) -> Result<Lease, Failure> {
     }
 }
 
-/// Open the IPv6 firewall for the listener's global addresses, where the
-/// router offers UPnP IPv6 firewall control. IPv6 needs no address
-/// translation, only permission, and a home router usually refuses inbound by
-/// default, which is what kept a phone on a cellular network from reaching a
-/// host directly over IPv6.
 fn open_pinholes(route: Option<Route>, lease: Option<&Lease>) -> Vec<Pinhole> {
-    // Only for a live IPv6 listener. Without one, the port number belongs to
-    // nothing of ours on IPv6, and a hole would expose whatever held it.
     let port = listening6();
     if port == 0 {
         return Vec::new();
@@ -553,9 +497,6 @@ fn close_pinholes(pinholes: &mut Vec<Pinhole>) {
     }
 }
 
-/// One nonce for the life of the process. PCP ties a mapping to its nonce, so
-/// a listener restart on the same port refreshes its own mapping instead of
-/// being refused as somebody else's.
 fn pcp_nonce() -> [u8; 12] {
     static NONCE: OnceLock<[u8; 12]> = OnceLock::new();
     *NONCE.get_or_init(|| {
@@ -571,7 +512,6 @@ fn pcp_nonce() -> [u8; 12] {
 #[derive(Debug, PartialEq, Eq)]
 enum PcpError {
     NoAnswer,
-    /// A NAT-PMP router answered. Ask it in NAT-PMP.
     OldVersion,
     Refused,
 }
@@ -621,8 +561,6 @@ fn natpmp_map(
     (lifetime == 0 || usable_public_address(external)).then_some((external, granted))
 }
 
-/// Send to the router's PCP/NAT-PMP port and wait for an answer `accept`
-/// recognises, retrying at 250 ms, 500 ms and 1 s as both protocols expect.
 fn exchange<T>(
     gateway: Ipv4Addr,
     local: Ipv4Addr,
@@ -656,7 +594,7 @@ fn exchange<T>(
                 {
                     break;
                 }
-                // ICMP port unreachable: nothing listens on 5351.
+
                 Err(_) => return None,
             }
         }
@@ -664,7 +602,6 @@ fn exchange<T>(
     None
 }
 
-/// RFC 6887 MAP request for TCP, 60 bytes.
 fn pcp_map_request(
     local: Ipv4Addr,
     port: u16,
@@ -693,7 +630,6 @@ enum PcpReply {
 }
 
 fn parse_pcp_reply(reply: &[u8], nonce: &[u8; 12], port: u16) -> Option<PcpReply> {
-    // A NAT-PMP router answers a version it does not know with version 0.
     if reply.len() >= 4 && reply[0] == 0 && reply[1] & 0x80 != 0 {
         return Some(PcpReply::OldVersion);
     }
@@ -720,7 +656,6 @@ fn parse_pcp_reply(reply: &[u8], nonce: &[u8; 12], port: u16) -> Option<PcpReply
     })
 }
 
-/// RFC 6886 TCP mapping request, 12 bytes.
 fn natpmp_map_request(port: u16, suggested: u16, lifetime: u32) -> [u8; 12] {
     let mut request = [0u8; 12];
     request[1] = 2;
@@ -730,7 +665,6 @@ fn natpmp_map_request(port: u16, suggested: u16, lifetime: u32) -> [u8; 12] {
     request
 }
 
-/// `Some(None)` is a refusal, so the caller stops instead of retrying.
 fn parse_natpmp_map(reply: &[u8], port: u16) -> Option<Option<(u16, u32)>> {
     if reply.len() < 16 || reply[0] != 0 || reply[1] != 130 {
         return None;
@@ -758,8 +692,6 @@ fn parse_natpmp_address(reply: &[u8]) -> Option<Option<Ipv4Addr>> {
     )))
 }
 
-/// Interfaces a VPN or overlay uses. Their default routes point away from the
-/// router that could map a port.
 #[cfg_attr(windows, allow(dead_code))]
 fn tunnel_interface(name: &str) -> bool {
     const PREFIXES: [&str; 10] = [
@@ -817,7 +749,6 @@ fn default_gateway() -> Option<Ipv4Addr> {
     None
 }
 
-/// `netstat -rn -f inet`: `default  192.168.1.1  UGScg  en0`.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", test))]
 fn parse_netstat_default(text: &str) -> Option<Ipv4Addr> {
     text.lines().find_map(|line| {
@@ -830,7 +761,6 @@ fn parse_netstat_default(text: &str) -> Option<Ipv4Addr> {
     })
 }
 
-/// `/proc/net/route`, gateways in little-endian hex. Lowest metric wins.
 #[cfg(any(target_os = "linux", test))]
 fn parse_proc_route(text: &str) -> Option<Ipv4Addr> {
     text.lines()
@@ -849,8 +779,6 @@ fn parse_proc_route(text: &str) -> Option<Ipv4Addr> {
         .map(|(_, gateway)| gateway)
 }
 
-/// `route print -4 0.0.0.0`: `0.0.0.0  0.0.0.0  192.168.1.1  192.168.1.20  25`.
-/// A VPN shows `On-link` as its gateway, which does not parse and is skipped.
 #[cfg(any(windows, test))]
 fn parse_route_print(text: &str) -> Option<Ipv4Addr> {
     text.lines()
@@ -896,8 +824,7 @@ mod tests {
             })
         );
         assert_eq!(parse_pcp_reply(&reply, &[0u8; 12], 7878), None);
-        // A zero lifetime still parses. It grants nothing, so `acquire`
-        // rejects it instead of publishing a mapping that is already dead.
+
         reply[4..8].copy_from_slice(&0u32.to_be_bytes());
         reply[3] = 0;
         assert_eq!(

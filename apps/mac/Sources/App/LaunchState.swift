@@ -18,22 +18,15 @@ import SwiftUI
 @MainActor
 @Observable
 final class LaunchState {
-    /// False until the host has answered at least once (or we give up waiting).
     private(set) var hostReady = false
 
-    /// Shortest the splash stays on screen, so a hot host is not a one-frame flash.
     private static let minimumSplash: Duration = .milliseconds(560)
 
-    /// Longest we wait for the host before showing the app over in-process.
     private static let hostDeadline: Duration = .seconds(8)
 
-    /// Bring the host up and prove it answers, then release the splash.
     func prepare() async {
         let started = ContinuousClock.now
 
-        // The transport first. The handshake was started with the app so its
-        // probe could run while the window was built; waiting here keeps every
-        // call below on the route the session finishes on. See `BridgeLaunch`.
         await BridgeLaunch.wait()
 
         await Task.detached(priority: .userInitiated) {
@@ -43,7 +36,6 @@ final class LaunchState {
             Bridge.ensureHosted()
         }.value
 
-        // Prove a real method answers, not only that a socket file exists.
         let deadline = ContinuousClock.now + Self.hostDeadline
         while ContinuousClock.now < deadline {
             if await Bridge.hostSettled() {
@@ -54,8 +46,6 @@ final class LaunchState {
         }
 
         #if os(macOS)
-        // After hostd answers, so the default is one battery check. A
-        // changed KeepAlive bootouts the job. Wait until it is back.
         if let policy = try? await Bridge.hostPolicy() {
             try? HostAgentInstaller.applyPolicy(alwaysOn: policy.alwaysOn)
             let again = ContinuousClock.now + .seconds(4)
@@ -83,12 +73,6 @@ final class LaunchState {
     }
 }
 
-/// Full-window splash: mark only, no wordmark, no chrome underneath.
-///
-/// Matches the product pattern of a quiet centre mark while the process
-/// warms. RootView mounts this alone until the host is ready; the split
-/// view is not in the tree yet, so the system cannot install a sidebar
-/// toggle on the window toolbar during splash.
 struct LaunchSplashView: View {
     var isFullScreen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -97,8 +81,6 @@ struct LaunchSplashView: View {
         ZStack {
             #if os(macOS)
             if #available(macOS 26, *) {
-                // Local AppStorage is ready before the host handshake. The
-                // sidebar surface supplies its persisted appearance or defaults.
                 SidebarGlassSurface(isFullScreen: isFullScreen, cornerRadius: 0)
                     .ignoresSafeArea()
             } else {
@@ -116,11 +98,6 @@ struct LaunchSplashView: View {
     }
 }
 
-/// Whether the host splash has finished and the real chrome may show tools.
-///
-/// The split view is only mounted once this is true. Screens still gate their
-/// own toolbar items on it so a late-appearing detail cannot race first paint.
-/// Do not hide the whole window toolbar: that also took the traffic lights.
 private struct HostReadyKey: EnvironmentKey {
     static let defaultValue = true
 }

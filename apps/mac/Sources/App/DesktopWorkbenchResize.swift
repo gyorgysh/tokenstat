@@ -3,8 +3,6 @@
 import SwiftUI
 import Observation
 
-/// Live drag updates reach only the two layout leaves that need the width.
-/// RootView and the stored chat/tool view values do not rebuild per pointer event.
 @Observable final class DesktopWorkbenchResizeState {
     private(set) var liveWidth: Double?
     @ObservationIgnored private var origin: Double?
@@ -77,9 +75,6 @@ private struct DesktopWorkbenchDivider: View {
     @State private var hovered = false
 
     var body: some View {
-        // The gutter is opaque: the panel floats over the chat when the
-        // window is narrow, and a clear gutter let transcript text show
-        // through between the two.
         Rectangle().fill(Theme.border).frame(width: 1)
             .frame(width: DesktopWorkbenchLayout.divider)
             .frame(maxHeight: .infinity)

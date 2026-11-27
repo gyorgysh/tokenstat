@@ -8,27 +8,11 @@
 import AppKit
 import Darwin
 
-/// A plain text record on disk of what the app was doing, for a freeze or a
-/// crash that leaves nothing else behind.
-///
-/// The unified log keeps nothing across a forced power-off, and a crash report
-/// names Apple's frames rather than the screen that was open. So this writes to
-/// `~/Library/Logs/tokenstat/app-<day>.log`, one line at a time, and forces
-/// every batch to the disk. The last lines before a freeze are the point.
-///
-/// Lines carry method names, control roles, timings,
-/// and memory figures. Never call parameters, typed text, keystrokes, chat
-/// content or file paths. The file stays on this Mac.
-///
-/// On by default. `defaults write ai.tokenstat.tokenstat DiagnosticsLogDisabled
-/// -bool YES` turns it off.
 enum DiagnosticsLog {
     static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/tokenstat", isDirectory: true)
 
-    /// Days of files kept. A freeze is looked at the same day or the next.
     private static let keepDays = 5
-    /// One day's file stops growing here. A busy day is a few megabytes.
     private static let maxFileBytes: off_t = 64 * 1024 * 1024
     private static let stallMs: UInt64 = 500
 
@@ -54,8 +38,6 @@ enum DiagnosticsLog {
         !UserDefaults.standard.bool(forKey: "DiagnosticsLogDisabled")
     }
 
-    /// Open today's file, then start the sampler, the stall watch and the
-    /// crash hooks. Called once, before any window exists.
     static func start() {
         guard enabled else { return }
         queue.sync {
@@ -118,7 +100,6 @@ enum DiagnosticsLog {
         }
     }
 
-    /// One line. Forced lines reach the disk before this returns.
     static func note(_ line: String, force: Bool = false) {
         guard started else { return }
         if force {
@@ -131,13 +112,11 @@ enum DiagnosticsLog {
         }
     }
 
-    // MARK: Bridge calls
 
     private static let inflightLock = NSLock()
     nonisolated(unsafe) private static var inflight: [UInt64: (method: String, at: UInt64)] = [:]
     nonisolated(unsafe) private static var nextCall: UInt64 = 0
 
-    /// Remember a call until it ends, so a freeze names what was still waiting.
     static func callStarted(_ method: String) -> UInt64 {
         guard started else { return 0 }
         inflightLock.lock()
@@ -147,8 +126,6 @@ enum DiagnosticsLog {
         return nextCall
     }
 
-    /// `failure` is an error code or a type name, never a message: a message
-    /// can quote a path or the text of a call.
     static func callFinished(_ token: UInt64, method: String, remote: Bool, failure: String?) {
         guard started, token != 0 else { return }
         inflightLock.lock()
@@ -167,10 +144,7 @@ enum DiagnosticsLog {
         return "inflight=\(inflight.count) oldest=\(oldest.method):\(age)ms"
     }
 
-    // MARK: Input
 
-    /// A click names the control under it by role. A key is
-    /// logged only as a shortcut, and only by its modifiers, never its letter.
     @MainActor
     private static func noteInput(_ event: NSEvent) {
         switch event.type {
@@ -204,8 +178,6 @@ enum DiagnosticsLog {
     @MainActor
     static func describe(_ element: Any?) -> String {
         guard let element = element as? NSAccessibilityProtocol else { return "role=none" }
-        // Row and menu labels can contain chat titles, file names or text
-        // typed into a note. Even a short prefix must stay out of this log.
         return "role=\(element.accessibilityRole()?.rawValue ?? "none")"
     }
 
@@ -214,10 +186,7 @@ enum DiagnosticsLog {
         "exception \(exception.name.rawValue)"
     }
 
-    // MARK: Sampler
 
-    /// Once a second: this app's memory and CPU, the helper's memory, the
-    /// machine's free memory, and what calls are still waiting.
     private static func startSampler() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
@@ -246,7 +215,6 @@ enum DiagnosticsLog {
         return fields.joined(separator: " ")
     }
 
-    /// The figure Activity Monitor calls Memory.
     private static func footprint(pid: pid_t) -> UInt64 {
         var usage = rusage_info_v2()
         let result = withUnsafeMutablePointer(to: &usage) { pointer in
@@ -268,8 +236,6 @@ enum DiagnosticsLog {
         return Int((cpu - last.cpu) * 100 / (wall - last.wall))
     }
 
-    /// The helper runs as its own process, so its memory is read by pid. The
-    /// pid is looked up again every ten seconds, since the helper can restart.
     private static func hostdFootprint() -> UInt64? {
         let now = DispatchTime.now().uptimeNanoseconds
         if hostdPID == 0 || now - hostdLookup > 10_000_000_000 {
@@ -300,9 +266,6 @@ enum DiagnosticsLog {
         return 0
     }
 
-    /// The kernel's free memory level, the figure `memory_pressure` prints,
-    /// plus what the compressor holds. A freeze from memory shows as the level
-    /// falling toward zero.
     static func systemMemory() -> String {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
@@ -322,15 +285,11 @@ enum DiagnosticsLog {
         return "sys_free=\(free) compressed_mb=\(compressed / 1_048_576) swapouts=\(stats.swapouts)"
     }
 
-    // MARK: Stall watch
 
     nonisolated(unsafe) private static var pingSentAt: UInt64 = 0
     nonisolated(unsafe) private static var stalled = false
     nonisolated(unsafe) private static var lastStallLine: UInt64 = 0
 
-    /// A background timer asks the main thread to answer every 200ms. A ping
-    /// left waiting past half a second is a stall, logged when it starts,
-    /// every second while it lasts, and once more when it ends.
     private static func startStallWatch() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: .milliseconds(200), leeway: .milliseconds(20))
@@ -382,10 +341,7 @@ enum DiagnosticsLog {
         pressure = source
     }
 
-    // MARK: Crashes
 
-    /// Written from a signal handler, so built ahead of time and written with
-    /// nothing but `write`.
     nonisolated(unsafe) private static var fatalLines: [Int32: [UInt8]] = [:]
     nonisolated(unsafe) fileprivate static var fatalFD: Int32 = -1
 
@@ -410,9 +366,7 @@ enum DiagnosticsLog {
         }
     }
 
-    // MARK: File
 
-    /// Runs on `queue`.
     private static func append(_ line: String) {
         let now = Date()
         let today = String(stamp.string(from: now).prefix(10))
@@ -425,7 +379,6 @@ enum DiagnosticsLog {
         if buffer.utf8.count > 64 * 1024 { flush() }
     }
 
-    /// Runs on `queue`. Write what is buffered and make the disk hold it.
     private static func flush() {
         guard !buffer.isEmpty, fatalFD >= 0 else {
             buffer = ""

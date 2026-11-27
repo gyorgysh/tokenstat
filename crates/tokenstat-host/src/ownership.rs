@@ -4,39 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Which daemon speaks for this machine.
-//!
-//! # Why this exists
-//!
-//! A machine identity is a single thing on the account: one key, one row in
-//! the directory, one tunnel credential. Two daemons sharing one identity do
-//! not share it, they fight over it, and the fight is silent and permanent.
-//!
-//! Minting a tunnel credential retires every other live one for the machine,
-//! so each daemon's renewal expires the other's token. Each is denied
-//! `token_expired`, each correctly mints a replacement, and each replacement
-//! breaks the other. The relay makes it worse: a HELLO for a key that is
-//! already live takes the slot and drops the old socket's channels, so the two
-//! also knock each other off, and every dial that lands in the gap is answered
-//! `no_such_peer`. A machine in this state reads as flaky to everybody who
-//! tries to reach it, and no log line on either side names the cause.
-//!
-//! This is not hypothetical. It ran for four days here: a `--socket /tmp/...`
-//! daemon left over from an afternoon's testing against the launchd one.
-//!
-//! # The rule
-//!
-//! The daemon listening on [`crate::server::default_socket_path`] is the
-//! machine's host. That is the path launchd or the Windows task starts, the
-//! path the app probes, and the path an installed tokenstat uses, so it is the
-//! one that must always win. A daemon anywhere else is a second copy and
-//! stands down.
-//!
-//! Standing down is decided by *identity*, not by existence. Two daemons with
-//! separate `TOKENSTAT_IDENTITY_DIR`s are two machines, which is the supported
-//! way to run a development host beside a real one, and neither is asked to
-//! yield. Only a second daemon carrying the *same key* is a problem.
 
 use std::io::Write;
 #[cfg(unix)]
@@ -57,18 +25,11 @@ pub enum Role {
     Secondary,
 }
 
-/// How long the probe waits for the other daemon to answer.
-///
-/// Short on purpose. This runs before the socket is bound, so it is time
-/// nobody's daemon is up, and a primary too busy to answer `remote.status` in
-/// two seconds is one this process should not assume owns anything.
 const PROBE_PATIENCE: Duration = Duration::from_secs(2);
 
 /// Which role a daemon on `socket` plays.
 pub fn role_for(socket: &Path) -> Role {
     match crate::server::default_socket_path() {
-        // Compared after resolving symlinks where both exist, so
-        // `/tmp` against `/private/tmp` on macOS is not read as two paths.
         Ok(default) if same_path(socket, &default) => Role::Primary,
         _ => Role::Secondary,
     }
@@ -86,9 +47,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
     #[cfg(not(windows))]
     match (left.canonicalize(), right.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
-        // A socket that does not exist yet cannot be canonicalized, which is
-        // the ordinary case at startup. Fall back to the parent directory,
-        // which does exist, plus the file name.
+
         _ => match (
             left.parent().map(Path::canonicalize),
             right.parent().map(Path::canonicalize),
@@ -166,23 +125,7 @@ pub fn owned_by_primary(my_key: &str) -> bool {
 /// who just typed the command.
 pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     let role = role_for(socket);
-    // The primary decides first, and the lock never gets to overrule it.
-    //
-    // Taking the lock above this line made the installed host refuse to start
-    // whenever a leftover development daemon held it, and
-    // `watch_for_the_installed_host` only stands a secondary down once a
-    // primary answers on the default socket. So neither could move: the
-    // primary exited, its supervisor started it again two seconds later, and
-    // the secondary waited for a primary that was being prevented from
-    // existing. The whole point of this module is that the installed host
-    // wins.
-    //
-    // Best effort here rather than required. A primary does not need the lock
-    // to keep a second primary out, because two daemons cannot both bind the
-    // default socket and `bind` already refuses the second one. What holding
-    // it buys is the *next* secondary being refused immediately instead of
-    // waiting on a `remote.status` probe, so it is worth taking late as well
-    // as early.
+
     if role == Role::Primary {
         if hold_identity_lock().is_err() {
             hold_identity_lock_when_free();
@@ -190,14 +133,7 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
         return Ok(role);
     }
     hold_identity_lock().map_err(|_| refusal(socket))?;
-    // Loaded rather than passed in: the key is what decides this, and a caller
-    // that had to fetch it first could get the comparison wrong in a way this
-    // module could not stop.
-    //
-    // Load, never create. A machine with no key yet cannot have another
-    // process holding it, so the answer is already known, and minting one here
-    // would leave identity material behind for a daemon that is about to
-    // refuse to start.
+
     let Some(identity) = tokenstat_identity::MachineIdentity::load().map_err(|e| e.to_string())?
     else {
         return Ok(role);
@@ -208,16 +144,6 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     Ok(role)
 }
 
-/// Keep asking for the identity lock in the background.
-///
-/// Only a primary does this, and only when a secondary held the lock at
-/// startup. That secondary stands down on its own within twenty seconds of
-/// this daemon answering on the default socket, and this is what picks the
-/// lock up afterwards so a later secondary is refused at once rather than
-/// after a probe.
-///
-/// Silent. Nothing is wrong while this is still trying: the machine already
-/// has its host, and this is only tidying up who holds a file.
 fn hold_identity_lock_when_free() {
     use std::sync::atomic::{AtomicBool, Ordering};
     static STARTED: AtomicBool = AtomicBool::new(false);
@@ -235,15 +161,6 @@ fn hold_identity_lock_when_free() {
     });
 }
 
-/// Exclusive lock on this identity directory.
-///
-/// An OS advisory lock on a file beside the key, held for the process
-/// lifetime. A PID file plus unlink-if-empty let two starters both win
-/// (the winner writes the pid after create, so the file is empty for a
-/// real window) and a reused pid after a crash blocked a healthy restart.
-/// `flock` (and `LockFileEx` on Windows) dies with the process, so a crash
-/// cannot leave a stale owner. A separate `TOKENSTAT_IDENTITY_DIR` is still a
-/// second machine.
 fn hold_identity_lock() -> Result<(), String> {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -269,7 +186,7 @@ fn hold_identity_lock() -> Result<(), String> {
         unsafe extern "C" {
             fn flock(fd: i32, operation: i32) -> i32;
         }
-        // LOCK_EX | LOCK_NB. Same values on macOS and Linux.
+
         const LOCK_EX: i32 = 2;
         const LOCK_NB: i32 = 4;
         let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
@@ -321,20 +238,6 @@ pub fn refusal(socket: &std::path::Path) -> String {
 mod tests {
     use super::*;
 
-    /// The defect this ordering exists to prevent.
-    ///
-    /// A leftover development daemon holds the identity lock for its whole
-    /// life. If the lock is consulted before the role, the installed host
-    /// refuses to start, and `watch_for_the_installed_host` only stands a
-    /// secondary down once a primary answers on the default socket. Neither
-    /// side can then move: the primary's supervisor restarts it every couple
-    /// of seconds forever, and the secondary waits for something it is
-    /// preventing.
-    ///
-    /// Asserted on the lock being held by this very process, which is the
-    /// strongest form of "somebody else has it" available in one test: the
-    /// second call cannot succeed, and a primary must still be allowed
-    /// through.
     #[test]
     fn a_held_identity_lock_never_keeps_the_installed_host_out() {
         crate::test_identity::isolated(|| {
@@ -349,8 +252,6 @@ mod tests {
         });
     }
 
-    /// The installed daemon's path is the one that must always win, whatever
-    /// order the two happened to start in.
     #[test]
     fn the_default_socket_is_the_primary() {
         let default = crate::server::default_socket_path().expect("a data directory");
@@ -362,8 +263,6 @@ mod tests {
         assert_eq!(role_for(other), Role::Secondary);
     }
 
-    /// The message is read by somebody whose next instinct is to run the
-    /// command again, so it has to name the two things that actually work.
     #[test]
     fn the_refusal_says_how_to_run_two_hosts() {
         #[cfg(windows)]

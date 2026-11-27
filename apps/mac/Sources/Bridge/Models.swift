@@ -7,7 +7,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - SSH connections
 
 // Every SSH record below spells its ids `…Id` on the wire, because the host
 // derives its keys with `#[serde(rename_all = "camelCase")]` and Rust's
@@ -49,10 +48,7 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
     var tags: [String]
     var provider: SSHProviderReference?
     var hostKeys: [String]
-    /// Nil is the top level. Every record saved before folders existed is
-    /// there, and stays there until somebody moves it.
     var folderID: String?
-    /// A name from `SSHColor`, never a hex string.
     var color: String?
     var keepaliveSeconds: Int = 0
     var env: [SSHEnvPair] = []
@@ -60,11 +56,8 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
     var lastConnectedMs: Int64?
     var favorite: Bool = false
     var sort: Int = 0
-    /// When this record last changed. The vault merges on this: a pulled
-    /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
 
-    /// The address as somebody would type it into a terminal.
     var address: String { "\(username)@\(hostname):\(port)" }
 
     enum CodingKeys: String, CodingKey {
@@ -90,8 +83,6 @@ struct SSHFolder: Codable, Sendable, Hashable, Identifiable {
     var parentID: String?
     var color: String?
     var sort: Int = 0
-    /// When this record last changed. The vault merges on this: a pulled
-    /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
 
     enum CodingKeys: String, CodingKey {
@@ -101,10 +92,6 @@ struct SSHFolder: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// The fixed palette both ends agree on.
-///
-/// Names rather than hex, so the record stays a record and each platform draws
-/// its own idea of "amber". Mirrors `ssh_records::COLORS`.
 enum SSHColor {
     static let names = ["violet", "blue", "green", "amber", "red", "grey"]
 
@@ -129,12 +116,9 @@ struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
     /// Reference into Keychain/ssh-agent. This is never private key material.
     var secretRef: String
     var hardwareBacked: Bool
-    /// SHA256 fingerprint. What a row shows instead of the whole public key.
     var fingerprint: String = ""
     var createdMs: Int64 = 0
     var passphraseProtected: Bool = false
-    /// When this record last changed. The vault merges on this: a pulled
-    /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
 }
 
@@ -144,12 +128,8 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
     var command: String
     var tags: [String]
     var hostIDs: [String]
-    /// Placeholder names in the command, asked for when it runs. Values are
-    /// never stored: the useful ones are secrets.
     var variables: [String] = []
     var runOnConnect: Bool = false
-    /// When this record last changed. The vault merges on this: a pulled
-    /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
 
     enum CodingKeys: String, CodingKey {
@@ -158,13 +138,6 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
         case variables, runOnConnect, updatedMs
     }
 
-    /// Spelled out rather than synthesized, to accept `hostIDs` as well.
-    ///
-    /// The vault carries whatever shape this app encoded, and older builds
-    /// encoded the misspelled key. Those records are already in somebody's
-    /// vault, and a snippet that decodes into nothing is a snippet that is
-    /// gone: `pullVault` drops a record it cannot read and never asks again.
-    /// The wrong spelling is only ever read, never written.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -202,29 +175,14 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
         self.updatedMs = updatedMs
     }
 
-    /// The spelling older builds wrote into the vault. Read-only.
     private enum LegacyKeys: String, CodingKey {
         case hostIDs
     }
 
-    /// The bytes a shell has to receive for a command to actually run.
-    ///
-    /// The trailing carriage return is the whole point. These screens used to
-    /// type the line at the prompt and stop, on the reasoning that a saved
-    /// command should be read before it fires. In practice a snippet is a
-    /// command somebody saved in order to run it, and leaving it sitting at
-    /// the prompt meant every use of the feature ended with reaching for the
-    /// keyboard, which on a phone means dismissing the menu first.
-    ///
-    /// One function rather than three call sites appending "\r", because
-    /// three call sites is how the Mac inspector, the Mac tab strip and the
-    /// phone's key bar came to disagree about anything in the first place.
     static func bytesToRun(_ command: String) -> [UInt8] {
         Array((command + "\r").utf8)
     }
 
-    /// `{{name}}` occurrences, in the order they appear. The editor keeps
-    /// `variables` in step with this so a client never has to parse it.
     static func placeholders(in command: String) -> [String] {
         var found: [String] = []
         var rest = Substring(command)
@@ -236,9 +194,6 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
         return found
     }
 
-    /// The command with every placeholder replaced. Missing values are left
-    /// alone rather than blanked, so a half-filled form cannot silently run a
-    /// different command.
     func filled(with values: [String: String]) -> String {
         var text = command
         for name in variables {
@@ -278,14 +233,8 @@ struct SSHKnownHostForget: Codable, Sendable, Hashable { var forgotten: Bool }
 
 struct SSHSessionHandle: Codable, Sendable, Hashable { var id: String }
 
-/// One session the host is holding, as `ssh.session.list` reports it.
-///
-/// The sessions live in the host process, not in the app, so this is how a
-/// relaunched app finds the shells it left running. The same relationship
-/// `pty.list` has always had with the workspace terminals.
 struct SSHSessionSummary: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// The saved record it was opened from, when it was opened from one.
     var hostID: String?
     var label: String
     var openedMs: Int64
@@ -300,11 +249,6 @@ struct SSHSessionSummary: Codable, Sendable, Hashable, Identifiable {
 }
 struct SSHHostFingerprint: Codable, Sendable, Hashable { var fingerprint: String }
 
-/// What a server said about itself before anything was written to it.
-///
-/// `blockers` is the host's own verdict, in sentences, so the wizard and any
-/// other surface that asks agree on what "ready" means instead of each
-/// deciding from the raw facts.
 struct ServerCheck: Codable, Sendable, Hashable {
     var os: String?
     var arch: String?
@@ -323,10 +267,6 @@ struct ServerCheck: Codable, Sendable, Hashable {
     var ready: Bool = false
 }
 
-/// One directory on a machine, as a picker sees it.
-///
-/// Names, kinds and a few stat fields. Never a byte of a file: the host
-/// answers what a folder holds, not what is in it.
 struct RemoteListing: Codable, Sendable, Hashable {
     struct Root: Codable, Sendable, Hashable, Identifiable {
         var path: String
@@ -349,12 +289,6 @@ struct RemoteListing: Codable, Sendable, Hashable {
         var id: String { path ?? name }
         var isDirectory: Bool { kind == "directory" }
 
-        /// The host omits `path`, `isRepo`, `isRegistered`, `size` and
-        /// `modified` on an entry it could not stat, which is what a broken
-        /// symlink is. A default in the declaration does not make the key
-        /// optional for the generated decoder, so one unreadable entry used to
-        /// throw and take the whole listing with it; a missing flag reads as
-        /// false, which is all that can honestly be said about such an entry.
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             name = try container.decode(String.self, forKey: .name)
@@ -370,37 +304,29 @@ struct RemoteListing: Codable, Sendable, Hashable {
     }
 
     var path: String
-    /// Nil at the top of a root, so "up" stops there instead of walking out.
     var parent: String?
     var roots: [Root] = []
     var entries: [Entry] = []
-    /// The listing stopped early. A home directory with a dependency tree in
-    /// it holds more names than any picker can draw.
     var truncated: Bool = false
 }
 
 struct RemoteCloneStatus: Codable, Sendable, Hashable {
-    /// `running`, `done` or `failed`.
     var state: String
     var path: String
     var workspaceId: String?
     var error: String?
 }
 
-/// The install command, in the two shapes it is needed in: the one the app
-/// types into a session, and the one a person reads before running it.
 struct InstallLine: Codable, Sendable, Hashable {
     var oneLine: String
     var annotated: String
 }
 
-/// A code that signs one machine in. Held only until it is used.
 struct PairingCode: Codable, Sendable, Hashable {
     var code: String
     var expiresIn: UInt64
 }
 
-/// Whether a machine is finished being set up. See `host.provisionStatus`.
 struct ProvisionStatus: Codable, Sendable, Hashable {
     struct Account: Codable, Sendable, Hashable {
         var signedIn: Bool?
@@ -418,9 +344,7 @@ struct ProvisionStatus: Codable, Sendable, Hashable {
         var id: String
         var name: String
         var installed: Bool
-        /// Null where nothing on that machine can be asked. Never guessed.
         var signedIn: Bool?
-        /// Absent from a host before protocol 9, which reads as `unknown`.
         var readiness: AgentReadiness?
         var expiresAt: Double?
         var signIn: AgentSignIn?
@@ -433,10 +357,7 @@ struct ProvisionStatus: Codable, Sendable, Hashable {
     }
 
     var headless: Bool
-    /// A graphical session on that machine. Absent from older hosts.
     var desktop: Bool?
-    /// Whether View screen can open there. Absent from older hosts, which
-    /// read as "not headless" instead.
     var screen: Bool?
     var serviceScope: String?
     var runsAs: RunsAs?
@@ -461,28 +382,14 @@ struct SSHSessionRead: Codable, Sendable, Hashable {
     var error: String?
 }
 
-/// One thing the host offers while somebody types in an SSH session.
-///
-/// Either a name the server reported in a directory or a command the person
-/// saved. Nothing here is sent to the shell by being shown: `insert` is typed
-/// only when a row is chosen.
 struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
     var kind: String
     var title: String
     var detail: String
     var insert: String
     var replace: Int
-    /// `{{placeholder}}` names, asked for before a snippet is inserted.
     var variables: [String] = []
 
-    /// Spelled out rather than synthesized, and the reason is worth keeping.
-    ///
-    /// A default value on a stored property does **not** make its key
-    /// optional to a synthesized `Decodable`: the key is still required and
-    /// its absence throws. The host omitted `variables` on a row that has
-    /// none, so every answer failed to decode, the failure was swallowed by
-    /// the `try?` this sits behind, and the palette silently never appeared.
-    /// The host writes the key now, and this reads it either way.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         kind = try c.decode(String.self, forKey: .kind)
@@ -493,8 +400,6 @@ struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
         variables = try c.decodeIfPresent([String].self, forKey: .variables) ?? []
     }
 
-    /// The kind and what it types. Two rows that would type the same thing
-    /// never both arrive, so this is unique within one answer.
     var id: String { "\(kind)\u{1}\(insert)" }
 
     var isSnippet: Bool { kind == "snippet" }
@@ -503,11 +408,8 @@ struct SSHSuggestion: Codable, Sendable, Hashable, Identifiable {
 }
 
 struct SSHSuggestions: Codable, Sendable, Hashable {
-    /// The line the host was asked about. An answer for a line the person has
-    /// already moved past is dropped rather than shown.
     var fragment: String
     var rows: [SSHSuggestion]
-    /// A directory listing is on its way. Ask again shortly.
     var pending: Bool
 
     init(from decoder: Decoder) throws {
@@ -526,30 +428,16 @@ struct SSHKeyMaterial: Codable, Sendable, Hashable {
 }
 
 struct SSHVaultStatus: Codable, Sendable, Hashable {
-    /// An opaque helper session, used only for exact local retirement.
     var vaultSession: String? = nil
     var created: Bool
     var recordCount: Int
     var enrolled: Bool?
-    /// The vault exists and this device has no key for it yet, so the password
-    /// has to be typed before anything can be read.
     var locked: Bool?
-    /// Made before password unlock existed. It cannot be opened by this build,
-    /// so the screen offers to recreate it rather than asking for a password
-    /// nothing will accept.
     var needsRecreate: Bool?
-    /// Why the account could not be asked, when it could not be asked.
-    ///
-    /// `created: false` means "this account has no vault". It used to mean
-    /// that *or* "the question never reached the account", which are opposite
-    /// situations: the first invites you to make one, the second means the one
-    /// you already have is out of reach and making another would be refused.
     var unreachable: String?
 }
 struct SSHVaultReset: Codable, Sendable, Hashable { var reset: Bool }
 struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
-/// A password change. Carries a fresh recovery code only when the change was a
-/// reset, because a reset retires the code it just spent.
 struct SSHVaultPasswordChange: Codable, Sendable, Hashable {
     var changed: Bool
     var recovery: String?
@@ -577,11 +465,6 @@ struct ScreenPermission: Codable, Sendable, Hashable, Identifiable {
     }
 }
 struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var expiresAt: UInt64; var control: Bool }
-/// What the person watching asked the picture to be worth.
-///
-/// A closed set with wire names the host knows, never a number: nothing
-/// arbitrary crosses that boundary. Auto is the default and means the host
-/// decides from the route, which is the answer almost everybody wants.
 enum ScreenQualityChoice: String, CaseIterable, Identifiable, Sendable {
     case auto
     case sharp
@@ -590,7 +473,6 @@ enum ScreenQualityChoice: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Nil for auto: the absence of a choice, rather than a choice called auto.
     var wire: String? { self == .auto ? nil : rawValue }
 
     var title: String {
@@ -612,35 +494,13 @@ enum ScreenQualityChoice: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// What one screen session may spend, and how finely it may spend it.
-///
-/// These four numbers used to be constants inside the encoder, chosen for the
-/// relay because that was the only route there was. A direct connection is the
-/// person's own bandwidth, so the same desktop can be several times sharper on
-/// it and cost nobody anything.
 struct ScreenQualityProfile: Sendable, Hashable {
-    /// The widest picture to encode. The capture is scaled down to this, so a
-    /// 5K display is not sent at 5K over anything.
     var maxWidth: CGFloat
     var averageBitRate: Int
-    /// Pictures per second while watching, and while driving.
-    ///
-    /// A pointer is the one thing on a remote desktop judged frame by frame,
-    /// and at thirty a drag arrives in visible steps however good each step
-    /// looks. Watching has no such test.
     var viewingFPS: Int32
     var controlFPS: Int32
-    /// Seconds between keyframes. A keyframe is the expensive picture, and on
-    /// a desktop nobody is touching it is the only traffic there is.
     var keyframeSeconds: Int32
 
-    /// Today's numbers, unchanged. Everything metered stays here.
-    ///
-    /// 1.5 Mbps, not 4: four megabits is a number for a screen recording
-    /// somebody keeps. This is a desktop being watched live, usually on a
-    /// phone, over a relay somebody pays for by the gigabyte, and the
-    /// difference on a screen that is mostly text and flat panels is not
-    /// something a person notices on a handset.
     static let relay = ScreenQualityProfile(
         maxWidth: 1920,
         averageBitRate: 1_500_000,
@@ -657,9 +517,6 @@ struct ScreenQualityProfile: Sendable, Hashable {
         keyframeSeconds: 4
     )
 
-    /// The default on a direct route. Text is legible at native size rather
-    /// than nearly legible, which is the whole difference between reading a
-    /// terminal on the other machine and squinting at it.
     static let direct = ScreenQualityProfile(
         maxWidth: 2560,
         averageBitRate: 8_000_000,
@@ -682,12 +539,7 @@ struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
     var peerID: String
     var control: Bool
     var dropped: UInt64
-    /// How the viewer reached this machine: `direct` or `relay`. Absent from a
-    /// host built before routes were carried, which reads as relay, the
-    /// answer that spends nothing it should not.
     var route: String?
-    /// What the viewer asked the picture to be worth, when it asked. Absent
-    /// means it left the choice here.
     var quality: String?
 
     enum CodingKeys: String, CodingKey {
@@ -696,12 +548,6 @@ struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
         case control, dropped, route, quality
     }
 
-    /// The bandwidth budget this session may spend.
-    ///
-    /// A relay channel is metered and pueev pays for it by the gigabyte. A
-    /// direct channel is the person's own network. The first has to stay
-    /// frugal; the second can afford a far better picture for nothing, and
-    /// spending the same 1.5 Mbps on it was leaving that on the table.
     var profile: ScreenQualityProfile {
         switch quality {
         case "sharp": return .directSharp
@@ -712,23 +558,12 @@ struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
     }
 }
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
-/// Everything queued for the capture helper since it last asked.
-///
-/// `data` is the head of `batch` and exists only so a helper built before
-/// batching still gets its one event. Read `events`: a daemon built before
-/// batching answers with `data` alone, and Swift's synthesized decoder honours
-/// no default values, so `batch` is optional here and folded back in.
 struct ScreenCaptureInput: Codable, Sendable, Hashable {
     var data: String?
     var batch: [String]? = nil
 
     var events: [String] { batch ?? data.map { [$0] } ?? [] }
 }
-/// A live viewer session. `id` is this end's handle; `sessionId` is the host's
-/// own id for the same session, which is what `screen.control.set` names.
-///
-/// `sessionId` is optional because a host built before that method answers
-/// without one, and the toggle then falls back to reopening the stream.
 struct ScreenViewerSession: Codable, Sendable, Hashable {
     var id: String
     var control: Bool
@@ -743,41 +578,24 @@ struct ScreenTransferSaved: Codable, Sendable, Hashable { var saved: Bool; var p
 struct ScreenTransferCancelled: Codable, Sendable, Hashable { var cancelled: Bool; var removed: Bool }
 struct ScreenAccessRequest: Codable, Sendable, Hashable { var sent: UInt32; var enabled: Bool; var signedIn: Bool }
 
-/// What the host said about a request this device just made. `granted` means
-/// the permission was already there and there is nothing to wait for.
 struct ScreenAccessAsk: Codable, Sendable, Hashable {
     var pending: Bool
     var granted: Bool?
 }
 
-/// What a device is asking this machine for.
-///
-/// Two grants, one shape. Being approved is not being let in: every device on
-/// the account is auto-approved on first contact, so each of these is a
-/// separate, explicit yes from whoever is at the machine.
 enum DeviceAccessKind: String, Sendable, Hashable {
-    /// Watch this screen, and possibly drive it.
     case screen
     case workspace
 }
 
-/// A device waiting for an answer on this machine.
 struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
     var peerID: String
-    /// The account's name for that device, when it has one. A public key is
-    /// not something anybody recognises their own phone by.
     var label: String?
-    /// Whether mouse and keyboard were asked for as well as the picture.
-    /// Always false for a workspace request: there is no half of that grant.
     var control: Bool
     var askedAt: UInt64
     var expiresAt: UInt64
-    /// Set from the method the row came back on rather than read off the wire,
-    /// so the two host policies stay unaware of each other.
     var kind: DeviceAccessKind = .screen
 
-    /// One device can have both kinds of request standing at once, so the peer
-    /// alone is not an identity here.
     var id: String { "\(kind.rawValue):\(peerID)" }
 
     enum CodingKeys: String, CodingKey {
@@ -810,7 +628,6 @@ struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
     var since: String?
     var until: String?
@@ -848,11 +665,6 @@ enum GroupBy: String, Sendable, CaseIterable, Identifiable {
     }
 }
 
-/// Token counters.
-///
-/// Every field is optional on purpose. "This tool does not report cache writes"
-/// and "this tool reported zero cache writes" are different facts, and the
-/// product's one unbreakable reporting rule is that they must not be collapsed.
 struct Counters: Codable, Sendable, Hashable {
     var inputFresh: UInt64?
     var cacheRead: UInt64?
@@ -863,15 +675,11 @@ struct Counters: Codable, Sendable, Hashable {
     var inputTotal: UInt64
     var hasUnknown: Bool
 
-    /// Fresh input plus output: what the work actually was, cache reads left
-    /// out. They are the largest number in the archive by a wide margin and
-    /// they measure how much context was re-sent, not how much was done.
     var workTokens: UInt64 {
         (inputFresh ?? 0).saturatingAdd(output ?? 0)
     }
 }
 
-/// One report row with its list-rate value.
 struct Bucket: Codable, Sendable, Hashable, Identifiable {
     var key: String
     var counters: Counters
@@ -880,55 +688,34 @@ struct Bucket: Codable, Sendable, Hashable, Identifiable {
     var valueMicros: Int64
     var estimated: Bool
     var unpricedModels: [String]
-    /// Every model here ran on a local server. Absent from older hosts.
     var local: Bool?
 
     var id: String { key }
 
-    /// Never call this "spend" or "cost" in the UI. Subscription usage is
-    /// valued the same way, so this is what the tokens were worth at list
-    /// rates, not what anyone was billed.
     var value: Money {
         Money(micros: valueMicros, estimated: estimated, complete: unpricedModels.isEmpty,
               local: local == true)
     }
 }
 
-/// An account-plane breakdown and the moment it was fetched.
-///
-/// The date travels with the rows because a figure and its age are one fact.
-/// The client shows it on any screen built from this, so a remembered answer
-/// never poses as a current one.
 struct AccountReport: Codable, Sendable, Hashable {
     var rows: [Bucket]
-    /// Which dimension these are folded by, echoed back by the host so an
-    /// answer that lands after the reader switched tabs can be discarded.
     var group: String
     var fetchedAtMs: Int64
-    /// Served from cache because the refresh failed. The numbers are real, they
-    /// are just old.
     var stale: Bool
 
     var fetchedAt: Date { Date(timeIntervalSince1970: Double(fetchedAtMs) / 1000) }
 }
 
-/// What one device contributed to the account over a window.
-///
-/// `sessions` is deliberately absent everywhere in this shape: the account
-/// receives no session identifiers, so there is no honest number to show.
 struct MachineUsage: Codable, Sendable, Hashable, Identifiable {
-    /// The account's machine id, which is what a device row matches on.
     var machine: String
     var valueMicros: Int64
     var events: UInt64
     var activeDays: Int
-    /// The window this covers, in days, so the screen labels it rather than
-    /// assuming one.
     var days: Int
 
     var id: String { machine }
 
-    /// List rates, never money charged. Same rule as `Bucket.value`.
     var value: Money {
         Money(micros: valueMicros, estimated: false, complete: true)
     }
@@ -943,9 +730,6 @@ struct Totals: Codable, Sendable, Hashable {
     var lastDate: String?
 }
 
-/// One coherent archive reading for Insights. Keeping this as a bridge model
-/// makes period changes one host trip rather than a fan-out of aggregates that
-/// serialize at the daemon anyway.
 struct InsightsSnapshot: Codable, Sendable, Hashable {
     var info: Info
     var totals: Totals
@@ -998,23 +782,11 @@ struct FileText: Codable, Sendable, Hashable {
     var content: String
 }
 
-// MARK: - Activity
 
-/// One day of the activity grid.
 struct HeatCell: Codable, Sendable, Hashable, Identifiable {
-    /// `YYYY-MM-DD`. Kept as the archive's own string, which is also the format
-    /// a `Query` filters by, so a click on a day can become a filter with no
-    /// reformatting in between.
     var date: String
-    /// What the day was worth at list rates, in microdollars. Spend rather than
-    /// tokens, so the grid ranks a day by what it cost and not by how many
-    /// cheap tokens went through it.
     var value: UInt64
-    /// `0...4`. Zero is a day inside the range with no usage, which has to read
-    /// as "nothing happened" and not as "no data".
     var level: Int
-    /// Older than the plan's unlocked window. Shade may remain. Value is
-    /// zero. Missing on an older host, which is not locked.
     var locked: Bool?
 
     var id: String { date }
@@ -1029,48 +801,24 @@ struct MonthLabel: Codable, Sendable, Hashable, Identifiable {
     var id: Int { column }
 }
 
-/// The activity calendar, as the core computed it.
-///
-/// The rows arrive built. Do not rebuild the grid from a list of days: the
-/// archive stores only days that had events, so packing them together draws a
-/// plausible calendar with every date in the wrong column.
 struct ActivityCalendar: Codable, Sendable, Hashable {
-    /// Seven rows, Monday first. `nil` is a day outside the rendered range.
     var rows: [[HeatCell?]]
     var months: [MonthLabel]
     var weeks: Int
-    /// Value of the whole grid at list rates, in microdollars, matching the
-    /// unit every `HeatCell` carries.
     var total: UInt64
     var activeDays: Int
-    /// Consecutive active days up to the most recent one with data. A quiet day
-    /// that is not over yet does not break it.
     var streakCurrent: Int
     var streakBest: Int
     var busiest: HeatCell?
     var first: String
     var last: String
-    /// Which grid this is: `"local"` or `"account"`. Optional because a peer
-    /// running an older host does not send it, and a missing answer is local.
     var scope: String?
     var notice: String?
-    /// What kind of fallback this is, so the interface can act on it instead
-    /// of parsing the sentence: `"auth"` (sign-in would fix it), `"upgrade"`
-    /// (the account does not include it), `"other"`. Absent when the grid is
-    /// the one asked for.
     var noticeCode: String?
-    /// First unlocked day (`YYYY-MM-DD`). Days before this keep the year
-    /// shape only. Missing when the whole grid is live.
     var unlockFrom: String?
-    /// Free year: last month exact, older days muted. Same treatment as
-    /// the public profile. Missing or false on a paid grid and on local.
     var historyLocked: Bool?
     var historyDays: Int?
-    /// Offer an upgrade under the grid. The app is the owner, so this is
-    /// true whenever the year is locked.
     var historyUpgrade: Bool?
-    /// When an account grid's numbers came off the service. Absent on a
-    /// local grid, which is read from disk and is never a remembered answer.
     var fetchedAtMs: Int64?
 
     var isHistoryLocked: Bool { historyLocked == true }
@@ -1089,17 +837,8 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     }
 }
 
-// MARK: - Day detail
 
-/// One day's hover detail, the same shape the profile page draws.
-///
-/// The heatmap cell carries one number so the grid can be built cheaply; this
-/// is what sits behind a hovered day: the totals line plus every
-/// `model × harness` slice, so the app and the website tell the same story
-/// about the day.
 struct DayDetail: Codable, Sendable, Hashable, Identifiable {
-    /// `YYYY-MM-DD`, echoed so the popover never has to guess which day it is
-    /// describing while a fetch races a hover change.
     var date: String
     var tokens: UInt64
     var events: UInt64
@@ -1110,39 +849,27 @@ struct DayDetail: Codable, Sendable, Hashable, Identifiable {
 
     var id: String { date }
 
-    /// List-rate value, with the same "not billed / floor" qualifiers money
-    /// everywhere else carries.
     var value: Money {
         Money(micros: valueMicros, estimated: estimated, complete: unpricedModels.isEmpty)
     }
 }
 
-/// One `model × harness` slice of a day.
 struct DayPart: Codable, Sendable, Hashable, Identifiable {
     var model: String
-    /// The harness that recorded the events, e.g. `"codex"`.
     var src: String
     var fresh: UInt64?
     var cacheRead: UInt64?
     var cacheWrite5m: UInt64?
     var cacheWrite1h: UInt64?
     var output: UInt64?
-    /// Sum of every known counter field, as the host sent it.
     var tokens: UInt64
     var events: UInt64
 
     var id: String { "\(src)\u{1}\(model)" }
 }
 
-/// Display label for a model id, matching tokenstat.ai.
-///
-/// Model ids are long and the useful part is at the end: "claude-opus-4-8"
-/// reads fine, "claude-haiku-4-5-20251001" does not. Cursor's auto router logs
-/// as bare "default"/"auto", which would otherwise render as a mystery.
 func shortModel(_ id: String) -> String {
     var raw = id.trimmingCharacters(in: .whitespaces)
-    // `local:` marks synced usage a machine served itself. Its price says
-    // so already, and the name reads without it.
     if raw.lowercased().hasPrefix("local:") { raw = String(raw.dropFirst(6)) }
     let leaf = raw.split(separator: "/").last.map(String.init) ?? raw
     let lower = leaf.lowercased()
@@ -1156,15 +883,7 @@ func shortModel(_ id: String) -> String {
     return leaf.isEmpty ? "model" : leaf
 }
 
-// MARK: - Syntax highlighting
 
-/// What a run of source text is.
-///
-/// One coloured run.
-///
-/// `start` and `length` are **UTF-16 code units**, which is what `NSTextStorage`
-/// indexes by, so they drop straight into an `NSRange` with no conversion. The
-/// Rust side does that conversion in the pass it was already making.
 struct SyntaxSpan: Codable, Sendable, Hashable {
     var start: Int
     var len: Int
@@ -1173,10 +892,6 @@ struct SyntaxSpan: Codable, Sendable, Hashable {
     var range: NSRange { NSRange(location: start, length: len) }
 }
 
-/// How a language is commented and indented.
-///
-/// Comes from the core so there is one table of these facts rather than one per
-/// front end.
 struct SyntaxRules: Codable, Sendable, Hashable {
     var lineComment: String?
     var blockComment: [String]?
@@ -1187,12 +902,6 @@ struct SyntaxRules: Codable, Sendable, Hashable {
     static let fallback = SyntaxRules(lineComment: nil, blockComment: nil, indent: 4)
 }
 
-/// The answer to a highlight request.
-///
-/// A file with no grammar and a file over the size limit both come back as a
-/// successful call with an empty `spans` and a `note`. Neither is an error: the
-/// file opened, it just is not colourable, and a red banner over a perfectly
-/// good file is worse than plain text.
 struct Highlighting: Codable, Sendable, Hashable {
     var language: String?
     var syntax: SyntaxRules?
@@ -1207,12 +916,7 @@ struct Highlighting: Codable, Sendable, Hashable {
 struct Info: Codable, Sendable, Hashable {
     var protocolVersion: String
     var coreVersion: String
-    /// Nil on a host that keeps no archive of its own, which is every mobile
-    /// build. Not an empty string: "no archive" and "an archive nobody named"
-    /// are different facts and must not render the same.
     var dbPath: String?
-    /// Whether this host can answer about its own machine's logs. False on a
-    /// client, where Insights comes from the account and nowhere else.
     var hasArchive: Bool
     var lastScanMs: Int64? = nil
     var timezone: String
@@ -1220,17 +924,13 @@ struct Info: Codable, Sendable, Hashable {
     var hasPrices: Bool
 }
 
-/// What `pricing.refresh` fetched and loaded.
 struct PricingRefresh: Codable, Sendable, Hashable {
     var effectiveFrom: String
     var models: UInt64
     var hasPrices: Bool
 }
 
-/// What `pricing.seed` did with the book this build ships with.
 struct PricingSeed: Codable, Sendable, Hashable {
-    /// False when the machine already had a book. Not a failure: a fetched
-    /// book is newer than anything a bundle can carry.
     var adopted: Bool
     var effectiveFrom: String
     var models: UInt64
@@ -1242,19 +942,13 @@ struct AppUpdate: Codable, Sendable, Hashable {
     var latest: String
     var newer: Bool
     var htmlURL: String
-    /// The signed, notarized disk image for this release, when it has one. A
-    /// release cut before the app shipped has none, so this stays optional and
-    /// the release page is the fallback.
     var dmgURL: String?
-    /// GitHub's earliest next check, as Unix seconds. No release was fetched.
     var retryAt: Double?
 
     enum CodingKeys: String, CodingKey {
         case current, latest, newer, retryAt, htmlURL = "htmlUrl", dmgURL = "dmgUrl"
     }
 
-    /// Where to send somebody who wants the update: the image if the release
-    /// carries one, the release page otherwise.
     var downloadURL: URL? {
         URL(string: dmgURL ?? htmlURL)
     }
@@ -1262,31 +956,18 @@ struct AppUpdate: Codable, Sendable, Hashable {
     var isAvailable: Bool { newer && latest != current }
 }
 
-/// Something the daemon fetched and checked, waiting on disk.
 struct DownloadedFile: Codable, Sendable {
     var path: String
 }
 
-/// A list-rate value, carrying the two qualifiers it must never be shown
-/// without.
 struct Money: Sendable, Hashable {
     var micros: Int64
-    /// At least one model was valued from an estimate rather than a published
-    /// rate.
     var estimated: Bool
-    /// Every model in the bucket could be priced. When false the figure is a
-    /// floor, and presenting it as a total would understate silently.
     var complete: Bool
-    /// Ran on a local server: nothing to value, and $0 would read like a
-    /// free tier of a cloud model.
     var local = false
 
     var dollars: Double { Double(micros) / 1_000_000 }
 
-    /// Rates are published in US dollars, so the figure is formatted as one
-    /// regardless of where the user is. A Hungarian locale renders the same
-    /// number as `6 786,57 US$`, which reads as a local amount and does not
-    /// match the `$6,786.57` the CLI prints for the very same archive.
     private static let currency: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency
@@ -1301,11 +982,6 @@ struct Money: Sendable, Hashable {
         if local && micros == 0 { return L10n.text("common.value.local") }
         let amount = Self.currency.string(from: NSNumber(value: dollars))
             ?? String(format: "$%.2f", dollars)
-        // A floor reads as "at least this much", an estimate as "about this
-        // much". Both must survive truncation, so they are never dropped.
-        // Do not add a separate caveat caption or tooltip for estimated /
-        // incomplete list-rate figures. The + / ~ marker already says it on
-        // the number itself; a prose line under Insights only crowds the UI.
         if !complete { return "\(amount)+" }
         if estimated { return "~\(amount)" }
         return amount
@@ -1313,8 +989,6 @@ struct Money: Sendable, Hashable {
 }
 
 extension Sequence where Element == Bucket {
-    /// Fold rows into one value, keeping the qualifiers. A total built from an
-    /// incomplete row is itself incomplete.
     var totalValue: Money {
         reduce(Money(micros: 0, estimated: false, complete: true)) { acc, row in
             Money(
@@ -1334,27 +1008,16 @@ extension Int64 {
 }
 
 extension UInt64 {
-    /// Saturating addition for values that arrived over the wire. A hostile
-    /// or corrupt total must saturate the figure on screen, not trap it; a
-    /// wrapping sum would be silently wrong instead.
     func saturatingAdd(_ other: UInt64) -> UInt64 {
         let (sum, overflow) = addingReportingOverflow(other)
         return overflow ? .max : sum
     }
 }
 
-/// A heat value as money.
-///
-/// The activity calendar carries microdollars, not tokens: a day's colour is
-/// what the day's work was worth at list rates, so a cheap high-volume day does
-/// not outshine an expensive one. The qualifiers are dropped here because the
-/// grid sends one number per day and the card above it already carries them.
 func formatSpend(_ micros: UInt64) -> String {
     Money(micros: Int64(clamping: micros), estimated: false, complete: true).formatted
 }
 
-/// Compact token counts. 1.2B rather than 1,214,203,912, because these numbers
-/// are read at a glance and compared, not audited.
 func formatTokens(_ n: UInt64) -> String {
     let value = Double(n)
     switch n {
@@ -1371,16 +1034,9 @@ func formatTokens(_ n: UInt64) -> String {
     }
 }
 
-// MARK: - Account
 
-/// A device authorization the user has not confirmed yet.
-///
-/// No device code here. That secret stays in the Rust bridge, which is why
-/// polling takes no arguments.
 struct DeviceLogin: Codable, Sendable, Hashable {
     var host: String
-    /// The short code the user reads. Shown large, because reading it off a
-    /// screen is the one manual step in the whole flow.
     var userCode: String
     var openURL: String
     var verificationURI: String
@@ -1397,7 +1053,6 @@ struct DeviceLogin: Codable, Sendable, Hashable {
     }
 }
 
-/// One poll's answer.
 struct DevicePoll: Codable, Sendable, Hashable {
     var state: String
     var interval: UInt64?
@@ -1408,11 +1063,8 @@ struct DevicePoll: Codable, Sendable, Hashable {
     var isConfirmed: Bool { state == "confirmed" }
 }
 
-/// Logins for coding agents on this machine: the machine's own, and any
-/// named profiles that give chosen agents a login of their own.
 struct AgentProfiles: Codable, Sendable, Hashable {
     var `default`: String
-    /// Agents a profile can give a login of their own.
     var agents: [String]
     var profiles: [AgentProfile]
     var workspaceLocks: [String: String]?
@@ -1424,11 +1076,9 @@ struct AgentProfiles: Codable, Sendable, Hashable {
 
 struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// Nil for the machine's own, which every client calls Main.
     var name: String?
     var system: Bool
     var platform: String? = nil
-    /// Agents with a login of their own in this profile.
     var own: [String]
 
     var title: String {
@@ -1437,14 +1087,10 @@ struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// The profile page's settings, as the account holds them.
 struct AccountProfile: Codable, Sendable, Hashable {
     var isPublic: Bool
-    /// Whether search engines may list the page while it is public.
     var indexable: Bool
-    /// Days until the handle may change. Zero when it may change today.
     var handleChangeDays: Int
-    /// Whether the one-time offer was answered, on any device.
     var handlePrompted: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -1453,7 +1099,6 @@ struct AccountProfile: Codable, Sendable, Hashable {
     }
 }
 
-/// Whether a handle can be claimed, and why not when it cannot.
 struct HandleCheck: Codable, Sendable, Hashable {
     var handle: String
     var available: Bool
@@ -1465,59 +1110,24 @@ struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
     var handle: String?
-    /// Opaque helper login lifetime, including helper restart and credential changes.
     var accountSession: String? = nil
-    /// The name the user chose to be shown as. The stable identity is the
-    /// handle when claimed, else the server's id (`accountId`); this is
-    /// only ever the label.
     var displayName: String?
-    /// Whether anyone can open the profile page. Nil from a server that does
-    /// not say, and then nothing here may claim either.
     var profilePublic: Bool? = nil
-    /// Handle and visibility settings. Nil when the account service has no
-    /// routes behind them, so no control is offered that could only fail.
     var profile: AccountProfile? = nil
     var tier: String?
-    /// Profile picture URL, when the account has one.
-    ///
-    /// Absolute by the time it arrives. The API sends `/avatar/<name>`,
-    /// relative on purpose so it never hands out a third-party URL, and
-    /// `tokenstat-host` resolves it against the host the token authenticated
-    /// to. Nil means this account has not set one, which is common and is not
-    /// an error: draw a monogram.
-    ///
-    /// This comment used to say the field was always nil because the API did
-    /// not send one. It does, and believing otherwise is why the phone drew a
-    /// letter for an account with a picture.
     var avatar: String?
-    /// When this account last synced, from any machine.
-    ///
-    /// Derived in the host from the machine list, because `/api/v1/me` carries
-    /// a timestamp per machine and none for the account. Reading the top level
-    /// gave nil, so the Account screen said "never" for an account that had
-    /// synced minutes earlier.
     var lastSyncAt: String?
     var thisMachineID: String?
-    /// The account's own id, as the server states it. The stable identity for
-    /// an account that has not claimed a handle yet. A new account has no
-    /// handle, and setup scopes its drafts to this instead.
     var accountId: String?
-    /// Server-side machine records. The shape belongs to the API, so this
-    /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
     var schemaCurrent: UInt32?
     var machineLimit: Int?
     var hostsLinked: Int?
-    /// Whether the relay will accept a HELLO from this account.
     var canRemote: Bool?
     var syncInterval: Int?
-    /// Who billed the current plan. Present when signed in, even on Free.
     var billing: AccountBilling?
     var relayUsage: RelayUsage?
 
-    /// `thisMachineId` on the wire. Spelling the acronym without saying so
-    /// left it nil on every decode, so no row in the machine list was ever
-    /// the one you are sitting at.
     enum CodingKeys: String, CodingKey {
         case signedIn, host, handle, displayName, profilePublic, profile
         case tier, avatar, lastSyncAt, accountSession
@@ -1543,13 +1153,8 @@ struct Account: Codable, Sendable, Hashable {
         }
     }
 
-    /// SSH vault is Supporter and above. Same three rungs as `isPaidTier`.
     var allowsVaultSync: Bool { isPaidTier }
 
-    /// What the SSH vault UI and host methods take as `tier`.
-    ///
-    /// A signed-in paid account whose `/me` tier is missing still passes
-    /// `legend` rather than `free`, so a grant cannot be mapped to unpaid.
     var vaultTierForSsh: String? {
         guard signedIn else { return nil }
         if allowsVaultSync { return tier?.lowercased() ?? "legend" }
@@ -1601,12 +1206,9 @@ struct AccountBilling: Codable, Sendable, Hashable {
         }
     }
 
-    /// The other store must not sell while this row is still the live one.
     var blocksOtherStore: Bool { hasLiveSub ?? isLive }
 }
 
-/// Live power, CPU and memory from a host. Read over the tunnel after a
-/// dial. Missing fields were not measured: do not draw them as zero.
 struct HostStats: Codable, Sendable, Hashable {
     var power: String?
     var charging: Bool?
@@ -1616,12 +1218,6 @@ struct HostStats: Codable, Sendable, Hashable {
     var ramTotalBytes: UInt64?
 }
 
-/// What a host knows about its own release. See `host.updateCheck`.
-///
-/// `hostVersion` is what the daemon process is *running*, which after an
-/// applied update is not what is on disk. That is the whole reason
-/// `restartPending` exists as a separate field rather than being inferred
-/// from a version comparison.
 struct HostUpdateState: Codable, Sendable, Hashable {
     var hostVersion: String
     var protocolVersion: String
@@ -1631,26 +1227,15 @@ struct HostUpdateState: Codable, Sendable, Hashable {
     var autoApply: Bool
     var restartPending: Bool
     var liveWork: Int
-    /// Whether stopping the daemon would get it started again. False means an
-    /// update installs but cannot come into use on its own.
     var canRestart: Bool
-    /// True where the desktop application owns the helper, so updating means
-    /// staging the application's download rather than replacing binaries.
     var appManaged: Bool
     var appImage: String?
 }
 
-/// What one `host.updateApply` did.
-///
-/// Every field is optional because two different things answer here: a host
-/// that replaced its own pair, and an application-managed helper that staged a
-/// download instead. Neither shape is a subset of the other.
 struct HostUpdateResult: Codable, Sendable, Hashable {
     var from: String? = nil
     var to: String? = nil
     var hostBinaryUpdated: Bool? = nil
-    /// The daemon is about to stop and be started again. The connection
-    /// dropping after this is the update working, not failing.
     var restarting: Bool? = nil
     var restartPending: Bool? = nil
     var liveWork: Int? = nil
@@ -1661,12 +1246,6 @@ struct HostUpdateResult: Codable, Sendable, Hashable {
     var detail: String? = nil
 }
 
-/// A machine on the account.
-///
-/// Field names follow the server (`id`, `label`, `last_sync_at`), not this
-/// app's preferences. Every one is optional because the shape belongs to the
-/// API: a machine that arrives with only an id still renders instead of
-/// failing the whole account decode.
 struct Machine: Codable, Sendable, Hashable, Identifiable {
     var machineID: String?
     var label: String?
@@ -1675,14 +1254,8 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     var lastSeenAt: String?
     var publicIdentity: String?
     var trustState: String?
-    /// `"host"` uploads usage; `"client"` is a phone that reaches hosts (P5).
     var kind: String?
-    /// What the machine says it is: "Ubuntu 24.04 · x86_64". Sent at login, so
-    /// a device that only ever ran the CLI still says what kind of computer it
-    /// is instead of showing an id.
     var platform: String?
-    /// `"user"` when somebody typed the name, so a machine's own registration
-    /// does not take a rename back.
     var labelSource: String?
 
     enum CodingKeys: String, CodingKey {
@@ -1698,14 +1271,10 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case labelSource
     }
 
-    /// Hosts only; clients (phones) are not dialable from Devices.
     var isHost: Bool { kind != "client" }
 
-    /// Phones never upload an archive. lastSyncAt is not a product fact there.
     var reportsArchiveSync: Bool { isHost }
 
-    /// Falls back to the label so two unnamed machines do not collapse into
-    /// one row in a ForEach.
     var id: String { machineID ?? label ?? "unidentified" }
 
     var displayName: String {
@@ -1719,7 +1288,6 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
-    /// The id, shown alongside a label rather than instead of it.
     var subtitle: String? {
         guard let machineID, label?.isEmpty == false else { return nil }
         return machineID
@@ -1735,19 +1303,10 @@ struct SyncOutcome: Codable, Sendable, Hashable {
     var to: String
 }
 
-/// A loopback port on this machine that bridges to a service on a peer's own
-/// localhost. The browser opens `url` as if the service were local.
 struct ProxyListen: Codable, Sendable, Hashable {
     var url: String
 }
 
-/// What a machine can launch in a workspace, as its daemon reports it. A
-/// remote folder asks the machine that owns it, so the launcher always means
-/// the machine the session would actually run on.
-///
-/// The catalog answers for the whole supported list, not only what is
-/// installed: a profile with `installed == false` is something the machine
-/// does not have yet, and `installCommand` is how it can get it.
 struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var id: String
     var name: String
@@ -1756,39 +1315,18 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var bypassArgs: [String]
     var harnessId: String?
     var symbol: String?
-    /// Loopback page the command starts, when the UI is a local web server.
     var openUrl: String?
-    /// Whether the command is on this machine's PATH (or in its own install
-    /// directory). False when the profile is only offered to be installed.
     var installed: Bool
-    /// Taken off this machine's launcher. The binary is still there. Stored
-    /// on the owning host so a phone and the Mac see the same grid.
-    ///
-    /// Optional so a daemon from before this field still decodes. Missing
-    /// means not hidden.
     var hidden: Bool?
-    /// The tool's official one-shot installer, shown for a profile that is
-    /// not installed. Data to display, never a command this app runs: the
-    /// host executes it and the app only sends the profile id.
     var installCommand: String?
-    /// Installed is not ready. A host from before protocol 9 omits these, and
-    /// a missing value means "not checked", never "signed out".
     var readiness: AgentReadiness?
     var expiresAt: Double?
     var signIn: AgentSignIn?
 }
 
-/// Whether an agent on a machine can actually start work.
-///
-/// `unknown` is a real answer and the default for anything this app cannot
-/// establish, including every host too old to have been asked. Sending
-/// somebody to redo a sign-in that was fine is as bad as letting them send a
-/// prompt into an auth error.
 enum AgentReadiness: String, Codable, Sendable, Hashable {
     case notInstalled, needsSignIn, signedIn, expired, unknown
 
-    /// A state this app has never heard of is one it cannot act on, so it
-    /// decodes as unknown rather than failing the whole machine's status.
     init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = AgentReadiness(rawValue: raw) ?? .unknown
@@ -1805,25 +1343,17 @@ enum AgentReadiness: String, Codable, Sendable, Hashable {
     }
 }
 
-/// How an agent signs in on a machine with no browser of its own.
 struct AgentSignIn: Codable, Sendable, Hashable {
     var supported: Bool
-    /// `browserCode` shows a link and then asks for a code pasted back.
-    /// `deviceCode` prints a code to type into a page on another device.
     var kind: String?
 }
 
-/// What running a profile's installer said. `output` is the captured tail of
-/// the installer's stdout and stderr, so an error is something the user can
-/// read rather than a bare "it failed".
 struct LauncherInstallResult: Codable, Sendable {
     var ok: Bool
     var exitCode: Int?
     var output: String
 }
 
-/// One installed agent's version, from `launcher.updates`. `latest` and
-/// `updateAvailable` are present only after a check that asked the vendor.
 struct AgentUpdateRow: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String?
@@ -1836,8 +1366,6 @@ struct AgentUpdateRow: Codable, Sendable, Hashable, Identifiable {
     var error: String?
 }
 
-/// What `launcher.update` did: the installer result plus the versions on
-/// either side, so the app can say what changed.
 struct AgentUpdateResult: Codable, Sendable {
     var ok: Bool
     var exitCode: Int?
@@ -1846,10 +1374,6 @@ struct AgentUpdateResult: Codable, Sendable {
     var after: String?
 }
 
-/// Allowlisted settings behind a launch tile's (i) badge.
-///
-/// The host only ever returns these keys. The rest of the file, including
-/// credentials, never crosses the bridge.
 struct HarnessConfig: Codable, Sendable {
     var id: String
     var path: String?
@@ -1864,13 +1388,9 @@ struct HarnessConfigField: Codable, Sendable, Identifiable {
     var kind: String
     var options: [String]
     var hint: String?
-    /// The band a number sits in, when the tool documents one. Present means
-    /// the form draws a slider instead of a text box.
     var min: Int?
     var max: Int?
     var step: Int?
-    /// What the tool itself uses when the key is absent, so a slider with no
-    /// value starts where the tool already is. `default` is a keyword.
     var fallback: Int?
     var value: String?
 
@@ -1883,7 +1403,6 @@ struct HarnessConfigField: Codable, Sendable, Identifiable {
     }
 }
 
-/// A model server discovered on this machine's loopback.
 struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String
@@ -1896,10 +1415,6 @@ struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     var models: [LocalModel]
     var error: String?
 
-    /// `baseUrl` on the wire, because the host camel-cases `base_url` like
-    /// every other field. Swift spells the acronym, so the two names have to
-    /// be joined here: without this the whole response fails to decode, and
-    /// the launcher reported it as "no local models discovered".
     enum CodingKeys: String, CodingKey {
         case id, name, baseURL = "baseUrl", port, defaultPort, available, models, error
     }
@@ -1925,15 +1440,6 @@ struct SyncScheduleStatus: Codable, Sendable {
     let due: Bool
 }
 
-/// Render an ISO-8601 instant from the server as something readable.
-///
-/// Returns nil rather than a placeholder when it cannot be parsed, so the
-/// caller decides what absence looks like.
-/// "3 minutes ago", for a timestamp whose exact minute nobody reads.
-///
-/// The absolute date stays available as a tooltip. "Last synced 4 Aug 2026 at
-/// 18:41" makes you work out whether that was recent. "12 minutes ago" is the
-/// answer to the question actually being asked.
 func formatRelativeDate(_ raw: String?) -> String? {
     guard let date = parseServerDate(raw) else { return nil }
     let formatter = RelativeDateTimeFormatter()
@@ -1969,7 +1475,6 @@ func formatServerDate(_ raw: String?) -> String? {
     return raw
 }
 
-/// One row of a two-level report.
 struct SplitBucket: Codable, Sendable, Hashable, Identifiable {
     var key: String
     var split: String
@@ -1980,11 +1485,6 @@ struct SplitBucket: Codable, Sendable, Hashable, Identifiable {
     var id: String { "\(key)\u{1}\(split)" }
 }
 
-/// An archive project with the harnesses that ran in it.
-///
-/// Not a workspace. A workspace is a folder the user registered; this is a
-/// label the archive recovered from a slug, and the two are deliberately
-/// separate concepts with separate types so they cannot be confused.
 struct ProjectHarnesses: Identifiable, Hashable {
     var path: String
     var harnesses: [SplitBucket]
@@ -1999,12 +1499,6 @@ struct ProjectHarnesses: Identifiable, Hashable {
     }
 }
 
-/// Archive source id for a launched command, or nil for a plain shell.
-///
-/// Matched on the basename so `/Users/…/bin/claude` and `claude` are the
-/// same harness. Used by session rows on both the Mac and the phone.
-/// Historical chats stored the raw binary name `agy`; map it to the
-/// canonical source id so brand marks and recent-chat tiles match.
 func harnessID(forCommand command: String) -> String? {
     switch URL(fileURLWithPath: command).lastPathComponent {
     case "claude": return "claude_code"
@@ -2027,22 +1521,13 @@ func harnessID(forCommand command: String) -> String? {
 }
 
 func harnessCanonicalID(_ id: String) -> String {
-    // Recent chats persist as `agy` from older builds; brand catalog is
-    // `antigravity`, so normalize before lookup.
     if id == "agy" { return "antigravity" }
     if id.hasPrefix("antigravity") { return "antigravity" }
-    // Chat backends store the raw CLI name `claude`; the brand catalog is
-    // `claude_code`. Without this the tile falls back to the letter "C".
     if id == "claude" { return "claude_code" }
-    // Same story for the `opencode2` binary: one brand, `opencode`.
     if id == "opencode2" { return "opencode" }
     return id
 }
 
-/// The tool a stored source id belongs to.
-///
-/// Recovery rows stay on disk as `claude_code_estimate` / `claude_code_rollup`.
-/// Surfaces that name a tool fold them into Claude Code.
 func harnessToolKey(_ id: String) -> String {
     switch id {
     case "claude_code_estimate", "claude_code_rollup": return "claude_code"
@@ -2050,14 +1535,7 @@ func harnessToolKey(_ id: String) -> String {
     }
 }
 
-/// Display name for a harness, the agent CLI that produced the events.
-///
-/// The archive stores source ids like `claude_code`. These are shown to
-/// people, so they get the same spelling tokenstat.ai uses. Keep the two in
-/// step: a user reading their profile on the web and their app should not see
-/// two names for one tool.
 func harnessName(_ id: String) -> String {
-    // The second binary keeps its own name even though it shares the mark.
     if id == "opencode2" { return "OpenCode 2" }
     let canonical = harnessCanonicalID(id)
     switch canonical {
@@ -2114,7 +1592,6 @@ func isHeadlessPlatform(_ platform: String?) -> Bool {
 /// Vendor marks, not ours. See TRADEMARK.md. A missing one falls back to a
 /// letter tile rather than borrowing another tool's logo.
 func harnessBrandAsset(_ id: String) -> String? {
-    // Estimate / rollup rows belong to the same brand as the live source.
     let canonical = harnessCanonicalID(id)
     let assetId: String
     switch canonical {
@@ -2129,9 +1606,7 @@ func harnessBrandAsset(_ id: String) -> String? {
     return known.contains(assetId) ? "brand_\(assetId)" : nil
 }
 
-// MARK: - Workspaces
 
-/// What happened to one file, as git reports it.
 enum ChangeKind: String, Codable, Sendable {
     case added, modified, deleted, renamed, untracked, conflicted
 
@@ -2171,8 +1646,6 @@ enum ChangeKind: String, Codable, Sendable {
 struct FileChange: Codable, Sendable, Hashable, Identifiable {
     var path: String
     var kind: ChangeKind
-    /// Nil when unknown rather than zero: an untracked file has nothing to diff
-    /// against, and a changed binary is not an unchanged one.
     var added: UInt64?
     var removed: UInt64?
 
@@ -2197,14 +1670,10 @@ struct GitStatus: Codable, Sendable, Hashable {
     var files: [FileChange]
     var added: UInt64
     var removed: UInt64
-    /// True when some file's counts were unknown, so the totals are a floor.
     var partial: Bool
 
     var hasLineChanges: Bool { added > 0 || removed > 0 }
 
-    /// Keep known line totals even when some paths have unknown counts. Use
-    /// the path count only when both totals are zero, as with an untracked
-    /// folder that would otherwise read as "+0 −0".
     var compactChangeSummary: String {
         if !hasLineChanges {
             return files.count == 1
@@ -2228,9 +1697,7 @@ struct GitBranch: Codable, Sendable, Hashable, Identifiable {
     var date: Date? { lastCommit > 0 ? Date(timeIntervalSince1970: TimeInterval(lastCommit)) : nil }
 }
 
-// MARK: - Pull requests
 
-/// Whether this workspace can use its forge connection.
 struct PullAvailability: Codable, Sendable, Hashable {
     var state: String
     var host: String?
@@ -2247,8 +1714,6 @@ struct PullAvailability: Codable, Sendable, Hashable {
     }
 }
 
-/// Public half of a GitHub device authorization. The device code never leaves
-/// the host bridge.
 struct PullDeviceLogin: Codable, Sendable, Hashable {
     var host: String
     var userCode: String
@@ -2297,8 +1762,6 @@ enum PullCheckState: String, Codable, Sendable, Hashable {
     case pending
 }
 
-/// One row returned by the forge list query. Bodies and diffs never enter this
-/// type: the compact list contains only review metadata.
 struct PullSummary: Codable, Sendable, Hashable, Identifiable {
     var number: UInt32
     var title: String
@@ -2398,7 +1861,6 @@ struct PullDetail: Codable, Sendable, Hashable, Identifiable {
 
     var id: UInt32 { number }
     var createdDate: Date? { parseServerDate(createdAt) }
-    /// Older hosts did not report pagination; 50 is their query limit.
     var hasIncompleteChecks: Bool { checksTruncated ?? (checks.count >= 50) }
 }
 
@@ -2447,11 +1909,8 @@ struct PullForgeConnection: Codable, Sendable, Hashable {
 
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
-    /// Path relative to the project root, with `/` separators.
     var path: String
     var isDir: Bool
-    /// True when git would ignore this. Shown dimmed rather than hidden:
-    /// `target/` and a generated project file are things people look for.
     var ignored: Bool
 
     var id: String { path }
@@ -2467,13 +1926,6 @@ extension DiffLineKind {
     }
 }
 
-/// What a git command that changed something reported.
-/// Which write produced a `GitOutcome`.
-///
-/// The panel leads with a sentence about the action and quotes git underneath,
-/// because git's success output is addressed to a script. "To <remote>" and
-/// "abc1234..def5678  main -> main" are both true and neither of them answers
-/// the question the person asked by pressing the button.
 enum GitOutcomeAction: Sendable, Hashable {
     case commit
     case push
@@ -2485,8 +1937,6 @@ enum GitOutcomeAction: Sendable, Hashable {
         }
     }
 
-    /// What to say when it did not. Git's own words follow, and they are the
-    /// part that explains it, so this only has to name what was attempted.
     var failed: String {
         switch self {
         case .commit: return L10n.text("apple.models.could_not_commit.48fd13cb")
@@ -2497,14 +1947,10 @@ enum GitOutcomeAction: Sendable, Hashable {
 
 struct GitOutcome: Codable, Sendable, Hashable {
     var ok: Bool
-    /// Git's own words. Shown verbatim on failure: they name the file, the
-    /// hook, or the conflict, and rewording loses that.
     var message: String
 }
 
-/// One commit in a workspace's history.
 struct Commit: Codable, Sendable, Hashable, Identifiable {
-    /// Full hash. Abbreviating is the view's job.
     var id: String
     var subject: String
     var author: String
@@ -2512,26 +1958,15 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     /// app: a launchd agent is updated on its own schedule, and a field it does
     /// not send must not fail the whole decode.
     var email: String?
-    /// Author time in unix seconds: when the work was done, not when a rebase
-    /// last touched it.
     var timestamp: Int64
-    /// True while the commit is not on the upstream branch yet. False when
-    /// there is no upstream at all, because then nothing is known either way.
     var unpushed: Bool
-    /// Authored by the identity this repository is configured with. The host
-    /// decides it, because `user.email` is git's answer to "who am I here" and
-    /// can differ per repository. Optional for the same reason as `email`.
     var mine: Bool?
-    /// Tags pointing at this commit, so history can say which commit a release
-    /// went out on. Optional because a running daemon can be older than the
-    /// app, and a commit without tags is still a commit.
     var tags: [String]?
 
     var shortID: String { String(id.prefix(7)) }
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 
-    /// Tags to draw, newest daemon or old: absent means none, not unknown.
     var tagList: [String] { tags ?? [] }
 }
 
@@ -2547,13 +1982,9 @@ enum LimitSeverity: String, Codable, Sendable {
     }
 }
 
-/// One quota window a vendor reports.
 struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
-    /// `5-hour`, `weekly`, `monthly`.
     var label: String
-    /// `primary` / `secondary` when the source provides it.
     var scope: String?
-    /// Percent of the allowance used, 0 to 100.
     var percent: Double
     var resetsAtMs: Int64?
     var severity: LimitSeverity
@@ -2572,13 +2003,8 @@ struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
         case "primary":
             return L10n.text("apple.models.0_primary.57ab87b8", "\(label)")
         case "current model":
-            // A small model's own allowance (Spark, and whatever comes
-            // next): secondary, never bare beside the account's week.
             return L10n.text("apple.models.0_secondary.6cd2b67a", "\(label)")
         default:
-            // The account's own allowance reads as written: "weekly
-            // (general)". Anything else vendor-named stays qualified rather
-            // than translated, which is what hid an exhausted account limit.
             return "\(label) (\(scope))"
         }
     }
@@ -2587,12 +2013,9 @@ struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
         resetsAtMs.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
     }
 
-    /// Clamped for drawing. A vendor reporting 104% is telling you it is over,
-    /// not asking for a bar that runs off the edge.
     var fraction: Double { min(1, max(0, percent / 100)) }
 }
 
-/// Opt-in plan-limit posting, plus the last readings this Mac has.
 struct LimitsSyncState: Codable, Sendable {
     var enabled: Bool
     var skip: [String]
@@ -2622,11 +2045,7 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     var plan: String?
     var windows: [UsageWindow]
     var observedAtMs: Int64
-    /// Why the vendor could not be read. With windows present it explains why
-    /// they are old rather than why they are missing.
     var note: String?
-    /// These windows were remembered from an earlier read, because this one
-    /// failed. Real numbers, just not current ones.
     var stale: Bool?
 
     var id: String { profileId.map { "\(source):\($0)" } ?? source }
@@ -2637,7 +2056,6 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
 
     var isStale: Bool { stale == true }
 
-    /// Something to draw, as opposed to only a reason there is nothing.
     var hasWindows: Bool { !windows.isEmpty }
 
     var nextReset: Date? {
@@ -2645,7 +2063,6 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// One commit in full: what it says, and what it changed.
 struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var subject: String
@@ -2653,46 +2070,27 @@ struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var author: String
     var email: String
     var timestamp: Int64
-    /// Two or more parents means a merge, which is why its diff can be empty
-    /// for a commit that plainly changed things.
     var parents: [String]
     var files: [FileChange]
     var added: UInt64
     var removed: UInt64
     var diffs: [FileDiff]
-    /// Tags pointing at this commit. Optional for the same older-daemon
-    /// reason as on `Commit`.
     var tags: [String]?
 
     var shortID: String { String(id.prefix(7)) }
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
     var isMerge: Bool { parents.count > 1 }
 
-    /// Tags to draw, newest daemon or old: absent means none, not unknown.
     var tagList: [String] { tags ?? [] }
 }
 
-/// What a folder is holding, as counts and nothing else.
-///
-/// Answered by `workspace.summary` in one call. It exists to save round trips:
-/// a phone drawing one folder's badges was reading five full lists over the
-/// tunnel and counting them itself.
 struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var sessions: Int
-    /// Conversations in this folder. Optional because a host older than this
-    /// field answers without it, and a missing badge is honest where a zero
-    /// would not be.
     var chats: Int?
-    /// Nil when the folder is missing, so "we did not look" is not drawn as
-    /// "nothing changed".
     var changed: Int?
-    /// Open pull requests only when an All/Open list is already cached.
     var pulls: Int?
     var tasks: Int
-    /// Notes kept here, archived ones excluded. Optional because a host older
-    /// than this field answers without it, and a row that says nothing is
-    /// honest where a zero would not be.
     var notes: Int?
     var workflows: Int
     var workflowsRunning: Int
@@ -2704,26 +2102,15 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var path: String
     var name: String
     var addedAtMs: Int64
-    /// False when the folder is gone. Kept and marked rather than dropped.
     var exists: Bool
-    /// Absent when the folder is missing, so "we did not look" cannot be
-    /// mistaken for "no changes".
     var git: GitStatus?
-    /// Public key of the machine that owns this workspace. Local folders have
-    /// no machine id. The id is optional for compatibility with older daemons.
     var machineID: String?
     var machineLabel: String?
-    /// Organizations the owning computer shares this folder with, by id.
-    /// Absent from older hosts, which reads the same as not shared.
     var teamOrganizations: [String]?
-    /// The host's folder for chats with no repository. Absent from older
-    /// hosts, which have no such folder.
     var general: Bool? = nil
 
     var changeCount: Int { git?.files.count ?? 0 }
     var isGeneral: Bool { general == true }
-    /// Shown where projects are listed. A chat-bubble glyph keeps the general
-    /// folder from reading as one more repository.
     var symbol: String { isGeneral ? "bubble.left.and.bubble.right" : isRemote ? "globe" : "folder" }
 
     var diffStat: String? {
@@ -2731,10 +2118,6 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
         return git.compactChangeSummary
     }
 
-    /// One-line git summary for the sidebar: branch, ahead/behind, diff stat.
-    ///
-    /// Nil when there is nothing worth saying, so a plain folder does not
-    /// pretend to be a repository.
     var subtitle: String? {
         guard !isGeneral else { return nil }
         guard exists else { return L10n.text("apple.models.folder_missing.f06c68a6") }
@@ -2751,8 +2134,6 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 
     var isRemote: Bool { machineID != nil }
 
-    /// The general folder carries the host's stored name. Every list shows it
-    /// as "No repository", which is what choosing it means.
     var presented: WorkspaceFolder {
         guard isGeneral else { return self }
         var folder = self
@@ -2762,10 +2143,6 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 }
 
 
-// MARK: - Chat
-
-/// The personal reader only needs to know that its source is shared. The
-/// publication journal and consent fingerprint stay on the publishing host.
 struct ChatSharingMarker: Codable, Sendable, Hashable {
     var id: String
 }
@@ -2789,43 +2166,24 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var budgetSeconds: UInt64
     var createdAtMs: Int64
     var updatedAtMs: Int64
-    /// The profile whose logins this chat's agent uses. Nil for the
-    /// machine's own, which every chat from before profiles is.
     var profileId: String? = nil
-    /// Last actual human/agent event. Setup edits move `updatedAtMs` but do
-    /// not make a conversation unread.
     var lastMessageAtMs: Int64?
-    /// `user` or `agent`; optional for hosts predating recent chats.
     var lastMessageAuthor: String?
     var sendRevision: UInt64?
     var runRevision: UInt64? = nil
     var runStartedAtMs: Int64? = nil
     var running: Bool
-    /// An approval or a question is open. Injected on `chat.list`, absent on
-    /// older hosts, where nothing is known rather than nothing waiting.
     var waiting: Bool? = nil
-    /// A note the host will hand to the next tool step. Injected on `chat.list`
-    /// only, so a restart cannot send words the person no longer sees.
     var pendingSteer: String?
-    /// Volatile capability from the host: this exact running CLI accepts live input.
     var nativeSteer: Bool? = nil
     var nativeSteerAttachments: Bool? = nil
     var routing: ChatRoutingState? = nil
-    /// The branch the conversation's last turn started or ended on, and
-    /// the pull request the host last saw for it. Both absent on a host
-    /// older than protocol 30.
     var branch: String?
     var pull: BranchPull?
-    /// Every pull request this chat opened or talked about, newest first.
-    /// Empty on a host older than 1.26.0, which only knows the branch's own.
     var pulls: [ChatPull] = []
-    /// What the last turn left in the provider's prompt cache. Absent for an
-    /// agent that does not report it and on a host older than protocol 54.
     var promptCache: ChatPromptCache? = nil
     var continuedFrom: String? = nil
 
-    /// A saved page has no live setup or permissions. These inert values are
-    /// replaced by the host's record before the reader can return to live work.
     init(saved reference: WorkReference, title: String, backend: String?) {
         id = reference.itemID ?? ""
         workspaceID = reference.workspaceID
@@ -2885,11 +2243,8 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
         nativeSteer = try c.decodeIfPresent(Bool.self, forKey: .nativeSteer)
         nativeSteerAttachments = try c.decodeIfPresent(Bool.self, forKey: .nativeSteerAttachments)
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
-        // Decoration: a pull request shape this client cannot read must not
-        // cost it the conversation.
         pull = try? c.decodeIfPresent(BranchPull.self, forKey: .pull)
         pulls = (try? c.decodeIfPresent([ChatPull].self, forKey: .pulls)) ?? pull.map { [ChatPull($0)] } ?? []
-        // Advice, never a reason to lose the conversation.
         promptCache = try? c.decodeIfPresent(ChatPromptCache.self, forKey: .promptCache)
         continuedFrom = try c.decodeIfPresent(String.self, forKey: .continuedFrom)
         profileId = try c.decodeIfPresent(String.self, forKey: .profileId)
@@ -2933,33 +2288,20 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// The last request a conversation sent, as the host recorded it.
 struct ChatPromptCache: Codable, Sendable, Hashable {
     var backend: String
     var tokens: UInt64
     var model: String?
-    /// The conversation's model setting when the turn started.
     var selection: String?
     var atMs: Int64
     var ttlMs: Int64
 }
 
-/// Answer from `chat.steerDeliver`.
-///
-/// `delivered` is false when the note did not start a turn. The conversation,
-/// when present, is the disk record of the turn that did start, and it does
-/// not carry the parked note.
 struct ChatSteerDelivery: Codable, Sendable {
     var delivered: Bool
     var conversation: ChatConversation?
 }
 
-/// Host-wide chat metadata for the Workspaces shortcut.
-///
-/// This deliberately is not `ChatConversation`: the full record includes the
-/// system prompt, tool permissions and backend resume token. None of those are
-/// needed to draw five rows. The custom decoder keeps a new client compatible
-/// with an older host, whose `chat.recent` response predates `needsAttention`.
 struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var workspaceID: String
@@ -2969,8 +2311,6 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
     var lastMessageAuthor: String?
     var running: Bool
     var needsAttention: Bool
-    /// The pull requests the host knows for this chat, read from its cache.
-    /// A host that only reports the branch's own sends `pull` alone.
     var pulls: [ChatPull] = []
 
     enum CodingKeys: String, CodingKey {
@@ -3007,21 +2347,11 @@ struct ChatRecentConversation: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
-/// must not imply an interactive approval channel where a CLI only has rules.
-/// Which launcher tools can be pointed at a local model server.
-///
-/// The host decides what a selection turns into, in
-/// `tokenstat-host::launcher::model_environment`, and refuses a pair it has
-/// no contract for. This list only decides whether to offer the choice, so a
-/// tool missing here costs a menu entry, never a bad launch. Shared by every
-/// Apple client, so the Mac and the phone offer the same thing.
 enum LocalModelLaunch {
     static func accepts(_ launcherID: String) -> Bool {
         ["claude_code", "codex", "opencode", "opencode2", "copilot"].contains(launcherID)
     }
 
-    /// `provider:model`, the key a folder's choice is stored under.
     static func parse(_ key: String?) -> (provider: String, model: String)? {
         guard let key, let separator = key.firstIndex(of: ":") else { return nil }
         let provider = String(key[key.startIndex ..< separator])
@@ -3031,14 +2361,11 @@ enum LocalModelLaunch {
     }
 }
 
-/// One local model in an agent's list, as the host describes it.
 struct LocalChatModelInfo: Codable, Sendable, Hashable {
     var id: String
     var contextLength: Int?
 }
 
-/// A chat model on a local server, named `local:<provider>/<model>` by the
-/// host. Shown as the server and the model rather than the stored id.
 enum LocalChatModel {
     static func parse(_ id: String?) -> (provider: String, model: String)? {
         guard let rest = id?.trimmingCharacters(in: .whitespaces), rest.hasPrefix("local:"),
@@ -3056,11 +2383,8 @@ enum LocalChatModel {
         }
     }
 
-    /// Below this an agent's own instructions crowd out the conversation, and
-    /// some agents start summarising on the first turn.
     static let roomyContext = 65_536
 
-    /// `LM Studio: qwen/qwen3-coder` for a local id, the id itself otherwise.
     static func title(_ id: String) -> String {
         guard let local = parse(id) else { return id }
         return "\(providerName(local.provider)): \(local.model)"
@@ -3073,8 +2397,6 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var command: String
     var models: [String]
     var efforts: [String]
-    /// Nil on older hosts and agents without speed selection. Empty means
-    /// the provider decides availability for the selected model/account.
     var fastModeModels: [String]? = nil
     var fastModeLive = false
     var modelListStatus: String? = nil
@@ -3084,21 +2406,13 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var readiness: String? = nil
     var signIn: AgentSignIn? = nil
     var canCheckSignIn: Bool = false
-    /// Whether `readiness` is the CLI's own answer to `launcher.checkSignIn`
-    /// rather than the catalog's reading of its files. Local to this client,
-    /// never encoded: a reload of the list is file evidence again.
     var signInVerified: Bool = false
     var gateTier: String
-    /// From the host's daily version check (protocol 55): this agent has a
-    /// newer published version. Absent on older hosts and before a check.
     var updateAvailable: Bool = false
     var latestVersion: String? = nil
     var installedVersion: String? = nil
-    /// The local models in `models`, with how much each one holds.
     var localModels: [LocalChatModelInfo] = []
 
-    /// Older hosts already support these two terminal flows, but do not yet
-    /// include sign-in metadata in chat.backends.
     var signInFlow: AgentSignIn? {
         if let signIn { return signIn }
         switch launcherID {
@@ -3141,7 +2455,6 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
         localModels = (try? c.decodeIfPresent([LocalChatModelInfo].self, forKey: .localModels)) ?? []
     }
 
-    /// Tokens a local model holds, when its server said.
     func contextLength(of id: String) -> Int? {
         localModels.first { $0.id == id }?.contextLength
     }
@@ -3172,12 +2485,9 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
 
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var id: String
-    /// Nil is a shared legacy persona, available in every workspace.
     var workspaceID: String?
     var name: String
     var systemPrompt: String
-    /// Drives `PersonaMark`, and nothing else. Stable across a rename, so a
-    /// persona somebody knows by its face keeps that face.
     var seed: UInt64
 
     enum CodingKeys: String, CodingKey {
@@ -3189,33 +2499,20 @@ struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     }
 
     static func blank() -> ChatPersona {
-        // Zero asks the host for the usual seed, derived from the id it is
-        // about to mint. A face cannot be settled before the persona exists.
         ChatPersona(id: "", workspaceID: nil, name: "", systemPrompt: "", seed: 0)
     }
 }
 
-/// The personas a workspace can use, plus which one new chats inherit.
 struct ChatPersonaList: Codable, Sendable {
     var personas: [ChatPersona]
     var defaultId: String
 }
 
-/// A generated starting point, before anybody has agreed to keep it.
-///
-/// Its own type rather than a `ChatPersona` so a draft cannot be mistaken for
-/// something saved: generated text goes into a form, and only a press turns it
-/// into a persona.
 struct ChatPersonaDraft: Codable, Sendable, Hashable {
     var name: String
     var systemPrompt: String
 }
 
-/// What the host says about a message a client named.
-///
-/// `unknown` is not "never sent": receipts are kept for thirty days, so an
-/// older message that has fallen out of the ledger reads as unknown too. The
-/// conversation is the answer in that case, not a resend.
 struct ChatSendReceipt: Codable, Sendable, Hashable {
     enum State: String, Codable, Sendable {
         case accepted
@@ -3228,12 +2525,10 @@ struct ChatSendReceipt: Codable, Sendable, Hashable {
     var atMs: Int64?
     var eventAtMs: Int64?
 
-    /// The host started this turn and the message is on the transcript.
     var isAccepted: Bool { state == .accepted }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // A host that grows another state must not make this undecodable.
         state = (try? container.decode(State.self, forKey: .state)) ?? .unknown
         atMs = try container.decodeIfPresent(Int64.self, forKey: .atMs)
         eventAtMs = try container.decodeIfPresent(Int64.self, forKey: .eventAtMs)
@@ -3245,7 +2540,6 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
     var name: String
     var mediaType: String?
     var size: UInt64?
-    /// Only present when the host explicitly attributes this file to a tool.
     var toolCallId: String? = nil
 }
 
@@ -3270,8 +2564,6 @@ struct ChatEventChunk: Codable, Sendable {
         tailCursor = try c.decodeIfPresent(String.self, forKey: .tailCursor)
         reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
         hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
-        // One ugly toolStart must not fail the whole poll. The host writes
-        // `input` as an object on tools and as a count on usage.
         events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
             .compactMap(\.value)
     }
@@ -3286,25 +2578,14 @@ struct ChatEventChunk: Codable, Sendable {
     }
 }
 
-/// One bounded page of a conversation's timeline, newest first.
-///
-/// `cursor` asks for the page before this one and is opaque: it names a place
-/// in a file whose shape belongs to the host. A client stores it and hands it
-/// back, and never builds or reads one.
 struct ChatEventPage: Codable, Sendable {
     var events: [ChatTimelineEvent]
-    /// Where live tailing carries on from. Only the newest page's is useful.
     var nextOffset: UInt64
     var tailCursor: String?
     var cursor: String?
     var hasEarlier: Bool
     var historyTrimmed: Bool
-    /// The cursor could not be honoured because the archive was trimmed under
-    /// it, so this is the newest page rather than the one asked for. What is
-    /// held should be replaced, not extended.
     var reset: Bool
-    /// What the whole conversation has spent, with the newest page only. The
-    /// meter says "this conversation", so it cannot be folded from a window.
     var usage: ChatUsageTotals?
 
     enum CodingKeys: String, CodingKey {
@@ -3332,7 +2613,6 @@ struct ChatEventPage: Codable, Sendable {
         historyTrimmed = try c.decodeIfPresent(Bool.self, forKey: .historyTrimmed) ?? false
         reset = try c.decodeIfPresent(Bool.self, forKey: .reset) ?? false
         usage = try c.decodeIfPresent(ChatUsageTotals.self, forKey: .usage)
-        // One unreadable row must not empty a page, exactly as on the tail.
         events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
             .compactMap(\.value)
     }
@@ -3350,8 +2630,6 @@ struct ChatEventPage: Codable, Sendable {
     }
 }
 
-/// Skips a single timeline row that cannot be decoded, so a new backend field
-/// cannot empty the conversation.
 private struct FailableChatEvent: Decodable {
     var value: ChatTimelineEvent?
     init(from decoder: Decoder) throws {
@@ -3360,16 +2638,9 @@ private struct FailableChatEvent: Decodable {
 }
 
 
-/// What a conversation says to its agent before the person's own words.
-/// Two halves on purpose. `brief` belongs to the person and is theirs to edit.
-/// `added` is the one rule tokenstat puts in every conversation, and the
-/// inspector shows it verbatim rather than describing it, because a product
-/// that appends instructions to somebody's chat owes them the actual text.
 struct ChatInstructions: Codable, Sendable, Hashable {
     var brief: String
     var added: String
-    /// `systemPrompt` where the backend takes a flag, `turnPrefix` where the
-    /// rules have to ride ahead of the message in a tagged block.
     var channel: String
 
     var travelsAsSystemPrompt: Bool { channel == "systemPrompt" }
@@ -3408,17 +2679,11 @@ extension ChatApproval {
 }
 
 
-/// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a
-/// schedule with a budget the run stops at.
 struct Automation: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String
-    /// One of the ids `automation.backends` reports. The daemon owns the argv
-    /// for each backend, so a client never builds a command line.
     var backend: String
-    /// Model alias passed to the CLI, when the backend advertises models.
     var model: String?
-    /// Reasoning effort passed to the CLI, when the backend advertises levels.
     var effort: String?
     var workspaceID: String
     var prompt: String
@@ -3428,7 +2693,6 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64?
     var nextRunAtMs: Int64?
     var lastRunID: String?
-    /// Missing on hosts before protocol 21, and on cached copies from then.
     var revision: UInt64 = 0
 
     enum CodingKeys: String, CodingKey {
@@ -3489,7 +2753,6 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 
-    /// Wire object for `automation.create` and `automation.update`.
     var payload: [String: Any] {
         [
             "id": id, "name": name, "backend": backend,
@@ -3511,7 +2774,6 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A confirmed creation, including when the job has since been deleted.
 struct AutomationCreationOutcome: Codable, Equatable, Sendable {
     var operationID: String
     var jobID: String
@@ -3525,18 +2787,12 @@ struct AutomationCreationOutcome: Codable, Equatable, Sendable {
     }
 }
 
-/// When a job fires, as a plain struct so the form edits one field at a time.
 struct AutomationSchedule: Codable, Sendable, Hashable {
     var kind: ScheduleKind
-    /// Interval only, seconds.
     var everySeconds: UInt64
-    /// Wall-clock kinds only, local hour and minute.
     var hour: Int
     var minute: Int
-    /// Weekly single-day, 0 = Monday to 6 = Sunday.
     var weekday: Int
-    /// Multi-day bitset, Monday = bit 0 … Sunday = bit 6. Used by custom and
-    /// weekdays; weekly with a single day keeps using `weekday` (this stays 0).
     var weekdays: Int
 
     enum CodingKeys: String, CodingKey {
@@ -3570,10 +2826,8 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
     }
 
     static let `default` = AutomationSchedule(kind: .once, everySeconds: 3600, hour: 9, minute: 0, weekday: 0)
-    /// Monday through Friday bits, matching the host.
     static let weekdaysMask = 0b0001_1111
 
-    /// One phrasing for Mac, iPhone and iPad, so a job cannot say two things.
     var summary: String {
         let time = String(format: "%d:%02d", hour, minute)
         switch kind {
@@ -3601,7 +2855,6 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
         }
     }
 
-    /// A repeating schedule can be paused. Once is only ever a button.
     var repeats: Bool { kind != .once }
 
     private static func dayList(_ mask: Int) -> String {
@@ -3632,7 +2885,6 @@ enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
     }
 }
 
-/// One completed or still-running agent run.
 struct RunRecord: Codable, Sendable, Identifiable {
     var id: String
     var jobId: String
@@ -3644,13 +2896,8 @@ struct RunRecord: Codable, Sendable, Identifiable {
     var exitCode: Int?
     var status: String
     var transcriptPath: String
-    /// Present for a live process. Interactive task runs use this to open the
-    /// same host-owned terminal instead of creating an unrelated session.
     var ptyID: String?
     var interactive: Bool?
-    /// The workflow run this is a step of, when it is one. Absent for a run
-    /// somebody scheduled or started, which is the only kind worth a
-    /// notification: see `RunNotifications`.
     var parentRunID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -3683,7 +2930,6 @@ struct AutomationRunSubmission: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey { case operationID = "operationId", jobID = "jobId" }
 }
 
-/// A confirmed run request. `run` is absent when the process was never recorded.
 struct AutomationRunOutcome: Codable, Sendable {
     var operationID: String
     var jobID: String
@@ -3700,17 +2946,13 @@ struct AutomationRunOutcome: Codable, Sendable {
     }
 }
 
-/// Shared run queue: default time limit and how many jobs may run at once.
 struct AutomationQueue: Codable, Sendable {
     var defaultBudgetSeconds: UInt64
     var maxConcurrent: UInt32
-    /// IANA name of the host scheduler clock. Nil on a host that does not
-    /// name it yet. Never the device zone.
     var timezone: String? = nil
 }
 
 
-/// Host-owned graph. The Mac canvas is a view of this, not the source of truth.
 struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String
@@ -3724,11 +2966,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var lastRunAtMs: Int64?
     var nextRunAtMs: Int64?
     var lastRunID: String?
-    /// Missing on hosts before protocol 22, and on cached copies from then.
     var revision: UInt64 = 0
-    /// Fields the host sent that this client does not name. Never shown,
-    /// never edited, written back untouched so a round trip cannot delete
-    /// them.
     var extraFields: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
@@ -3809,7 +3047,6 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 
-    /// Empty graph with a start node. The person still has to save it.
     static func blank(name: String = L10n.text("apple.models.untitled.f59ab8d1"), scope: WorkflowScope = .global, workspaceID: String? = nil) -> WorkflowGraph {
         WorkflowGraph(
             name: name,
@@ -3819,10 +3056,6 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
-    /// Place nodes top to bottom when every position is still the origin.
-    ///
-    /// Design-from-prompt often omits `x`/`y`. The runner ignores them. The
-    /// canvas needs something it can show. Layers go down. Siblings share a row.
     mutating func layoutIfNeeded() {
         guard !nodes.isEmpty else { return }
         if nodes.contains(where: { $0.x != 0 || $0.y != 0 }) { return }
@@ -3929,9 +3162,6 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
     var pattern: String?
     var times: UInt32?
     var until: String?
-    /// Fields the host sent that this client does not name. Never shown,
-    /// never edited, written back untouched so a round trip cannot delete
-    /// them.
     var extraFields: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
@@ -4051,7 +3281,6 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         return kind.label
     }
 
-    /// One-line caption for the outline. Never invents a dollar figure.
     var subtitle: String {
         switch kind {
         case .input:
@@ -4207,26 +3436,20 @@ struct WorkflowDesignResult: Codable, Sendable {
     var transcript: String
 }
 
-/// A slice of a run's transcript, asked for by byte offset.
 struct TranscriptChunk: Codable, Sendable {
     var text: String
     var nextOffset: UInt64
 }
 
-/// Argv from `automation.interactiveCommand`.
 struct InteractiveCommandArgv: Codable, Sendable {
     var argv: [String]
 }
 
-/// One agent CLI a job can run on, as the daemon advertises it.
 struct AgentBackend: Codable, Sendable, Identifiable {
     var id: String
     var label: String
     var command: String
-    /// Model aliases the CLI accepts on its `--model` flag. Empty means the
-    /// client offers no model picker for this backend.
     var models: [String]
-    /// Effort levels the CLI accepts. Empty means no effort picker.
     var efforts: [String]
 
     init(id: String, label: String, command: String, models: [String] = [], efforts: [String] = []) {
@@ -4242,8 +3465,6 @@ struct AgentBackend: Codable, Sendable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         label = try c.decode(String.self, forKey: .label)
         command = try c.decode(String.self, forKey: .command)
-        // An older daemon does not advertise the lists yet; both default to
-        // empty so the pickers simply do not appear.
         models = try c.decodeIfPresent([String].self, forKey: .models) ?? []
         efforts = try c.decodeIfPresent([String].self, forKey: .efforts) ?? []
     }
@@ -4255,7 +3476,6 @@ enum TodoKind: String, Codable, Sendable, Hashable {
     case note
 }
 
-/// A card on the kanban board.
 struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var revision: UInt64?
@@ -4313,14 +3533,6 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
 
     var isNote: Bool { kind == .note }
 
-    /// A note drawn before the host has confirmed it.
-    ///
-    /// The phone's notes screen shows what you wrote at once and swaps this
-    /// for the host's card when it answers. Written as its own initializer
-    /// because the decoding one above takes the memberwise initializer away,
-    /// and the id is deliberately not a plausible one: nothing may act on this
-    /// row except the code that made it, and a temporary that looks real is a
-    /// delete aimed at nothing.
     init(pendingNote text: String, workspaceID: String) {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         id = "pending:\(UUID().uuidString)"
@@ -4341,8 +3553,6 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         delegate = nil
     }
 
-    /// The token a CLI `--model` flag accepts. Drops a tab-separated label
-    /// or a mashed `idLabel` leftover from an older picker.
     var cleanedModel: String {
         Self.cleanModelID(model ?? "")
     }
@@ -4367,7 +3577,6 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// Start this card as an interactive terminal, not as an automation.
 struct InteractiveTaskLaunch: Sendable {
     var workspaceID: String
     var backend: String
@@ -4377,7 +3586,6 @@ struct InteractiveTaskLaunch: Sendable {
     var title: String
 }
 
-/// The live state of a card handed to an agent.
 struct TodoDelegate: Codable, Sendable, Hashable {
     var runId: String
     var status: String
@@ -4409,8 +3617,6 @@ enum TaskRunPlacement: String, Codable, Sendable, Hashable {
     case foreground
 }
 
-/// The durable answer to one task launch operation. A missing card means the
-/// task was removed later. The receipt and run remain the authoritative result.
 struct TaskRunOutcome: Codable, Sendable {
     var operationID: String
     var cardID: String
@@ -4428,9 +3634,7 @@ struct TaskRunOutcome: Codable, Sendable {
     }
 }
 
-// MARK: - Terminals
 
-/// Validated OSC 7501 metadata, without program messages or task descriptions.
 struct PtyProgramStatus: Codable, Sendable, Hashable {
     var state: String
     var kind: String?
@@ -4450,71 +3654,33 @@ struct PtyProgramStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// A pty session as the host reports it.
-///
-/// The host owns the process, so it survives closing a window. Field names
-/// follow the Rust `SessionInfo`, including optional metadata from newer hosts.
 struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var command: String
     var cwd: String
     var workspaceID: String?
-    /// Daemon-owned jobs (automations) set this so the workspace must not
-    /// adopt the session as a tab.
     var hidden: Bool?
     var rows: Int
     var cols: Int
     var alive: Bool
-    /// Set once the process has exited. `nil` while it still runs, which is
-    /// not the same as having exited with status 0.
     var exitCode: Int?
-    /// Total bytes ever produced. A client's read offset is against this.
     var totalBytes: UInt64
-    /// When the process last produced output, epoch milliseconds. Absent
-    /// when the host predates the field or nothing has been read yet.
     var lastActivityAtMs: Int64?
-    /// Host process spawn time, so Live Activities retain elapsed time after reattachment.
     var startedAtMs: UInt64? = nil
-    /// Legacy host activity: `working` or `idle`. Rich turn states are in programStatus.
-    /// Absent when the sampler has not reached it yet, which is not
-    /// the same as idle and must not be shown as idle.
     var activity: String?
-    /// Smoothed CPU of the process subtree, percent of one core. The number
-    /// behind the verdict, so a row can show its working.
     var cpuPercent: Double?
-    /// Resident memory of the process subtree, in megabytes.
     var memoryMb: Double?
-    /// Why the person should look: `permission`, `question`, `auth`, or `input`.
-    /// Absent when nothing needs them. Not the same as idle.
     var attention: String?
-    /// Explicit terminal status. Program text is not part of this DTO.
     var programStatus: PtyProgramStatus? = nil
-    /// Lifetime tokens this session has used, from the live meter.
-    /// Absent when the harness has no usable log yet. Never a fake zero.
     var tokens: UInt64?
-    /// List-rate equivalent of those tokens, in microdollars. Zero once
-    /// something priced, so the row counts up from `$0.00`. Absent only when
-    /// nothing could be priced at all.
     var costMicros: Int64?
-    /// True when at least one priced event used a catalog estimate.
     var costEstimated: Bool?
-    /// False when at least one event could not be priced. The figure is then
-    /// a floor.
     var costComplete: Bool?
-    /// Model id of the last priced turn, for the context-bar denominator.
     var model: String?
-    /// Prompt-side tokens of the last turn. The context bar numerator.
     var contextUsed: UInt64?
-    /// Catalog context window for `model`. Absent for a model no snapshot
-    /// lists, in which case the row shows the used figure without a bar.
     var contextWindow: UInt64?
-    /// True when the window came from sibling models rather than a published
-    /// figure. The percentage is then marked as approximate.
     var contextEstimated: Bool?
-    /// `metered`, `plan`, or `unknown`. A plan session's money is an
-    /// equivalent, never a charge.
     var billing: String?
-    /// Backend-native identifiers verified from this PTY's attributed logs.
     var sessionIdentities: SessionIdentities? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -4550,24 +3716,13 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// One poll's worth of terminal output.
-///
-/// The wire carries base64, because the bytes are not valid UTF-8 in general:
-/// an escape sequence can be cut in half at a read boundary. The decode happens
-/// here, in `init(from:)`, which runs on the bridge's own queue. That placement
-/// is the point: a burst of build output is up to half a megabyte per poll, and
-/// decoding it in the session actor put that work on the thread that draws.
 struct PtyChunk: Decodable, Sendable {
     var bytes: Data
     var nextOffset: UInt64
-    /// Bytes dropped before this chunk because this reader fell behind the
-    /// host's bounded buffer. Zero in normal use, and never silently ignored.
     var dropped: UInt64
-    /// The host paused its PTY reader because the lossless handoff window is full.
     var paused: Bool
     var exitCode: Int?
     var reportsExitStatus: Bool
-    /// A present null means output is still open; absence means an older host.
     var outputEndOffset: UInt64?
     var reportsOutputEnd: Bool
 
@@ -4583,9 +3738,6 @@ struct PtyChunk: Decodable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let encoded = try container.decode(String.self, forKey: .data)
-        // An unreadable chunk is empty output rather than a failed poll. The
-        // offset still advances, so the session carries on instead of asking
-        // for the same bytes forever.
         bytes = Data(base64Encoded: encoded) ?? Data()
         nextOffset = try container.decode(UInt64.self, forKey: .nextOffset)
         dropped = try container.decode(UInt64.self, forKey: .dropped)
@@ -4597,29 +3749,19 @@ struct PtyChunk: Decodable, Sendable {
     }
 }
 
-// MARK: - Machines
 
 struct MachineIdentity: Codable, Sendable {
-    /// The public key as hex. Long, and the thing that is actually pinned.
     let key: String
     let fingerprint: String
-    /// The same key as three words. What the screen leads with, because it is
-    /// the comparison a person performs rather than skims.
     let words: String?
     let label: String
-    /// Whether somebody named this machine, as opposed to it carrying the name
-    /// the operating system gave it. Decides whether there is anything to undo.
     var labelIsChosen: Bool?
 }
 
 struct Peer: Codable, Sendable, Identifiable, Hashable {
     enum Trust: String, Codable, Sendable {
-        /// It made contact and nobody has decided yet. The only state a new
-        /// peer can arrive in.
         case pending
         case approved
-        /// Somebody withdrew access. Remembered rather than deleted, so the
-        /// same machine coming back is known as one that was turned away.
         case revoked
     }
 
@@ -4628,8 +3770,6 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
     let words: String?
     let label: String
     let trust: Trust
-    /// Where it was reached or seen from. A hint for dialling, never a
-    /// credential: an address proves nothing about who is at it.
     let address: String?
     let firstSeen: String
     let lastSeen: String
@@ -4638,32 +3778,19 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
 }
 
 struct RemoteStatus: Codable, Sendable {
-    /// Whether this machine keeps an outbound connection to the blind tunnel.
     let tunnel: Bool
-    /// Outbound calls can use the metered relay when direct access fails.
-    /// Nil means the local core predates this setting.
     let relayFallback: Bool?
-    /// What the tunnel is actually doing. The toggle can be on while the
-    /// daemon is being refused (plan gate, revoked token, endpoint down), so
-    /// the screen has to read these rather than trust the setting.
     let tunnelOnline: Bool?
-    /// Whether the account directory carries this machine's key and name.
     let tunnelRegistered: Bool?
     let tunnelError: String?
     let key: String
     let fingerprint: String
     let words: String?
     let label: String
-    /// Addresses held by the live direct listener. Optional across rollout.
     let directCandidates: [RemoteDirectCandidate]?
-    /// This-device payload counters. Older hosts omit the object.
     let traffic: RemoteTraffic?
 }
 
-/// Payload this process has moved, split by how it travelled.
-///
-/// Direct is a TCP socket between two of the user's machines. Relay is the
-/// hosted tunnel. These numbers are not the account relay allowance.
 struct RemoteTraffic: Codable, Sendable, Hashable {
     var directBytes: UInt64
     var relayBytes: UInt64
@@ -4680,8 +3807,6 @@ struct RemoteTrafficPeer: Codable, Sendable, Hashable, Identifiable {
 
     var routeLabel: String { Self.knownLabel(route) ?? L10n.text("common.unknown") }
 
-    /// Nil when this process has not yet observed a path, so a machine
-    /// screen can stay quiet rather than invent Encrypted relay.
     var knownRouteLabel: String? { Self.knownLabel(route) }
 
     static func knownLabel(_ route: String?) -> String? {
@@ -4703,7 +3828,6 @@ struct TunnelOutcome: Codable, Sendable {
     let tunnel: Bool
 }
 
-/// Whether this Mac's host helper outlives the app.
 struct HostPolicy: Codable, Sendable {
     var alwaysOn: Bool
     var defaultAlwaysOn: Bool
@@ -4721,9 +3845,6 @@ struct ProjectWorktree: Codable, Sendable, Identifiable {
     var id: String { path }
 }
 
-// Vault records are persisted client JSON, so host-side defaults cannot repair
-// an older record before this decoder sees it. Keep both the original acronym
-// spelling and the defaults introduced after those records were written.
 extension SSHHost {
     private enum LegacyKeys: String, CodingKey { case credentialID, jumpHostID, folderID }
 
@@ -4788,10 +3909,8 @@ extension SSHProviderReference {
     }
 }
 
-/// The Claude live feed, as the host reads it from Claude Code's settings.
 struct ClaudeLiveFeedState: Decodable, Equatable {
     var enabled: Bool
-    /// The person had a status line of their own, which still runs.
     var chained: Bool
     var lastReadingAtMs: Int64?
 }

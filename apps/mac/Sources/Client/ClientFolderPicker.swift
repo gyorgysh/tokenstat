@@ -8,16 +8,9 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Choosing a folder on a machine that has no file panel.
-///
-/// A phone has no open panel and a server has no screen, so the machine
-/// answers the question instead and this draws the answer. What may be
-/// browsed is decided there, not here: a path outside the machine's own roots
-/// is refused by the host, and this screen never tries to work around that.
 struct ClientFolderPicker: View {
     let peer: String
     let hostName: String
-    /// Called with the registered folder, so the screen behind can open it.
     var onAdded: ((WorkspaceFolder) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -28,7 +21,6 @@ struct ClientFolderPicker: View {
     @State private var showHidden = false
     @State private var newFolder = ""
     @State private var naming = false
-    /// Guards against stale responses when rows are tapped in quick succession.
     @State private var generation = 0
     @State private var visible = false
     @State private var owner = WorkSessionContext.shared.scope
@@ -90,8 +82,6 @@ struct ClientFolderPicker: View {
         .task { await load(nil) }
     }
 
-    /// Where you are, and the way back up. The roots are the machine's own, so
-    /// this is a real answer rather than a guess about somebody's disk.
     private func header(_ listing: RemoteListing) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
@@ -227,8 +217,6 @@ struct ClientFolderPicker: View {
             self.error = L10n.text("apple.clientfolderpicker.a_folder_name_is_one_name_without_a_path_i.d41badd4")
             return
         }
-        // Same guard as a browse: creating and then listing is two awaits, and
-        // a browse started while they run must win the screen.
         generation &+= 1
         let current = generation
         loading = true

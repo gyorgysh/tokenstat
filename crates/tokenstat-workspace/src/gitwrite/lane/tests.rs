@@ -160,7 +160,6 @@ fn a_failing_check_blocks_landing_and_reports_its_output() {
         land(&a, "main", Some("origin"), &pass),
         Landing::Landed { .. }
     ));
-    // The check log never enters the lane's working tree.
     assert_eq!(git(&a, &["status", "--porcelain"]), "");
 }
 
@@ -216,7 +215,6 @@ fn a_conflict_is_left_for_the_agent_and_lands_once_resolved() {
         std::fs::read_to_string(b.join("a.txt")).unwrap(),
         "one\nTWO from b\nthree\n"
     );
-    // A resolved conflict finishes and lands on top of a.
     start_rebase(&b, "main", Some("origin")).unwrap();
     std::fs::write(b.join("a.txt"), "one\nTWO from a and b\nthree\n").unwrap();
     finish_rebase(&b).unwrap();
@@ -241,7 +239,6 @@ fn links_out_of_the_lane_are_found_and_hooks_never_run() {
         Some(a.canonicalize().unwrap().join("outside"))
     );
     std::fs::remove_file(a.join("outside")).unwrap();
-    // A hook in the shared git directory is not run by a lane commit.
     let hooks = f.main.join(".git/hooks");
     std::fs::create_dir_all(&hooks).unwrap();
     let marker = f.lanes.join("hook-ran");
@@ -377,7 +374,6 @@ fn a_teammates_landing_reaches_a_clean_checkout_and_leaves_others_alone() {
         land(&a, "main", Some("origin"), &[]),
         Landing::Landed { .. }
     ));
-    // Uncommitted work is never touched.
     std::fs::write(f.main.join("a.txt"), "unsaved\n").unwrap();
     assert_eq!(catch_up(&f.main, "main", "origin"), CatchUp::Dirty);
     git(&f.main, &["checkout", "-q", "--", "a.txt"]);

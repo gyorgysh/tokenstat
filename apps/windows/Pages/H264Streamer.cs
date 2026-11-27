@@ -10,13 +10,6 @@ using Windows.Media.MediaProperties;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Feeds Annex-B H.264 samples into a MediaStreamSource the player
-/// element shows. A bounded queue preserves reference pictures; after overflow
-/// it waits for a keyframe rather than feeding undecodable deltas.
-/// Created per resolution, because the
-/// descriptor is fixed when the source is built.
-/// </summary>
 internal sealed class H264Streamer
 {
     private readonly object _gate = new();
@@ -69,8 +62,6 @@ internal sealed class H264Streamer
                 }
                 _lastSequence = current;
             }
-            // Dropping a reference picture invalidates every following delta.
-            // Bound latency, but resume only at a fresh independently decodable frame.
             if (_queue.Count >= 30)
             {
                 _queue.Clear();
@@ -163,7 +154,6 @@ internal sealed class H264Streamer
 
     private static void CompleteDeferral(MediaStreamSourceSampleRequestDeferral? deferral)
     {
-        // MediaPlayer can cancel the request while a page is detaching.
         try { deferral?.Complete(); }
         catch (System.Runtime.InteropServices.COMException) { }
         catch (ObjectDisposedException) { }
@@ -174,7 +164,6 @@ internal sealed class H264Streamer
         var sample = MediaStreamSample.CreateFromBuffer(pending.AnnexB.AsBuffer(), pending.Stamp);
         sample.KeyFrame = pending.Key;
         sample.Discontinuous = pending.Discontinuous;
-        // Timestamps come from capture; do not pretend every quality preset is 30 fps.
         return sample;
     }
 }

@@ -208,7 +208,6 @@ pub fn fetch_into(
         }
     }
 
-    // Ingest whatever JSONL is on disk (fresh or prior sync). Dedup is by event id.
     let ingested = ingest_ide_cache(store, tz)?;
     if ingested > 0 {
         events += ingested;

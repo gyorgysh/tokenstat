@@ -149,8 +149,6 @@ pub fn unstage(dir: &Path, paths: &[String]) -> GitOutcome {
     let mut args = if has_head {
         vec!["restore", "--staged", "--"]
     } else {
-        // An unborn branch has no tree to restore from. Remove only the
-        // selected index entries, retaining their current working files.
         vec!["rm", "--cached", "-r", "-f", "--"]
     };
     args.extend(paths.iter().map(String::as_str));
@@ -208,10 +206,6 @@ pub fn create_branch(dir: &Path, name: &str, from: Option<&str>) -> GitOutcome {
         return GitOutcome::failed("that is not a valid branch name");
     }
     match from.map(str::trim).filter(|value| !value.is_empty()) {
-        // A start point is a revision, not a branch, so `check-ref-format`
-        // cannot judge it. What it must not be is an option: git reads a
-        // leading dash as one, and `--discard-changes` in this position
-        // throws away every uncommitted change in the workspace.
         Some(start) if start.starts_with('-') => {
             GitOutcome::failed("that is not a valid starting point")
         }
@@ -440,8 +434,6 @@ mod tests {
 
     #[test]
     fn unstaging_keeps_the_edit() {
-        // The reason this uses `restore --staged` rather than `reset`: a
-        // mis-click must never be able to throw away someone's work.
         let dir = repo("unstage");
         std::fs::write(dir.join("seed.txt"), "seed\nedited\n").unwrap();
         assert!(stage(&dir, &["seed.txt".into()]).ok);
@@ -536,8 +528,6 @@ pub fn clone_command(url: &str, name: &str) -> Result<Vec<String>, String> {
     let scheme_ok = ["https://", "http://", "ssh://", "git://"]
         .iter()
         .any(|scheme| lower.starts_with(scheme));
-    // The scp-like form, `git@github.com:owner/repo.git`, which is what most
-    // people paste. A colon after a host, and no scheme in front of it.
     let scp_like = !lower.contains("://")
         && !lower.contains("::")
         && url.split_once(':').is_some_and(|(host, path)| {

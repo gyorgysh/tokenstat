@@ -9,14 +9,7 @@ import AppKit
 import UIKit
 #endif
 
-/// Read a cloud provider's server list and save what it finds.
-///
-/// A screen in the library rather than a sheet, so the result is a list a
-/// person can read rather than a line at the bottom of a small box.
 struct CloudImportForm: View {
-    /// AWS import shells out to the AWS CLI, which only exists on the Mac.
-    /// On the phone there is no CLI and no key to paste, so DigitalOcean
-    /// stands alone there instead of offering a door that cannot open.
     #if os(macOS)
     private var providers: [SSHCloudProvider] { SSHCloudProvider.allCases }
     #else
@@ -130,9 +123,6 @@ struct CloudImportForm: View {
             let result: SSHHostImport
             if submittedProvider == .digitalOcean { result = try await Bridge.importDigitalOcean(token: submittedToken, username: submittedUsername) }
             else { result = try await Bridge.importAWS(profile: submittedProfile.isEmpty ? nil : submittedProfile, region: submittedRegion.isEmpty ? nil : submittedRegion, username: submittedUsername) }
-            // Saving each one through the model is what puts it in the
-            // encrypted vault as well, so an import reaches the phone the same
-            // way a hand-typed host does.
             guard permits(owner) else { return }
             for host in result.hosts {
                 guard permits(owner) else { return }
@@ -146,15 +136,6 @@ struct CloudImportForm: View {
     }
 }
 
-/// The recovery code, then the same line typed back.
-///
-/// Two steps, because one surface is not a confirmation. The code is on
-/// screen to be written down, then off screen while it is typed, so confirming
-/// cannot be done by reading. Going back is allowed and re-showing the code is
-/// a deliberate action, so nobody is trapped.
-///
-/// This used to be 24 words and a three-word quiz. The host now issues one
-/// Crockford line, and the quiz has to ask for that line or Done never enables.
 struct SSHRecoveryWordsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let recovery: String
@@ -170,7 +151,6 @@ struct SSHRecoveryWordsSheet: View {
 
     private var typedAnything: Bool { !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    /// The same normalisation the host uses: case, dashes, and O/0 I,L/1.
     private var codesMatch: Bool {
         let expected = Self.normalized(recovery)
         return !expected.isEmpty && expected == Self.normalized(typed)
@@ -228,18 +208,12 @@ struct SSHRecoveryWordsSheet: View {
         } message: { Text(L10n.text("apple.sshconnectionsview.every_encrypted_ssh_secret_in_the_vault_is.d87ca6a9")) }
     }
 
-    /// The code's ten groups, which is how it is written and how it is read
-    /// back off paper.
     private var groups: [String] {
         recovery.split(separator: "-").map(String.init)
     }
 
     private var readStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            // Grouped rather than one long line. Fifty characters of monospace
-            // does not fit across a phone, and the version that wrapped
-            // wherever it ran out of room broke groups across lines, which is
-            // the one thing a code being copied onto paper must not do.
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 66), spacing: 8, alignment: .leading)],
                 alignment: .leading,
@@ -306,12 +280,6 @@ struct SSHRecoveryWordsSheet: View {
     }
 }
 
-/// Create the account's one vault, or open it on this device.
-///
-/// One password, and the recovery code is only the way back if it is
-/// forgotten. The old version of this screen offered "Create new", "Recovery
-/// words" and "Ask a device", which is three ways to say "which of the several
-/// vaults did you mean", and the answer is that an account has one.
 struct SSHVaultSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
     let tier: String
@@ -326,10 +294,6 @@ struct SSHVaultSetupSheet: View {
     @State private var forgot = false
     @State private var biometricAccount: String?
     @State private var biometricTask: Task<Void, Never>?
-    // Both answered by the device, not the host, so the first frame is already
-    // the right shape. Asking the host which account is signed in takes a round
-    // trip, and the sheet used to spend it showing the password form and then
-    // swapping to Face ID under somebody who had started typing.
     @State private var biometricName: String? = SSHVaultBiometrics.name
     @State private var biometricSaved = SSHVaultBiometrics.hasSavedPassword
     @State private var usePassword = false
@@ -338,16 +302,12 @@ struct SSHVaultSetupSheet: View {
     @State private var working = false
     @State private var error: String?
     @State private var confirmingReset = false
-    /// Bumped when the button was pressed with something still missing. The
-    /// fields watch it and shake.
     @State private var refusals = 0
     @FocusState private var focus: Field?
 
     private enum Field: Hashable { case password, confirmPassword, recovery }
 
-    /// The vault exists, so this is an unlock rather than a creation.
     private var exists: Bool { status?.created == true }
-    /// Made before password unlock existed and cannot be opened by this build.
     private var stale: Bool { status?.needsRecreate == true }
 
     private var biometricUnlock: Bool {
@@ -363,11 +323,6 @@ struct SSHVaultSetupSheet: View {
     private var problems: [String] { VaultPassword.problems(password) }
     private var matches: Bool { password == confirmPassword }
 
-    /// What is stopping the button, as a sentence and a field to point at.
-    ///
-    /// The button stays pressable so this can be said at all. Disabling it
-    /// made the screen silent at exactly the moment somebody was asking it a
-    /// question.
     private var blocker: (message: String, field: Field)? {
         if stale { return nil }
         if exists && !forgot {
@@ -384,7 +339,6 @@ struct SSHVaultSetupSheet: View {
         return nil
     }
 
-    /// Press it and find out. `blocker` is what comes back when it cannot run.
     private func attempt() {
         guard !working && !passwordAccepted else { return }
         if let blocker {
@@ -452,8 +406,6 @@ struct SSHVaultSetupSheet: View {
             let freshAccount = try? await SSHVaultBiometrics.accountKey()
             guard ownership.permits(owner) else { return }
             biometricAccount = freshAccount
-            // Now the exact one. The opening guess was "this device has a saved
-            // password"; this is "for the account signed in right now".
             biometricSaved = biometricAccount.map(SSHVaultBiometrics.contains) ?? false
             enableBiometrics = biometricSaved
         }
@@ -463,7 +415,6 @@ struct SSHVaultSetupSheet: View {
         } message: { Text(L10n.text("apple.sshconnectionsview.the_vault_is_removed_from_the_account_and.0c2c6b7a")) }
     }
 
-    // MARK: - The three states
 
     private var createBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -598,17 +549,11 @@ struct SSHVaultSetupSheet: View {
             .buttonStyle(SecondaryButtonStyle())
             .keyboardShortcut(.cancelAction)
         if exists && !passwordAccepted && (forgot || stale) {
-            // The way out when the password is gone and no other device
-            // can open it. Deleting needs neither, so it is offered here
-            // rather than only after a successful unlock.
             Button(L10n.text("apple.sshconnectionsview.delete_vault.9fd7de76"), .delete) { confirmingReset = true }
                 .buttonStyle(DestructiveButtonStyle())
                 .disabled(working)
         }
         Spacer()
-        // Written out rather than one button with two ternaries. The two
-        // do different things and read differently, and a glyph chosen by
-        // an expression is a glyph nobody can grep for.
         if passwordAccepted {
             Button(L10n.text("common.done"), .done) { dismiss() }
                 .buttonStyle(AccentButtonStyle())
@@ -621,9 +566,6 @@ struct SSHVaultSetupSheet: View {
                 }
             }
             .buttonStyle(AccentButtonStyle())
-            // The panel can be up before the account key lands. Without this a
-            // fast tap hits the guard in `unlockWithBiometrics` and nothing
-            // happens, which reads as a broken button.
             .disabled(working || biometricAccount == nil)
             .keyboardShortcut(.defaultAction)
         } else if exists && !stale {
@@ -639,7 +581,6 @@ struct SSHVaultSetupSheet: View {
         }
     }
 
-    // MARK: - Doing it
 
     private func permits(_ token: UUID, _ owner: SSHOperationOwner.Ticket) -> Bool {
         operation == token && ownership.permits(owner)
@@ -757,21 +698,9 @@ struct SSHVaultSetupSheet: View {
     }
 }
 
-/// The password rule, said the same way everywhere it is shown.
-///
-/// The authority is `tokenstat_core::passphrase`, which the host enforces
-/// before it wraps a key. This is the same list written for a person to read
-/// while they type, so nobody meets a rule for the first time in a rejection.
 enum VaultPassword {
     static let minLength = 12
 
-    /// The same test the host runs, scalar for scalar.
-    ///
-    /// Measured over unicode scalars and with an ASCII-only digit test,
-    /// because `tokenstat_core::passphrase` does both. Swift's `isNumber`
-    /// matches Eastern Arabic digits and Rust's `is_ascii_digit` does not, so
-    /// the friendlier-looking predicate is the one that enables the button
-    /// over a password the host then refuses.
     static func problems(_ password: String) -> [String] {
         let scalars = password.unicodeScalars
         var out: [String] = []
@@ -796,10 +725,6 @@ enum VaultPassword {
     ]
 }
 
-/// Every rule, with the ones already met ticked off as you type.
-///
-/// All four are on screen from the start. A rule revealed one rejection at a
-/// time is three rejections for one password.
 struct VaultPasswordRules: View {
     let password: String
 
@@ -833,12 +758,6 @@ struct SSHConnectForm: View {
     @State private var verifiedJump: SSHHost?
     @State private var error: String?
     @State private var working = false
-    /// The probe or connect in flight, so Cancel has something to stop.
-    ///
-    /// A TCP connect to a host that is not answering sits there until the
-    /// socket times out, which is around a minute, and for that whole minute
-    /// this sheet was a screen with nothing on it that did anything. Holding
-    /// the task means leaving is leaving.
     @State private var inFlight: Task<Void, Never>?
     @State private var attempt: UUID?
     var body: some View {
@@ -1058,8 +977,6 @@ struct SSHConnectForm: View {
             guard permits(token, owner) else { return }
             guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
             let handle = try await Bridge.openSSHWithResolvedAuth(target, auth: auth, rows: 24, cols: 80, jump: jump)
-            // A late shell remains in the host's session list. Retirement
-            // detaches readers and never closes a shell on another account.
             guard permits(token, owner) else { return }
             guard targetIsCurrent(target, key: key, jumpHost: jumpHost, jumpKey: jumpKey) else { throw CancellationError() }
             model.recordConnection(target)

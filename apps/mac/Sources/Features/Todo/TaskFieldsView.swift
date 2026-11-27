@@ -2,7 +2,6 @@
 
 import SwiftUI
 
-/// Creation and editing use the same writing space and settings vocabulary.
 struct TaskFieldsView: View {
     @Binding var fields: TaskEditorDraft
     let backends: [AgentBackend]

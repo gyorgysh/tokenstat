@@ -2,11 +2,6 @@
 
 import SwiftUI
 
-/// Device-local downloads, shared by both Apple settings surfaces.
-///
-/// Named for the product, not for the one kind of file that uses it today.
-/// Chat files are the current contents. Other downloads join the same budget
-/// as they land, so this card does not get renamed each time.
 struct ChatCacheSettings: View {
     @AppStorage(ChatCachePreferences.sizeKey) private var maxGB = 5
     @AppStorage(ChatCachePreferences.daysKey) private var days = 7

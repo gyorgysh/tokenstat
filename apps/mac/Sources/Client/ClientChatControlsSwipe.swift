@@ -26,8 +26,6 @@ struct ChatBackSwipeIntent {
         guard accepts(translation) else { return false }
         let distance = rightToLeft ? -translation.x : translation.x
         let speed = rightToLeft ? -velocity.x : velocity.x
-        // A deliberate reversal cancels a swipe that already crossed the
-        // distance threshold. Ignore small velocity noise at finger lift.
         guard speed > -150 else { return false }
         return distance > 64 || distance > 24 && speed > 500
     }
@@ -37,7 +35,6 @@ struct ChatBackSwipeIntent {
 import SwiftUI
 import UIKit
 
-/// Observe only swipes beginning inside this view, without covering its controls.
 struct ClientChatControlsSwipe: ViewModifier {
     var upward: Bool
     var enabled = true
@@ -51,8 +48,6 @@ struct ClientChatControlsSwipe: ViewModifier {
     }
 }
 
-/// In-place readers use the same action as Back. Pushed readers keep the
-/// system gesture while chrome is visible and use dismiss when it is hidden.
 struct ClientChatBackSwipe: ViewModifier {
     var enabled = true
     var action: (() -> Void)? = nil
@@ -151,7 +146,6 @@ private struct ControlsPanAnchor: UIViewRepresentable {
             owner.addGestureRecognizer(pan)
         }
 
-        // Stay in this presentation's view tree; a sheet above it owns its touches.
         private var hostingView: UIView? {
             var responder: UIResponder? = self
             while let current = responder {
@@ -194,8 +188,6 @@ private struct ControlsPanAnchor: UIViewRepresentable {
 
         func gestureRecognizer(_ gesture: UIGestureRecognizer,
                                shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-            // Reserve a recognized edge swipe for Back instead of horizontal
-            // content scrolling. The system pop is inactive with hidden chrome.
             enabled && intent.edge != nil && other is UIPanGestureRecognizer
         }
 

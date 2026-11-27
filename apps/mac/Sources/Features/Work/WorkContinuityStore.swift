@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Small, device-local continuation metadata. Read-modify-write always reads
-/// current storage so separate windows cannot overwrite each other's visits.
 @MainActor
 final class WorkContinuityStore {
     static let shared = WorkContinuityStore()
@@ -35,7 +33,6 @@ final class WorkContinuityStore {
         }?.reference
     }
 
-    /// Most recently visited conversations in this scope, without contacting hosts.
     func recentConversations(scope: WorkReference.Scope, limit: Int = 4) -> [WorkReference] {
         Array(read().filter { $0.reference.scope == scope }.prefix(max(0, limit))).map(\.reference)
     }
@@ -60,8 +57,6 @@ final class WorkContinuityStore {
         if place()?.folder?.scope == scope { defaults.removeObject(forKey: placeKey) }
     }
 
-    /// Where the shell is pointed now. One record, not one per scope: it
-    /// answers "where was I", and there is only ever one answer to that.
     func rememberPlace(_ place: WorkPlace) {
         guard place.isWellFormed,
               let data = try? JSONEncoder().encode(PlaceEnvelope(version: 1, place: place))

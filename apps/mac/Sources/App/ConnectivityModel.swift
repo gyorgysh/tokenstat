@@ -7,19 +7,10 @@ import Network
 import Observation
 
 extension Notification.Name {
-    /// The network came back after an offline stretch. Anything that was
-    /// waiting on the internet refreshes now instead of on the next retry
-    /// tick.
     static let connectivityRestored = Notification.Name("tokenstat.connectivityRestored")
     static let connectivityChanged = Notification.Name("tokenstat.connectivityChanged")
 }
 
-/// The offline flag, readable from anywhere without hopping actors.
-///
-/// `ConnectivityModel` is main-actor isolated, and the place that needs this
-/// answer is a call about to leave the process on a background queue. Copying
-/// one bool behind a lock is cheaper than making every call wait for the main
-/// actor to say what it already knows.
 enum NetworkGate {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var offline = false
@@ -62,15 +53,10 @@ final class ConnectivityModel {
         case offline
     }
 
-    /// Nil until the first probe answers, so the UI can tell "not checked
-    /// yet" from "definitely offline".
     private(set) var status: Status = .unknown
 
-    /// When the current offline stretch began. Nil while online or unknown.
     private(set) var offlineSince: Date?
 
-    /// Whether the current offline stretch was waved away. Cleared when the
-    /// internet comes back, so the next stretch shows again.
     private(set) var offlineDismissed = false
 
     static let retryInterval: Duration = .seconds(30)
@@ -85,12 +71,8 @@ final class ConnectivityModel {
     private var probeTask: Task<Void, Never>?
     private var started = false
     private var pathSatisfied = false
-    /// Last observed route (wifi / cellular / ethernet). A satisfied path
-    /// that changes interface is still "online", but the tunnel socket is
-    /// bound to the old route.
     private var lastPathKey = ""
     private var sawPath = false
-    /// A VPN flap can fire several path updates. One redial per burst.
     private var lastRouteRestoreAt = Date.distantPast
 
     func start() {
@@ -106,8 +88,6 @@ final class ConnectivityModel {
             }
         }
         monitor.start(queue: queue)
-        // The monitor's first path update lands asynchronously. Probe once
-        // now so a launch without internet shows the offline card right away.
         scheduleProbe()
     }
 
@@ -118,23 +98,14 @@ final class ConnectivityModel {
         started = false
     }
 
-    /// Immediate egress check from a "Try now" control, without waiting for
-    /// the offline retry timer.
     func checkNow() {
         scheduleProbe()
     }
 
-    /// Hide the offline card until the next stretch. The probe keeps running:
-    /// this waves the card away, not the retries.
     func dismissOffline() {
         offlineDismissed = true
     }
 
-    /// The path changed. A satisfied path does not prove egress, so confirm
-    /// with a probe before announcing online. An unsatisfied path is
-    /// definitive. A satisfied path that merely changes interface (Wi-Fi to
-    /// cellular) stays online, and that is exactly when the tunnel must
-    /// redial rather than wait for a keepalive timeout.
     private func pathDidChange(satisfied: Bool, routeKey: String) {
         let alreadyHadPath = sawPath
         let routeChanged = alreadyHadPath && routeKey != lastPathKey
@@ -186,15 +157,10 @@ final class ConnectivityModel {
         probeTask?.cancel()
         NotificationCenter.default.post(name: .connectivityChanged, object: self)
         if wasOffline {
-            // The connectionBack hook: refresh immediately, not on the next
-            // 30-second tick.
             NotificationCenter.default.post(name: .connectivityRestored, object: self)
         }
     }
 
-    /// Probe now, then keep probing every `retryInterval` until online. One
-    /// task per trigger: starting a probe cancels whatever retry is running,
-    /// so a path change restarts the timer instead of stacking them.
     private func scheduleProbe() {
         probeTask?.cancel()
         probeTask = Task { [weak self] in
@@ -214,8 +180,6 @@ final class ConnectivityModel {
         }
     }
 
-    /// One egress check. Anything that is not the success page counts as
-    /// offline, so a captive portal is not mistaken for the internet.
     private static func probe() async -> Bool {
         var request = URLRequest(url: URL(string: "https://captive.apple.com/hotspot-detect.html")!)
         request.timeoutInterval = 5

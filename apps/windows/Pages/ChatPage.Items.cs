@@ -6,24 +6,15 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// The transcript's row model, in a file of its own so the portable chat
-/// tests can compile it and <see cref="ChatDetailFold"/> without WinUI.
-/// </summary>
 internal sealed partial class ChatPage
 {
     internal enum ItemKind
     {
         User, Assistant, Thinking, Tool, Edit, Approval, Attachment, Gallery, Usage, Failed,
-        /// <summary>Steps folded into one line by the chat's detail level.</summary>
         Group,
-        /// <summary>A question the agent asked, with the answer once there is one.</summary>
         Question,
-        /// <summary>The files a finished turn edited, added by the fold.</summary>
         Changes,
-        /// <summary>The plan as last reported. A newer report replaces the older row.</summary>
         Plan,
-        /// <summary>The conversation changed agents. Target is the agent, Text what it was told.</summary>
         Handoff,
     }
 
@@ -60,20 +51,11 @@ internal sealed partial class ChatPage
         public bool CostUnknown;
         public long StartedAt;
         public long EndedAt;
-        /// <summary>
-        /// The open step group this row is shown under, or empty for a
-        /// top-level row.
-        /// </summary>
         public string GroupId;
-        /// <summary>How a step under an open Compact line is drawn.</summary>
         public PlainStep Plain;
-        /// <summary>The folded steps, on a <see cref="ItemKind.Group"/> row.</summary>
         public ChatStepGroup? Group;
-        /// <summary>The question, on a <see cref="ItemKind.Question"/> row.</summary>
         public ChatQuestionItem? Question;
-        /// <summary>The files, on a <see cref="ItemKind.Changes"/> row.</summary>
         public IReadOnlyList<ChangedFile>? Changes;
-        /// <summary>The checklist, on a <see cref="ItemKind.Plan"/> row.</summary>
         public IReadOnlyList<PlanStepItem>? Plan;
 
         public DisplayItem()

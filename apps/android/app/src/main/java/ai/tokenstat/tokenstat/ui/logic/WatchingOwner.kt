@@ -9,7 +9,6 @@ import kotlinx.serialization.json.put
 
 private const val VAULT_ACCOUNT_CHANGED = "the signed-in account changed; retry from the current account"
 
-/** Capture a login receipt once, including for the cancelled watcher's release. */
 data class WatchingOwner(val scope: JsonObject, val receipt: String?) {
     fun parameters(conversation: String, watcher: String): JsonObject = buildJsonObject {
         put("conversationId", conversation)
@@ -25,9 +24,6 @@ data class WatchingOwner(val scope: JsonObject, val receipt: String?) {
             val origin = ProjectOwner.canonicalOrigin(field("host")) ?: return null
             val identity = RecentPlaces.accountIdentity(field("handle"), field("accountId")) ?: return null
             return WatchingOwner(buildJsonObject {
-                // The host compares this with the account it is signed in to.
-                // What this device files under can be a handle the account has
-                // since left, and the id never moves.
                 val wire = field("accountId")?.takeIf { it.isNotBlank() } ?: identity
                 put("kind", "account"); put("origin", origin); put("identity", wire)
             }, field("accountSession"))
@@ -35,8 +31,6 @@ data class WatchingOwner(val scope: JsonObject, val receipt: String?) {
     }
 }
 
-/// Name the account that started a vault call. The host drops the call when
-/// that login is no longer the one holding the credentials.
 fun JsonObject.withVaultScope(account: JsonObject?): JsonObject {
     val scope = WatchingOwner.from(account)?.scope ?: throw IllegalStateException(VAULT_ACCOUNT_CHANGED)
     return buildJsonObject {

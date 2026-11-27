@@ -5,9 +5,6 @@ import SceneKit
 import SceneKit.ModelIO
 import SwiftUI
 
-/// A small, self-contained model can be inspected without leaving the chat.
-/// Model I/O reads USD on Apple devices; the bundled offline renderer handles
-/// common game asset exports such as GLB and FBX.
 struct ClientChatModelPreview: View {
     let name: String
     let id: String
@@ -113,8 +110,6 @@ struct ClientChatModelPreview: View {
     }
 }
 
-/// SceneKit objects are created on a detached task and handed to the main
-/// actor exactly once. No task mutates the scene after this handoff.
 private struct ModelSceneBox: @unchecked Sendable {
     let scene: SCNScene
 }

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Live transport captured when a conversation opens its handoff sheet.
-/// Every suspension rechecks the account, linked host and exact selection.
 @MainActor
 final class WorkHandoffConnection {
     struct Unavailable: LocalizedError {
@@ -84,8 +82,6 @@ final class WorkHandoffConnection {
 
     func attachments(for draft: WorkSharedDraft) async throws -> [ChatAttachment] {
         try await prepare()
-        // Even an empty list verifies that the exact conversation still exists
-        // under the host's ownership/deletion lock, without fetching file bytes.
         let result = try await Bridge.workHandoffAttachments(workspaceID: reference.workspaceID,
             conversationID: conversationID, attachmentIDs: draft.attachmentIDs, peer: peer)
         try requireCurrent()
@@ -95,8 +91,6 @@ final class WorkHandoffConnection {
         return result
     }
 
-    /// Permission may change while the preview is open, including when the
-    /// shared work has no files whose metadata would otherwise be requested.
     func verifyForImport() async throws {
         _ = try await attachments(for: WorkSharedDraft(text: "", attachmentIDs: []))
     }

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// One Team repository: where it is shared from and what can be done with it.
-/// A repository is a project shared from one or more computers, so the row
-/// names each computer and the person who shared it.
 struct TeamRepositoryRow: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -24,8 +21,6 @@ struct TeamRepositoryRow: View {
     @State private var removeError: String?
 
     private var canManage: Bool { organization.role.canManage || repository.role == .maintainer }
-    /// Only an empty project can go: the server refuses while any computer
-    /// still shares it, so a live checkout is never cut off from here.
     private var canRemove: Bool {
         organization.role.canManage && !repository.isShared && store.capabilities?.canArchiveRepositories == true
     }
@@ -98,8 +93,6 @@ struct TeamRepositoryRow: View {
         overflow(includingCheckouts: false)
     }
 
-    /// Changes to the project itself: rare, so they wait behind one menu
-    /// instead of competing with Chats for attention on every card.
     @ViewBuilder private func overflow(includingCheckouts: Bool) -> some View {
         if canManage || canRemove || (includingCheckouts && repository.role != nil) {
             TeamRowMenu(label: L10n.text("common.teams.more_actions")) {
@@ -135,7 +128,6 @@ struct TeamRepositoryRow: View {
                 ? L10n.text("common.teams.lane_ready", lane.askedBy.name, String(lane.files.count))
                 : L10n.text("common.teams.lane_kept", lane.askedBy.name, String(lane.files.count)))
                 .font(Theme.caption).foregroundStyle(.secondary)
-            // Compared here across every computer's lanes, not only within one host.
             let files = Set(lane.files)
             let overlapping = all.filter { $0.branch != lane.branch && !files.isDisjoint(with: $0.files) }
                 .map { $0.ask.isEmpty ? $0.branch : $0.ask }
@@ -196,8 +188,6 @@ struct TeamRepositoryRow: View {
             }
         } catch {}
         loaded = true
-        // Each computer answers for its own lanes. One that is offline just
-        // shows nothing; it is not an error on this screen.
         for checkout in checkouts.prefix(3) {
             let target: JSONValue = .object(["organization": .string(repository.organizationId), "repository": .string(repository.id), "checkout": .string(checkout.id)])
             if let result: TeamLanes = try? await store.read(.connectionCall, fields: ["target": target, "method": .string("team.lanes"), "params": .object([:])], context: context) {

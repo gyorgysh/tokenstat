@@ -2,14 +2,6 @@
 
 import Foundation
 
-/// A JSON value the app's models do not name.
-///
-/// Workflow graphs round-trip between the Mac, the phone and the iPad
-/// through the same Swift models, so known fields cannot be lost that way.
-/// The loss vector is a host that sends a field no client names yet: plain
-/// `Codable` drops it on decode and the next save would delete it. Models
-/// that the person edits keep their unknown fields in this bag and write
-/// them back untouched.
 enum JSONValue: Codable, Hashable, Sendable {
     case null
     case bool(Bool)
@@ -76,8 +68,6 @@ enum JSONValue: Codable, Hashable, Sendable {
     }
 }
 
-/// Coding-key box for fields no model names. Decode the known keys first,
-/// then collect whatever remains into the bag.
 struct UnknownFields: Sendable {
     static func decode(from decoder: Decoder, known: Set<String>) throws -> [String: JSONValue] {
         let container = try decoder.container(keyedBy: AnyCodingKey.self)

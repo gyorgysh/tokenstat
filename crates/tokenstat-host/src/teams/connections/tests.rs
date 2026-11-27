@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};

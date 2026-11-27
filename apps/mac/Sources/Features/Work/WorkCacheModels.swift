@@ -93,16 +93,9 @@ struct CacheClearResult: Decodable, Sendable {
     var repaired: Bool
 }
 
-/// What the transcript is showing when the machine cannot be reached.
-///
-/// Identifiers and timestamps only: the rows themselves live in the model's
-/// events, read from the sealed copy. Nil is the ordinary case, a live
-/// conversation, and the only state that can send, approve or fetch.
 struct SavedCopyInfo: Sendable, Equatable {
     var title: String
     var savedAt: Date
-    /// The saved page said earlier pages exist on the host. They are not in
-    /// the copy, and the reader is told so rather than shown a start marker.
     var hasEarlier: Bool
     var revision: String
 }

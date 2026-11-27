@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! A sharing preview is a projection of visible history, never serialized
-//! conversation state or the backend's raw/session files.
-
 use super::*;
 use sha2::{Digest, Sha256};
 
@@ -112,7 +108,6 @@ fn reparse_or_link(metadata: &fs::Metadata) -> bool {
     {
         use std::os::windows::fs::MetadataExt;
         if metadata.file_attributes() & 0x400 != 0 {
-            // FILE_ATTRIBUTE_REPARSE_POINT
             return true;
         }
     }
@@ -315,9 +310,6 @@ impl Store {
             return Err(invalid());
         }
         self.review_locked(workspace, id, |mut index, history| {
-            // This check belongs under source acceptance. A local withdrawal
-            // that already cleared this marker must prevent a delayed
-            // publisher from freezing the source again after recovery's ACK.
             current()?;
             if history.fingerprint != expected {
                 return Err(DispatchError::new(
@@ -413,9 +405,8 @@ impl Store {
             match chat.team_share.as_ref() {
                 None => match expected {
                     None => return Ok(()),
-                    // An earlier stop or another accepted local change already
-                    // fenced the old consent. Retrying must not fence a newer
-                    // source revision or overwrite a new sharing marker.
+
+
                     Some(revision) if revision < chat.send_revision => return Ok(()),
                     Some(revision) if revision == chat.send_revision => {}
                     Some(_) => {
@@ -451,9 +442,6 @@ impl Store {
     }
 
     pub(crate) fn require_private_chat(&self, id: &str) -> Result<(), DispatchError> {
-        // Leave missing-resource behavior to the original operation. Existing
-        // records are checked against disk so another process's conversion
-        // cannot be bypassed through an older in-memory copy.
         if self.get(id).is_err() {
             return Ok(());
         }
@@ -614,8 +602,8 @@ impl Store {
                 )
             } else { None };
             let directory = safe_join(&self.root, id).map_err(|_| invalid())?;
-            // A bounded regular leaf is insufficient if a conversation's
-            // directory was replaced with a symlink or Windows reparse point.
+
+
             match fs::symlink_metadata(&directory) {
                 Ok(metadata) if metadata.is_dir() && !reparse_or_link(&metadata) => {}
                 Err(error) if error.kind()==std::io::ErrorKind::NotFound && chat.last_message_at_ms.is_none() => {}
@@ -813,8 +801,6 @@ fn project_with_journal(
                 ..
             }
         ) {
-            // Session announcements contain vendor continuation identities.
-            // They are not shared transcript content.
             continue;
         }
         let mut value = visible(event)?;
@@ -825,9 +811,7 @@ fn project_with_journal(
         value["seq"] = json!(sequence);
         events.push(value);
     }
-    // Bind the source and the reviewed content. Private backend state is not
-    // part of the shared view or its consent fingerprint. Converting the chat
-    // can update its private sharing marker without changing this review.
+
     let source = json!({"v":1,"source":chat.id,"workspace":chat.workspace_id,"createdAtMs":chat.created_at_ms,
         "title":chat.title,"backend":chat.backend,"historyDigest":tokenstat_identity::hex(&Sha256::digest(bytes))});
     let fingerprint = tokenstat_identity::hex(&Sha256::digest(
@@ -852,9 +836,6 @@ fn project_with_journal(
 
 fn visible(event: StoredEvent) -> Result<Value, DispatchError> {
     let mut value = match event {
-        // Generated briefs contain host archive and native session inventory
-        // references. The shared history keeps the provider transition and
-        // the original messages, without exporting continuation machinery.
         StoredEvent::Handoff { to, at_ms, .. } => json!({"kind":"handoff","to":to,"atMs":at_ms}),
         StoredEvent::Approval { approval, at_ms } => {
             json!({"kind":"approval","atMs":at_ms,"approval":{
@@ -877,8 +858,7 @@ fn visible(event: StoredEvent) -> Result<Value, DispatchError> {
             agent.remove(from);
         }
     }
-    // The output has only the fields declared by StoredEvent/Event and the
-    // approval projection above. Unknown raw/backend fields were discarded.
+
     Ok(value)
 }
 

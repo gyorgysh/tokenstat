@@ -109,7 +109,6 @@ fn notify_when(reason: Reason, permitted: &dyn Fn() -> bool) -> Result<Sent, Pro
     }
     let host = resolve_api_host(None)?;
     let Some(token) = keychain::load_token(&host)? else {
-        // Signed out. A machine nobody has linked has nowhere to send.
         return Ok(Sent::default());
     };
     let machine = crate::config::ensure_machine_id()?;
@@ -127,8 +126,6 @@ fn notify_when(reason: Reason, permitted: &dyn Fn() -> bool) -> Result<Sent, Pro
             .as_ref()
             .and_then(|v| v.get("sent").and_then(|s| s.as_u64()))
             .unwrap_or(0) as u32,
-        // Absent means an older server that had no opinion, and one that
-        // answered at all can send.
         enabled: answer
             .as_ref()
             .and_then(|v| v.get("enabled").and_then(|s| s.as_bool()))
@@ -146,10 +143,6 @@ fn notify_when(reason: Reason, permitted: &dyn Fn() -> bool) -> Result<Sent, Pro
 /// production host is answered with BadDeviceToken. Android has one host, so
 /// it always registers as production.
 pub fn register_device(token: &str, platform: &str, environment: &str) -> Result<(), ProfileError> {
-    // Both fields are an allowlist, the same way `Reason` is: they travel to
-    // somebody else's servers, so free text from a caller must not be able
-    // to ride along. The server rejects what it does not recognise; refusing
-    // here first keeps a bad value a local error instead of a failed request.
     if !matches!(platform, "ios" | "ipados" | "android") {
         return Err(ProfileError::Message(format!(
             "unknown push platform {platform:?}: expected \"ios\", \"ipados\" or \"android\""
@@ -383,7 +376,6 @@ pub fn unregister_activity(token: &str) -> Result<(), ProfileError> {
     .map(|_| ())
 }
 
-// Credentials are captured once when a run starts, before its first status.
 #[derive(Clone)]
 struct ActivityUpdate {
     host: String,
@@ -440,8 +432,6 @@ fn begin_work_activity(key: String, revision: u64) -> bool {
     let mut runs = activity_runs()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // A signed-out launch deliberately clears any old binding. Later status
-    // calls cannot resolve credentials for an account that arrived mid-run.
     runs.remove(&key);
     if let Some(update) = update {
         runs.insert(key, update);
@@ -470,7 +460,6 @@ fn queue_activity(queue: &mut std::collections::VecDeque<ActivityUpdate>, update
         return;
     }
     if queue.len() == 64 {
-        // Heartbeats must not displace completion, even while the network is unavailable.
         let Some(index) = queue.iter().position(|pending| !pending.terminal()) else {
             return;
         };
@@ -505,7 +494,6 @@ fn take_activity_update(
         .clone();
     update.phase = phase;
     if update.terminal() {
-        // Late hooks/heartbeats can no longer revive this completed run.
         runs.remove(key);
     }
     Some(update)
@@ -515,8 +503,6 @@ fn work_activity_in_background(key: &str, revision: u64, phase: &'static str) {
     if !matches!(phase, "working" | "waiting" | "done" | "failed" | "stopped") {
         return;
     }
-    // Keep the run lock until enqueueing: a concurrent completion must not
-    // overtake an extracted heartbeat and let it arrive after the ending.
     let mut runs = activity_runs()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -555,7 +541,6 @@ fn enqueue_activity(update: ActivityUpdate) {
                             .expect("nonempty pending activity queue")
                     };
                     for attempt in 0..3 {
-                        // Revocation wins over retries. Never resolve a new account's bearer for old work.
                         if resolve_api_host(None).ok().as_ref() != Some(&update.host)
                             || keychain::load_token(&update.host).ok().flatten().as_ref()
                                 != Some(&update.bearer)
@@ -620,7 +605,6 @@ fn post_with_status(
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(5))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
-        // The bearer must not follow a redirect to another host.
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| ProfileError::Message(err.to_string()))?;
@@ -837,8 +821,6 @@ mod tests {
 
     #[test]
     fn register_device_refuses_anything_off_the_allowlist() {
-        // Rejected locally, before any credential is read or any request is
-        // made: free text must not be able to ride to somebody else's server.
         let err = register_device("tok", "windows", "production").unwrap_err();
         assert!(err.to_string().contains("platform"), "{err}");
         let err = register_device("tok", "ios", "development").unwrap_err();
@@ -849,10 +831,6 @@ mod tests {
 
     #[test]
     fn background_notify_never_blocks_the_caller() {
-        // Queued on one worker, not a thread per call: a burst must return
-        // promptly even while the worker is stuck on a slow server.
-        // Exercise the real bounded worker without contacting a signed-in
-        // account or sending notifications from a test process.
         let sender = notification_worker(|_, _| {});
         let start = std::time::Instant::now();
         for _ in 0..64 {

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Labels and eligible identifiers only. Cache records contribute candidate
-/// folders after host authorization, never permission to read those folders.
 struct WorkSearchCatalog: Sendable {
     struct KnownFolder: Sendable {
         let reference: WorkReference
@@ -19,7 +17,6 @@ struct WorkSearchCatalog: Sendable {
         machines = linkedMachines.filter { allowedHosts.contains($0.key) }
         var labels: [WorkSearchIndex.Folder: String] = [:]
         var documents: [WorkSearchIndex.Folder: WorkSearchIndex.Document] = [:]
-        // Newest known label wins independently of caller iteration order.
         for folder in knownFolders.sorted(by: {
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.name < $1.name

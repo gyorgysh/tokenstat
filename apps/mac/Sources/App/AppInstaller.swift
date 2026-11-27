@@ -58,11 +58,6 @@ enum AppInstaller {
         }
     }
 
-    /// Install the disk image at `imagePath` over the running application.
-    ///
-    /// Off the main actor: it mounts a disk image and copies tens of megabytes,
-    /// and doing that on the main thread would freeze the window for the whole
-    /// of it.
     static func install(imagePath: String, runningVersion: String) throws {
         let mountPoint = try attach(imagePath)
         defer { detach(mountPoint) }
@@ -88,8 +83,6 @@ enum AppInstaller {
         let current = Bundle.main.bundleURL
         let runningID = Bundle.main.bundleIdentifier
         let diskID = bundleIdentifier(at: current)
-        // A failed plist read must not take the `-u` path: that is the
-        // same-id case we cannot prove, and unregistering forgets the pin.
         let idChanged = runningID != nil && diskID != nil && runningID != diskID
         refreshLaunchServices(bundle: current, unregisterFirst: idChanged)
         DispatchQueue.main.async {
@@ -97,11 +90,8 @@ enum AppInstaller {
         }
     }
 
-    // MARK: - The image
 
     private static func attach(_ imagePath: String) throws -> URL {
-        // -nobrowse keeps it out of the Finder sidebar: this is machinery, not
-        // something the user opened. -readonly because nothing writes to it.
         let out = run("/usr/bin/hdiutil", [
             "attach", imagePath,
             "-nobrowse", "-readonly", "-noverify",
@@ -109,7 +99,6 @@ enum AppInstaller {
         ])
         guard out.status == 0 else { throw Failure.notMounted(out.errors) }
 
-        // The last tab-separated field of the last line is the mount point.
         let mount = out.output
             .split(separator: "\n")
             .compactMap { line -> String? in
@@ -124,12 +113,9 @@ enum AppInstaller {
     }
 
     private static func detach(_ mountPoint: URL) {
-        // Best effort. A mount left behind is untidy; failing the update over
-        // it would be worse, and the reboot everybody eventually does clears it.
         _ = run("/usr/bin/hdiutil", ["detach", mountPoint.path, "-quiet"])
     }
 
-    // MARK: - The checks
 
     private static func verify(_ app: URL) throws {
         let signed = run("/usr/bin/codesign", [
@@ -137,10 +123,6 @@ enum AppInstaller {
         ])
         guard signed.status == 0 else { throw Failure.unsigned(firstLine(signed.errors)) }
 
-        // The identity has to be the one that signs this app, not merely *an*
-        // identity. Without this a validly signed, validly notarized
-        // application from anybody at all would pass, which is not a check, it
-        // is a formality.
         guard let expected = developerIDTeam(of: Bundle.main.bundleURL) else {
             // A local build has no Developer ID to hold the download to, so
             // there is nothing to check against and it must not pretend
@@ -189,7 +171,6 @@ enum AppInstaller {
         return team
     }
 
-    // MARK: - Putting it in place
 
     private static func replaceRunningBundle(with fresh: URL) throws {
         let current = Bundle.main.bundleURL
@@ -198,14 +179,9 @@ enum AppInstaller {
             try replaceUnprivileged(fresh, at: current, in: parent)
             return
         }
-        // The ordinary failure: the app lives in /Applications and a normal
-        // user cannot write there. Replacing it is exactly what the user
-        // wants, so ask for their password and do the copy with admin rights
-        // rather than giving up and sending them to a download page.
         try replaceAuthenticated(fresh, at: current, in: parent)
     }
 
-    /// Swap the bundle in place when the folder is writable by this user.
     private static func replaceUnprivileged(
         _ fresh: URL,
         at current: URL,
@@ -216,10 +192,6 @@ enum AppInstaller {
         try? fm.removeItem(at: staged)
 
         do {
-            // Copied beside the old one first, so a copy that fails part way
-            // through has not touched the application the user is running.
-            // Only when a whole bundle is on the same volume is anything
-            // swapped, and that swap is one rename.
             try fm.copyItem(at: fresh, to: staged)
             _ = try fm.replaceItemAt(current, withItemAt: staged)
         } catch {
@@ -259,9 +231,6 @@ enum AppInstaller {
             "/bin/mv \(shellQuote(aside.path)) \(shellQuote(current.path));",
             "exit 1; } )",
         ].joined(separator: " ")
-        // Earlier steps only ever stage, so their failure needs the staged
-        // path cleaned up and nothing else. The old bundle is not touched
-        // until the swap group's first rename succeeds.
         let command = [
             "/bin/rm -rf \(shellQuote(staged.path))",
             "/usr/bin/ditto \(shellQuote(fresh.path)) \(shellQuote(staged.path))",
@@ -271,9 +240,6 @@ enum AppInstaller {
         ].joined(separator: " && ")
             + " || { /bin/rm -rf \(shellQuote(staged.path)); exit 1; }"
 
-        // The shell command goes inside an AppleScript string, so double
-        // quotes have to be escaped for AppleScript before the shell ever
-        // sees them.
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -285,35 +251,15 @@ enum AppInstaller {
         }
     }
 
-    /// Quote a path for a `/bin/sh` command line.
-    ///
-    /// App paths can contain spaces and the mount point is under a temp
-    /// directory, so neither side can be trusted bare. Single-quoting handles
-    /// everything except a quote inside the path, which is escaped the shell
-    /// way.
     private static func shellQuote(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    // MARK: - Relaunching
 
-    /// Start the freshly installed copy and quit this one.
-    ///
-    /// `open` rather than re-executing ourselves: this process is the old
-    /// bundle's image, and launching through the Finder's own path is what
-    /// makes the new one come up as a normal application with its own
-    /// activation, rather than a child of a process that is about to die.
     @MainActor
     static func relaunch() {
-        // `open -n` is a new instance. The Dock treats that as a new tile,
-        // so a pinned app grows a second icon under the pin. Wait for this
-        // process to die, then a normal `open` of the same path reuses the
-        // persistent tile.
         let bundle = Bundle.main.bundleURL.path
         let pid = ProcessInfo.processInfo.processIdentifier
-        // Path as $1 so a space in the bundle is not eaten by the inner
-        // single-quoted -c. nohup plus ignore HUP so quitting this app
-        // does not kill the waiter before it can `open` the replaced bundle.
         let script = """
         /usr/bin/nohup /bin/sh -c 'trap "" HUP
         while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
@@ -366,8 +312,6 @@ enum AppInstaller {
                 try task.run()
                 task.waitUntilExit()
             } catch {
-                // The cache refresh is a nicety; a failed one must not fail the
-                // update that already succeeded.
             }
         }
     }
@@ -385,7 +329,6 @@ enum AppInstaller {
         }
     }
 
-    // MARK: - Running a tool
 
     private struct Output {
         var status: Int32

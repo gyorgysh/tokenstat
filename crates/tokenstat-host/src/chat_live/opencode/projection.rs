@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Correlate the native stream with the selected CLI session and snapshots.
-
 use super::PART_CAP;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -8,8 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Default)]
 pub(super) struct Projection {
     pub(super) session: Option<String>,
-    // CLI completion IDs derive from the native started event. Recovery
-    // records instead identify the message and ordinal directly.
+
     pub(super) parts: HashMap<String, String>,
     pub(super) admitted: HashSet<String>,
     pub(super) ordinals: HashMap<(String, String), u64>,
@@ -51,8 +48,6 @@ impl Projection {
     fn defer(&mut self, event: Value, bytes: usize) {
         if self.pending.len() >= PART_CAP || self.pending_bytes.saturating_add(bytes) > 1024 * 1024
         {
-            // A partial prefix with a missing middle cannot be appended to
-            // an exact completion. Keep the CLI recovery path for this turn.
             self.limited = true;
             self.pending.clear();
             self.pending_bytes = 0;
@@ -192,8 +187,6 @@ impl Projection {
                 | "session.execution.failed"
                 | "session.execution.interrupted"
         ) {
-            // SSE can still carry an earlier execution when resuming. Its
-            // end is meaningful only after seeing this CLI's own message.
             self.ended |= self.observed_current;
             return Vec::new();
         }

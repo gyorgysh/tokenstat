@@ -96,7 +96,6 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     if !app.days.is_empty() {
         lines.push(Line::from(""));
         let pairs = &app.day_tokens;
-        // Website token-volume heatmap: violet through fuchsia.
         let weeks = usize::from(width)
             .saturating_sub(4 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
@@ -117,9 +116,6 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
-                        // A day that was worked without measured tokens gets its
-                        // own hollow mark, never level 0: a day off must not
-                        // look the same as a day whose transcripts are gone.
                         Some(c) if c.unmeasured => {
                             spans.push(Span::styled(
                                 ui::heat_unknown_cell(),
@@ -238,8 +234,6 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             )));
         }
 
-        // Dollar total always follows the (possibly truncated) list so the
-        // headline "how much in total" stays on screen when collapsed.
         let mut any_estimate = false;
         let total_value: EquivalentValue = app
             .models
@@ -362,8 +356,6 @@ pub(super) fn table_lines(
         })
         .max()
         .unwrap_or(8)
-        // Dates need the full YYYY-MM-DD width. The old upper clamp alone was
-        // fine, but pad used to elide exact-fit strings.
         .clamp(label.len().max(10), 36);
     let max = rows
         .iter()
@@ -450,8 +442,6 @@ pub(super) fn table_lines(
         }
     }
     if !price_as_model && let Some((spark, first, last)) = trend_spark(rows) {
-        // The tab can be sorted newest first, so the sparkline sorts its own
-        // copy: a trend that reads right to left is worse than none.
         lines.push(Line::from(vec![
             Span::raw(ui::pad_right("", key_w + 2)),
             Span::styled(spark, Style::default().fg(secondary())),
@@ -461,8 +451,6 @@ pub(super) fn table_lines(
     lines
 }
 
-/// Sparkline over time-bucketed rows, oldest first, or `None` when the keys are
-/// not a date-like series.
 pub(super) fn trend_spark(rows: &[Bucket]) -> Option<(String, String, String)> {
     if rows.len() < 2 || !rows.iter().all(|r| looks_like_a_period(&r.key)) {
         return None;
@@ -481,10 +469,6 @@ pub(super) fn trend_spark(rows: &[Bucket]) -> Option<(String, String, String)> {
     ))
 }
 
-/// `2026-08-03`, `2026-W31`, or `2026-08`: keys that sort chronologically.
-///
-/// Projects and sessions come through the same renderer, and a sparkline over
-/// them would imply an order they do not have.
 pub(super) fn looks_like_a_period(key: &str) -> bool {
     let bytes = key.as_bytes();
     matches!(bytes.len(), 7 | 8 | 10)
@@ -492,10 +476,6 @@ pub(super) fn looks_like_a_period(key: &str) -> bool {
         && bytes[4] == b'-'
 }
 
-/// A horizontal bar that fades along its length and scales with `fraction`.
-///
-/// Quiet rows stay deep violet. Strong rows run violet into fuchsia at the tip,
-/// so rank is visible without reading the number.
 pub(super) fn faded_bar_spans(fraction: f64, width: usize) -> Vec<Span<'static>> {
     let filled = ui::bar(fraction, width);
     let n = filled.chars().count();
@@ -505,8 +485,6 @@ pub(super) fn faded_bar_spans(fraction: f64, width: usize) -> Vec<Span<'static>>
         return spans;
     }
     for (i, ch) in filled.chars().enumerate() {
-        // Blend overall magnitude with position along the bar so the tip is
-        // always the brightest part of that row.
         let along = (i as f64 + 1.0) / n as f64;
         let t = (fraction.powf(0.55) * 0.4 + along * 0.6).clamp(0.0, 1.0);
         let (r, g, b) = ui::intensity_rgb(t);
@@ -522,7 +500,6 @@ pub(super) fn faded_bar_spans(fraction: f64, width: usize) -> Vec<Span<'static>>
     spans
 }
 
-/// Offline sync line for the status bar: host, plan interval, next allowed time.
 pub(super) fn format_sync_hint(info: &tokenstat_sync::SchedulingInfo) -> String {
     let mut parts = vec![format!("linked · {}", info.host)];
     if let Some(until) = &info.next_allowed_at {
@@ -734,8 +711,6 @@ pub(super) fn doctor_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
-/// Body of the `/heatmap` window: the same grid as the Summary tab but with
-/// the legend, streak, and busiest day the compact body leaves out.
 pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if app.days.is_empty() {
@@ -830,8 +805,6 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
     lines
 }
 
-/// Body of the `/wrapped [year]` window: the year-in-review stats plus the
-/// Jan-to-Dec grid, same numbers as `tokenstat wrapped`.
 pub(super) fn wrapped_detail_lines(
     store: &Store,
     tz: &jiff::tz::TimeZone,
@@ -875,7 +848,6 @@ pub(super) fn wrapped_detail_lines(
         .sum();
     let top_model = models.first().map(|m| display_usage_model_id(&m.key));
     let top_project = projects.first().map(|p| p.key.clone());
-    // Busiest by token volume, so this row agrees with the heatmap under it.
     let day_tokens = crate::render::daily_tokens(&days);
     let busiest = day_tokens.iter().max_by_key(|(_, tokens)| *tokens);
 
@@ -926,8 +898,6 @@ pub(super) fn wrapped_detail_lines(
         let now = jiff::Timestamp::now().to_zoned_datetime(tz.clone()).date();
         let anchor = if now < year_end { now } else { year_end };
         let weeks = (anchor.day_of_year() as usize).div_ceil(7) + 1;
-        // The popup is narrower than a terminal, so a full year has to trim to
-        // what fits. A partial year usually does not need trimming at all.
         let fit = usize::from(width)
             .saturating_sub(2 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
@@ -946,9 +916,6 @@ pub(super) fn wrapped_detail_lines(
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
-                        // A day that was worked without measured tokens gets its
-                        // own hollow mark, never level 0: a day off must not
-                        // look the same as a day whose transcripts are gone.
                         Some(c) if c.unmeasured => {
                             spans.push(Span::styled(
                                 ui::heat_unknown_cell(),
@@ -973,8 +940,6 @@ pub(super) fn wrapped_detail_lines(
     Ok(lines)
 }
 
-/// Body of the `/budget` window: list-rate spend today and this month against
-/// any caps, same numbers the one-shot `tokenstat budget` prints.
 pub(super) fn budget_detail_lines(
     store: &Store,
     tz: &jiff::tz::TimeZone,

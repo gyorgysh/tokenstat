@@ -2,29 +2,6 @@
 //
 //! How an agent asks the person a question in the chat, and how the answer
 //! gets back to it.
-//!
-//! Every backend tokenstat runs is a CLI in print mode. None of them can show
-//! a prompt of its own, and a "don't ask" turn has no hook to stop at. So the
-//! question travels in the one channel all of them share, the reply text: a
-//! fenced `tokenstat-question` block holding a small JSON object. The host
-//! notices a finished block while the turn is still streaming and records it
-//! as a question in the timeline, which every client draws as a card with the
-//! choices and a field for an answer of the person's own.
-//!
-//! ## A question is not a stop
-//!
-//! What the agent should do next depends on the turn, and the standing rule
-//! ([`rule`]) says which:
-//!
-//! - A turn that does not ask before tools must never wait. The agent states
-//!   the default it is going with and keeps working.
-//! - A turn that asks may stop, but only when going on without the answer
-//!   would be wrong. Otherwise it continues on its default too.
-//!
-//! An answer given while the turn is still running is parked like a steer
-//! note. A backend that takes notes mid-turn reads it on its next step; any
-//! other turn gets it as the next message once it ends. An answer to an idle
-//! conversation starts a turn of its own.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,8 +13,6 @@ pub const FENCE: &str = "tokenstat-question";
 const QUESTION_MAX_CHARS: usize = 600;
 const OPTION_MAX_CHARS: usize = 200;
 const MAX_OPTIONS: usize = 8;
-/// Far more than a question's own caps can fill, even with every option
-/// written at length and escaped. Past this an unclosed block is given up.
 const BLOCK_MAX_BYTES: usize = 64 * 1024;
 /// An answer is one note on the agent's next step, the same size as a steer,
 /// or longer when that is what every choice of a multiple-choice question
@@ -117,8 +92,6 @@ pub(crate) fn next_block<'a>(
     loop {
         let rest = text.get(search..)?;
         let Some(relative) = rest.find("```") else {
-            // Keep two trailing bytes for an opening fence split across
-            // chunks, rather than rescanning all prior prose on every token.
             let mut tail = text.len().saturating_sub(2).max(search);
             while !text.is_char_boundary(tail) {
                 tail += 1;
@@ -127,15 +100,11 @@ pub(crate) fn next_block<'a>(
             return None;
         };
         let at = search + relative;
-        *from = at; // An unfinished header or body is retried from here.
+        *from = at;
         let after = &text[at + 3..];
-        // Named fences count even after prose on the same line, and even when
-        // the JSON shares that line. Other backtick runs stay prose.
+
         let body_start = match after.find('\n') {
             None => {
-                // Header line still growing. Wait unless the language tag is
-                // already complete and the JSON body has started on this line.
-                // Skipping a partial `tokenstat-q` would lose the fence.
                 let header = after.strip_suffix('\r').unwrap_or(after);
                 match fence_open_body_at(header, fence) {
                     Some(Some(offset)) => at + 3 + offset,
@@ -158,10 +127,6 @@ pub(crate) fn next_block<'a>(
             }
         };
         let Some(close) = closing_fence(text, body_start) else {
-            // A question is a few lines of JSON. A block that has run this
-            // long without closing is not one, and waiting on it would rescan
-            // the whole rest of the reply on every chunk and hide every later
-            // question behind it.
             if text.len().saturating_sub(body_start) > BLOCK_MAX_BYTES {
                 search = at + 3;
                 *from = search;
@@ -178,10 +143,6 @@ pub(crate) fn next_block<'a>(
     }
 }
 
-/// When `header` (text after the opening ticks on that line) opens `fence`,
-/// `Some(Some(offset))` is where the body starts inside `header`, and
-/// `Some(None)` means the body begins on the following line. `None` when this
-/// is some other fence.
 fn fence_open_body_at(header: &str, fence: &str) -> Option<Option<usize>> {
     let lead = header.len() - header.trim_start().len();
     let info = &header[lead..];
@@ -196,8 +157,7 @@ fn fence_open_body_at(header: &str, fence: &str) -> Option<Option<usize>> {
     if body.is_empty() {
         return Some(None);
     }
-    // Prose after the language tag is not a block. The body is a JSON object,
-    // so a same-line body must open one.
+
     if !body.starts_with('{') {
         return None;
     }
@@ -205,15 +165,11 @@ fn fence_open_body_at(header: &str, fence: &str) -> Option<Option<usize>> {
     Some(Some(offset))
 }
 
-/// Where the body ends and where following text starts. Closing ticks may
-/// stand alone, share a line with the next sentence (` ```Yes`), sit on the
-/// same line as the JSON (`{...}```), or open the next named fence.
 fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
     let mut line_start = from;
     loop {
         let rest = text.get(line_start..)?;
-        // The last line counts only once the stream has moved past it.
-        // Until then the closing backticks may still be arriving.
+
         let n = rest.find('\n')?;
         let (raw_line, next) = (&rest[..n], line_start + n + 1);
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
@@ -230,8 +186,6 @@ fn closing_fence(text: &str, from: usize) -> Option<(usize, usize)> {
     }
 }
 
-/// Body end and offset past the closing ticks inside one line, when that line
-/// closes a fence.
 fn close_on_line(line: &str) -> Option<(usize, usize)> {
     let indent = line
         .bytes()
@@ -240,7 +194,6 @@ fn close_on_line(line: &str) -> Option<(usize, usize)> {
     let rest = &line[indent..];
     let ticks = rest.bytes().take_while(|&b| b == b'`').count();
     if ticks >= 3 {
-        // Line is only a closing fence (plus optional glued next open / prose).
         let after = if glued_opening(&rest[3..]) {
             indent + 3
         } else {
@@ -251,7 +204,6 @@ fn close_on_line(line: &str) -> Option<(usize, usize)> {
     trailing_close(line)
 }
 
-/// `{...}``` or `{...} ```Yes` or `{...}``````tokenstat-plan`.
 fn trailing_close(line: &str) -> Option<(usize, usize)> {
     let mut search = 0;
     while search < line.len() {
@@ -272,8 +224,6 @@ fn trailing_close(line: &str) -> Option<(usize, usize)> {
     None
 }
 
-/// Whether text right after a closing fence opens another block: three or
-/// more ticks followed by an info string.
 fn glued_opening(after_close: &str) -> bool {
     let ticks = after_close.bytes().take_while(|&b| b == b'`').count();
     ticks >= 3
@@ -282,8 +232,6 @@ fn glued_opening(after_close: &str) -> bool {
             .starts_with(|c: char| c.is_ascii_alphabetic())
 }
 
-/// Read one block body. Anything malformed is dropped: a broken question is
-/// still readable in the reply, which is where it was written.
 fn parse(body: &str) -> Option<Question> {
     let value: Value = serde_json::from_str(body.trim()).ok()?;
     let question = clip(value.get("question")?.as_str()?, QUESTION_MAX_CHARS)?;
@@ -320,7 +268,6 @@ fn parse(body: &str) -> Option<Question> {
     })
 }
 
-/// Trimmed and cut to `cap` characters. Empty is no value at all.
 fn clip(text: &str, cap: usize) -> Option<String> {
     let text = text.trim();
     if text.is_empty() {
@@ -463,7 +410,7 @@ mod tests {
         let mut scanner = Scanner::default();
         let mut text = "x".repeat(1_000);
         assert!(scanner.scan(&text).is_empty());
-        // The caller drops the front of a long reply to bound its memory.
+
         text.drain(..900);
         scanner.shift(900);
         text.push_str(&format!("\n{}", block(r#"{"question":"Still here?"}"#)));
@@ -504,19 +451,16 @@ mod tests {
 
     #[test]
     fn a_closing_fence_glued_to_prose_still_ends_the_block() {
-        // Streaming often lands the ticks and the next sentence on one line.
         let text = format!("```{FENCE}\n{{\"question\":\"Ship?\"}}\n```Yes, shipping.\n");
         let found = Scanner::default().scan(&text);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].question, "Ship?");
 
-        // The reply may end on that glued line with no final newline yet.
         let mut scanner = Scanner::default();
         let pending = format!("```{FENCE}\n{{\"question\":\"Ship?\"}}\n```Yes, shipping.");
         assert!(scanner.scan(&pending).is_empty());
         assert_eq!(scanner.finish(&pending).len(), 1);
 
-        // Indentation and a CRLF reply must still close.
         let crlf = format!("```{FENCE}\r\n{{\"question\":\"Ship?\"}}\r\n  ```Yes\r\n");
         assert_eq!(Scanner::default().scan(&crlf).len(), 1);
     }

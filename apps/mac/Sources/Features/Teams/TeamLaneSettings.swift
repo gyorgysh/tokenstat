@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// How work from this computer's agent reaches the project. The settings
-/// stay on this computer, next to the checkout they describe.
 struct TeamLaneSettings: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext

@@ -7,8 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Browse every changed file, loading the full diff only for the current file.
-/// Selection here is independent of the files selected for a commit.
 struct ClientReviewAllView: View {
     let peer: String
     let workspaceID: String
@@ -41,7 +39,6 @@ struct ClientReviewAllView: View {
     }
 }
 
-/// A turn is a recorded snapshot; it remains available after later Git edits.
 struct ClientRecordedTurnReview: Identifiable {
     let id = UUID()
     let changes: ChatTurnChanges

@@ -29,7 +29,6 @@ import SwiftUI
 @MainActor
 final class ClientWebAuth: NSObject {
 
-    /// The scheme the site redirects to when approval finishes.
     private static let callbackScheme = "tokenstat"
 
     private var session: ASWebAuthenticationSession?
@@ -59,8 +58,6 @@ final class ClientWebAuth: NSObject {
         }
     }
 
-    /// Present the sign-in page. Returns immediately: the outcome arrives
-    /// through the device-flow polling that started this, not through here.
     func start(_ url: URL) {
         guard let window else { pendingURL = url; return }
         start(url, in: window)
@@ -70,14 +67,6 @@ final class ClientWebAuth: NSObject {
         cancel()
         let ticket = attempts.begin()
         let presentation = WindowPresentation(window: window)
-        // Marks this as the client flow, so the site can render the phone
-        // variant of `/link` and redirect back when it is approved. Harmless on
-        // a server that does not know the parameter yet, which is the point:
-        // the app ships before the website does.
-        // `mobile=1` asks for the app-shaped layout: no site header, no footer,
-        // no marketing column, providers as full-width rows. A query flag and
-        // not a user agent, because an authentication session gives an app no
-        // way to set one and sniffing strings is a losing game.
         var flags = [
             URLQueryItem(name: "app", value: "ios"),
             URLQueryItem(name: "mobile", value: "1"),
@@ -103,12 +92,6 @@ final class ClientWebAuth: NSObject {
             url: tagged,
             callbackURLScheme: Self.callbackScheme
         ) { [weak self] _, _ in
-            // Both outcomes are handled the same way on purpose. A callback
-            // means the site approved and polling is about to see it. A
-            // dismissal means the person closed the sheet, which is not the
-            // same as abandoning the sign-in: they may have approved on the
-            // page just before closing it. Cancelling here would throw away an
-            // approval that already happened.
             Task { @MainActor [weak self] in
                 guard let self, self.attempts.finish(ticket) else { return }
                 self.session = nil
@@ -116,10 +99,6 @@ final class ClientWebAuth: NSObject {
             }
         }
         session.presentationContextProvider = presentation
-        // Off, so the provider session the phone already has in Safari is the
-        // one used. Ephemeral would make every sign-in a fresh password entry,
-        // which is a worse experience bought with no privacy: this is the
-        // user's own account on their own device.
         session.prefersEphemeralWebBrowserSession = false
         self.presentation = presentation
         self.session = session
@@ -139,8 +118,6 @@ final class ClientWebAuth: NSObject {
     }
 }
 
-/// The anchor belongs to the window that requested this attempt. A callback
-/// from an earlier attempt cannot select or close a successor's presentation.
 private final class WindowPresentation: NSObject, ASWebAuthenticationPresentationContextProviding {
     private let window: UIWindow
     init(window: UIWindow) { self.window = window }

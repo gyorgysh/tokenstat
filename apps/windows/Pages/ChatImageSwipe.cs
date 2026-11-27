@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 namespace Tokenstat.Pages;
 
-/// <summary>One fitted-image swipe; a second contact belongs to native zoom.</summary>
 internal sealed class ChatImageSwipe
 {
     internal enum Start { Native, Observe, HandOff }
@@ -37,7 +36,6 @@ internal sealed class ChatImageSwipe
                 direction = dx < 0 ? 1 : -1;
             _pointer = null;
         }
-        // If releases reach us, the completed contact sequence can reset immediately.
         if (_contacts.Count == 0) Reset();
         return direction;
     }
@@ -49,8 +47,6 @@ internal sealed class ChatImageSwipe
     internal void Invalidate() => _pointer = null;
     internal void NativeStarted()
     {
-        // CancelDirectManipulations can finish an earlier system interaction
-        // while a fitted swipe is starting. That must not cancel the swipe.
         if (_manual && _pointer.HasValue) return;
         _system = true; _manual = false; _nativeActive = true; _pointer = null;
     }

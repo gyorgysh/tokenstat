@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Admission owns a fresh visible prefix and both local writer leases. It is
-//! deliberately separate from the private-send path and provider continuations.
-
 use super::{
     journal::{self, AskRecord, Attribution, Journal, Record},
     writer, *,
@@ -413,7 +409,7 @@ impl Store {
             {
                 return Err(unavailable());
             }
-            // Verify the exact Ask row is still present, not only its receipt.
+
             shared_project(
                 chat,
                 bytes,
@@ -423,14 +419,10 @@ impl Store {
                 &directory,
                 false,
             )?;
-            // Authentication and cloud admission happen after reservation.
-            // The managed writer lease does not prevent an external Git client
-            // changing the reviewed branch/HEAD/status during that interval.
+
             let worktree = tokenstat_workspace::git::checkout_review(prepared.writer.folder())
                 .map_err(|_| unavailable())?;
             if worktree != prepared.launch_worktree {
-                // Admission is already durable: this is an uncertain existing
-                // attempt, not the definite pre-reservation stale-review code.
                 return Err(unavailable());
             }
             prepared.ensure_writer_current()
@@ -488,8 +480,6 @@ impl Store {
         mut current: impl FnMut() -> Result<(), DispatchError>,
         mut checkpoint: impl FnMut(Step) -> Result<(), DispatchError>,
     ) -> Result<AskPreparation, DispatchError> {
-        // The review is of the publisher's checkout. A lane only changes
-        // which folder the run writes in, and it never fences the checkout.
         let (folder, checkout, lane) = checkout;
         input.validate()?;
         let (scope, actor) = scope(principal)?;
@@ -513,8 +503,7 @@ impl Store {
             }
             Ok(None)
         };
-        // Settle an immutable prior attempt even while its own writer is busy.
-        // No candidate cloud reference or runner is allocated for a retry.
+
         if let Some(value) =
             self.source_locked(target.workspace, target.id, false, |_, chat, bytes| {
                 principal.ensure_account_current()?;
@@ -527,7 +516,7 @@ impl Store {
         {
             return Ok(AskPreparation::Existing(value));
         }
-        // No canonical/index lock spans filesystem writer acquisition or HTTP.
+
         let writer = match lane {
             Some(lane) => tokenstat_workspace::writer::Lease::acquire_lane(lane),
             None => tokenstat_workspace::writer::Lease::acquire(folder),
@@ -574,9 +563,8 @@ impl Store {
                 if reviewed.digest != input.review {
                     return Err(changed());
                 }
-                // A lane owns its isolated execution snapshot. The publisher's
-                // checkout may advance while another lane runs, without changing
-                // this lane or the frozen Ask that was already admitted.
+
+
                 let launch_worktree = if lane.is_some() {
                     tokenstat_workspace::git::checkout_review(writer.folder())
                         .map_err(|_| checkout_unread())?
@@ -659,12 +647,12 @@ impl Store {
                 source.resume_token = None;
                 source.resume_tokens.clear();
                 source.standing_sent.clear();
-                // This independent barrier survives a missing or damaged journal.
+
                 source.team_run_fence = Some(binding.fence.clone());
                 self.write_team_index(&index)?;
                 checkpoint(Step::Fenced)?;
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
-                // Set the initialized bit only after a durable journal exists.
+
                 index
                     .conversations
                     .iter_mut()
@@ -675,8 +663,8 @@ impl Store {
                 checkpoint(Step::Reserved)?;
                 principal.ensure_account_current()?;
                 current()?;
-                // A durable reservation already exists. This is no longer a
-                // definite refusal: clients must retain its original identity.
+
+
                 writer.ensure_current().map_err(|_| super::run_recovery_required())?;
                 let mut canonical = bytes.to_vec();
                 canonical.extend_from_slice(&encoded);
@@ -747,8 +735,6 @@ impl Store {
                     .map_err(|_| unavailable())?;
                 writer::save(&directory.join(writer::JOURNAL), &journal)?;
                 if prepared.claimed {
-                    // No backend birth is possible while still Reserved.
-                    // Durable NotStarted is written before releasing claims.
                     prepared
                         .writer
                         .clear_completed_run(prepared.binding.fence.incarnation())
@@ -944,8 +930,7 @@ impl Store {
                 .retire_terminal_output(fence, bytes, &journal::read_chain(&directory)?)
                 .map_err(|_| unavailable())?;
             writer::save(&directory.join(writer::JOURNAL), &journal)?;
-            // Keep the chat fenced until both durable cleanup steps succeed.
-            // Retrying a terminal journal is safe after a failed claim write.
+
             release_writer()?;
             let source = index
                 .conversations

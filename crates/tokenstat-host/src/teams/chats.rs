@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{
     api_error,
     publications::{self, ChatShare, ChatTarget, Owner, Phase, Store},
@@ -303,10 +302,7 @@ pub(super) fn perform(
             if previous.cloud_withdrawn {
                 return Ok(json!({"withdrawn":true}));
             }
-            // Missing is not a withdrawal receipt: an earlier POST may still
-            // commit after a timeout. Reserve a terminal cloud tombstone with
-            // expectedRevision 0, or delete the exact observed live revision.
-            // One revision race gets a fresh read; no publish is replayed.
+
             for _ in 0..2 {
                 let revision = match client.chat_publication(
                     &request.organization,
@@ -347,7 +343,6 @@ pub(super) fn perform(
     }
 }
 
-/// Share one local chat with the repository, from a reviewed preview.
 fn publish(
     owner: &AccountSnapshot,
     client: &TeamClient,
@@ -374,8 +369,7 @@ fn publish_if_current(
     let (binding, checkout, repository, cloud_revision) = review_context(owner, client, &request)?;
     let store = Store::capture()?;
     let target = target(&binding, &request);
-    // Repeating an accepted publication settles its original receipt;
-    // later shared messages must not turn it into a new publication.
+
     if let Some(previous) = store.chat_request(&target, &input.request_id)?
         && previous.phase == Phase::Active
     {
@@ -579,9 +573,7 @@ pub(super) fn start_for_member(
     let (binding, local, _, _) = review_context(owner, client, &source)?;
     let store = Store::capture()?;
     let _request = store.new_chat_lease(&target(&binding, &source), request_id)?;
-    // A timed-out cloud publication keeps its original conversation and
-    // request. Creating another conversation would conflict with that saved
-    // request forever, and would spend another rate-limit slot on each retry.
+
     let previous = store.chat_request(&target(&binding, &source), request_id)?;
     if let Some(previous) = &previous
         && previous.phase == Phase::Active
@@ -627,9 +619,6 @@ pub(super) fn start_for_member(
     match shared {
         Ok(value) => Ok(json!({"share":value["publication"]["id"]})),
         Err(error) => {
-            // A prepared record may already be committed remotely even when
-            // its reply was lost. Keep the matching source for idempotent
-            // recovery instead of deleting it or creating a replacement.
             let owns_source = store
                 .chat_request(&target(&binding, &request), request_id)
                 .map(|saved| saved.is_some_and(|row| row.conversation_id == chat.id));
@@ -641,8 +630,6 @@ pub(super) fn start_for_member(
     }
 }
 
-/// The account lookups and publication locks above can outlive a short member
-/// lease. Check it again at the local creation boundary, before making a chat.
 fn new_chat_conversation(
     chats: &crate::chat::Store,
     workspace: &str,
@@ -657,8 +644,7 @@ fn new_chat_conversation(
         if previous.phase != Phase::Prepared {
             return Err(changed());
         }
-        // The original attempt may have been created by another native or
-        // daemon instance after this process loaded its conversation cache.
+
         chats.refresh_index().map_err(DispatchError::from)?;
         let chat = chats
             .list(workspace)
@@ -689,9 +675,6 @@ fn new_chat_conversation(
         .map_err(|_| changed())
 }
 
-/// A member requested a fresh, empty chat, not permission to share private
-/// messages the physical owner may have added while account lookups ran.
-/// The publication preview and canonical freeze bind this exact revision too.
 fn require_empty_new_chat(
     history: &crate::chat::sharing::History,
     revision: u64,
@@ -705,9 +688,6 @@ fn require_empty_new_chat(
     Ok(())
 }
 
-/// A Run proof lives for minutes, so one person could otherwise fill this
-/// computer with empty chats before it expires. Ten an hour per person and
-/// checkout is more than anyone starts by hand.
 fn admit_new_chat(person: &str, checkout: &str) -> Result<(), DispatchError> {
     use std::{
         collections::HashMap,
@@ -871,8 +851,7 @@ mod new_chat_tests {
             .is_err(),
             "a prepared request keeps its original backend"
         );
-        // Another native/daemon instance may have cached the index before
-        // the original creator saved this source. Its retry must reload it.
+
         let stale = crate::chat::Store::at(root.path().join("chats"));
         assert!(stale.list("workspace").is_empty());
         let (retried, created) = super::new_chat_conversation(
@@ -887,7 +866,7 @@ mod new_chat_tests {
         .unwrap();
         assert_eq!(retried.id, original.id);
         assert!(!created);
-        // A cached matching source cannot substitute for an unreadable index.
+
         std::fs::write(root.path().join("chats/conversations.json"), b"{damaged").unwrap();
         let error = super::new_chat_conversation(
             &stale,

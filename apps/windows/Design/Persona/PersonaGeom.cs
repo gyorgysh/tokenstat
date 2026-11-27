@@ -6,11 +6,6 @@
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// A point in persona unit space, where the mark's frame is one by one and y
-/// points down. Mirrors CGPoint in the Mac engine so the physics transcribes
-/// line for line.
-/// </summary>
 internal readonly record struct PPoint(double X, double Y)
 {
     public static PPoint operator +(PPoint p, PVector v) => new(p.X + v.X, p.Y + v.Y);
@@ -18,7 +13,6 @@ internal readonly record struct PPoint(double X, double Y)
     public static PVector operator -(PPoint a, PPoint b) => new(a.X - b.X, a.Y - b.Y);
 }
 
-/// <summary>A velocity or a force. Mirrors CGVector.</summary>
 internal readonly record struct PVector(double X, double Y)
 {
     public static readonly PVector Zero = new(0, 0);
@@ -30,10 +24,8 @@ internal readonly record struct PVector(double X, double Y)
     public static PVector operator *(PVector v, double k) => new(v.X * k, v.Y * k);
 }
 
-/// <summary>A multiplier pair, for squash and stretch. Mirrors CGSize.</summary>
 internal readonly record struct PSize(double Width, double Height);
 
-/// <summary>A bounds rect in unit space. Mirrors CGRect.</summary>
 internal readonly record struct PRect(double X, double Y, double Width, double Height)
 {
     public double MinX => X;

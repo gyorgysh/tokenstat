@@ -7,19 +7,6 @@
 import Foundation
 import Observation
 
-/// What the Home screen shows.
-///
-/// Home answers "what do I have left before I start", which is a different
-/// question from "what did I spend last month". Insights answers the second.
-/// Keeping them apart is why the plan limit cards moved here: they were the
-/// first thing on the reporting screen and the last thing a reporting screen
-/// should be about.
-/// Which machines the activity grid counts.
-///
-/// The local archive is one machine's logs, which is the whole design: the
-/// parser reads what is on this disk. "What have I spent everywhere" is a
-/// different question, and the account the machines already upload to is the
-/// only thing that can answer it.
 enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
     case thisMachine
     case allMachines
@@ -53,26 +40,13 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
 final class HomeModel {
     private(set) var calendar: ActivityCalendar?
 
-    /// What the user asked the grid to count. Every machine by default: a
-    /// person with two Macs wants their year, not one laptop's share of it.
     var scope: ActivityScope = ActivityScope(rawValue: UserDefaults.standard.string(forKey: "activity.scope") ?? "") ?? .allMachines {
         didSet { UserDefaults.standard.set(scope.rawValue, forKey: "activity.scope") }
     }
 
-    /// What the host actually built.
-    ///
-    /// Not the same as `scope`. An account grid needs the network and an
-    /// account, and when it cannot be had the host falls back to this machine's
-    /// own archive. Drawing that as the account's would report one laptop's
-    /// spend as everybody's, so the two are kept apart.
     private(set) var deliveredScope: ActivityScope = .thisMachine
 
-    /// Why the grid on screen is not the one that was asked for.
     private(set) var scopeNotice: String?
-    /// True when the account grid fell back because signing in would fix it.
-    ///
-    /// The host says so with a structured code rather than a sentence, so the
-    /// screen can offer a sign-in button instead of quoting a CLI command.
     private(set) var needsAccountSignIn = false
 
     var planLimits: [ProviderLimits] { PlanLimitsStore.shared.visible }
@@ -84,71 +58,45 @@ final class HomeModel {
     private var limitsGeneration: UInt64 = 0
     private let layout = HomeLayout.shared
 
-    /// Archive-backed plan usage, by source. Separate from the vendor limits
-    /// above: this is what the logs recorded, that is what the vendor reports.
     var planBySource: [Bucket] = []
 
     var isLoading = false
-    /// Quiet re-read in progress (toolbar refresh, return to Home, post-scan).
-    /// Does not flip `isLoading`, so wireframes do not replace drawn content.
     private(set) var isRefreshing = false
     var errorMessage: String?
 
-    /// True after the heatmap (or a successful archive load) has landed once.
-    ///
-    /// RootView uses this to warm Machines / remotes / the launch catalog so
-    /// the first click on those surfaces is a cache hit, not a cold host fan-out.
-    /// Not the same as `!isLoading`: a failed load must not start the warm pass.
     private(set) var isArchiveReady = false
 
-    /// Setup needs proof of an empty answer, never an absent or failed response.
     private(set) var hasConfirmedEmptyActivity = false
 
     private var hostRetryTask: Task<Void, Never>?
     private var hostRetryCount = 0
-    /// When the archive was last successfully read. Used to skip redundant
-    /// quiet refreshes when the user bounces between destinations.
     private var calendarGeneration: UInt64 = 0
     private var lastLimitsLoadedAt: Date?
     private var lastLoadedAt: Date?
-    /// Minimum age before an automatic quiet refresh will hit the host again.
     private static let quietRefreshStale: TimeInterval = 45
 
-    // MARK: - Day hover detail
 
-    /// The day the pointer is over, by `YYYY-MM-DD`.
     private(set) var hoveredDay: String?
-    /// The day's detail once it has answered, or nil while it loads.
     private(set) var hoveredDetail: DayDetail?
     private(set) var isLoadingDayDetail = false
 
-    /// The day pinned in the inspector. Survives leaving Home and coming back.
     private(set) var selectedDay: HeatCell?
     private(set) var selectedDetail: DayDetail?
     private(set) var isLoadingSelectedDetail = false
-    /// Insights-style breakdown for the pinned day. Local archive only.
     private(set) var selectedOverview: DayOverview?
     private(set) var isLoadingSelectedOverview = false
 
-    /// Fetched details, kept per day so revisiting a cell is instant and a
-    /// quick sweep across the grid does not re-ask for every cell.
     private var dayDetailCache: [String: DayDetail] = [:]
-    /// Hover and the pinned inspector must not share a task. Leaving the
-    /// grid used to cancel today's fetch and leave the pane on "Loading day…".
     private var hoverDetailTask: Task<Void, Never>?
     private var selectedDetailTask: Task<Void, Never>?
     private var dayOverviewCache: [String: DayOverview] = [:]
     private var dayOverviewTask: Task<Void, Never>?
 
-    /// Value at list rates over the last seven calendar days, the same measure
-    /// the heatmap colours by, so the two cannot disagree.
     var weekValue: Money {
         let micros = calendarDays.suffix(7).reduce(UInt64(0)) { $0.saturatingAdd($1.value) }
         return Money(micros: Int64(clamping: micros), estimated: false, complete: true)
     }
 
-    /// The new chat page's spend panel: the last seven days in micros, oldest
-    /// first. Nil until the grid has loaded once.
     var glance: ChatStartGlanceData? {
         guard calendar != nil else { return nil }
         let days = calendarDays.suffix(7).map(\.value)
@@ -160,21 +108,11 @@ final class HomeModel {
         return Money(micros: Int64(clamping: micros), estimated: false, complete: true)
     }
 
-    /// Dated cells from the delivered grid, oldest first. The tiles read this
-    /// rather than a second day report, so All devices and This device stay
-    /// on the same series as the heatmap.
     private var calendarDays: [HeatCell] {
         guard let calendar else { return [] }
         return calendar.rows.flatMap { $0.compactMap { $0 } }.sorted { $0.date < $1.date }
     }
 
-    /// Load archive-backed Home data.
-    ///
-    /// - Parameter quiet: when true (and content is already on screen), do not
-    ///   set `isLoading`, so the heatmap stays put while numbers update. Used
-    ///   for toolbar refresh, returning to Home, app activation, and post-scan.
-    /// - Parameter refreshAccountGrid: drop the host's ten-minute series cache
-    ///   so a pull after a plan change cannot redraw Free's locked year.
     func load(quiet: Bool = false, refreshAccountGrid: Bool = false) async {
         let soft = quiet && calendar != nil
         if soft {
@@ -199,37 +137,21 @@ final class HomeModel {
                 scope: scope.wire,
                 force: refreshAccountGrid
             )
-            // The shared calendar drives the greeting, profile and summaries.
-            // Plan-card queries run separately, only while that section is shown.
             let grid = try await calendar
             guard !Task.isCancelled, generation == calendarGeneration, scope == requestedScope else { return }
             self.calendar = grid
             EcosystemPublisher.publish(calendar: grid, lease: ecosystemLease)
-            // Only null means the account/archive has no records. A grid
-            // with zero active days can be a quiet or locked history window.
             hasConfirmedEmptyActivity = grid == nil
-            // Heatmap is the largest Home surface and the first query back.
-            // Mark archive ready here (not after the other two) so secondary
-            // screens can warm while day/plan reports still finish.
             isArchiveReady = true
-            // What came back, not what was asked for.
             let newScope: ActivityScope = grid?.scope == "account" ? .allMachines : .thisMachine
             let scopeChanged = newScope != deliveredScope
             if scopeChanged {
-                // The grid underneath the popover changed identity (e.g. an
-                // account grid fell back to local). Stale day details would
-                // describe a different machine's usage, so they have to go.
                 invalidateArchiveCaches()
             }
             deliveredScope = newScope
             scopeNotice = grid?.notice
             needsAccountSignIn = grid?.noticeCode == "auth"
 
-            // The inspector is empty until a day is pinned. Open today on
-            // first load so Home is not "pick a day" when the grid is already
-            // about this year. A later click is left alone, including across
-            // a quiet refresh. A scope change has to re-select: the cell is
-            // the same date, the numbers are not.
             if selectedDay == nil {
                 pinToday()
             } else if scopeChanged {
@@ -248,13 +170,8 @@ final class HomeModel {
         } catch {
             guard !Task.isCancelled, generation == calendarGeneration, scope == requestedScope else { return }
             hasConfirmedEmptyActivity = false
-            // Host recovery is expected to resolve through the retry loop. The
-            // footer reports it quietly, so Home does not replace useful data
-            // with a large error card for a transient socket pause.
             if Bridge.isHostRecoveryError(error) {
                 scheduleHostRetryIfNeeded(error)
-                // Once the bounded retry budget is spent, the error belongs on
-                // screen so the user has an explicit way to try again.
                 errorMessage = hostRetryCount >= hostRetryLimit ? error.localizedDescription : nil
             } else {
                 errorMessage = error.localizedDescription
@@ -280,15 +197,6 @@ final class HomeModel {
         }
     }
 
-    /// Explicit re-read from the toolbar. Always hits the host; also refreshes
-    /// plan limit cards so one control covers the whole Home surface.
-    ///
-    /// The Inspector is a pinned day and the archive can move under it.
-    /// `load` only drops those per-day caches when the scope changes, so a
-    /// plain quiet load would leave the Inspector on yesterday's numbers until
-    /// the next cold start. Keep the currently displayed Inspector visible
-    /// while fresh data loads, then crossfade - clearing `selectedDetail`
-    /// before the fetch is what made the pane blink to empty.
     func refresh() async {
         let pinned = selectedDay?.date
         softInvalidateForRefresh()
@@ -297,10 +205,6 @@ final class HomeModel {
         await loadPlanLimits()
     }
 
-    /// Automatic re-read when the user comes back to Home or the app wakes.
-    ///
-    /// Skips if a load is already running, or the last successful load is
-    /// fresher than `quietRefreshStale`, so bouncing the sidebar is free.
     func refreshIfStale() async {
         if let last = lastLoadedAt,
            Date().timeIntervalSince(last) < Self.quietRefreshStale
@@ -314,11 +218,6 @@ final class HomeModel {
         await loadPlanLimits(force: false)
     }
 
-    /// Clear per-day caches but keep the Inspector's current content on
-    /// screen. `invalidateArchiveCaches` wipes `selectedDetail`/`selectedOverview`
-    /// and the Inspector disappears to a placeholder - that is the lag the
-    /// refresh was reported as. This keeps stale content visible while fresh
-    /// fetches run, with a subtle spinner from `isLoadingSelected*`.
     private func softInvalidateForRefresh() {
         dayDetailCache = [:]
         dayOverviewCache = [:]
@@ -326,21 +225,12 @@ final class HomeModel {
         hoveredDetail = nil
         isLoadingDayDetail = false
         hoverDetailTask?.cancel()
-        // Keep selectedDay/selectedDetail/selectedOverview on screen; new
-        // fetches will replace them when they land without flashing.
         selectedDetailTask?.cancel()
         dayOverviewTask?.cancel()
         if selectedDetail != nil { isLoadingSelectedDetail = true }
         if selectedOverview != nil { isLoadingSelectedOverview = true }
     }
 
-    /// Keep trying while the host is still booting.
-    ///
-    /// The daemon can be down for a few seconds when the app opens ahead of
-    /// it, and the first load failing then is nobody's fault. Instead of
-    /// pinning an error banner the user would have to dismiss by hand, retry
-    /// quietly in the background until the host answers or a bounded number
-    /// of attempts runs out.
     private func scheduleHostRetryIfNeeded(_ error: Error) {
         guard Bridge.isHostRecoveryError(error), hostRetryCount < hostRetryLimit else {
             return
@@ -356,12 +246,6 @@ final class HomeModel {
 
     private let hostRetryLimit = 10
 
-    /// The pointer moved over (or left) a heatmap cell.
-    ///
-    /// Keeps the hover state here rather than in the view so the popover can
-    /// render above the whole window and still read the same truth. A quiet
-    /// cell asks for nothing: the grid only lights priced days, and a day with
-    /// no value has nothing to show.
     func hover(day: HeatCell?) {
         let date = day.flatMap { $0.value > 0 && !$0.isLocked ? $0.date : nil }
         guard date != hoveredDay else { return }
@@ -394,17 +278,11 @@ final class HomeModel {
         calendarDays.last { $0.date == date }
     }
 
-    /// Pin today if the grid has that cell. Used once, when nothing is pinned.
     private func pinToday() {
         guard let today = todayCell else { return }
         select(day: today)
     }
 
-    /// Pin a day in the inspector. Hover still only glances.
-    ///
-    /// When the same date is re-selected during a sync/refresh the Inspector
-    /// keeps stale content on screen instead of flashing to "Loading day..." -
-    /// see `softInvalidateForRefresh` and `refreshPinnedDay`.
     func select(day: HeatCell) {
         let isSameDay = selectedDay?.date == day.date
         selectedDay = day
@@ -427,10 +305,6 @@ final class HomeModel {
         loadOverview(for: day.date, keepStale: isSameDay)
     }
 
-    /// Local reports for the pinned day: models, harnesses, projects, sessions.
-    ///
-    /// The account series has no project or session keys, so this stays off
-    /// when the grid is counting every device.
     private func loadOverview(for date: String, keepStale: Bool = false) {
         dayOverviewTask?.cancel()
         guard deliveredScope == .thisMachine else {
@@ -477,9 +351,6 @@ final class HomeModel {
         let scope = deliveredScope.wire
         return Task { [weak self] in
             if settle {
-                // A hover settle: crossing cells fast must not fire a request
-                // per cell. 140ms is short enough to feel instant, long enough
-                // to eat a sweep across the grid.
                 try? await Task.sleep(for: .milliseconds(140))
                 guard !Task.isCancelled else { return }
             }
@@ -505,18 +376,11 @@ final class HomeModel {
 
     func setScope(_ new: ActivityScope) async {
         guard new != scope else { return }
-        // The new grid is a different set of numbers; a cached hover from the
-        // old one would describe the wrong scope.
         invalidateArchiveCaches()
         scope = new
         await load()
     }
 
-    /// Forget every per-day answer this screen is holding.
-    ///
-    /// Two things make an answer wrong: the grid started counting something
-    /// else, or the archive underneath it changed. A scope switch is the first
-    /// and a sync is the second, and both need exactly this.
     func invalidateArchiveCaches() {
         dayDetailCache = [:]
         dayOverviewCache = [:]
@@ -532,36 +396,16 @@ final class HomeModel {
         isLoadingSelectedOverview = false
     }
 
-    /// Re-read everything a sync can have moved.
-    ///
-    /// A sync sends this machine's window to the account and pulls a fresh
-    /// answer back, so the grid, the day under the pointer and the day pinned
-    /// in the inspector are all stale at once. Before this, only the account
-    /// card reloaded and the numbers on Home stayed at whatever they were
-    /// before the upload, for ten minutes or until somebody changed scope.
-    ///
-    /// Quiet, so the heatmap stays drawn while its numbers move, and
-    /// `refreshAccountGrid` so the host's own ten-minute series cache does not
-    /// hand back the answer the sync just replaced.
     func reloadAfterSync() async {
         let pinnedDate = selectedDay?.date
         invalidateArchiveCaches()
         await load(quiet: true, refreshAccountGrid: true)
-        // Pin that date again so the inspector refetches rather than sitting on
-        // the detail the cache no longer holds. The cell has to come from the
-        // grid that just arrived: re-pinning the one held from before the sync
-        // would put the pre-sync value back in the inspector's header, which is
-        // the number this whole reload exists to move.
         if let pinnedDate, let fresh = cell(on: pinnedDate) {
             select(day: fresh)
         }
         await loadPlanLimits()
     }
 
-    /// Vendor plan limits, loaded on their own.
-    ///
-    /// These queries belong to the limits section. Archive plan usage can
-    /// publish before a slower provider reply, without delaying the calendar.
     func loadPlanLimits(force: Bool = true) async {
         let ecosystemLease = EcosystemPublisher.lease
         let owner = WorkSessionContext.shared.generation
@@ -575,8 +419,6 @@ final class HomeModel {
         }
         isLoadingLimits = true
         defer { if generation == limitsGeneration { isLoadingLimits = false } }
-        // Only desktop plan cards use the local archive breakdown. Phones
-        // have no archive and must not initiate that query for a hidden card.
         async let usage: Void = loadPlanUsage(generation: generation)
         do {
             try await PlanLimitsStore.shared.refresh(force: force)
@@ -586,7 +428,6 @@ final class HomeModel {
             lastLimitsLoadedAt = Date()
             planLimitsError = nil
         } catch is CancellationError {
-            // A sharing edit or account switch retired this shared read.
         } catch {
             guard current() else { return }
             planLimitsError = error.localizedDescription
@@ -594,7 +435,6 @@ final class HomeModel {
         await usage
     }
 
-    /// A hidden section cannot publish an older request or start its next read.
     func hidePlanLimits() {
         limitsGeneration &+= 1
         isLoadingLimits = false

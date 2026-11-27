@@ -2,20 +2,12 @@
 
 import SwiftUI
 
-/// Home at a glance: one bar per visible card, in order.
-///
-/// Small enough to sit above the list and still say what the arrangement will
-/// look like, which is the thing a list of names cannot show. Not a rendering
-/// of the real cards: a miniature that pretended to be the screen would be
-/// wrong the moment any of them had nothing to say.
 struct HomeLayoutPreview: View {
     let sections: [HomeSection]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // The greeting, which is not a card and cannot be moved. Drawn
-            // so the bars below read as a screen rather than a stack.
             Capsule()
                 .fill(Theme.accent.opacity(0.35))
                 .frame(width: 84, height: 8)

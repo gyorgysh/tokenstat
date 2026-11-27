@@ -4,20 +4,16 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>How the Repositories sidebar lists work. Same raw values as the Mac.</summary>
 internal enum SidebarProjectsDisplay { ByRepository, ByChat }
 
-/// <summary>Order inside the Repositories sidebar. Same raw values as the Mac.</summary>
 internal enum SidebarProjectsSort { Manual, Name, Recent }
 
-/// <summary>One chat drawn in the chat list, with the folder it belongs to.</summary>
 internal sealed record SidebarChatEntry(string FolderId, string FolderName, string MachineLabel, JsonNode Chat)
 {
     public string Id => SidebarProjectsLayout.Text(Chat, "id");
     public string Title => SidebarProjectsLayout.Text(Chat, "title");
     public bool Running => SidebarProjectsLayout.Flag(Chat, "running");
 
-    /// <summary>The last message, or the last update when a chat has no message yet.</summary>
     public long ActivityMs
     {
         get
@@ -30,7 +26,6 @@ internal sealed record SidebarChatEntry(string FolderId, string FolderName, stri
 
 internal enum SidebarChatDayKind { Working, Today, Yesterday, Day, Older }
 
-/// <summary>Which heading a chat sits under. <c>Date</c> is only set for <c>Day</c>.</summary>
 internal readonly record struct SidebarChatDay(SidebarChatDayKind Kind, DateTime Date)
 {
     public string Id => Kind switch
@@ -45,16 +40,9 @@ internal readonly record struct SidebarChatDay(SidebarChatDayKind Kind, DateTime
 
 internal sealed record SidebarChatDayGroup(SidebarChatDay Day, IReadOnlyList<SidebarChatEntry> Entries);
 
-/// <summary>
-/// Filter, sort and day rules for the Repositories sidebar, kept free of WinUI
-/// so they can be checked without a window. Mirrors the Mac
-/// <c>SidebarProjectsLayout</c>.
-/// </summary>
 internal static class SidebarProjectsLayout
 {
-    /// <summary>Chats drawn before Show more, and how many more each press adds.</summary>
     public const int ChatPageSize = 30;
-    /// <summary>Past this many days, chats share one Older heading instead of a day each.</summary>
     public const int OlderAfterDays = 7;
 
     public static string Raw(SidebarProjectsDisplay display) =>
@@ -77,7 +65,6 @@ internal static class SidebarProjectsLayout
         _ => SidebarProjectsSort.Manual,
     };
 
-    /// <summary>A folder survives the filter when its name, machine or any of its chats match.</summary>
     public static bool FolderMatches(string query, string folderName, string machineLabel, IEnumerable<JsonNode> chats)
     {
         var needle = query.Trim();
@@ -91,7 +78,6 @@ internal static class SidebarProjectsLayout
         return needle.Length == 0 || Contains(folderName, needle) || Contains(machineLabel, needle);
     }
 
-    /// <summary>Title, branch or agent.</summary>
     public static bool ChatMatches(string query, JsonNode chat)
     {
         var needle = query.Trim();
@@ -100,7 +86,6 @@ internal static class SidebarProjectsLayout
             || Contains(Text(chat, "backend"), needle);
     }
 
-    /// <summary>Folders in the chosen order. Recent uses each folder's newest chat.</summary>
     public static List<T> OrderFolders<T>(IEnumerable<T> folders, SidebarProjectsSort sort,
         Func<T, string> name, Func<T, long> activity) => sort switch
     {
@@ -109,10 +94,6 @@ internal static class SidebarProjectsLayout
         _ => folders.ToList(),
     };
 
-    /// <summary>
-    /// Every chat that survives the filter, running first, then newest first.
-    /// The chat list is a timeline, so the repository sort does not apply.
-    /// </summary>
     public static List<SidebarChatEntry> ChatEntries(IEnumerable<SidebarChatEntry> entries, string query)
     {
         var needle = query.Trim();
@@ -125,10 +106,6 @@ internal static class SidebarProjectsLayout
             .ToList();
     }
 
-    /// <summary>
-    /// Splits ordered entries into Working, Today, Yesterday, one heading per
-    /// day of the past week, and Older, keeping their order.
-    /// </summary>
     public static List<SidebarChatDayGroup> DayGroups(IReadOnlyList<SidebarChatEntry> entries, DateTime nowLocal)
     {
         var today = nowLocal.Date;

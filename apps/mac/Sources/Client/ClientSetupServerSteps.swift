@@ -8,11 +8,6 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Door two: a server, over the SSH session this phone opens itself.
-///
-/// One screen per step. Each of them can fail on its own, each failure has its
-/// own sentence, and the one place where a mistake is permanent (trusting a
-/// host key) is a screen rather than a row inside another one.
 struct ClientSetupServerStep: View {
     let step: SetupStep
     @Bindable var model: ClientSetupModel
@@ -44,23 +39,14 @@ struct ClientSetupServerStep: View {
     }
 }
 
-// MARK: - Shared shape
 
-/// Every step looks the same: what this is, the thing to do, and one button.
-///
-/// A container rather than six copies, so the wizard reads as one flow and a
-/// change to the rhythm happens once.
 struct StepScaffold<Content: View, Footer: View>: View {
     let title: String
     let subtitle: String
     var number: Int
     var total = 7
-    /// The step's own picture. Nil on the two steps that draw their own: the
-    /// install shows a terminal, and the last one shows the machine.
     var art: SetupArtKind?
     var error: String?
-    /// The typed form, when the screen has somewhere for its action to go.
-    /// `error` stays for the places that only print a sentence.
     var failure: ClientSetupFailure?
     var onDismissError: (() -> Void)?
     var onRecover: ((ClientSetupFailure.Action) -> Void)?
@@ -113,9 +99,6 @@ struct StepScaffold<Content: View, Footer: View>: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("setup.step.\(number)")
-        // A failure is the one state change worth interrupting for: somebody
-        // is waiting on a step that has stopped, and the next action is in the
-        // banner they cannot see.
         .onChange(of: failure?.explanation) { _, now in
             guard let now, now != announced else { return }
             announced = now
@@ -124,7 +107,6 @@ struct StepScaffold<Content: View, Footer: View>: View {
     }
 }
 
-/// Actions stay in the scroll layout, above the home indicator and keyboard.
 struct SetupActions<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -151,15 +133,6 @@ private struct SetupSecondaryButtonStyle: ButtonStyle {
     }
 }
 
-/// Where a recovery action goes.
-///
-/// One table for the whole wizard rather than a closure per screen: the answer
-/// to "the fingerprint changed" is the fingerprint screen wherever somebody was
-/// standing when it happened, and six copies of that would drift.
-///
-/// Actions that are not a place stay where they are. Retrying is the screen's
-/// own button, and updating a machine is something that happens on the machine,
-/// so both leave the failure on screen with its explanation.
 @MainActor
 func recover(
     _ action: ClientSetupFailure.Action,
@@ -167,16 +140,9 @@ func recover(
     path: Binding<[SetupStep]>
 ) {
     guard let destination = action.destination else { return }
-    // A changed key is re-established from scratch: it has to be looked at,
-    // not carried forward from a record that no longer fits the server.
     if action == .reviewFingerprint { model.resetServer() }
     model.failure = nil
-    // Already here. Rebuilding the stack onto the screen somebody is standing
-    // on would animate a journey to where they already are.
     guard path.wrappedValue.last != destination else { return }
-    // Every destination is reached through the address, so the stack is built
-    // rather than pushed onto: arriving at the credential screen with no way
-    // back to the address would be a dead end of its own.
     switch destination {
     case .where: path.wrappedValue = [.where]
     case .credential: path.wrappedValue = [.where, .credential]
@@ -186,14 +152,6 @@ func recover(
     }
 }
 
-/// What failed, what it changed, and the one thing to do next.
-///
-/// The three parts are the contract. "What changed" is the half people ask for
-/// first and the half an error message never has: knowing that a failed
-/// connection touched nothing is what makes it safe to try again.
-///
-/// The technical detail is there and closed. It is selectable, because the
-/// person who wants it wants to paste it somewhere.
 struct SetupFailureBanner: View {
     let failure: ClientSetupFailure
     var onDismiss: (() -> Void)?
@@ -232,10 +190,6 @@ struct SetupFailureBanner: View {
                 }
             }
             HStack(spacing: Theme.Space.s) {
-                // Only an action that leads somewhere gets a button. Signing
-                // in to the account and updating the machine both happen
-                // outside this wizard, and the explanation says so; retrying
-                // is the screen's own primary button, already on screen.
                 if let onRecover, failure.action.isActionable {
                     Button(failure.action.title, failure.action.icon) {
                         onRecover(failure.action)
@@ -269,12 +223,6 @@ struct SetupFailureBanner: View {
     }
 }
 
-/// One readable column, wherever the window happens to be.
-///
-/// An iPad in landscape gives this sheet a thousand points of width, and a
-/// paragraph that wide is measured in head movements rather than in words. The
-/// column stops growing and centres instead. On a phone the limit is never
-/// reached, so nothing there changes.
 extension View {
     func setupColumn() -> some View {
         frame(maxWidth: 620, alignment: .leading)
@@ -282,15 +230,6 @@ extension View {
     }
 }
 
-/// Where somebody is, in four words rather than eight numbers.
-///
-/// "Step 3 of 7" says how much is left and nothing about what any of it is
-/// for. The five connection screens are one thing happening, so they are one
-/// milestone, and the two that follow are the two real decisions: the
-/// machine, the project.
-///
-/// It is deliberately not a progress bar. Nothing here knows how long an
-/// install takes, and a bar that fills at a made-up rate is a claim.
 struct SetupRail: View {
     let number: Int
     let total: Int
@@ -363,7 +302,6 @@ struct SetupRail: View {
     }
 }
 
-/// A titled block of rows, the shape the rest of the client uses for a form.
 struct StepSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: () -> Content
@@ -381,7 +319,6 @@ struct StepSection<Content: View>: View {
     }
 }
 
-// MARK: - 1. Where
 
 private struct WhereStep: View {
     @Bindable var model: ClientSetupModel
@@ -471,15 +408,12 @@ private struct WhereStep: View {
             guard let picked, let host = library.hosts.first(where: { $0.id == picked }) else {
                 return
             }
-            // Carry the saved record's own credential over, so somebody who has
-            // connected to this server before does not choose a key twice.
             if let credential = host.credentialID { model.credential = .key(credential) }
             if model.machineName == "server" { model.machineName = host.label }
         }
     }
 }
 
-// MARK: - 2. How to sign in
 
 private struct CredentialStep: View {
     @Bindable var model: ClientSetupModel
@@ -563,7 +497,6 @@ private struct CredentialStep: View {
     }
 }
 
-// MARK: - 3. The host key
 
 private struct FingerprintStep: View {
     @Bindable var model: ClientSetupModel
@@ -642,7 +575,6 @@ private struct FingerprintStep: View {
     }
 }
 
-// MARK: - 4. What is on the machine
 
 private struct CheckStep: View {
     @Bindable var model: ClientSetupModel
@@ -671,9 +603,6 @@ private struct CheckStep: View {
                     }
                 }
                 if check.root == true {
-                    // A fact next to the operating system version, not a
-                    // warning triangle. It is the trade being made, and it is
-                    // the right one for a machine that exists to do this work.
                     StepSection(title: L10n.text("apple.clientsetupserversteps.who_agents_run_as.fc7c9918")) {
                         Text(L10n.text("apple.clientsetupserversteps.agents_on_this_machine_will_run_as_root.d624b53a"))
                             .font(ClientType.body)
@@ -742,7 +671,6 @@ private struct CheckStep: View {
     }
 }
 
-// MARK: - 5. Install
 
 private struct InstallStep: View {
     @Bindable var model: ClientSetupModel
@@ -752,9 +680,6 @@ private struct InstallStep: View {
     var body: some View {
         VStack(spacing: 0) {
             if let terminal = model.terminal {
-                // A real terminal, not a spinner. People trust an installer
-                // they can watch, and every support conversation about a
-                // failed install starts with this text.
                 HStack {
                     Text(L10n.text("apple.clientsetupserversteps.installing_on_0.db18c0f3", "\(model.machineName)"))
                         .font(ClientType.label)
@@ -853,7 +778,6 @@ private struct InstallStep: View {
     }
 }
 
-// MARK: - 6. Finish
 
 private struct FinishStep: View {
     @Bindable var model: ClientSetupModel
@@ -935,8 +859,6 @@ private struct FinishStep: View {
     }
 }
 
-/// A field with its own label above it, which is what the rest of the client
-/// uses instead of a placeholder that disappears the moment somebody types.
 private struct LabeledField: View {
     let title: String
     @Binding var text: String

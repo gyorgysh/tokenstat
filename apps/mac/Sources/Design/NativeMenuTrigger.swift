@@ -3,7 +3,6 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 
-/// One entry in a menu popped by `NativeMenuTrigger`.
 struct NativeMenuItem {
     enum Kind {
         case action
@@ -53,8 +52,6 @@ struct NativeMenuItem {
 /// of it as the control: the menu is the system's own, with its keyboard
 /// handling and its placement, and the row is untouched.
 struct NativeMenuTrigger: NSViewRepresentable {
-    /// Read at press time, not at build time, so item titles and enablement
-    /// describe the moment the menu opens.
     var items: () -> [NativeMenuItem]
     var accessibilityLabel: String? = nil
     var rightClickOnly = false
@@ -159,13 +156,8 @@ struct NativeMenuTrigger: NSViewRepresentable {
             return super.hitTest(point)
         }
 
-        /// Menus drop from the bottom of the row, which is where a pop-up
-        /// button puts them, and flipped coordinates make that `maxY`.
         override var isFlipped: Bool { true }
 
-        /// Open on the click that also brings the window forward. Without
-        /// this, pressing the row in a background window only activates it and
-        /// the press has to be repeated.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
         override func mouseDown(with event: NSEvent) {

@@ -6,10 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The face math must match `PersonaTraits.swift` exactly: the same persona is
-/// the same creature on every client, so a drift here is a different cast.
-/// Raw generator outputs below were computed independently from the xorshift
-/// sequence, not copied from this implementation.
 class PersonaTraitsTest {
     @Test
     fun seedZeroFallsBackToSettledLook() {

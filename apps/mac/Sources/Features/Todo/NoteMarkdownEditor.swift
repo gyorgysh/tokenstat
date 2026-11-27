@@ -80,7 +80,6 @@ private struct SelectedNoteEditor: View {
     }
 }
 
-/// A stable undo target whose bindings are detached when the note closes.
 @MainActor
 private final class NoteFormattingHistory {
     var read: (() -> String)?
@@ -163,8 +162,6 @@ private struct LegacyMacNoteSurface: NSViewRepresentable {
         guard let editor = scroll.documentView as? NSTextView else { return }
         target.editor = editor
         if editor.string != text {
-            // A different note or an external revision must not inherit undo
-            // operations that could restore the previous note's contents.
             editor.undoManager?.removeAllActions()
             editor.string = text
             editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))

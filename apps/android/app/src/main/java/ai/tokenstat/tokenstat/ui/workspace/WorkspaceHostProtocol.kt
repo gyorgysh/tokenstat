@@ -19,7 +19,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 
-/** Account machine records lack capabilities. Read them from the connected computer. */
 @Composable
 internal fun rememberWorkspaceHostProtocol(
     model: AppViewModel,
@@ -30,7 +29,6 @@ internal fun rememberWorkspaceHostProtocol(
     val client by model.state.collectAsStateWithLifecycle()
     val owner = HomeStores.pinIdentity(client.account)
     var protocol by remember(model, owner, peer) { mutableStateOf<Long?>(null) }
-    // Recheck on resume and navigation, including after the computer updates.
     ForegroundEffect(model, owner, peer, workspace, section) {
         if (owner.isNotEmpty() && peer.isNotBlank()) {
             probeWorkspaceHostProtocol(
@@ -42,7 +40,6 @@ internal fun rememberWorkspaceHostProtocol(
     return protocol
 }
 
-/** A failed tunnel read must not hide newer controls for the rest of the visit. */
 internal suspend fun probeWorkspaceHostProtocol(
     read: suspend () -> JsonElement?,
     onRead: (Long) -> Unit,
@@ -57,7 +54,6 @@ internal suspend fun probeWorkspaceHostProtocol(
         } catch (_: Exception) {
             null
         }
-        // A native read can finish after navigation has cancelled its coroutine.
         currentCoroutineContext().ensureActive()
         val protocol = HostContracts.protocolOf(response as? JsonObject)
         if (protocol != null) {

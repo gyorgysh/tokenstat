@@ -8,13 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
-/// The workspaces session: which host is dialled, what it loaded, and the
-/// last stable failure. Held on the model, next to the SSH sessions, so
-/// navigating between tabs does not dial again: the tunnel underneath never
-/// dropped, and a full connecting dance on every return is pure UI churn.
-///
-/// Only the session lives here. Screens keep their own UI state (search,
-/// selection, sheets), which is correctly ephemeral.
 class WorkspacesConnectionState {
     private var accountOwner: String? = null
     private var knownHosts: Set<String>? = null
@@ -51,9 +44,6 @@ class WorkspacesConnectionState {
         val loadedAtMs: Long,
     )
 
-    // Keep loaded work under its peer key when navigation focuses another
-    // machine. Raw workspace ids can overlap between hosts, so callers must
-    // always select a peer before using one of these lists.
     private val hostSnapshots = mutableMapOf<String, HostSnapshot>()
     private val mutableConnectedHosts = MutableStateFlow<Set<String>>(emptySet())
     val connectedHosts: StateFlow<Set<String>> = mutableConnectedHosts.asStateFlow()
@@ -110,8 +100,6 @@ class WorkspacesConnectionState {
                           nowMs: Long = System.currentTimeMillis()): Boolean {
         if (accountOwner != owner || (knownHosts != null && peer !in knownHosts.orEmpty()) ||
             backgroundTickets[peer] != ticket) return false
-        // A foreground dial owns the visible lists. Background results never
-        // overwrite that selected host, even when the two requests overlap.
         if (mutableConnectedPeer.value == peer || mutableConnectingPeer.value == peer) return false
         hostSnapshots[peer] = HostSnapshot(folders, sessions, filteredChats(chats), nowMs)
         mutableConnectedHosts.value = hostSnapshots.keys.toSet()
@@ -133,8 +121,6 @@ class WorkspacesConnectionState {
     val connectingPeer: StateFlow<String?> = mutableConnectingPeer.asStateFlow()
     private var connectionTicket = 0L
 
-    /// Home and Workspaces share the same dial. An explicit host choice can
-    /// replace a background warmup; the old result then loses its ticket.
     fun beginConnecting(peer: String, explicit: Boolean = false): Long? {
         if (mutableConnectingPeer.value != null && !explicit) return null
         invalidateBackground(peer)
@@ -151,9 +137,6 @@ class WorkspacesConnectionState {
 
     private fun cancelConnecting(peer: String) {
         if (mutableConnectingPeer.value != peer) return
-        // The caller checks this ticket after every remote step. Revoking a
-        // host while its access check is in flight must invalidate the answer
-        // before it can publish folders for a machine no longer on the account.
         connectionTicket++
         mutableConnectingPeer.value = null
         if (mutableConnectedPeer.value == null) {
@@ -187,9 +170,6 @@ class WorkspacesConnectionState {
     private val mutableChats = MutableStateFlow(JsonArray(emptyList()))
     val chats: StateFlow<JsonArray> = mutableChats.asStateFlow()
 
-    /// The last failure worth reading. Automatic retries fail silently into
-    /// the log until they settle; only a stable failure lands here, so it
-    /// never flashes past on the way to a connection.
     private val mutableError = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = mutableError.asStateFlow()
 
@@ -202,8 +182,6 @@ class WorkspacesConnectionState {
 
     fun activateConnectedHost(machine: JsonObject): Boolean {
         val peer = machine.str("publicIdentity") ?: return false
-        // Keep a failed background refresh visible as a host, but never
-        // present its old work as a live connection during a later handoff.
         if (peer in mutableStaleHosts.value) return false
         val snapshot = hostSnapshots[peer] ?: return false
         invalidateBackground(peer)
@@ -247,7 +225,6 @@ class WorkspacesConnectionState {
     fun setLists(folders: JsonArray, sessions: JsonArray, chats: JsonArray) {
         mutableFolders.value = folders
         mutableSessions.value = sessions
-        // Recent chats leave out the ones opened and never used.
         mutableChats.value = filteredChats(chats)
         saveSelectedSnapshot()
     }
@@ -288,8 +265,6 @@ class WorkspacesConnectionState {
         mutableRequestNotice.value = notice
     }
 
-    /// What Disconnect does on every client: forget the session. The tunnel
-    /// underneath is the host's to reap, exactly like iOS.
     fun disconnect() {
         mutableConnectedPeer.value?.let {
             hostSnapshots.remove(it)

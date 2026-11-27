@@ -119,7 +119,6 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
     }
 }
 
-/** A fixed-width preview uses clock times, so second-by-second age labels cannot move it. */
 @Composable private fun ChatQuotaPreview(reading: JsonObject) {
     val colors = LocalTsColors.current
     val source = reading.str("source").orEmpty()
@@ -157,8 +156,6 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
         val clockTime = remember(observed, locale) { DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(observed)) }
         L10n.text("common.chat.usage.updated_at", clockTime)
     } else L10n.text("android.tokenstatapp.no_date.89be6303")
-    // Keep freshness in one reserved line. Adding a separate stale row made
-    // the popup grow upward every time a refreshed reading changed its lease.
     val stale = reading.bol("stale")
     Text(if (stale) L10n.text("common.chat.usage.stale") + " · " + updated else updated,
         style = MaterialTheme.typography.labelSmall, color = if (stale) colors.warning else colors.textSecondary,
@@ -237,7 +234,6 @@ internal data class ChatQuotaState(val reading: JsonObject?, val refreshing: Boo
     }
 }
 
-/** The windows an agent row shows: 5h and 7d, Codex's general ones first. */
 internal fun chatQuotaHeadline(reading: JsonObject): List<Pair<String, JsonObject>> {
     val windows = (reading["windows"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
     val general = if (harnessCanonicalID(reading.str("source").orEmpty()) == "codex")
@@ -248,7 +244,6 @@ internal fun chatQuotaHeadline(reading: JsonObject): List<Pair<String, JsonObjec
     }
 }
 
-/** "5h 87% · 7d 60%" beside an agent in the picker, each figure in its own severity. */
 @Composable internal fun ChatQuotaLine(reading: JsonObject?) {
     val rows = reading?.let(::chatQuotaHeadline).orEmpty().ifEmpty { return }
     val colors = LocalTsColors.current

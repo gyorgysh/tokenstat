@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A suggested setup on the Automations screen, pre-filling the sheet.
 struct AutomationTemplate: Identifiable, Hashable, Sendable {
     var id: String { title }
     var title: String

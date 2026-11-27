@@ -79,7 +79,6 @@ struct Row {
     kind: Option<String>,
     id: Option<String>,
     timestamp: Option<String>,
-    /// Only on the session header.
     cwd: Option<String>,
     message: Option<Message>,
     model: Option<String>,
@@ -140,9 +139,6 @@ fn parse_file_for(
         if line.is_empty() {
             continue;
         }
-        // The header is worth parsing for its `cwd`; everything else is worth
-        // parsing only if it could carry counters. Most lines in a session are
-        // user turns and tool results.
         let interesting = line.contains("\"usage\"") || line.contains("\"cwd\"");
         if !interesting {
             continue;
@@ -171,8 +167,6 @@ fn parse_file_for(
             } else {
                 let Some(message) = row.message else { continue };
                 if source == SourceId::Omp {
-                    // Task results can contain aggregate subagent usage, which is
-                    // already counted from the subagent transcript itself.
                     if message.role.as_deref() != Some("assistant") {
                         continue;
                     }
@@ -183,8 +177,6 @@ fn parse_file_for(
             };
         let Some(usage) = usage else { continue };
 
-        // A missing bucket is unknown, not zero: writing it down as a zero
-        // would defeat `has_unknown` and present a partial sum as complete.
         let input = usage.input;
         let output = usage.output;
         if input.unwrap_or(0) == 0
@@ -202,10 +194,6 @@ fn parse_file_for(
             .and_then(parse_iso8601_ms)
             .map(Timestamp::from_ms)
             .unwrap_or(Timestamp::from_ms(0));
-        // The line's own id. Pi writes a uuid per event, so a re-read of the
-        // same turn lands on the same row rather than adding a second one.
-        // Without one, the file offset would be the only identity, and a file
-        // rewritten from the start would count every turn again.
         let id = match row.id.as_deref() {
             Some(id) if !id.is_empty() && source == SourceId::Omp => {
                 // OMP uses eight-hex IDs unique within one session only.
@@ -254,9 +242,6 @@ fn parse_file_for(
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
-            // Pi prices the turn itself. A zero on a turn that spent tokens is
-            // a model the plan covers, which is the same reading the OpenCode
-            // shard makes of the same shape.
             billing: match usage.cost.and_then(|c| c.total) {
                 Some(0.0) => BillingMode::Plan,
                 Some(_) => BillingMode::Metered,
@@ -274,7 +259,6 @@ fn parse_iso8601_ms(s: &str) -> Option<i64> {
         .map(|t| t.as_millisecond())
 }
 
-/// The session id, which is the part of the filename after the timestamp.
 fn session_id(path: &Path) -> String {
     let stem = path
         .file_stem()
@@ -285,9 +269,6 @@ fn session_id(path: &Path) -> String {
         .unwrap_or_else(|| stem.to_string())
 }
 
-/// Project from the encoded folder name, for a file whose header we did not
-/// read. `--Users-x-git-demo--` is the folder `/Users/x/git/demo`, so the last
-/// dash-separated part is the best guess at its name.
 fn folder_label(path: &Path, sessions_root: &Path) -> String {
     let dir = path
         .strip_prefix(sessions_root)
@@ -408,8 +389,6 @@ mod tests {
 
     #[test]
     fn the_folder_name_stands_in_when_the_header_was_not_read() {
-        // A resumed read starts after the header line, which is the case this
-        // fallback exists for.
         let text = r#"{"type":"message","id":"m5","timestamp":"2026-08-19T21:50:01.000Z","message":{"role":"assistant","model":"m","usage":{"input":5,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":6,"cost":{"total":0.1}}}}"#;
         let out = parse_file(&path(), Path::new(ROOT), text);
         assert_eq!(out.events[0].project, "demo");

@@ -65,8 +65,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the authoring-wave pure logic to the same answers the Apple
-/// client's Swift originals produce.
 class AuthoringLogicTest {
 
     @Test
@@ -249,23 +247,18 @@ class AuthoringLogicTest {
             submission.first, submission.second,
         )
         assertTrue(accepted is RunAcceptance.Accepted)
-        // A different operation id never confirms: the original run stays
-        // the authoritative result.
         assertTrue(
             acceptTaskRun(
                 TaskRunOutcome(operationID = "op-2", cardID = "c1", runID = "r2", hasRun = true),
                 submission.first, submission.second,
             ) is RunAcceptance.Rejected,
         )
-        // Accepted but not recorded yet: check again, do not resend.
         assertTrue(
             acceptTaskRun(
                 TaskRunOutcome(operationID = "op-1", cardID = "c1", card = card()),
                 submission.first, submission.second,
             ) is RunAcceptance.Pending,
         )
-        // No card and no run: the task was deleted before the request
-        // could start, and no run was launched.
         assertTrue(
             acceptTaskRun(
                 TaskRunOutcome(operationID = "op-1", cardID = "c1"),
@@ -328,7 +321,6 @@ class AuthoringLogicTest {
             "Pick at least one day for a custom schedule.",
             ScheduleFields(scheduleKind = ScheduleKind.CUSTOM, customDays = 0).validation,
         )
-        // Loading an empty custom schedule starts on Mon-Fri, like Apple.
         assertNull(ScheduleFields.load(AutomationSchedule(ScheduleKind.CUSTOM, weekdays = 0)).validation)
     }
 
@@ -399,9 +391,6 @@ class AuthoringLogicTest {
         assertEquals("America/New_York", HostScheduleClock.resolved("America/New_York"))
         assertEquals("New York", HostScheduleClock.place("America/New_York"))
         assertEquals("UTC", HostScheduleClock.place("UTC"))
-        // 2026-09-14 12:00 UTC is 08:00 in New York (EDT). The day
-        // carries the year once this test runs in another year, so the
-        // assertions read around it.
         val noon = 1_789_387_200_000L
         val wall = HostScheduleClock.wallClock(noon, "America/New_York")
         assertTrue(wall != null && wall.contains("14 Sep") && wall.endsWith("8:00"))

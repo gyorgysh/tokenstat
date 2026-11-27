@@ -14,54 +14,27 @@ import android.view.inputmethod.InputConnection
 import kotlin.math.abs
 import kotlin.math.hypot
 
-/// What a finger on the picture can do. A value rather than a pile of
-/// callbacks on the view, so the composable keeps the state and the view
-/// keeps the gestures. Port of Apple `ScreenInputActions`.
 class ScreenInputActions(
-    /// Put the pointer at this normalized point.
     val move: (Float, Float) -> Unit,
-    /// Move the pointer by a distance measured on this surface. Trackpad
-    /// mode: the finger is not where the pointer is.
     val nudge: (Float, Float, Float, Float) -> Unit,
-    /// Press and release, with a button and a click count in one message.
     val click: (Int, Int) -> Unit,
-    /// Hold or release the left button, for a drag that outlives one gesture.
     val press: (Boolean) -> Unit,
-    /// Wheel movement in density-independent pixels.
     val scroll: (Float, Float) -> Unit,
-    /// Move a locally zoomed picture without sending anything to the host.
     val panView: (Float, Float, Float, Float) -> Unit,
-    /// Typed characters, with modifier flags already folded in.
     val text: (String, Long) -> Unit,
-    /// A key that has no character: escape, tab, the arrows.
     val key: (Int, Boolean, Long) -> Unit,
-    /// Pinch. The surface reports the factor, the composable decides.
     val magnify: (Float, Float, Float) -> Unit,
-    /// A modifier was spent by a keystroke, so the key row can unlight it.
     val modifiersSpent: () -> Unit,
-    /// A tap while merely watching, which means nothing on the far end and is
-    /// how the chrome comes back over a full-screen picture.
     val tapWhileWatching: () -> Unit,
 )
 
-/// Mouse and keyboard over the shared screen.
-///
-/// A plain `View` rather than Compose pointer input because a remote desktop
-/// needs what Compose does not offer in one place: a two-finger tap that is a
-/// right click, a long press that holds the button down across a later drag,
-/// a pinch that zooms the picture rather than the layout, and an input
-/// connection so the soft keyboard has somewhere to type.
 @SuppressLint("ViewConstructor")
 class ScreenTouchView(context: Context) : View(context) {
     var actions: ScreenInputActions? = null
-    /// Whether touches reach the far end. Not called `enabled`: that name
-    /// belongs to the platform's own view flag, and taking it would turn the
-    /// view off rather than hand control back.
     var inputEnabled: Boolean = false
     var mode: ScreenPointerMode = ScreenPointerMode.Trackpad
     var zoomed: Boolean = false
 
-    /// Modifiers the key row is holding, folded into whatever is typed next.
     var modifiers: Long = 0
 
     private val density = context.resources.displayMetrics.density
@@ -103,8 +76,6 @@ class ScreenTouchView(context: Context) : View(context) {
             return true
         }
 
-        /// Long press, then move: the button stays down until the finger
-        /// leaves. This is how a window gets dragged or a file gets selected.
         override fun onLongPress(event: MotionEvent) {
             if (!inputEnabled || twoFingers) return
             positionForTap(event.x, event.y)
@@ -128,9 +99,6 @@ class ScreenTouchView(context: Context) : View(context) {
     init {
         isFocusableInTouchMode = true
         isClickable = true
-        // Pinch is local viewing, not remote control, so the surface stays in
-        // the gesture chain in view mode and every input-sending path checks
-        // `inputEnabled` itself.
         setWillNotDraw(true)
     }
 
@@ -167,8 +135,6 @@ class ScreenTouchView(context: Context) : View(context) {
                 twoFingerDownAt = event.eventTime
                 twoFingerTravel = 0f
                 pinched = false
-                // The tap detector must see cancellation; otherwise its
-                // first-finger long-press timer survives the pinch.
                 val cancel = MotionEvent.obtain(event)
                 cancel.action = MotionEvent.ACTION_CANCEL
                 taps.onTouchEvent(cancel)
@@ -179,9 +145,6 @@ class ScreenTouchView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> if (twoFingers) twoFingerMove(event) else oneFingerMove(event)
             MotionEvent.ACTION_POINTER_UP -> if (twoFingers && event.pointerCount == 2) {
-                // A two-finger tap is a right click, the way it is on a
-                // trackpad. Anything that travelled or lingered was a scroll
-                // or a pinch and has already done its job.
                 val quick = event.eventTime - twoFingerDownAt < TWO_FINGER_TAP_MS
                 if (inputEnabled && quick && !pinched && twoFingerTravel < slop) {
                     positionForTap(focusX(event), focusY(event))
@@ -222,14 +185,8 @@ class ScreenTouchView(context: Context) : View(context) {
         lastFocusX = x
         lastFocusY = y
         twoFingerTravel += hypot(dx, dy)
-        // A pinch is a zoom of the picture on this device, not a scroll of
-        // the document on the far end. The focus still tracks above, so tap
-        // detection keeps working through it.
         if (pinches.isInProgress) return
         if (!inputEnabled) return
-        // Density-independent, so a finger's travel means the same distance
-        // of scrolled content here as it does on a phone with a denser
-        // display, and the same as it does on the Apple client.
         actions?.scroll(dx / density, dy / density)
     }
 
@@ -244,8 +201,6 @@ class ScreenTouchView(context: Context) : View(context) {
         panning = true
         val handlers = actions ?: return
         if (!inputEnabled) {
-            // Merely watching a magnified picture. The finger moves what is
-            // on this device and nothing on the far end.
             if (zoomed) handlers.panView(dx, dy, width.toFloat(), height.toFloat())
             return
         }
@@ -270,8 +225,6 @@ class ScreenTouchView(context: Context) : View(context) {
             EditorInfo.IME_FLAG_NO_FULLSCREEN or
             EditorInfo.IME_FLAG_NO_EXTRACT_UI or
             EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-        // No editor behind this, so nothing is composed and nothing is
-        // predicted. Every keystroke goes straight down the wire.
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 typed(text?.toString() ?: return false)
@@ -309,8 +262,6 @@ class ScreenTouchView(context: Context) : View(context) {
             tap(ScreenKey.RETURN)
             return
         }
-        // A character typed with command or control has to reach the host as a
-        // key code, because the host synthesises a key event and not text.
         if (held and (ScreenFlag.COMMAND or ScreenFlag.CONTROL) != 0L && text.length == 1) {
             val code = ScreenKey.code(text[0])
             if (code != null) {
@@ -338,9 +289,7 @@ class ScreenTouchView(context: Context) : View(context) {
         return false
     }
 
-    /// One key, down then up, spending whatever the key row was holding.
-    /// Gated like every other input-sending path: the IME connection can
-    /// outlive control being handed back.
+    /// The IME connection can outlive control being handed back.
     fun tap(code: Int, flags: Long = modifiers) {
         if (!inputEnabled) return
         val handlers = actions ?: return
@@ -375,8 +324,6 @@ class ScreenTouchView(context: Context) : View(context) {
     }
 }
 
-/// Android maps Ctrl+letter to a control character, which cannot be used
-/// as the remote key. Preserve the physical shortcut and modifier flags.
 internal fun screenShortcutCode(androidCode: Int, flags: Long): Int? {
     if (flags and (ScreenFlag.COMMAND or ScreenFlag.CONTROL) == 0L) return null
     val character = when (androidCode) {

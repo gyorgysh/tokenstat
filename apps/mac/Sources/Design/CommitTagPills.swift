@@ -6,11 +6,6 @@
 
 import SwiftUI
 
-/// The tags pointing at a commit, as small pills under its subject.
-///
-/// Usually zero or one: a release tag marks the commit it went out on, which
-/// is what makes a history list answer "where was 0.9.2". Empty draws nothing,
-/// so untagged rows read exactly as before.
 struct CommitTagPills: View {
     let tags: [String]
 

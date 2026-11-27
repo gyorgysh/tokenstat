@@ -14,7 +14,6 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Private material is encrypted with a non-exportable Android Keystore key. */
 object SshSecrets {
     private const val TAG = "SshSecrets"
     private const val LEGACY = "ai.tokenstat.ssh.secrets"
@@ -64,7 +63,6 @@ object SshSecrets {
         return String(cipher.doFinal(Base64.decode(parts[2], Base64.NO_WRAP)), Charsets.UTF_8)
     }
 
-    /** Commit and verify encrypted copies before removing any legacy plaintext. */
     @Synchronized
     fun migrate(context: Context) {
         val old = context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE)
@@ -74,14 +72,11 @@ object SshSecrets {
         val edit = secure.edit()
         val migrated = mutableSetOf<String>()
         for ((ref, value) in raw) {
-            // One bad legacy entry must not poison the whole store: skip it
-            // so the remaining keys still migrate and stay usable.
             if (value !is String) {
                 Log.w(TAG, "skipping non-string legacy entry $ref")
                 continue
             }
             try {
-                // The legacy entry is authoritative until its deletion commits.
                 val encrypted = seal(ref, value)
                 check(open(ref, encrypted) == value) { L10n.text("android.sshsecrets.could_not_verify_encrypted_ssh_key.32cd1ad2") }
                 edit.putString(ref, encrypted)
@@ -92,8 +87,6 @@ object SshSecrets {
         }
         if (migrated.isEmpty()) return
         check(edit.commit()) { L10n.text("android.sshsecrets.could_not_save_encrypted_ssh_keys.e813fbe7") }
-        // Only remove the entries that migrated; quarantine the rest for a
-        // later retry instead of dropping or blocking on them.
         val cleanup = old.edit()
         for (ref in migrated) cleanup.remove(ref)
         check(cleanup.commit()) { L10n.text("android.sshsecrets.could_not_remove_legacy_ssh_keys.0989da38") }
@@ -104,18 +97,12 @@ object SshSecrets {
         try {
             migrate(context)
         } catch (e: Exception) {
-            // Best-effort: a locked Keystore or corrupt legacy entry must not
-            // block saving a fresh key. Migration retries on the next call.
             Log.w(TAG, "migration failed on put, continuing to v2 store", e)
         }
         val sealed = seal(ref, pem)
-        // Round-trip before committing so an unreadable value never replaces
-        // a good one.
         check(open(ref, sealed) == pem) { L10n.text("android.sshsecrets.could_not_verify_ssh_key.efc089b9") }
         check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
             .putString(ref, sealed).commit()) { L10n.text("android.sshsecrets.could_not_save_ssh_key.80038ca7") }
-        // A legacy copy left by an earlier failed migration must not overwrite
-        // this replacement on the next get(). Only delete after the new save.
         check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
             .remove(ref).commit()) { L10n.text("android.sshsecrets.could_not_retire_legacy_ssh_key.ca966ae0") }
     }
@@ -125,22 +112,15 @@ object SshSecrets {
         try {
             migrate(context)
         } catch (e: Exception) {
-            // Fall through to the v2 store: an already-migrated key stays
-            // readable even when migration itself is unavailable.
             Log.w(TAG, "migration failed on get, reading v2 store", e)
         }
         val encoded = context.getSharedPreferences(STORE, Context.MODE_PRIVATE)
             .getString(ref, null) ?: return null
-        // Tamper/corruption is a missing key, not a crash: callers expect
-        // nullable-get semantics.
         return openOrNull(ref, encoded)
     }
 
-    // Forgets one sealed secret. Removing a vault tombstone's row also
-    // removes its private half; anything else keeps working.
     @Synchronized
     fun delete(context: Context, ref: String) {
-        // Remove the legacy copy too, or the next migration resurrects the key.
         check(context.getSharedPreferences(LEGACY, Context.MODE_PRIVATE).edit()
             .remove(ref).commit()) { L10n.text("android.sshsecrets.could_not_remove_legacy_ssh_key.feed516e") }
         check(context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()

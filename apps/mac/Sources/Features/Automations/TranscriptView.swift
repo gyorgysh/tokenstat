@@ -6,9 +6,6 @@
 
 import SwiftUI
 
-/// A run transcript as a timeline: tool rows, then prose, then a short edit
-/// preview. The host already flattened NDJSON into paragraphs. This view
-/// only splits that text.
 struct TranscriptView: View {
     var text: String
     var empty: String
@@ -38,7 +35,6 @@ struct TranscriptView: View {
         case tool(verb: String, arg: String, snippet: [String], time: String?)
     }
 
-    /// Verbs the host writes as the first token of a tool paragraph.
     private static let verbs: Set<String> = [
         "Read", "Write", "Edit", "Shell", "Grep", "Glob", "Find", "Search",
         "Bash", "Task", "Subagent", "NotebookEdit", "WebFetch", "WebSearch",
@@ -87,12 +83,10 @@ struct TranscriptView: View {
         let verb = String(first)
         guard verbs.contains(verb) else { return nil }
         let arg = parts.count > 1 ? String(parts[1]) : ""
-        // A sentence that happens to start with "Read" stays prose.
         if arg.contains(". ") || arg.contains("? ") { return nil }
         return (time, verb, arg)
     }
 
-    /// `17:29:15 Bash ls` from the host. Optional. Prose never starts this way.
     private static func clockPrefix(_ line: String) -> (time: String, rest: String)? {
         let chars = Array(line)
         guard chars.count >= 8 else { return nil }

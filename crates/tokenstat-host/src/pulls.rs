@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! Pull-request connection methods for registered workspaces.
-//!
-//! The authorization secret stays in this process while the UI shows only the
-//! short device code. A paired client may inspect a workspace's availability,
-//! but it cannot start, poll, replace, or remove credentials on this machine.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,7 +36,6 @@ struct Params {
     verdict: Option<tokenstat_sync::forge::Verdict>,
     merge_method: Option<tokenstat_sync::forge::MergeMethod>,
     refresh: bool,
-    /// A commit id: where `pulls.commitAvatars` starts reading history.
     oid: String,
 }
 
@@ -93,8 +88,6 @@ fn open_count_from(
         .map(|(_, entry)| entry.page.rows.len())
 }
 
-/// What the forge last said about one branch. `None` is an answer too: the
-/// branch has no pull request.
 #[derive(Clone)]
 struct BranchEntry {
     epoch: u64,
@@ -110,9 +103,6 @@ struct BranchKey {
 }
 
 const BRANCH_TTL: Duration = Duration::from_secs(60);
-/// How long a chat list keeps showing what was last learned. Chat lists
-/// never ask the forge themselves, so this is all they have, and a badge a
-/// few minutes old beats none.
 const BRANCH_SHOWN: Duration = Duration::from_secs(15 * 60);
 
 fn branch_cache() -> &'static Mutex<HashMap<BranchKey, BranchEntry>> {
@@ -131,8 +121,7 @@ fn cached_for_repository(key: &BranchKey) -> Option<BranchEntry> {
     let mut cache = branch_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    // A failed query against a new remote must not leave the old remote's
-    // badge in chat lists. Learning the repository is enough to retire it.
+
     cache.retain(|cached, entry| {
         entry.at.elapsed() < BRANCH_SHOWN
             && (cached.workspace_id != key.workspace_id
@@ -227,12 +216,6 @@ fn cached<K: Eq + std::hash::Hash, V: Clone>(
         .map(|entry| entry.value.clone())
 }
 
-/// Put an answer in one of the read caches, dropping what has gone stale.
-///
-/// The pruning is the point. Reading is filtered by age, so an entry nobody
-/// asks for again is never looked at and was never removed: a daemon that
-/// runs for weeks kept every parsed diff it had ever shown, which for a
-/// repository with large diffs is memory nothing can reclaim.
 fn remember<K: Eq + std::hash::Hash, V>(
     cache: &Mutex<HashMap<K, DetailEntry<V>>>,
     key: K,
@@ -349,9 +332,6 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 }
 
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
-    // A poll stores the credential before returning. Serialize cancellation,
-    // replacement and sign-out through that acceptance so a late poll cannot
-    // restore a connection after sign-out has finished.
     static AUTH_OPERATION: Mutex<()> = Mutex::new(());
     let _auth = matches!(
         method,
@@ -486,10 +466,6 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
-/// The pull request for one branch of a workspace: the named one, or the
-/// branch the folder is on. A workspace that is not connected to its forge
-/// answers with no pull request rather than an error, because the chips that
-/// ask are decoration and must not turn into warnings.
 fn branch(p: &Params) -> Result<Value, String> {
     let epoch = cache_epoch();
     if p.workspace_id.trim().is_empty() {
@@ -540,8 +516,7 @@ fn prepare_create(p: &Params) -> Result<Value, String> {
     let workspace = crate::workspaces::folder(&p.workspace_id)?;
     let base = tokenstat_sync::forge::default_branch(&repo).map_err(|e| e.to_string())?;
     let status = tokenstat_workspace::git::status(&workspace.path);
-    // A Git credential problem is actionable at the push step, and must not
-    // hide the pending files or prevent creating a feature branch.
+
     let (branch, problem) = match tokenstat_workspace::git::pull_branch(&workspace.path) {
         Ok(branch) => (
             serde_json::to_value(branch).map_err(|e| e.to_string())?,
@@ -578,9 +553,7 @@ fn create(p: &Params) -> Result<Value, String> {
         tokenstat_sync::forge::create(&repo, &p.branch, &p.base, &p.title, &p.body, p.draft)
             .map_err(|e| e.to_string())?;
     invalidate_workspace(&p.workspace_id);
-    // The chat that asked for it can show its badge straight away. A pull
-    // request that already existed is left for the next look, since its
-    // title and draft state are its own, not this request's.
+
     if !result.existing {
         remember_branch(
             &p.workspace_id,
@@ -736,9 +709,6 @@ fn diff(p: &Params) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
-/// How long a history screen's author pictures are reused. Long enough that
-/// paging through history and switching tabs never asks again, which matters
-/// without a sign-in: the forge allows 60 anonymous requests an hour.
 const AVATAR_TTL: Duration = Duration::from_secs(10 * 60);
 
 type AvatarKey = (tokenstat_sync::forge::Repo, String, u64);
@@ -748,9 +718,6 @@ fn avatar_cache() -> &'static Mutex<HashMap<AvatarKey, (Instant, Value)>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Public profile pictures for the authors of this workspace's commits, so a
-/// history row shows who wrote it whoever that is, not only this machine's
-/// own git identity.
 fn commit_avatars(p: &Params) -> Result<Value, String> {
     let epoch = cache_epoch();
     let repo = repo_for(&p.workspace_id, "pulls.commitAvatars")?;
@@ -772,7 +739,7 @@ fn commit_avatars(p: &Params) -> Result<Value, String> {
     let mut cache = avatar_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    // Bounded: one entry per screen of history, a handful of folders.
+
     if cache.len() >= 64 {
         cache.clear();
     }
@@ -873,7 +840,7 @@ fn remember_list(
     started: Instant,
 ) {
     cache.retain(|_, entry| entry.at.elapsed() < Duration::from_secs(60));
-    // A slow older refresh must not replace a newer response or reset its age.
+
     if cache
         .get(&key)
         .is_some_and(|entry| entry.epoch == epoch && entry.at >= started)

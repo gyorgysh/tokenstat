@@ -3,7 +3,6 @@
 import CryptoKit
 import Foundation
 
-/// Small, atomic, account-scoped checkpoints. This store never receives secrets.
 struct ClientSetupStore {
     private static let maximumBytes = 32_768
     var directory: URL

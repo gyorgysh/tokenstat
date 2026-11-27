@@ -59,8 +59,6 @@ internal sealed partial class TeamsPage
             pullRequest.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         }
         mode.SelectionChanged += (_, _) => Describe(); updateCheckout.Checked += (_, _) => Describe(); updateCheckout.Unchecked += (_, _) => Describe(); check.TextChanged += (_, _) => acknowledge.IsChecked = false; Describe();
-        // This editor shares the settings page's navigation but does not redraw
-        // it until all fields have been assembled from the successful read.
         TeamEditor(L10n.Text("common.teams.workflow"), fields, L10n.Text("common.save"), () => target.Text.Trim().Length > 0
             && (!supportsUpdates || mode.SelectedIndex == 2 || updateCheckout.IsChecked != true || remote.Text.Trim().Length > 0)
             && (mode.SelectedIndex == 0 || check.Text.Trim().Length == 0 || acknowledge.IsChecked == true), async () => {
@@ -99,9 +97,6 @@ internal sealed partial class TeamsPage
             }));
         }
     }
-    /// Whether teammates' Asks may start the agent on this computer, for this
-    /// project. A new share starts with it off. Who is eligible stays with the
-    /// team's agent access controls below.
     private async Task AddAgentAccessAsync(TeamPublisherModel model, string checkout, int view)
     {
         JsonNode state;

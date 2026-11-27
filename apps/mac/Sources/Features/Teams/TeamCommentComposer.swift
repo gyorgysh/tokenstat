@@ -4,8 +4,6 @@ import SwiftUI
 struct TeamCommentComposer: View {
     @State private var model: TeamCommentModel
     let allowsComments: Bool
-    /// False while the composer shows the agent instead. The model stays
-    /// alive so a draft and a delivery check survive the switch.
     let visible: Bool
     let didPost: () -> Void
     let presentationChanged: (Bool, Bool) -> Void
@@ -64,8 +62,6 @@ struct TeamCommentComposer: View {
     private var audience: some View {
         Text(L10n.text("common.teams.comment_audience")).font(Theme.caption).foregroundStyle(.secondary).lineLimit(2)
     }
-    /// Who reads it on the leading side, the buttons on the trailing side,
-    /// the way the main composer's utility row is laid out.
     @ViewBuilder
     private var actions: some View {
         if textSize.isAccessibilitySize {

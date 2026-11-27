@@ -7,7 +7,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>One file list and one diff, with a compact picker for narrow panes.</summary>
 internal sealed class WorkspaceReviewBrowser : Grid
 {
     private readonly ScrollViewer _detail;
@@ -99,7 +98,6 @@ internal sealed class WorkspaceReviewBrowser : Grid
         Layout(0);
     }
 
-    /// <summary>Between 160 and 420 pixels, and never more than half the pane.</summary>
     internal static double ClampListWidth(double width, double pane) =>
         Math.Clamp(width, 160, Math.Max(160, Math.Min(420, pane * 0.5)));
 

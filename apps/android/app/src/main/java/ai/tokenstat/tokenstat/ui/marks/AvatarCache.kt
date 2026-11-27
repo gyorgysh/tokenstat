@@ -21,13 +21,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 
-/// One decoded profile picture per URL, for the life of the process and on
-/// disk across launches. Ported from `AvatarCache` in `Marks.swift`: the
-/// picture must be a plain bitmap by the time it reaches the layout, and the
-/// same face is drawn in the top bar and on the account sheet, so reads are
-/// synchronous and fetches are deduped. A fresh composable for an already
-/// fetched URL paints the picture on its first frame instead of flashing the
-/// monogram while a new fetch spins up.
 object AvatarCache {
     private const val MAX_COUNT = 128
     private const val MAX_BYTES = 64 * 1024 * 1024
@@ -39,12 +32,8 @@ object AvatarCache {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
 
-    /// In-flight fetches, so two seats for one account share a single request
-    /// instead of racing each other.
     private val pending = mutableMapOf<String, Deferred<Outcome>>()
 
-    /// A picture, no picture, or no answer. Only the last is worth asking
-    /// again: a 404 or a body that is not an image will say the same thing.
     private sealed interface Outcome {
         data class Picture(val bitmap: Bitmap) : Outcome
         data object Missing : Outcome
@@ -52,17 +41,8 @@ object AvatarCache {
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /// Already decoded, or nil. Synchronous so the first frame can paint the
-    /// picture instead of the letter when it is a cache hit.
     fun cached(url: String): Bitmap? = synchronized(decoded) { decoded.get(url.trim()) }
 
-    /// The picture, asked for again while it cannot be reached.
-    ///
-    /// One timeout used to leave the letter on screen until something
-    /// recomposed with a new key. A picture that is not there stops at once.
-    /// One that could not be reached waits and tries again, backing off to
-    /// every thirty seconds, for as long as the caller's coroutine runs. The
-    /// composable's effect ends it when the avatar leaves the screen.
     suspend fun image(context: Context, url: String): Bitmap? {
         val key = url.trim()
         if (key.isEmpty()) return null
@@ -143,8 +123,6 @@ object AvatarCache {
     private fun store(key: String, bitmap: Bitmap) {
         synchronized(decoded) {
             decoded.put(key, bitmap)
-            // LruCache trims by bytes on its own; the count cap trims the
-            // eldest entries by hand, one per excess key.
             while (decoded.snapshot().size > MAX_COUNT && decoded.size() > 0) {
                 decoded.trimToSize(decoded.size() - 1)
             }
@@ -159,9 +137,6 @@ object AvatarCache {
         return File(File(context.applicationContext.cacheDir, "avatars"), name)
     }
 
-    /// Fetch and decode one avatar off the caller's thread. The download
-    /// streams with a cap, so a body larger than the limit is rejected by its
-    /// size before any of it is read into memory and decoded.
     private fun download(url: String): Outcome {
         val connection = runCatching { URL(url).openConnection() as HttpURLConnection }.getOrNull()
             ?: return Outcome.Missing
@@ -171,8 +146,6 @@ object AvatarCache {
             connection.instanceFollowRedirects = true
             connection.connect()
             val status = connection.responseCode
-            // Busy, rate limited or failing on the server's side: the same
-            // request can succeed in a moment.
             if (status == 408 || status == 429 || status >= 500) return Outcome.Unreachable
             if (status !in 200..299) return Outcome.Missing
             val declared = connection.contentLengthLong
@@ -193,20 +166,14 @@ object AvatarCache {
             if (bytes.isEmpty()) return Outcome.Missing
             decode(bytes)?.let { Outcome.Picture(it) } ?: Outcome.Missing
         } catch (_: javax.net.ssl.SSLPeerUnverifiedException) {
-            // A certificate the host cannot prove. Asking again gets the same.
             Outcome.Missing
         } catch (error: javax.net.ssl.SSLHandshakeException) {
-            // A rejected certificate is permanent. A handshake cut short is
-            // the network, and worth asking again.
             if (error.cause is java.security.cert.CertificateException) Outcome.Missing else Outcome.Unreachable
         } catch (_: java.net.ProtocolException) {
-            // A redirect loop, or a 401 that offers no way to answer it.
             Outcome.Missing
         } catch (_: java.net.UnknownServiceException) {
-            // A scheme this connection cannot speak, such as cleartext http.
             Outcome.Missing
         } catch (_: java.io.IOException) {
-            // No route, a timeout, a dropped connection.
             Outcome.Unreachable
         } catch (_: Exception) {
             Outcome.Missing

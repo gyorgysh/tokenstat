@@ -50,9 +50,6 @@ fn window(label: &str, scope: Option<String>, percent: f64, resets: Option<i64>)
     }
 }
 
-/// Seconds or milliseconds since the epoch, or an ISO 8601 instant. Claude
-/// Code sends epoch seconds to the status line and ISO strings from
-/// `get_usage`.
 fn instant_ms(value: Option<&Value>) -> Option<i64> {
     match value? {
         Value::Number(n) => {
@@ -75,7 +72,6 @@ fn percent_of(value: Option<&Value>) -> Option<f64> {
     value?.as_f64().filter(|p| p.is_finite())
 }
 
-/// Plan names as people write them: `pro` becomes `Pro`.
 fn plan_name(raw: Option<&Value>) -> Option<String> {
     let raw = raw?.as_str()?.trim();
     let mut chars = raw.chars();
@@ -232,8 +228,6 @@ pub mod live {
             .ok_or_else(|| std::io::Error::other("no data directory"))?;
         std::fs::create_dir_all(parent)?;
         let json = serde_json::to_string(reading).map_err(std::io::Error::other)?;
-        // Several Claude Code sessions can draw at once, so each writer gets
-        // its own staging name and the rename decides who was last.
         let staging = parent.join(format!(
             ".claude-live-limits.{}.{}.tmp",
             std::process::id(),

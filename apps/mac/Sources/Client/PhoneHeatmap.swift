@@ -11,53 +11,19 @@ import UIKit
 
 #if !os(macOS)
 
-/// The year of activity, sized for a thumb.
-///
-/// A phone variant rather than `HeatmapView` because that one solves for a
-/// width: it shrinks the cell until the whole year fits the window, which on a
-/// 402 point screen lands near six points a day. Six points draws a year, and
-/// nobody can tap a day in it. So the cell is fixed and the grid scrolls,
-/// opening on the most recent week.
-///
-/// **The cell size is deliberately not fitted to the width.** Growing it to
-/// fill the card needs the width to pick the cell, and the height then follows
-/// the cell, so the view ends up measuring itself: the first pass has no
-/// measurement, lays out at the minimum, reports its own over-wide content as
-/// the available width, and every card on Home is dragged off the screen by the
-/// next pass. A fixed cell has a constant height and no feedback loop.
-///
-/// The drawing is one `Canvas`, same as the Mac's, for the same reason: a view
-/// per day is hundreds of views re-laid out on every scroll frame.
 struct PhoneHeatmap: View {
     let calendar: ActivityCalendar
-    /// Tapped day, for the detail sheet. Nil while nothing is selected.
     var onSelect: ((HeatCell) -> Void)?
-    /// A hold started or ended. The page above uses it to hold still: while a
-    /// finger is picking a day out of a grid, any movement of the page under
-    /// it is the page fighting the finger.
     var onScrub: ((Bool) -> Void)?
 
-    /// The day under the finger right now.
-    ///
-    /// A 15 point square under a thumb is covered by the thumb, so a tap on
-    /// this grid is a guess until the sheet opens. Holding names the day
-    /// before anything happens, and lifting opens the one being named: the
-    /// same gesture whether it lasted a moment or a second, with the answer
-    /// visible for as long as the finger is down.
     @State private var focus: Focus?
-    /// A hold is in progress: the grid stops scrolling and follows the finger.
     @State private var scrubbing = false
-    /// Set for a moment after a hold, so the lift that ended it does not also
-    /// count as a tap.
     @State private var suppressTap = false
 
-    /// Big enough to hit, small enough that a season fits on screen.
     private let cell: CGFloat = 15
     private let gap: CGFloat = 3.5
     private let corner: CGFloat = 3
     private let gutter: CGFloat = 16
-    /// The month row's height, which the weekday letters are pushed down by so
-    /// the two line up.
     private let monthRow: CGFloat = 13
 
     private var step: CGFloat { cell + gap }
@@ -77,18 +43,6 @@ struct PhoneHeatmap: View {
         .accessibilityHint(L10n.text("apple.phoneheatmap.hold_a_day_to_read_its_date_and_amount_lif.d2f63c75"))
     }
 
-    /// The line above the grid: what the finger is on, or how to use it.
-    ///
-    /// **The readout lives here rather than beside the square it names.** A
-    /// bubble by the cell is a bubble under the hand pointing at it, and one
-    /// placed high enough to clear a thumb is outside the scroll view's bounds
-    /// and gets clipped. Above the whole grid it is always visible, always in
-    /// the same place, and never behind a finger.
-    ///
-    /// When nothing is held it says what can be done, which is the other half
-    /// of the problem: a grid that scrolls sideways inside a page that scrolls
-    /// down does not announce itself, and a year that looks like a season is a
-    /// year nobody scrolls.
     private var caption: some View {
         HStack(spacing: 6) {
             if let focus {
@@ -125,18 +79,12 @@ struct PhoneHeatmap: View {
 
             Group {
                 if fits {
-                    // A wide tab-mode iPad has room for the entire year. Keep
-                    // the weekday gutter attached to the month/grid unit and
-                    // centre that complete unit, rather than leaving the grid
-                    // biased to the trailing edge as the scroll view did.
                     HStack(alignment: .top, spacing: 6) {
                         weekdayLabels
                         calendarGrid
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                 } else {
-                    // Narrow cards and sidebar detail retain the recent-week
-                    // opening position and horizontal scrolling behavior.
                     HStack(alignment: .top, spacing: 6) {
                         weekdayLabels
                         ScrollView(.horizontal, showsIndicators: true) {
@@ -158,8 +106,6 @@ struct PhoneHeatmap: View {
             monthLabels
             grid
         }
-        // Room for the indicator, so it sits under the grid rather than across
-        // the bottom row of squares.
         .padding(.bottom, 6)
     }
 
@@ -169,25 +115,10 @@ struct PhoneHeatmap: View {
             let days = calendar.historyDays ?? 30
             text += L10n.text("apple.phoneheatmap.last_0_days_are_clear_older_days_keep_the.5d9eddd2", "\(days)")
         }
-        // Says what is inside, because what is inside is not every square.
-        // See `accessibleDays`.
         text += L10n.text("apple.phoneheatmap.days_with_activity_are_listed.6dc67e87")
         return text
     }
 
-    /// The activity ramp, with a quiet day that can actually be seen.
-    ///
-    /// `Theme.heat` is the website's ramp and its first step is `#ECEAF2`,
-    /// which sits on a Mac's panel colour perfectly well and all but vanishes
-    /// on a white card at arm's length. A grid whose quiet half is invisible
-    /// does not read as "nothing happened those weeks", it reads as a control
-    /// that failed to draw, which is exactly how it was reported.
-    ///
-    /// Only step zero changes. The four active steps stay the brand's own, so
-    /// a busy week on the phone is the same colour as a busy week on the site.
-    ///
-    /// A chosen theme or OLED has its own ramp, whose step zero is already
-    /// the border tone and reads on any ground.
     private static var heatPalette: [Color] {
         let appearance = AppAppearance.shared
         guard appearance.paletteID == "default", appearance.mode != .oled else { return Theme.heat }
@@ -204,17 +135,7 @@ struct PhoneHeatmap: View {
     }()
 
     private var weekdayLabels: some View {
-        // Monday, Wednesday, Friday only. Seven letters at this size is a
-        // column of noise beside the thing it labels.
         VStack(spacing: gap) {
-            // Pushed down by the month row so the letters line up with rows.
-            //
-            // **The width matters.** A `Color` with only a height set is
-            // flexible horizontally and takes everything offered, so this
-            // spacer alone stretched the label column across half the card and
-            // squeezed the grid into what was left. That is what "the heatmap
-            // only uses half the width" was: not the data, not the scroll
-            // position, one missing dimension on a clear rectangle.
             Color.clear.frame(width: gutter, height: monthRow)
             ForEach(0..<7, id: \.self) { row in
                 Text(Self.rowLabel(row))
@@ -293,24 +214,16 @@ struct PhoneHeatmap: View {
         }
         .simultaneousGesture(
             SpatialTapGesture().onEnded { event in
-                // A hold that ended already opened its day. Without this the
-                // lift counts twice and the sheet opens on top of itself.
                 guard !suppressTap, !scrubbing else { return }
                 guard let landed = hit(at: event.location) else { return }
                 onSelect?(landed.day)
             }
         )
-        // Rebuilt as a flat list so a screen reader gets days rather than a
-        // canvas, without the app drawing a year of real views to get them.
         .accessibilityChildren {
             ForEach(accessibleDays) { day in
                 Button {
                     onSelect?(day)
                 } label: {
-                    // A spoken date, not an ISO string: "twenty twenty six
-                    // dash zero eight dash eleven" is not a date anybody
-                    // hears. The amount is in the label too, so intensity is
-                    // never carried by colour alone.
                     Text(L10n.text("apple.phoneheatmap.0_1_at_api_list_price.c7adc814", "\(spokenDate(day.date))", "\(formatSpend(day.value))"))
                 }
             }
@@ -345,8 +258,6 @@ struct PhoneHeatmap: View {
                 action: #selector(Coordinator.handle(_:))
             )
             press.minimumPressDuration = 0.2
-            // A hold that wanders is still the same hold: this is a scrub, so
-            // the finger is expected to travel a long way once it has begun.
             press.allowableMovement = 24
             press.cancelsTouchesInView = false
             press.delaysTouchesEnded = false
@@ -387,10 +298,6 @@ struct PhoneHeatmap: View {
         }
     }
 
-    /// Leave scrub mode and let the grid scroll again.
-    ///
-    /// The tap is muted briefly because the same lift that ends a hold also
-    /// completes the tap gesture, and the day has already been opened by then.
     private func endScrub() {
         scrubbing = false
         onScrub?(false)
@@ -407,9 +314,6 @@ struct PhoneHeatmap: View {
         var rect: CGRect
     }
 
-    /// Which day a touch landed on, using the same packing the canvas drew
-    /// with. Points between squares round to the square they are nearest, so a
-    /// finger dragged across the grid never lands on nothing.
     private func hit(at point: CGPoint) -> Focus? {
         let column = Int(point.x / step)
         let row = Int(point.y / step)

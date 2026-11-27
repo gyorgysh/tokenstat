@@ -22,9 +22,6 @@ internal sealed record ChatLaunchChoice(
     string Model,
     string Effort,
     string Autonomy,
-    // Three states, all different: null means nothing was recorded and the
-    // workspace default applies, empty means the person chose no persona,
-    // and an id means that one.
     string? PersonaId)
 {
     private static string FilePath => Path.Combine(
@@ -54,7 +51,6 @@ internal sealed record ChatLaunchChoice(
         }
     }
 
-    /// <summary>Remember the setup of a conversation record the host returned.</summary>
     public static void Save(JsonNode? chat)
     {
         var backend = Format.Text(chat, "backend");
@@ -65,7 +61,6 @@ internal sealed record ChatLaunchChoice(
             ["model"] = Format.Text(chat, "model"),
             ["effort"] = Format.Text(chat, "effort"),
             ["autonomy"] = Format.Text(chat, "autonomy", "standard"),
-            // Empty, not absent: no persona is a choice worth carrying.
             ["personaId"] = Format.Text(chat, "personaId"),
         };
         try
@@ -75,7 +70,6 @@ internal sealed record ChatLaunchChoice(
         }
         catch
         {
-            // Remembering is a courtesy. The next chat takes the defaults.
         }
     }
 }

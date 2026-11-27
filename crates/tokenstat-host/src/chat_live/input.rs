@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Keep provider stdin writes from blocking stdout processing or Stop.
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::io::Write;
@@ -88,8 +87,6 @@ pub(super) fn start_with<W: Write>(writer: impl FnOnce() -> W + Send + 'static) 
                 Err(Failure::Expired)
             } else {
                 (|| {
-                    // Recheck cancellation between writes. Killing a stuck
-                    // provider releases a write already blocked in the OS.
                     for chunk in request.bytes.chunks(8192) {
                         if cancelled.load(Ordering::Acquire) {
                             return Err("The agent input was stopped.".into());
@@ -177,9 +174,7 @@ impl Input {
         if self.pending >= MAX_PENDING || self.completed.len() >= MAX_COMPLETED {
             return Ok(false);
         }
-        // Include active large writes in the byte budget. Count-bound small
-        // messages add at most 32 KiB and can follow a large initial prompt.
-        // One larger message can use the whole budget to preserve old payloads.
+
         let charge = prepared.0.charge;
         if self.bytes + charge > MAX_BYTES {
             return Ok(false);
@@ -215,8 +210,6 @@ impl Input {
         id: String,
         expires: u64,
     ) -> Result<bool, String> {
-        // Preserve serial control admission. Later requests stay in their
-        // mailbox, where expiry is checked again before a write is attempted.
         if !self.ready_for_control() {
             return Ok(false);
         }

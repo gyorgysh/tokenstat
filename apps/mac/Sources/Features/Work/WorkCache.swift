@@ -21,8 +21,6 @@ struct WorkCachedEnvelope {
 }
 
 enum WorkCache {
-    /// One record per conversation: its newest page, which is what an offline
-    /// open shows. Earlier pages stay on the host; the copy says so.
     static func recordID(for reference: WorkReference) -> String? {
         guard let prefix = recordPrefix(reference.kind), let item = reference.itemID, !item.isEmpty,
               !reference.hostIdentity.isEmpty, !reference.workspaceID.isEmpty
@@ -71,16 +69,10 @@ enum WorkCache {
             .map(WorkReferenceKey.encode).joined(separator: "|")
     }
 
-    /// What timeline a page came from: the highest archive position in it,
-    /// how many rows it carries, and where live tailing carries on from. Two
-    /// pages with the same revision show the same conversation.
     static func revision(maxSeq: UInt64, count: Int, nextOffset: UInt64) -> String {
         "s\(maxSeq):\(count):\(nextOffset)"
     }
 
-    /// Whether a kept copy still names the live timeline. Reconnecting
-    /// compares the saved revision against the fresh page's: a match means
-    /// the conversation was quiet, anything else means the copy is replaced.
     static func matches(_ savedRevision: String, maxSeq: UInt64, count: Int, nextOffset: UInt64) -> Bool {
         savedRevision == revision(maxSeq: maxSeq, count: count, nextOffset: nextOffset)
     }
@@ -93,8 +85,6 @@ enum WorkCache {
             "revision": revision,
             "page": page,
         ]
-        // Round through data so only JSON values can leave: a non-plist type
-        // fails here rather than in the transport's serializer.
         let data = try JSONSerialization.data(withJSONObject: envelope)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw WorkCacheError.encoding
@@ -117,12 +107,6 @@ enum WorkCacheError: Error {
     case encoding
 }
 
-/// Whether this device keeps encrypted copies of opened work.
-///
-/// On with a first-use explanation where the copies are managed; off means
-/// nothing new is saved and previously kept copies stay until cleared there.
-/// A separate durable setting from the copies themselves, so turning saving
-/// off does not delete what is already kept.
 final class WorkCacheSettings {
     static let shared = WorkCacheSettings()
     private let defaults: UserDefaults
@@ -170,8 +154,6 @@ final class WorkCacheSettings {
         return "work.cache.folder.enabled." + digest
     }
 
-    /// Nothing recorded means on: the copies exist to be opened offline, and
-    /// a device that has never chosen keeps them until it says otherwise.
     var enabled: Bool {
         get { defaults.object(forKey: key) as? Bool ?? true }
         set { defaults.set(newValue, forKey: key) }

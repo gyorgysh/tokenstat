@@ -244,8 +244,7 @@ impl From<ScanReport> for ScanReportDto {
             events_new: r.events_new,
             events_recovered: r.events_recovered,
             days_recovered: r.days_recovered,
-            // u128 does not survive JSON. A scan measured in milliseconds has
-            // no business overflowing u64.
+
             elapsed_ms: r.elapsed_ms.min(u64::MAX as u128) as u64,
             warnings: r.warnings.iter().map(Warning::to_string).collect(),
         }
@@ -945,9 +944,6 @@ mod tests {
         assert!(full.get("gitStatusPending").is_none());
     }
 
-    /// The account call decodes `relayUsage` with `from_value(...).ok()`, so a
-    /// strict struct turns one missing server key into a silently absent card.
-    /// A partial ledger must still decode, with zeros where keys are missing.
     #[test]
     fn a_partial_relay_ledger_still_decodes() {
         let value = serde_json::json!({

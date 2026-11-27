@@ -32,9 +32,6 @@ struct TaskEditorDestination: View {
     }
 }
 
-/// Chat launches create ordinary workspace conversations. Sending uses the
-/// chat composer's durable draft and receipt handling, including uncertain
-/// replies, rather than starting an automation behind the chat surface.
 struct TaskChatLaunchView: View {
     let card: TodoCard
     let peer: String?
@@ -83,8 +80,6 @@ struct TaskChatLaunchView: View {
                 guard model.holdDraftForSending(card.promptForRun) else { return }
                 await model.sendFromComposer()
             } catch {
-                // Creation is not replayed after an uncertain reply: the
-                // workspace's chat list is the place to check what was made.
                 failure = L10n.text("apple.taskeditorview.could_not_confirm_the_new_chat_check_this.cdc6ca26", "\(error.localizedDescription)")
             }
         }

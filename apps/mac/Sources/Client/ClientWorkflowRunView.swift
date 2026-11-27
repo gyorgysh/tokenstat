@@ -7,7 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// One workflow run on a phone: steps and the transcript of the selected step.
 struct ClientWorkflowRunView: View {
     @Bindable var session: ClientWorkflowSession
     let runID: String

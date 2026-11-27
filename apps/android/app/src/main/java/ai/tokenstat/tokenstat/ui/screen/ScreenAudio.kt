@@ -6,14 +6,6 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.util.Log
 
-/// What the far end is playing, played here. The Android counterpart of Apple
-/// `ScreenAudioPlayer`.
-///
-/// The host sends 16-bit interleaved PCM in `TAUD` chunks, so there is nothing
-/// to decode: the track is opened on the first chunk's rate and channel count
-/// and fed as the chunks arrive. Writes are non-blocking on purpose. Audio
-/// that cannot keep up is dropped, because the alternative is a write that
-/// stalls the loop reading the picture.
 class ScreenAudio {
     private var track: AudioTrack? = null
     private var rate = 0
@@ -57,8 +49,6 @@ class ScreenAudio {
         val mask = when (chunk.channels) {
             1 -> AudioFormat.CHANNEL_OUT_MONO
             2 -> AudioFormat.CHANNEL_OUT_STEREO
-            // Said out loud: anything else is permanent silence, and silence
-            // with nothing in the log is undebuggable.
             else -> {
                 Log.w(TAG, "unsupported channel count: ${chunk.channels}")
                 return null
@@ -83,13 +73,10 @@ class ScreenAudio {
                         .setChannelMask(mask)
                         .build()
                 )
-                // Two buffers' worth. One is a click every time a chunk
-                // arrives late, and a deep buffer is lip sync nobody asked
-                // for on a screen being driven from here.
                 .setBufferSizeInBytes(minimum * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
-            track = created // Retain ownership before play(), which may throw.
+            track = created
             created.play()
             rate = chunk.sampleRate
             channels = chunk.channels

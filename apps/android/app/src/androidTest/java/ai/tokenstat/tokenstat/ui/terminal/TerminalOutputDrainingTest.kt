@@ -103,7 +103,6 @@ class TerminalOutputDrainingTest {
                     offset == early.size && quietReads >= 4 -> late
                     else -> byteArrayOf()
                 }
-                // Process metadata can precede closure of inherited output.
                 bridge.readInfo(endedInfo())
                 buildJsonObject {
                     put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))

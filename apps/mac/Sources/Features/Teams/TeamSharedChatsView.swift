@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Team navigation has its own reader. It never selects a private ChatModel,
-/// changes WorkSessionContext, or loads another person's personal archive.
 struct TeamSharedChatsView: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext
@@ -31,7 +29,6 @@ struct TeamSharedChatsView: View {
     @State private var localCheckoutIds: Set<String> = []
     @State private var newTitle = ""
     @State private var newBackend = ""
-    // The original title/backend keep the same identity after a lost reply.
     @State private var newRequest: (title: String, backend: String, id: String)?
     @State private var starting = false
     @Environment(\.scenePhase) private var scenePhase
@@ -164,8 +161,6 @@ struct TeamSharedChatsView: View {
             Task { if checkout == nil { await loadCheckouts() } else { await loadShares(more: false) } }
         }.buttonStyle(TeamSmallButtonStyle()).environment(\.compactActions, true).help(L10n.text("common.refresh")).disabled(loading || repository == nil)
     }
-    /// Which project and whose computer, side by side, as the two filters
-    /// they are rather than as a form to fill in.
     private var filters: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: Theme.Space.l) { filterControls; Spacer(minLength: 0) }
@@ -198,8 +193,6 @@ struct TeamSharedChatsView: View {
         }
     }
     private func computerCanStart(_ repository: TeamRepository) -> Bool { repository.role == .contributor || repository.role == .maintainer }
-    /// A member starts an empty shared chat on that computer and asks its
-    /// agent there, without waiting for the owner to share one.
     private func newChat(_ checkout: TeamCheckout) -> some View {
         Card(title: L10n.text("common.teams.new_chat_title"), subtitle: L10n.text("common.teams.new_chat_detail", computerName(checkout)), mark: "mark_chat") {
             ViewThatFits(in: .horizontal) {
@@ -299,8 +292,6 @@ struct TeamSharedChatsView: View {
                         "method":.string("team.chat.catalog"),"params":.object(params)], context: context)
                 } catch let failure as TeamRequestFailure where ["team_method_required", "unknown_method"].contains(failure.code) {
                     guard isCurrent, shareLoad == load, self.checkoutId == checkoutId, self.repository?.id == repository.id else { return }
-                    // Older hosts can still provide exact-share history. Their
-                    // account directory contains opaque references only.
                     catalogAvailable = false
                 }
             }

@@ -56,13 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/// Messages waiting for the open turn to finish, sitting above the composer.
-/// Port of `ChatQueueStrip.swift`.
-///
-/// The host will not take a second send until this turn ends, so the next
-/// prompt waits here. One waiting message stays on the strip, where it can
-/// still be edited, dropped or sent now. Two or more open from View pending,
-/// so the list does not cover the transcript.
 @Composable
 fun ChatQueueStrip(
     items: List<QueuedMessage>,
@@ -134,9 +127,6 @@ fun ChatQueueStrip(
     }
 }
 
-/// The rest of the queue. Reordering is two buttons rather than a drag: the
-/// Mac sheet offers exactly these as its keyboard and accessibility actions,
-/// and a drag handle inside a scrolling sheet on a phone fights the scroll.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatPendingSheet(
@@ -251,8 +241,6 @@ private fun ChatQueueRow(
     val context = LocalContext.current
     var draft by remember(item.id) { mutableStateOf(item.text) }
     var savedText by remember(item.id) { mutableStateOf(item.text) }
-    // An older asynchronous save must not replace newer typing. Keep failed
-    // edits available to copy, and do not send until the visible text is saved.
     LaunchedEffect(item.text) {
         if (draft == savedText) draft = item.text
         savedText = item.text
@@ -335,8 +323,6 @@ private fun copyToClipboard(context: Context, text: String) {
     manager.setPrimaryClip(ClipData.newPlainText("message", text))
 }
 
-/// A note waiting to ride the next tool step. Shown even when nothing else
-/// is queued, because the words are already with the agent.
 @Composable
 fun ChatSteerNoteBanner(
     note: String,

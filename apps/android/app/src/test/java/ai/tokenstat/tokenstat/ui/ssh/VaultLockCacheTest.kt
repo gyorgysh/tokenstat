@@ -22,8 +22,6 @@ class VaultLockCacheTest {
     @Test
     fun missingOrUnreachableStatusStoresNothing() {
         assertNull(VaultLockSnapshot.of(null))
-        // An unreachable account is not a vault state: the cache keeps what
-        // it knew rather than storing the absence.
         assertNull(
             VaultLockSnapshot.of(buildJsonObject {
                 put("created", false)

@@ -1,27 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 // Source-available, not open source. See LICENSE for permissions and restrictions.
-
-//! Line counts for an edit whose agent named only the file it touched.
-//!
-//! Codex reports a file change as a path and a kind, with no patch, so its
-//! edit lines had nothing to count. Reading the file when the change starts
-//! is too late: the stream is read a few times a second and the patch is
-//! already on disk by then. So the "before" side is what the file held the
-//! last time this turn knew it:
-//!
-//! - a file already changed when the turn began, read then;
-//! - a file this turn already edited, as that edit left it;
-//! - otherwise the captured index blob, which for a file clean at the start of the
-//!   turn matches the working text after Git's line-ending normalization.
-//!
-//! The difference becomes the same `Edit` event every other agent sends
-//! itself. Everything here reads. Nothing writes to the folder or to git.
-//!
-//! A chat shares its checkout with terminal agents and other chats, so a file
-//! another agent changed during the turn is counted into this edit. The count
-//! is a courtesy, not an attribution, and nothing is billed on it.
-
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -30,20 +9,12 @@ use serde_json::Value;
 
 use crate::transcript::Event;
 
-/// Larger files are left uncounted. A count is a courtesy, and diffing a
-/// generated megabyte file a few times a turn is not.
 const MAX_BYTES: usize = 1024 * 1024;
-/// How many changed files a turn reads up front. A tree with thousands of
-/// untracked files would otherwise be read in full before the agent starts.
 const MAX_BASELINE_FILES: usize = 400;
-/// The patch kept on the edit row. The counts cover the whole change.
 const PATCH_CAP: usize = 16 * 1024;
-/// Past this many changed lines the middle of a file is counted as replaced
-/// rather than aligned line by line. Memory grows with its square.
 const MAX_EDIT_DISTANCE: usize = 1500;
 const CONTEXT: usize = 3;
 
-/// What a file held. An unknown baseline must never become an empty file.
 #[derive(Clone)]
 enum Contents {
     Absent,
@@ -130,8 +101,7 @@ impl EditMeasure {
                         .text(&path, MAX_BYTES)
                         .map(Contents::Text)
                         .unwrap_or(Contents::Unknown),
-                    // Not tracked or present at the start, inside the repo:
-                    // this file is new. Outside it the baseline is unknown.
+
                     Some(index) if index.can_be_new(&path) => Contents::Absent,
                     _ => Contents::Unknown,
                 },
@@ -144,8 +114,7 @@ impl EditMeasure {
                 self.known.insert(path, after);
                 continue;
             }
-            // Git keeps LF in the index for normalized text, while clean
-            // working files may hold LF or CRLF. Compare both in Git's form.
+
             let (added, removed, patch) = if self
                 .index
                 .as_ref()
@@ -182,10 +151,6 @@ impl EditMeasure {
     }
 }
 
-/// One spelling per file. Git names files under the repository's real path
-/// and an agent under the folder it was given, and the two differ wherever
-/// a symlink sits above the folder. A file not there yet resolves through
-/// its folder.
 fn canonical(path: &Path) -> PathBuf {
     if let Ok(real) = std::fs::canonicalize(path) {
         return real;
@@ -196,8 +161,6 @@ fn canonical(path: &Path) -> PathBuf {
     }
 }
 
-/// The files a path-only edit names: Codex's `changes` list. Every other
-/// agent's edit input carries its own text and is left alone.
 fn reported_paths(input: &Value) -> Option<Vec<String>> {
     let paths: Vec<String> = input
         .get("changes")?
@@ -246,11 +209,7 @@ enum Op {
     Added,
 }
 
-/// Lines added and removed between two texts, and a unified patch of them
-/// with a few lines of context, capped at `PATCH_CAP`.
 fn difference(old: &str, new: &str) -> (u32, u32, String) {
-    // Keep line endings: adding an EOF newline or changing CRLF is still
-    // a changed line in git, even when `str::lines` returns identical text.
     let a: Vec<&str> = old.split_inclusive('\n').collect();
     let b: Vec<&str> = new.split_inclusive('\n').collect();
     let ops = script(&a, &b);
@@ -263,8 +222,6 @@ fn difference(old: &str, new: &str) -> (u32, u32, String) {
     )
 }
 
-/// The shortest edit script, one op per line. Common lines at either end
-/// are matched first, which is all most edits need.
 fn script(a: &[&str], b: &[&str]) -> Vec<Op> {
     let prefix = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let room = a.len().min(b.len()) - prefix;
@@ -284,8 +241,6 @@ fn script(a: &[&str], b: &[&str]) -> Vec<Op> {
     ops
 }
 
-/// Myers' greedy search, keeping each round's frontier to walk back from.
-/// Past `MAX_EDIT_DISTANCE` the whole stretch counts as replaced.
 fn middle(a: &[&str], b: &[&str]) -> Vec<Op> {
     let replaced = || {
         let mut ops = vec![Op::Removed; a.len()];
@@ -361,7 +316,6 @@ fn walk_back(trace: &[Vec<i64>], offset: i64, n: i64, m: i64) -> Vec<Op> {
     ops
 }
 
-/// Hunks with `CONTEXT` lines either side, the way `git diff` draws them.
 fn patch(a: &[&str], b: &[&str], ops: &[Op]) -> String {
     let mut at = Vec::with_capacity(ops.len());
     let (mut i, mut j) = (0usize, 0usize);
@@ -529,7 +483,7 @@ mod tests {
         std::fs::write(&dirty, "a\nb\nmine\n").unwrap();
 
         let mut measure = EditMeasure::start(dir.path());
-        // The agent has already written by the time the stream is read.
+
         std::fs::write(&clean, "a\nB\n").unwrap();
         std::fs::write(&dirty, "a\nb\nmine\nagent\n").unwrap();
         let out = measure.observe(vec![

@@ -48,9 +48,6 @@ import ai.tokenstat.tokenstat.ui.marks.TierMark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
 
-/// Tier ladder, the same words the website and the Apple client use. Relay
-/// allowances are captions, not feats: they share one window with everything
-/// else the connection carries, not a line in the feature list.
 private data class Pitch(
     val productId: String,
     val hasMonthly: Boolean,
@@ -125,15 +122,12 @@ private val compareFeatures = listOf(
     "Read API" to listOf(L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.no"), L10n.text("common.yes")),
 )
 
-/// In-app plans, yearly by default. The pitch wraps Play Billing; the system
-/// sheet stays the purchase. Supporter is yearly only, like on Apple.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaywallSheet(
     billing: PlayBillingManager,
     onDismiss: () -> Unit,
     currentTier: String? = null,
-    /// This account's billing interval, "month" or "year", when it has one.
     currentInterval: String? = null,
 ) {
     val colors = LocalTsColors.current
@@ -141,9 +135,6 @@ fun PaywallSheet(
     val billingState by billing.state.collectAsStateWithLifecycle()
     var monthly by rememberSaveable { mutableStateOf(false) }
     val catalog = if (monthly) pitches.filter { it.hasMonthly } else pitches
-    // Full height. This is a list of plans with a paragraph each; opening it
-    // half way over the sheet that launched it showed one and a half cards
-    // and made comparing them a scroll inside a scroll inside a sheet.
     TsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -183,10 +174,6 @@ fun PaywallSheet(
                 }
                 val sameTier = currentTier?.equals(pitch.tier, ignoreCase = true) == true
                 val isCurrent = sameTier && currentInterval == interval
-                // The tier on the other interval, switchable only when Play
-                // holds the subscription to replace. A plan bought on the web
-                // or the App Store reads as current instead: offering the
-                // switch would stack a second subscription beside it.
                 val canSwitch = sameTier && currentInterval != null && !isCurrent &&
                     billingState.hasPlaySubscription
                 val readsCurrent = isCurrent ||

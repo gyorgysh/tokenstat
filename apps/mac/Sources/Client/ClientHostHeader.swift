@@ -8,23 +8,11 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// What another computer is doing, and the two ways in.
-///
-/// One view in two places on purpose. The machine's power, CPU and memory and
-/// the View screen action only existed on the Devices detail page, so somebody
-/// who thought "I want to see what that Mac is doing" opened it under
-/// Workspaces, which is the honest reading of the word, and found a folder
-/// list. Copying the header into that screen would have let the two drift, so
-/// they share this one.
 struct ClientHostHeader: View {
     let name: String
     let peerKey: String
     let online: Bool?
-    /// The sentence under the name. Devices already composes one from the
-    /// account's record; the work screen has no record to compose from.
     var reach: String?
-    /// Off on the work screen, which is what Open work opens: a button that
-    /// pushes the screen you are already on is a button that does nothing.
     var showsOpenWork = true
 
     @Environment(AccountModel.self) private var account
@@ -39,9 +27,6 @@ struct ClientHostHeader: View {
 
     private var isLegend: Bool { account.account?.tier?.lowercased() == "legend" }
 
-    /// Whether the host says View screen can open there. Nil until it has
-    /// answered, and stays nil when it cannot, so the platform guess decides
-    /// only then. Once the host answers, its answer wins over the guess.
     @State private var hostShowsScreen: Bool?
 
     private var showsScreen: Bool {
@@ -71,21 +56,14 @@ struct ClientHostHeader: View {
                 Spacer(minLength: 0)
             }
 
-            // Only for a host that is awake. A sleeping machine has no
-            // readings, and a bar of dashes says less than no bar.
             if online == true, !peerKey.isEmpty {
                 HostStatsBar(peer: peerKey, online: true)
             }
 
             if showsOpenWork { openWork }
-            // Until the host answers, the account's platform string guesses,
-            // so a Linux server does not flash a row that only ends in an
-            // error. After that the host's own answer decides.
             if showsScreen { viewScreen }
         }
         .task(id: peerKey) {
-            // Same stale-run guard as the security card: a probe for the last
-            // peer must not write its answer onto the new peer's header.
             let wanted = peerKey
             hostShowsScreen = nil
             let answer = try? await Bridge.peerCanShowScreen(wanted)
@@ -97,7 +75,6 @@ struct ClientHostHeader: View {
         .cardSurface()
     }
 
-    /// Personal remote work follows the account capability.
     @ViewBuilder
     private var openWork: some View {
         if canRemote {
@@ -114,7 +91,6 @@ struct ClientHostHeader: View {
             }
             .buttonStyle(DeviceActionRowStyle())
         } else {
-            // Keep an unavailable account in the same panel as the action.
             HStack(spacing: Theme.Space.m) {
                 ActionSeat(icon: .reveal)
                 VStack(alignment: .leading, spacing: 4) {
@@ -140,8 +116,6 @@ struct ClientHostHeader: View {
         }
     }
 
-    /// Legend. The screen viewer says so itself when the tier is lower, so the
-    /// row stays reachable rather than disappearing with no explanation.
     private var viewScreen: some View {
         NavigationLink {
             ScreenViewerView(peer: peerKey, name: name, tier: account.account?.tier)

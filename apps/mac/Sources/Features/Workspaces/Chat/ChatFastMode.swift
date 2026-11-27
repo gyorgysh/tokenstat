@@ -3,9 +3,6 @@
 import Foundation
 
 enum ChatFastMode {
-    /// Claude uses supported prefixes; Grok requires exact listed pairs.
-    /// A nil list also covers older
-    /// hosts, which must not show a switch they cannot honor.
     static func available(model: String?, models: [String]?, backend: String? = nil) -> Bool {
         guard let models, model?.trimmingCharacters(in: .whitespaces).hasPrefix("local:") != true else { return false }
         if backend == "grok" { return models.contains(model ?? "") }

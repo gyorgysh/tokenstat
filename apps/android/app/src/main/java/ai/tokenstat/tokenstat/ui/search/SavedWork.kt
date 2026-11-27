@@ -31,9 +31,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// Encrypted conversation copies kept on this phone for search while a host
-/// is asleep. The wrapping key lives in AndroidKeyStore; the cache ciphertext
-/// lives in the local host. Remote peers never see these methods.
 internal class SavedWork private constructor(
     private val model: AppViewModel,
     private val context: Context,
@@ -99,7 +96,6 @@ internal class SavedWork private constructor(
                 try { return@withLock Base64.encodeToString(raw, Base64.NO_WRAP) } finally { raw.fill(0) }
             }
             if (!create) return@withLock null
-            // Do not mint a replacement key while sealed records still exist.
             check(ids().isEmpty()) { L10n.text("android.savedwork.key_unavailable") }
             val wrappingKey = existing ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
                 init(KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -130,7 +126,6 @@ internal class SavedWork private constructor(
         fun open(model: AppViewModel, context: Context): SavedWork? =
             scope(model.state.value.account)?.let { SavedWork(model, context.applicationContext, it) }
 
-        /// Newest-first messages, capped so one huge reply cannot fill the shelf.
         fun transcript(items: List<ChatDisplayItem>, hasEarlier: Boolean): Transcript? {
             val lines = ArrayList<String>()
             var remaining = MaximumCharacters

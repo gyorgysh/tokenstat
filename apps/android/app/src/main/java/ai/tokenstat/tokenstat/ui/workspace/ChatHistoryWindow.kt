@@ -8,7 +8,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
-/** Initial reads are bounded; polling only asks for bytes after the last reply. */
 internal class ChatHistoryWindow {
     var events: List<JsonObject> = emptyList(); private set
     var usage: ChatUsageTotals? = null; private set
@@ -32,8 +31,6 @@ internal class ChatHistoryWindow {
         } else events = rows + events
         val spent = if (replace) null else cursor
         cursor = answer["cursor"]?.jsonPrimitive?.contentOrNull
-        // A usable, unspent cursor, or pages that load on their own would ask
-        // for the same one for ever.
         hasEarlier = answer["hasEarlier"]?.jsonPrimitive?.booleanOrNull == true &&
             !cursor.isNullOrEmpty() && cursor != spent
         loaded = true

@@ -2,14 +2,9 @@
 
 import SwiftUI
 
-/// Review Changes and History for the folder that produced a task result.
-///
-/// Whole-surface rows, the same shape as a folder's own sections, so the
-/// destination is the folder rather than a second run action.
 struct TaskResultWorkspaceLinks: View {
     let route: TaskResultRoute
     var onSelect: (TaskResultWorkspaceSurface) -> Void
-    /// When the surrounding chrome already names the folder, skip the extra heading.
     var showsContext: Bool = true
 
     var body: some View {
@@ -64,8 +59,6 @@ struct TaskResultWorkspaceLinks: View {
     }
 }
 
-/// One destination in a task result. The glyph is the folder section, not a
-/// generic preview eye, so Changes and History cannot be mistaken for View run.
 struct TaskResultWorkspaceRow: View {
     let surface: TaskResultWorkspaceSurface
     var caption: String

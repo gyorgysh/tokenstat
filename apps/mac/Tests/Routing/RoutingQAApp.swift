@@ -153,8 +153,6 @@ private final class TerminalTypingQA: NSObject, TerminalViewDelegate {
         let bytes = Array(data)
         Task { @MainActor in
             input += String(decoding: bytes, as: UTF8.self)
-            // Exercise the real write-error/recovery layout on successive
-            // keys, as well as cursor-only TUI redraws.
             session.transportError = input.count.isMultiple(of: 2) ? nil : "QA transient write failure"
             session.view.feedOutput("\u{1b}[2;1H\u{1b}[2K> " + input)
         }

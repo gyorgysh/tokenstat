@@ -6,7 +6,6 @@
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>Where the face is, before the body's own motion pushes it around.</summary>
 internal static class PersonaMoodFace
 {
     public static PersonaFacePose Face(this PersonaMood mood, double clock, PersonaTraits traits)
@@ -59,8 +58,6 @@ internal static class PersonaMoodFace
                 face.MouthOpen = idea * 0.55;
                 if (idea > 0.45)
                 {
-                    // The moment it lands, and the only moment. Held any
-                    // longer and having an idea stops being an event.
                     face.Openness = 1.15;
                     face.Squint = 0;
                     face.EyeScale = 1.10;
@@ -74,8 +71,6 @@ internal static class PersonaMoodFace
                 face.Openness = 0.62 + job.Admire * 0.30;
                 face.Squint = 0.32 * (1 - job.Admire);
                 face.Brow = 0.40 - job.Admire * 0.55;
-                // Eyes on the nail, all the way down. It is what makes the
-                // swing land somewhere rather than merely happen.
                 face.Gaze = new PPoint(0.45 - job.Admire * 0.20, 0.60 - job.Admire * 0.85);
                 face.Lift = -0.02;
                 face.MouthCurve = -0.1 + job.Admire * 1.0 + job.Strike * 0.2;
@@ -93,7 +88,6 @@ internal static class PersonaMoodFace
             {
                 double syllable = PersonaMoodTiming.SpeechEnvelope(clock);
                 face.Openness = 1.0 + syllable * 0.16;
-                // Brows up, never down, and the mouth kept to a talking size.
                 face.Brow = -0.16 - syllable * 0.10;
                 face.MouthOpen = 0.24 + syllable * 0.62;
                 face.MouthCurve = 0.38;
@@ -183,8 +177,6 @@ internal static class PersonaMoodFace
 
             case PersonaMood.Reading:
             {
-                // A saccade, not a sweep: eyes jump along a line, drop to the
-                // next one, and jump back. Reading is what that looks like.
                 var gag = PersonaMoodTiming.ReadingGag(clock);
                 double line = clock / 2.1;
                 double across = line - Math.Floor(line);

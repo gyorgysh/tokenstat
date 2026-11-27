@@ -37,8 +37,6 @@ enum WorkbenchShortcut: String, CaseIterable {
         static let option = Modifiers(rawValue: 1 << 2)
     }
 
-    /// The printable key, lowercased. Never Return: starting work always
-    /// names its target through a confirm, never through a bare key.
     var key: String {
         switch self {
         case .save: return "s"
@@ -72,7 +70,6 @@ struct EditorShortcutState: Equatable {
     var conflict = false
     var canNavigate = false
     var findShowing = false
-    /// A terminal cover owns the keyboard; typed keys go to the program.
     var terminalOpen = false
 }
 
@@ -80,7 +77,6 @@ struct JobRunShortcutState: Equatable {
     var working = false
     var hasSelection = false
     var hasLiveRun = false
-    /// An unconfirmed create/run is waiting for Check/Retry, not a new Run.
     var hasPendingLaunch = false
     var modalPresented = false
     var terminalOpen = false
@@ -92,31 +88,20 @@ struct NewShortcutState: Equatable {
 }
 
 struct InspectorShortcutState: Equatable {
-    /// False where there is no inspector to show (no folder, compact phone
-    /// without a pushed surface, unknown workspace).
     var hasIdentity = false
     var terminalOpen = false
 }
 
 enum WorkbenchShortcutPolicy {
-    /// Save writes the open draft. Refuses while clean, while a save is in
-    /// flight, while a conflict waits for Reload/Keep, and while a terminal
-    /// owns the keyboard.
     static func canSave(_ state: EditorShortcutState) -> Bool {
         guard !state.terminalOpen else { return false }
         return state.dirty && !state.saving && !state.conflict
     }
 
-    /// Find toggles the bar. Always available in the editor except over a
-    /// terminal, where Command-F belongs to the program.
     static func canFind(_ state: EditorShortcutState) -> Bool {
         !state.terminalOpen
     }
 
-    /// Next/previous match. When the bar is hidden the same chord opens it
-    /// instead of doing nothing, so the shortcut stays enabled there; the
-    /// views route hidden-presses to `showing = true` and visible-presses to
-    /// `goNext`/`goPrevious`, which no-op honestly without matches.
     static func canFindNext(_ state: EditorShortcutState) -> Bool {
         guard !state.terminalOpen else { return false }
         return state.findShowing ? state.canNavigate : true
@@ -127,28 +112,20 @@ enum WorkbenchShortcutPolicy {
         return state.findShowing ? state.canNavigate : true
     }
 
-    /// Focused Run. Only for the selected job on screen, only when starting
-    /// is unambiguous, and never while a modal or terminal owns the screen.
-    /// Task placement (foreground/background/chat) stays an explicit choice,
-    /// so tasks expose no single-key Run.
     static func canRun(_ state: JobRunShortcutState) -> Bool {
         guard !state.modalPresented, !state.terminalOpen else { return false }
         guard !state.working, state.hasSelection else { return false }
         return !state.hasLiveRun && !state.hasPendingLaunch
     }
 
-    /// Contextual New (task/automation/workflow for the open surface).
     static func canCreate(_ state: NewShortcutState) -> Bool {
         !state.modalPresented && !state.terminalOpen
     }
 
-    /// Inspector toggle (workspace tools, review pane). Needs something to
-    /// show and a screen that is not a terminal.
     static func canToggleInspector(_ state: InspectorShortcutState) -> Bool {
         state.hasIdentity && !state.terminalOpen
     }
 
-    /// Every entry in the map, for the no-collision tests.
     static func binding(of shortcut: WorkbenchShortcut) -> (key: String, modifiers: WorkbenchShortcut.Modifiers) {
         (shortcut.key, shortcut.modifiers)
     }

@@ -11,22 +11,7 @@ import UIKit
 
 #if !os(macOS)
 
-/// What protects a connection between this phone and a computer, in the words
-/// and the numbers it actually runs on.
-///
-/// The claim is the product, so this screen shows the mechanism rather than a
-/// padlock: the keys are on the two devices, the relay carries bytes it cannot
-/// read, and the fingerprints below are the ones a person can compare against
-/// the other machine's Machines screen. Two devices showing the same pair of
-/// words are talking to each other and to nobody in between.
-///
-/// On the work list it sits as a glass divider, not a fourth device card. The
-/// keys stay a tap away. The wording follows the project's privacy rule:
-/// **the guarantee is the boundary, not the read.** Nothing here says
-/// tokenstat "cannot see" something it never receives in the first place,
-/// because a claim that overstates is a claim somebody can catch out.
 struct ClientSecurityCard: View {
-    /// The far end, when there is one. Nil shows this device alone.
     var peerKey: String?
     var peerName: String?
 
@@ -144,9 +129,6 @@ struct ClientSecurityCard: View {
     }
 
     private func load() async {
-        // The task id is `peerKey`, but a task already past its first await is
-        // not stopped by the next one starting. Capture what this run is for
-        // and refuse to publish into a different peer's screen.
         let wanted = peerKey
         let identity = try? await Bridge.machineIdentity()
         guard !Task.isCancelled, wanted == peerKey else { return }

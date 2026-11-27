@@ -46,8 +46,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// One honest answer about the network, written by `ConnectionTracker`. The
-/// name the chrome reads; the shape lives with the logic that fills it.
 typealias ConnectionUi = ConnectionUiState
 
 data class ClientState(
@@ -58,26 +56,13 @@ data class ClientState(
     val limitsError: String? = null,
     val error: String? = null,
     val connection: ConnectionUi = ConnectionUi(),
-    /// True only after a definitive account answer: signed in, or honestly
-    /// signed out (`account.status` came back saying `signedIn: false`).
-    ///
-    /// A network failure does **not** set this. Collapsing "could not check"
-    /// into "signed out" is the cold-start bug the Apple client already paid
-    /// for: `account.status` asks the account service, so a phone with a
-    /// valid token and no internet flashed the Sign in door and never
-    /// recovered without a retry.
     val authChecked: Boolean = false,
-    /// Why the last check failed, when it was not a clean signed-out answer.
-    /// Null while loading and after a check that answered.
     val authError: String? = null,
 ) {
     val signedIn: Boolean get() = account?.get("signedIn")?.jsonPrimitive?.content == "true"
 
-    /// The first check is still in flight. Splash territory.
     val authPending: Boolean get() = !authChecked && authError == null
 
-    /// The first check failed, usually because this device is offline. Show
-    /// a retry surface, not the Sign in door.
     val authNeedsRetry: Boolean get() = !authChecked && authError != null
     val canRemote: Boolean
         get() {
@@ -101,9 +86,6 @@ data class ClientState(
             ?.content
             ?.takeIf { it.isNotBlank() }
 
-    /// Whether this account has already had its one trial, on any store. The
-    /// gate is account-scoped on the server, so a trial taken on the App Store
-    /// or through the website counts here too.
     val trialUsed: Boolean
         get() = (account?.get("billing") as? JsonObject)
             ?.get("trialUsed")
@@ -118,8 +100,6 @@ private enum class SignInPollFailure { TRANSPORT, INVALID_GRANT, TERMINAL }
 
 private class SignInFailed(message: String) : Exception(message)
 
-// The core gives device polling its own codes. Transport errors below the
-// core envelope stay retryable too.
 private fun signInPollFailure(error: Exception): SignInPollFailure {
     val code = (error as? CoreFailure)?.code
     if (code == "device_transport" || code == "offline" || code == "host_timeout" || code == "host_unreachable") {
@@ -143,7 +123,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val chatDrafts = ai.tokenstat.tokenstat.ui.logic.ChatDraftFiles(java.io.File(app.filesDir, "chat-drafts"))
 
-    /// ViewModel-owned, so Back and changing project tools keep unsent writing.
     val chatComposers = ai.tokenstat.tokenstat.ui.logic.ChatComposerSessions<ai.tokenstat.tokenstat.ui.workspace.StagedAttachment>(
         attachmentCost = { it.data.length.toLong() * 2 + it.name.length.toLong() * 2 },
         saved = chatDrafts,
@@ -162,22 +141,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (next != null && next != current) mutableNewChatSetups.value = mutableNewChatSetups.value + (owner to next)
     }
 
-    /// The live SSH shells, in one place. Held here so navigating between
-    /// tabs cannot orphan a shell: a refresh reconciles against what the host
-    /// is holding and never drops a live connection. See `SshConnectionState`.
     val sshConnections = SshConnectionState(::core)
 
-    /// The workspaces session: which host is dialled and what it loaded.
-    /// Held here for the same reason as the shells, so leaving the tab does
-    /// not dial again on return. See `WorkspacesConnectionState`.
     val workspacesConnection = ai.tokenstat.tokenstat.ui.workspace.WorkspacesConnectionState()
 
     private val mutableNetworkRecoveryEpoch = MutableStateFlow(0L)
     val networkRecoveryEpoch = mutableNetworkRecoveryEpoch.asStateFlow()
 
-    /// What the app believes about the network, folded from the platform's
-    /// route and from every call that leaves this process. One tracker, so
-    /// two screens cannot say different things about one failure.
     private val tracker = ConnectionTracker()
     private val connectivity = ConnectivityMonitor(app, viewModelScope)
 
@@ -207,9 +177,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refreshLimits(force: Boolean = false) = planLimits.refresh(force)
 
     init {
-        // Every call that leaves this device reports here, and offline ones
-        // are refused before they spend their patience budget. Installed
-        // once, where the tracker lives, so no screen has to remember to.
         CoreObserver.report = { method, peer, error -> noteCall(method, peer, error) }
         CoreObserver.precheck = { method ->
             if (NetworkGate.isOffline && NetworkPlane.of(method) != null) {
@@ -219,9 +186,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         connectivity.start()
-        // Synchronously, before the first call goes out: a launch with no
-        // internet must refuse an account call now rather than spend its
-        // patience budget finding out.
         tracker.setPath(connectivity.status.value)
         publishConnection()
         viewModelScope.launch {
@@ -231,10 +195,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            // The network came back, or moved to another route. A cold start
-            // with no internet leaves an account nobody could read, and the
-            // tunnel session this phone holds should redial now rather than
-            // after its backoff.
             connectivity.restored.collect {
                 tracker.reset()
                 publishConnection()
@@ -253,8 +213,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CoreObserver.precheck = null
     }
 
-    /// Fold one call's outcome into the tracker and publish what changed.
-    /// Calls that say nothing about the network move nothing.
     private fun noteCall(method: String, peer: String?, error: Throwable?) {
         val plane = NetworkPlane.of(method) ?: return
         val kind = error?.let {
@@ -264,10 +222,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         publishConnection()
     }
 
-    /// Called from whatever thread a call finished on, so the write is a
-    /// compare-and-set rather than a read-modify-write: an IO thread
-    /// reporting a failure must not lose a main-thread write of the account
-    /// it raced with.
     private fun publishConnection() {
         NetworkGate.isOffline = tracker.offline
         val next = tracker.ui()
@@ -301,10 +255,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     authChecked = true,
                     authError = null,
                 )
-                // Cheap on every load, and it is what lets the chip say
-                // "Studio" rather than "Computer" when an account has four
-                // machines. Only machines their owner named: an invented
-                // name in a warning is a puzzle, not news.
                 notePeerNames(
                     ((accountObject["machines"] as? JsonArray).orEmpty())
                         .mapNotNull { it as? JsonObject }
@@ -324,10 +274,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             .onFailure { err ->
                 if (err is CancellationException) throw err
-                // Not an answer about the account, so `authChecked` is left
-                // where it was. A check that already succeeded once keeps the
-                // app open; a first check that never landed gets the retry
-                // door instead of Sign in.
                 mutableState.value = mutableState.value.copy(
                     error = err.message,
                     authError = err.message ?: L10n.text("android.appviewmodel.the_account_could_not_be_reached.3159ef5a"),
@@ -336,8 +282,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         mutableState.value = mutableState.value.copy(loading = false)
     }
 
-    /// The person pressed Try now. Re-read the route, forget the counters
-    /// that described a network which may no longer exist, and ask again.
     fun retryConnection() {
         connectivity.checkNow()
         tracker.reset()
@@ -345,8 +289,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
-    /// Names for the machines this account knows about, so the chip can say
-    /// "Studio" rather than "Computer".
     fun notePeerNames(names: Map<String, String>) {
         tracker.setPeerNames(names)
         publishConnection()
@@ -371,9 +313,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         limits.await()
     }
 
-    // One account-plane breakdown, the way the iOS Insights model loads it:
-    // per cut, from `account.report`, because a client has no archive of its
-    // own. `group` is "model", "source" or "day".
     suspend fun accountReport(group: String, weeks: Int = 53): JsonObject =
         core("account.report", buildJsonObject { put("group", group); put("weeks", weeks) }) as JsonObject
 
@@ -385,16 +324,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val signInError = _signInError.asStateFlow()
     private var signInJob: Job? = null
 
-    // Start the device flow, open the approval page, then poll until
-    // confirmed, the way the iOS account model does. The cadence and the
-    // deadline come from the server: polling faster than asked invites a
-    // rate limit, and a fixed loop ends while somebody is still typing a
-    // provider password.
     fun signIn(openPage: (String) -> Unit) {
-        // A sign-in is already running. Do not start a second one: a second
-        // device code orphans the first, and the poll that is running belongs
-        // to the code the user is looking at. Put the page back in front of
-        // them instead, which is what tapping the button again means.
         if (signInJob?.isActive == true) {
             _pendingLogin.value?.let { openPage(it.url) }
             return
@@ -403,7 +333,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _signInError.value = null
         val previous = signInJob
         signInJob = viewModelScope.launch {
-            previous?.join() // Old cancellation must finish before starting a new device flow.
+            previous?.join()
             try {
                 val device = CoreClient.call("account.deviceStart").jsonObject
                 val raw = device["openUrl"]?.jsonPrimitive?.content
@@ -469,9 +399,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Put the approval page back in front of the user. The browser tab can
-    // be dismissed while the sign-in it started is still perfectly alive
-    // underneath.
     fun presentSignInPage(openPage: (String) -> Unit) {
         _pendingLogin.value?.let { openPage(it.url) }
     }
@@ -526,7 +453,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     data class HandleAnswer(val available: Boolean, val reason: String?, val message: String)
 
-    /// Whether this account could claim a handle. Advice while somebody types.
     suspend fun checkHandle(handle: String): HandleAnswer {
         val answer = CoreClient.call("account.checkHandle", buildJsonObject { put("handle", handle) }).jsonObject
         return HandleAnswer(
@@ -539,15 +465,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun claimHandle(handle: String) =
         changeProfile("account.claimHandle", buildJsonObject { put("handle", handle) })
 
-    /// Null leaves that setting as it is.
     suspend fun setProfile(public: Boolean? = null, indexable: Boolean? = null) =
         changeProfile("account.setVisibility", buildJsonObject {
             public?.let { put("public", it) }
             indexable?.let { put("indexable", it) }
         })
 
-    /// The one-time offer closed. Remembered here first, so an account service
-    /// that cannot be reached does not turn "not now" into every launch.
     fun answerHandleOffer() {
         val account = state.value.account
         ai.tokenstat.tokenstat.ui.account.HandleOffer.markAnswered(getApplication(), account)
@@ -559,18 +482,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /// Change the profile and take the account the change answered with. A
-    /// status read already on its way would put the old answer back, so it
-    /// lands first.
     private suspend fun changeProfile(method: String, params: JsonObject) {
         refreshJob?.join()
         applyAccount(CoreClient.call(method, params)).join()
     }
 
     private fun syncWorkspaceAccount(account: JsonObject) {
-        // Background host warmup uses HomeStores.pinIdentity as its owner.
-        // Keep this lease in the same account scope or every secondary host
-        // loses its ticket before it can publish a snapshot.
         workspacesConnection.setAccountOwner(ai.tokenstat.tokenstat.ui.home.HomeStores.pinIdentity(account).ifBlank { null })
         (account["machines"] as? JsonArray)?.let { machines ->
             val thisId = account["thisMachineId"]?.jsonPrimitive?.contentOrNull
@@ -583,9 +500,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // This phone's own key, so the workspaces list can leave it out the way
-    // the iOS model does: a record from before the server knew client kinds
-    // carries no kind and would otherwise list this phone as an asleep host.
     suspend fun machineIdentity(): JsonObject =
         CoreClient.call("machine.identity") as? JsonObject ?: buildJsonObject {}
 
@@ -593,10 +507,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CoreClient.call("machine.peers") as? JsonArray ?: JsonArray(emptyList())
 
     suspend fun prepareHost(peer: String, label: String) {
-        // Pair once: a peer this store already approves is paired, and
-        // re-pairing on every connect would redo its grant bookkeeping for
-        // nothing. Anything else (unknown, pending, revoked) pairs, which is
-        // also what re-approves a peer the owner un-revoked elsewhere.
         val approved = runCatching {
             machinePeers().any {
                 val entry = it as? JsonObject
@@ -614,23 +524,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         CoreClient.call("remote.serve", buildJsonObject { put("tunnel", true) })
     }
 
-    /// Tell the tunnel the app is back, port of `Bridge.nudgeTunnel`. A
-    /// plain nudge wakes the supervisor and starts a session that is not
-    /// running. `reconnect` drops a live socket after a path change left
-    /// it answering nothing. Without this a fresh process holds no tunnel
-    /// session and the first dial fails with "tunnel session is not
-    /// running" instead of opening.
     suspend fun nudgeTunnel(reconnect: Boolean = false) {
         runCatching {
             CoreClient.call("remote.nudge", buildJsonObject { put("reconnect", reconnect) })
         }
     }
 
-    /// The nudge for coming back to the foreground, port of
-    /// `Bridge.nudgeTunnelOnForeground`. Asking what the tunnel thinks
-    /// first costs one local call and drops a socket only when the tunnel
-    /// already says it is not connected, so a healthy session keeps its
-    /// channels.
     suspend fun nudgeTunnelOnForeground() {
         val offline = runCatching {
             val status = CoreClient.call("remote.status") as? JsonObject
@@ -639,10 +538,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         nudgeTunnel(reconnect = offline)
     }
 
-    /// Approve one machine key, and nothing else. Setup pairs the key that
-    /// arrived over the verified SSH session so its own tunnel calls are not
-    /// refused as unapproved; it does not turn on serving, which is a
-    /// separate decision the Mac door owns.
     suspend fun pairPeer(peer: String, label: String) {
         CoreClient.call("machine.pair", buildJsonObject {
             put("key", peer)
@@ -661,8 +556,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun hostStats(peer: String): JsonObject =
         CoreClient.remote(peer, "host.stats") as? JsonObject ?: buildJsonObject {}
 
-    /// Direct vs relay for a live peer, from this device's `remote.status`.
-    /// Missing stays missing: never invent a path nobody observed.
     suspend fun peerRoute(peer: String): String? {
         val status = runCatching { CoreClient.call("remote.status") as? JsonObject }.getOrNull()
         val peers = ((status?.get("traffic") as? JsonObject)?.get("peers") as? JsonArray)
@@ -684,8 +577,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return GeneralFolder.present(folders, L10n.text("common.new_chat.no_repository"))
     }
 
-    /// An agent update started from a chat. It runs here so it outlives the
-    /// agent sheet it was started from, and the chat shows it as a toast.
     data class AgentUpdateNotice(val text: String, val done: Boolean, val failed: Boolean)
     private val mutableAgentUpdate = MutableStateFlow<AgentUpdateNotice?>(null)
     val agentUpdate = mutableAgentUpdate.asStateFlow()
@@ -696,8 +587,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (mutableAgentUpdate.value?.done == true) mutableAgentUpdate.value = null
     }
 
-    /// Update one agent on `peer`'s host. `finished` gets the host's answer,
-    /// or null when there was none, so the caller can refresh its lists.
     fun updateAgent(peer: String, id: String, label: String, finished: (JsonObject?) -> Unit = {}) {
         if (mutableUpdatingAgent.value != null) {
             finished(null)

@@ -4,36 +4,6 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
-//! Live per-session token and list-rate meter.
-//!
-//! The sidebar wants two numbers the archive already knows how to compute:
-//! how many tokens this session has used, and what that would have cost at
-//! list rates. This module answers both from the same allowlisted parsers
-//! the archive uses, without writing anything to the store.
-//!
-//! Conversation text is dropped at the parser boundary. The reading carries
-//! counters, a model id, a context fraction and verified native session IDs.
-//! Session IDs stay on the terminal route; aggregate account snapshots omit them.
-//!
-//! **The reading starts when the process did.** A folder's transcript is the
-//! folder's whole history, so folding all of it in reported the last session's
-//! spend, or this month's, against a shell that opened a second ago. Every
-//! event before the spawn is dropped, and a session that has not produced one
-//! yet has no reading rather than an inherited one.
-//!
-//! Every harness that writes a local log naming its folder is metered:
-//! Claude, Grok, Codex, OpenCode and Antigravity. Each supplies a locator
-//! that answers "which log is this folder's", and they share one `fold`.
-//! A harness whose log cannot say which folder it belongs to keeps CPU · RAM
-//! rather than being given somebody else's numbers.
-//!
-//! Several processes of the same harness in one folder share the folder's
-//! logs in spawn order: the first process claims the first log born at or
-//! after it, the second claims the next, and so on. Picking independently
-//! would give every close-started window the same first log. A process
-//! whose own log has not been written yet has no reading, not its sibling's.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -121,9 +91,7 @@ pub(crate) fn reading(
     let mut reading = fold(&mine, &current_prices())?;
     reading.session_identities =
         terminal_session_identities(harness, &mine, native_parent.as_deref());
-    // Grok's own log says nothing about how the session is paid for, but the
-    // login it runs under does: an OIDC login is a SuperGrok subscription, an
-    // API key is metered. Read, never written, and no token leaves this call.
+
     if harness == "grok" && reading.billing == BillingMode::Unknown {
         reading.billing = grok_billing();
     }
@@ -199,11 +167,6 @@ fn terminal_session_identities(
     })
 }
 
-/// Whether the Grok CLI on this machine is signed in to a subscription.
-///
-/// `auth.json` holds one record per issuer with an `auth_mode`. `oidc` is the
-/// SuperGrok sign-in; anything else is a key the person pasted, which bills.
-/// An unreadable or absent file is `Unknown`, not a guess in either direction.
 fn grok_billing() -> BillingMode {
     let Some(home) = tokenstat_paths::home_dir() else {
         return BillingMode::Unknown;
@@ -228,17 +191,8 @@ fn grok_billing() -> BillingMode {
     seen
 }
 
-/// How far before the spawn a turn still counts as this session's.
-///
-/// The harness stamps the turn and the daemon stamps the spawn, and they are
-/// not the same clock. Used by the in-memory filter and by the sources that
-/// can push the same floor down into their own query.
 const GRACE_MS: i64 = 2_000;
 
-/// One live process, plus its siblings in the same folder.
-///
-/// The pty id is the tie-break when two windows share a spawn timestamp,
-/// which Devin's second-resolution `created_at` makes common.
 #[derive(Clone, Copy)]
 struct SpawnMatch<'a> {
     id: &'a str,
@@ -246,16 +200,6 @@ struct SpawnMatch<'a> {
     siblings: &'a [(&'a str, u64)],
 }
 
-/// Events this session could have produced.
-///
-/// Borrowed, not cloned. This runs for every live session on every `pty.list`
-/// poll, and a long transcript is thousands of events each holding several
-/// strings: copying them all every two seconds to read them once is a lot of
-/// allocator traffic for nothing.
-///
-/// A small grace before the spawn, because the two clocks are not the same
-/// one: the harness stamps the turn, the daemon stamps the spawn, and a first
-/// turn written a moment "before" launch is still this session's.
 fn spawn_floor(start: u64) -> i64 {
     i64::try_from(start)
         .unwrap_or(i64::MAX)
@@ -267,20 +211,12 @@ fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<&UsageEvent> {
     events.iter().filter(|e| e.ts.utc_ms >= floor).collect()
 }
 
-/// The first unmatched log (or session) born at or after this process started.
-///
-/// Live siblings of the same harness and folder are assigned in spawn order,
-/// so two windows started a second apart do not both claim the first file.
-/// Equal spawn times break on pty id, equal births on `T`, so HashMap
-/// iteration cannot hand the same session to two windows. With no siblings
-/// this is the earliest candidate at or after the spawn.
 fn claim_since<T: Ord>(
     candidates: impl IntoIterator<Item = (i64, T)>,
     spawn: SpawnMatch<'_>,
 ) -> Option<T> {
     let mut remaining: Vec<(i64, T)> = candidates.into_iter().collect();
-    // Multiple Muse shards can name the same parent session. Claim each
-    // session once, using its earliest recorded birth.
+
     remaining.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
     remaining.dedup_by(|a, b| a.1 == b.1);
     remaining.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -307,7 +243,6 @@ fn claim_since<T: Ord>(
     None
 }
 
-/// Independent pick, used when this process is the only one in the folder.
 #[cfg(test)]
 fn earliest_since<T: Ord>(
     candidates: impl IntoIterator<Item = (i64, T)>,
@@ -323,14 +258,6 @@ fn earliest_since<T: Ord>(
     )
 }
 
-/// Keep one database session when a folder query returned several.
-///
-/// OpenCode, Kilo, Hermes, Devin and Qwen store every conversation in one
-/// place. Birth must be the conversation start, not the first turn after a
-/// later process's SQL floor, or an older still-writing session looks new
-/// and wins. Empty session ids mean the source does not name conversations,
-/// so the caller keeps the rows it already has. A named session that this
-/// spawn does not own is empty, not the sibling's rows.
 fn pick_session(events: Arc<Vec<UsageEvent>>, spawn: SpawnMatch<'_>) -> Arc<Vec<UsageEvent>> {
     let births = named_session_births(&events);
     if births.is_empty() {
@@ -356,7 +283,6 @@ fn named_session_births(events: &[UsageEvent]) -> Vec<(i64, String)> {
         .collect()
 }
 
-/// Pick a named session from unfiltered births, then keep that session's rows.
 fn pick_named_session(
     events: Arc<Vec<UsageEvent>>,
     births: Vec<(i64, String)>,
@@ -376,12 +302,6 @@ fn pick_named_session(
     Arc::new(mine)
 }
 
-/// When a log (or session directory) was born, for matching it to a spawn.
-///
-/// The first timestamp in the file is the session start. Creation time is
-/// the fallback when the head has no clock. Modification time is last: a
-/// long-running session is still being written, so mtime is "now" and would
-/// make an hour-old process look like it owns the newest sibling.
 fn file_born_ms(path: &Path, head: Option<&str>) -> i64 {
     if let Some(head) = head
         && let Some(ms) = first_timestamp_ms(head)
@@ -421,9 +341,6 @@ fn first_timestamp_ms(head: &str) -> Option<i64> {
 fn json_time_ms(value: &serde_json::Value, key: &str) -> Option<i64> {
     let stamp = value.get(key)?;
     if let Some(n) = stamp.as_i64() {
-        // Seconds vs milliseconds vs microseconds. Ten billion ms is 1970-04,
-        // so a smaller absolute value is a Unix second. Ten trillion ms is
-        // year 2286, so a larger value is microseconds (Muse `recorded_at`).
         return Some(if n.unsigned_abs() < 10_000_000_000 {
             n.saturating_mul(1_000)
         } else if n.unsigned_abs() < 10_000_000_000_000 {
@@ -448,24 +365,6 @@ pub(crate) fn fold_events(events: &[UsageEvent], prices: &PriceTable) -> Option<
     fold(&events.iter().collect::<Vec<_>>(), prices)
 }
 
-/// Collapse events that are the same request seen more than once.
-///
-/// A transcript is not a list of requests, it is a list of rows, and one
-/// request is written many times while it streams: the prompt side is fixed
-/// and `output_tokens` grows. The archive never sees that, because the store
-/// upserts on the event id and keeps the larger counter per field, so a
-/// duplicate updates a row instead of adding one. The meter reads the same
-/// parsers and never goes near the store, so without this it charged a
-/// session once per row and read roughly double what the harness itself
-/// reports. Same key, same rule: highest wins per field, `None` is absent
-/// rather than zero.
-///
-/// First-seen order is kept, so the model and the context figure still come
-/// from the newest turn.
-///
-/// Borrowed, like `since`: this runs for every live session on every
-/// `pty.list` poll, so a merged request carries the strings it needs by
-/// reference rather than cloning a long session's events to read them once.
 fn collapse<'a>(events: &[&'a UsageEvent]) -> Vec<Folded<'a>> {
     let mut order: Vec<EventId> = Vec::with_capacity(events.len());
     let mut by_id: HashMap<EventId, Folded<'a>> = HashMap::with_capacity(events.len());
@@ -473,9 +372,7 @@ fn collapse<'a>(events: &[&'a UsageEvent]) -> Vec<Folded<'a>> {
         match by_id.get_mut(&event.id) {
             Some(kept) => {
                 keep_larger(&mut kept.counters, &event.counters);
-                // A row that streamed a model or a billing mode the first one
-                // lacked is still this request. Later rows win where they say
-                // something, never where they say nothing.
+
                 if kept.model.is_empty() || kept.model == "unknown" {
                     kept.model = &event.model;
                 }
@@ -500,7 +397,6 @@ fn collapse<'a>(events: &[&'a UsageEvent]) -> Vec<Folded<'a>> {
     order.iter().filter_map(|id| by_id.remove(id)).collect()
 }
 
-/// One request after the rows that streamed it have been merged.
 struct Folded<'a> {
     rollup: bool,
     model: &'a str,
@@ -508,13 +404,6 @@ struct Folded<'a> {
     counters: Counters,
 }
 
-/// Whether this row is a session running total rather than one turn's usage.
-///
-/// Hermes only ever writes one, per session+model+task. Codex writes per
-/// request deltas until they disagree with the vendor's own total, and then
-/// replaces them with a single cumulative row. Either way the input side is
-/// the session's whole prompt history, so it cannot stand in for the live
-/// context.
 fn is_rollup(event: &UsageEvent) -> bool {
     match event.source {
         SourceId::Hermes => true,
@@ -523,7 +412,6 @@ fn is_rollup(event: &UsageEvent) -> bool {
     }
 }
 
-/// Per-field maximum, mirroring the store's `ON CONFLICT` update.
 fn keep_larger(kept: &mut Counters, seen: &Counters) {
     fn larger(kept: &mut Option<u64>, seen: Option<u64>) {
         if let Some(n) = seen {
@@ -575,14 +463,6 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         .map(|e| e.model.to_string())
         .unwrap_or_default();
 
-    // A rollup row carries the session's running total, not a per-turn prompt.
-    // Hermes writes nothing else, and it persists no live context figure at
-    // all: the `124K / 200K` its own `/usage` prints is in-session state that
-    // never reaches `state.db`. Codex falls back to one when its deltas
-    // disagree with the vendor's total. The "last event's input_total" below is
-    // then the whole session's cumulative prompt (input + cache_read), which
-    // makes a context bar read as hundreds of percent. Withhold it rather than
-    // show a number that is meaningless as a context fill.
     let rollup = events.iter().any(|e| e.rollup);
     let context_used = if rollup {
         None
@@ -598,11 +478,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         .catalog()
         .and_then(|c| c.get(&lookup))
         .and_then(|m| m.context_window());
-    // A model the snapshot has not caught up with used to cost the bar
-    // outright: `context_used` was thrown away whenever the window was
-    // missing, so a Grok 4.6 session showed a lifetime token count and
-    // nothing else. The used figure stands on its own, and a sibling window
-    // is a marked estimate rather than a silent one.
+
     let context_window = published.or_else(|| {
         prices
             .catalog()
@@ -610,10 +486,6 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
     });
     let context_estimated = published.is_none() && context_window.is_some();
 
-    // Zero is an answer once something priced: a session that has run a turn
-    // costs what it costs, and $0.00 counting up reads as a meter where an
-    // absent figure that later appears at $7.98 reads as a surprise. Nothing
-    // priced at all is still nothing, never a made-up zero.
     let billing = billing_mode(&events);
     Some(MeterReading {
         tokens,
@@ -629,10 +501,6 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
     })
 }
 
-/// How this session is paid for, from the events themselves.
-///
-/// Metered wins over plan: a session that billed one request per token is not
-/// covered, whatever the rest of it says.
 fn billing_mode(events: &[Folded<'_>]) -> BillingMode {
     if events.iter().any(|e| e.billing == BillingMode::Metered) {
         return BillingMode::Metered;
@@ -685,11 +553,9 @@ pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
         "claude" => Some("claude"),
         "grok" => Some("grok"),
         "codex" => Some("codex"),
-        // The launcher ships a second OpenCode tile for a side-by-side
-        // install. Same logs, same database, so the same reader.
+
         "opencode" | "opencode2" => Some("opencode"),
-        // Kilo Code forked OpenCode but keeps its own database, so it is its
-        // own harness here rather than another name for that one.
+
         "kilo" | "kilocode" => Some("kilo"),
         "hermes" => Some("hermes"),
         "pi" => Some("pi"),
@@ -704,19 +570,6 @@ pub(crate) fn harness_name(command: &str) -> Option<&'static str> {
     }
 }
 
-/// The Codex rollout this process started, if one has been written.
-///
-/// A rollout says which directory it was recorded in, so the match is the
-/// folder itself rather than a label. Only the head of each candidate is
-/// read: the answer is on a rollout's first records and the file itself can
-/// be tens of megabytes. Among matching files, live processes in the folder
-/// claim logs in spawn order, not the newest file and not independently the
-/// same first file.
-///
-/// The scan is memoised. This runs from `pty.info`, which a focused session
-/// polls four times a second, and answering it by reading every rollout each
-/// time would be hundreds of megabytes a second on a machine with a year of
-/// them. See `resolve_logs`.
 fn codex_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let path = resolve_logs("codex", cwd, spawn, || {
         let home = tokenstat_paths::home_dir()?;
@@ -740,11 +593,6 @@ fn codex_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>
     cached_events(&path, |contents| codex::parse_file(&path, contents).events)
 }
 
-/// Devin's database, read for one folder since this session started.
-///
-/// Both narrowings are SQL, the way OpenCode's and Hermes's are: one database
-/// holds every session the machine has run, and the counters sit inside a JSON
-/// column that SQLite can pick apart without handing the conversation over.
 fn devin_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let db = devin::discover(&home)?;
@@ -758,11 +606,6 @@ fn devin_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>
     (!events.is_empty()).then_some(events)
 }
 
-/// Kimi Code wires for this process in this workspace.
-///
-/// One session is a directory with a main agent wire and any subagent wires.
-/// The meter picks that directory, then folds every wire under it. A second
-/// Kimi window in the folder is a later session directory.
 fn kimi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let root = kimi::discover(&home)?;
@@ -793,7 +636,6 @@ fn kimi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
     (!all.is_empty()).then_some(Arc::new(all))
 }
 
-/// Qwen Code's monthly ledger narrowed to this process's session.
 fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let root = qwen::discover(&home)?;
@@ -823,15 +665,6 @@ fn qwen_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
     (!events.is_empty()).then_some(events)
 }
 
-/// The Muse session this process started, in this folder.
-///
-/// Muse files by date and uuid rather than by folder, so the folder has to be
-/// read out of each candidate rather than encoded in a path. Same shape as
-/// Codex above, and same reason for the cap and the memo: this answers a poll
-/// four times a second and a session log runs to tens of megabytes.
-///
-/// A session is the parent directory. Subagent logs under it fold into the
-/// same reading. A second Muse window in the folder is a later parent.
 fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<(Arc<Vec<UsageEvent>>, String)> {
     let parent = resolve_logs("muse", cwd, spawn, || {
         let home = tokenstat_paths::home_dir()?;
@@ -864,18 +697,8 @@ fn muse_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<(Arc<Vec<UsageEvent>>
     (!all.is_empty()).then_some((Arc::new(all), parent_id))
 }
 
-/// How many matching logs a locator will keep for one folder.
-///
-/// Matches for this folder are collected first, newest mtime first, then
-/// capped. The cap is what stops a folder with a year of sessions from
-/// handing every one to the spawn-order pick on every poll.
 const SCAN_LIMIT: usize = 40;
 
-/// How long a resolved (or absent) log stays trusted.
-///
-/// Long enough that a 4Hz poll scans at most once per interval, short enough
-/// that a session whose first turn has just been written starts reporting
-/// within a few seconds of it.
 const RESOLVE_TTL: Duration = Duration::from_secs(5);
 
 struct ResolvedLogs {
@@ -888,13 +711,6 @@ fn resolve_cache() -> &'static Mutex<HashMap<(&'static str, String), ResolvedLog
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Which logs belong to this folder, scanned at most once per `RESOLVE_TTL`.
-///
-/// The scan itself is per folder. Picking among the results is per spawn, so
-/// three processes in one folder share the scan and still get three files.
-/// A miss is cached too: a folder the harness has never been used in is the
-/// case that would otherwise scan everything on every poll and find nothing
-/// every time.
 fn resolve_logs(
     harness: &'static str,
     cwd: &str,
@@ -940,11 +756,6 @@ fn newest_first(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     stamped.into_iter().map(|(_, path)| path).collect()
 }
 
-/// The first part of a file, as text.
-///
-/// Enough for the records that name a session's folder, and bounded so that
-/// asking a 40 MB rollout which directory it belongs to costs 64 KB. Cut at
-/// the last newline so the caller never sees half a JSON object.
 fn read_head(path: &Path) -> Option<String> {
     use std::io::Read;
     const HEAD_BYTES: usize = 64 * 1024;
@@ -961,12 +772,6 @@ fn read_head(path: &Path) -> Option<String> {
     Some(text)
 }
 
-/// OpenCode's database, read for one folder since this session started.
-///
-/// Both narrowings are SQL. One database holds every folder this machine has
-/// ever opened and reaches gigabytes: on a working Mac one folder is 3,700
-/// messages and 12 MB of JSON, all but a handful of it older than the session
-/// asking. Reading it whole four times a second is what this avoids.
 fn opencode_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let db = opencode::discover(&home)?;
@@ -980,8 +785,6 @@ fn opencode_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEven
     (!events.is_empty()).then_some(events)
 }
 
-/// Kilo Code's database, narrowed the same way OpenCode's is. Same schema,
-/// same reason for the narrowing.
 fn kilo_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let db = kilo::discover(&home)?;
@@ -995,11 +798,6 @@ fn kilo_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
     (!events.is_empty()).then_some(events)
 }
 
-/// Hermes's state database, for this folder since this session started.
-///
-/// Its rows are running totals rather than per-call records, so a reading here
-/// is the session's total so far rather than a sum of turns. Two Hermes
-/// windows in one folder are two database sessions, picked by birth time.
 fn hermes_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let db = hermes::discover(&home)?;
@@ -1012,13 +810,6 @@ fn hermes_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>
     (!events.is_empty()).then_some(events)
 }
 
-/// Pi's session log for this process in this folder.
-///
-/// Pi files sessions under a directory named after the folder, so the folder
-/// is found by name rather than by reading heads: `/Users/x/git/demo` is
-/// `--Users-x-git-demo--`. That encoding is lossy in the other direction, so
-/// this only ever goes forwards, from the folder we already know to the
-/// directory it must be in.
 fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let root = pi::discover(&home)?;
@@ -1044,14 +835,10 @@ fn pi_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     })
 }
 
-/// Match Oh My Pi's main transcript across its profile roots.
 fn omp_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let roots = omp::discover(&home);
     let path = resolve_logs("omp", cwd, spawn, || {
-        // OMP has used home-relative, absolute and hashed bucket names.
-        // Read each main transcript's session header instead of guessing a
-        // bucket name; do not claim subagent files as separate terminals.
         let files: Vec<_> = roots
             .iter()
             .flat_map(|root| {
@@ -1098,12 +885,6 @@ fn omp_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> 
     })
 }
 
-/// The DeepSeek Harness transcript for this process in this folder.
-///
-/// Its sessions live one folder deeper than Pi's (`<encoded>/session-<uuid>/`)
-/// and the file is compressed, so the parser opens it rather than being handed
-/// text. Small enough to decompress on a poll: a long session is tens of
-/// kilobytes.
 fn dsh_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let home = tokenstat_paths::home_dir()?;
     let root = dsh::discover(&home)?;
@@ -1127,17 +908,10 @@ fn dsh_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> 
     (!events.is_empty()).then_some(events)
 }
 
-/// How Pi and the DeepSeek Harness spell a folder as a directory name. The two
-/// encode it the same way; only the depth below it differs.
 fn pi_dir_name(cwd: &str) -> String {
     format!("--{}--", cwd.trim_matches('/').replace('/', "-"))
 }
 
-/// The Antigravity conversation this process started in this folder.
-///
-/// One database per conversation, each naming its workspace as a `file://`
-/// URI. Memoised like the Codex scan: opening forty SQLite databases four
-/// times a second to answer one question is not a poll, it is a load test.
 fn antigravity_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>> {
     let path = resolve_logs("antigravity", cwd, spawn, || {
         let home = tokenstat_paths::home_dir()?;
@@ -1175,9 +949,7 @@ fn grok_events(cwd: &str, spawn: SpawnMatch<'_>) -> Option<Arc<Vec<UsageEvent>>>
     let session_dir = grok_home.join("sessions").join(&encoded);
     let sid = claim_since(child_dirs_born(&session_dir), spawn)?;
     let log = grok::log_path(&grok_home)?;
-    // Parse with an empty session index so the cached events do not belong
-    // to whichever session happened to ask first. Model is joined after
-    // the filter, from this session's own summary.
+
     let events = cached_events(&log, |contents| {
         grok::parse_file(&log, contents, &HashMap::new()).events
     })?;
@@ -1229,9 +1001,6 @@ fn grok_one_session(home: &Path, encoded_cwd: &str, sid: &str) -> Option<grok::S
     })
 }
 
-/// Claude conversation files in `dir`, with the birth time used to match a
-/// spawn. Does not descend: subagent transcripts belong to a parent we
-/// cannot name.
 fn jsonl_born(dir: &Path) -> Vec<(i64, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -1255,7 +1024,6 @@ fn jsonl_born(dir: &Path) -> Vec<(i64, PathBuf)> {
         .collect()
 }
 
-/// Grok session directories under a folder, with birth times for spawn match.
 fn child_dirs_born(dir: &Path) -> Vec<(i64, String)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -1284,11 +1052,6 @@ struct CachedParse {
     events: Arc<Vec<UsageEvent>>,
 }
 
-/// The shortest a parse of a live store is trusted, whatever its mtime says.
-///
-/// A database being written to by the session being measured changes on every
-/// poll, so mtime alone caches nothing at exactly the moment it matters. Two
-/// seconds is what the price book already uses for the same reason.
 const LIVE_PARSE_FLOOR: Duration = Duration::from_secs(2);
 
 fn parse_cache() -> &'static Mutex<HashMap<PathBuf, CachedParse>> {
@@ -1296,9 +1059,6 @@ fn parse_cache() -> &'static Mutex<HashMap<PathBuf, CachedParse>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The parse cache holds whole usage histories, so it is bounded. A machine
-/// that opens many stores cannot grow it without limit; the oldest parse is
-/// dropped first, and a miss is only a reparse.
 const PARSE_CACHE_ENTRIES: usize = 64;
 
 fn cache_parse(key: PathBuf, entry: CachedParse) {
@@ -1327,8 +1087,6 @@ fn cached_events(
         && let Some(hit) = guard.get_mut(path)
         && hit.mtime == mtime
     {
-        // True LRU: a hit refreshes recency, so the log polled four times a
-        // second is not evicted ahead of one parsed once and never touched.
         hit.at = Instant::now();
         return Some(Arc::clone(&hit.events));
     }
@@ -1345,15 +1103,6 @@ fn cached_events(
     Some(events)
 }
 
-/// When a SQLite store was last written, sidecars included.
-///
-/// This is why OpenCode 2 kept reporting `0% ctx · $0.00 · 0k`. The database
-/// runs in WAL mode, so a turn lands in `opencode.db-wal` and the database
-/// file itself does not change until a checkpoint, hours later. The cache
-/// compared the database file's mtime, found it equal every time, and served
-/// the parse it made when the session was still empty for the whole life of
-/// that session. Taking the newest of the database and its `-wal` and `-shm`
-/// sidecars makes "has this changed" mean what the cache assumed it meant.
 fn store_mtime(path: &Path) -> Option<SystemTime> {
     let mut newest = path.metadata().ok()?.modified().ok()?;
     for suffix in ["-wal", "-shm"] {
@@ -1369,11 +1118,6 @@ fn store_mtime(path: &Path) -> Option<SystemTime> {
     Some(newest)
 }
 
-/// The same cache, for a source that is read by path rather than as text.
-///
-/// A SQLite database cannot be handed to a parser as a string, and OpenCode's
-/// holds every folder this machine has opened, so the key carries the
-/// directory the rows were filtered to as well as the file.
 fn cached_db_events(
     path: &Path,
     scope: &str,
@@ -1388,16 +1132,11 @@ fn cached_db_events(
             path.file_name().unwrap_or_default().to_string_lossy()
         ))
     };
-    // Mtime **or** recency. A store the measured session is writing to changes
-    // on every poll, so mtime alone stops being a cache at the one moment the
-    // meter is actually being watched.
+
     if let Ok(mut guard) = parse_cache().lock()
         && let Some(hit) = guard.get_mut(&key)
         && (hit.mtime == mtime || hit.at.elapsed() < LIVE_PARSE_FLOOR)
     {
-        // True LRU, but only on an mtime match: refreshing the stamp on a
-        // floor hit would extend the freshness window itself, and a store
-        // polled constantly would then never reparse.
         if hit.mtime == mtime {
             hit.at = Instant::now();
         }
@@ -1617,9 +1356,6 @@ mod tests {
         assert_eq!(identities.entries[0].status, "current");
     }
 
-    /// The trap the archive avoids in SQL and the meter used to walk into: a
-    /// streaming request is written once per chunk, so summing rows charges a
-    /// session twice for one turn.
     #[test]
     fn a_streamed_request_is_counted_once() {
         let mut first = event("claude-opus-4-5", 10, 1_000, 5);
@@ -1658,9 +1394,6 @@ mod tests {
 
     #[test]
     fn a_first_turn_just_before_the_spawn_still_counts() {
-        // The harness stamps the turn and the daemon stamps the spawn. They
-        // are not the same clock, and a turn a moment "before" launch is
-        // still this session's.
         let events = [stamped(59_500)];
         assert_eq!(since(&events, 60_000).len(), 1);
     }
@@ -1694,8 +1427,6 @@ mod tests {
 
     #[test]
     fn two_spawns_that_both_precede_both_logs_split_them() {
-        // Process A starts, process B starts a second later, then both write.
-        // Independent earliest_since would give both the first file.
         let older = (20_000, PathBuf::from("a.jsonl"));
         let newer = (30_000, PathBuf::from("b.jsonl"));
         assert_eq!(
@@ -1793,9 +1524,7 @@ mod tests {
         );
         assert_eq!(later.len(), 1);
         assert_eq!(later[0].session, "sess-b");
-        // The older session is still writing after the later spawn. True birth
-        // stays 10_000, so the later process still gets sess-b. A SQL floor
-        // would have made sess-a look born at 82_000 and steal the pick.
+
         let mut older_again = stamped(82_000);
         older_again.session = "sess-a".into();
         older_again.counters.input_fresh = Some(200);
@@ -1841,7 +1570,7 @@ mod tests {
         ];
         let reading = fold_events(&events, &prices()).expect("reading");
         assert_eq!(reading.tokens, 3_300);
-        // 3000 input * $5/M + 300 output * $25/M = $0.015 + $0.0075 = $0.0225
+
         assert_eq!(reading.cost_micros, Some(22_500));
         assert!(reading.complete);
         assert!(!reading.estimated);
@@ -1862,12 +1591,6 @@ mod tests {
 
     #[test]
     fn hermes_rollup_rows_do_not_feed_a_context_bar() {
-        // Hermes stores one running total per session+model+task, so its last
-        // row's input_total is the whole session's cumulative prompt (input +
-        // cache_read ≈ its "Prompt tokens (total)"), not the live context. The
-        // in-session `124K / 200K` it prints is never persisted, so there is no
-        // honest bar to draw: withhold `context_used` rather than show hundreds
-        // of percent. Tokens and cost still accumulate from the same rows.
         let mut e = event("grok-composer-2.5-fast", 328_000, 4_962_304, 44_969);
         e.source = SourceId::Hermes;
         let reading = fold_events(&[e], &prices()).expect("reading");
@@ -1877,10 +1600,6 @@ mod tests {
 
     #[test]
     fn codex_rollup_rows_do_not_feed_a_context_bar_but_per_turn_rows_do() {
-        // When codex's per-request deltas disagree with the vendor's running
-        // total, the parser replaces them with one cumulative row. That row is
-        // the same shape as a Hermes one, so it must be withheld from the bar
-        // for the same reason. An ordinary codex turn is unaffected.
         let mut rollup = event("gpt-5.4-codex", 300_000, 1_200_000, 20_000);
         rollup.source = SourceId::Codex;
         rollup.id = codex::rollup_event_id(&rollup.session);
@@ -1929,8 +1648,6 @@ mod tests {
 
     #[test]
     fn a_model_the_catalog_missed_borrows_its_siblings_window() {
-        // The case this exists for: the price book knew grok-4.6 while the
-        // catalog snapshot had no row for it, so the bar vanished.
         let table = PriceTable::parse(BOOK)
             .expect("book")
             .with_catalog(Arc::new(
@@ -2058,12 +1775,10 @@ mod tests {
     fn pi_names_a_folders_directory_the_way_pi_does() {
         assert_eq!(pi_dir_name("/Users/x/git/demo"), "--Users-x-git-demo--");
         assert_eq!(pi_dir_name("/private/tmp"), "--private-tmp--");
-        // A trailing separator must not add an empty part, or the directory
-        // gains a third dash and is never found.
+
         assert_eq!(pi_dir_name("/Users/x/git/"), "--Users-x-git--");
     }
 
-    /// The harness that shares Pi's folder encoding must keep sharing it.
     #[test]
     fn the_deepseek_harness_spells_a_folder_the_same_way() {
         assert_eq!(
@@ -2085,8 +1800,7 @@ mod tests {
         assert_eq!(harness_name("codex"), Some("codex"));
         assert_eq!(harness_name("/usr/local/bin/opencode"), Some("opencode"));
         assert_eq!(harness_name("opencode2"), Some("opencode"));
-        // Kilo forked OpenCode and kept the schema, but not the database, so
-        // it must not resolve to that reader.
+
         assert_eq!(harness_name("kilo"), Some("kilo"));
         assert_eq!(harness_name("kilocode"), Some("kilo"));
         assert_eq!(harness_name("hermes"), Some("hermes"));
@@ -2112,11 +1826,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A WAL write must count as a change to the store.
-    ///
-    /// OpenCode's database file sits still for hours while every turn lands in
-    /// the `-wal` beside it, so a cache keyed on the database file alone
-    /// served a session's opening emptiness for the session's whole life.
     #[test]
     fn a_wal_write_moves_the_store_mtime() {
         let dir = std::env::temp_dir().join(format!("tokenstat-wal-{}", std::process::id()));
@@ -2143,8 +1852,7 @@ mod tests {
             SCANS.fetch_add(1, Ordering::Relaxed);
             None
         };
-        // A miss is cached too: a folder the harness was never used in is
-        // exactly the case that would otherwise scan everything every poll.
+
         assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
         assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
         assert_eq!(resolve_logs("codex", &cwd, spawn("a", 1, &[]), scan), None);
@@ -2162,7 +1870,7 @@ mod tests {
             codex::session_cwd(rollout).as_deref(),
             Some("/Users/me/git/tokenstat")
         );
-        // A rollout with no session_meta cannot claim a folder.
+
         assert_eq!(codex::session_cwd("{\"type\":\"event_msg\"}"), None);
     }
 

@@ -38,7 +38,6 @@ class AppAppearanceTest {
         AppAppearance.palettes.forEach { palette ->
             AppearanceMode.entries.forEach { mode ->
                 val colors = AppAppearance.colors(mode, palette.id, systemDark = true)
-                // The default dark accent is the brand's and sits just under.
                 val floor = if (palette.id == "default") 4f else 4.5f
                 listOf(colors.background, colors.sidebar, colors.panel).forEach {
                     assertTrue("${palette.id} $mode", contrast(colors.accent, it) >= floor)

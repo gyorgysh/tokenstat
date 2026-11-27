@@ -27,7 +27,6 @@ internal static class ChatClipboard
             catch (Exception error) { report(FriendlyError.Display(error.Message)); return null; }
         }
 
-        // The text box only offers its native Paste command for text.
         composer.PreviewKeyDown += async (_, args) =>
         {
             bool Down(VirtualKey key) => InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);

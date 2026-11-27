@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Host-private bindings between opaque Team references and physical folders.
-//! Prepared entries never authorize reads. Withdrawal is durable locally
-//! before contacting the account server, so a network outage cannot keep a
-//! revoked local publication readable.
-
 use crate::{
     chat_receipts::{MetadataLease, OwnerLease},
     error::DispatchError,
@@ -272,8 +266,7 @@ impl Store {
         if cloud_revision == 0 || cloud_revision > 9_007_199_254_740_991 {
             return Err(storage());
         }
-        // Inspect the folder outside the index lock. A slow or disconnected
-        // volume must not hold up revocation of another checkout.
+
         let folder = self.read(|index| {
             index
                 .checkouts
@@ -510,8 +503,6 @@ impl Store {
         write: bool,
         operation: impl FnOnce(&mut Cached) -> Result<T, DispatchError>,
     ) -> Result<T, DispatchError> {
-        // Metadata reads are frequent. Parse the private index only when its
-        // file identity changes, including replacement by another process.
         static CACHE: OnceLock<Mutex<Cached>> = OnceLock::new();
         let mut cached = CACHE
             .get_or_init(|| Mutex::new(Cached::default()))
@@ -525,10 +516,7 @@ impl Store {
             {
                 break lease;
             }
-            // Other guardians read this same index before each effect. Readers
-            // can coexist; a brief writer must settle before we validate the
-            // current snapshot, rather than retiring an unrelated run's SDK.
-            // Never accept cached authority when the lock stays unavailable.
+
             if write || started.elapsed() >= Duration::from_millis(250) {
                 return Err(unavailable(
                     "sharing_busy",
@@ -736,7 +724,7 @@ fn private_options() -> OpenOptions {
     {
         use std::os::windows::fs::OpenOptionsExt;
         options.custom_flags(0x00200000);
-    } // OPEN_REPARSE_POINT.
+    }
     options
 }
 fn load(path: &Path) -> Result<Index, DispatchError> {

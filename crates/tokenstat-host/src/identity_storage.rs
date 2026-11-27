@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Serialize identity metadata transactions across threads and processes.
 //! Lock files stay beside the records and are never replaced or removed.
 

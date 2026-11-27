@@ -7,8 +7,6 @@ internal data class TeamAuthor(val kind: String, val name: String = "", val back
 internal enum class TeamBlockKind { User, Text, Thinking, Tool, Edit, File, Notice, Error }
 internal data class TeamBlock(val id: String, val kind: TeamBlockKind, val author: TeamAuthor?, val text: String = "", val title: String = "", val file: JsonObject? = null, val ok: Boolean? = null)
 
-/** Only shared, host-projected content enters this reader. No personal chat,
- * approval, workspace, URL action or provider continuation callback exists. */
 internal object TeamTranscript {
     private val runPattern = Regex("run_[0-9a-f]{32}")
     private fun JsonObject.str(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -105,8 +103,6 @@ internal object TeamTranscript {
     }
 }
 
-/** Fixed-size literal pages preserve every UTF-16 code unit without breaking
- * surrogate pairs. Used for large replies and read-only tool/diff detail. */
 internal fun teamTextPages(text: String, limit: Int = 8192): List<String> {
     require(limit >= 2)
     val pages = mutableListOf<String>(); var start = 0

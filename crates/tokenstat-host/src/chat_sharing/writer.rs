@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{journal::*, *};
 use crate::teams::AuthorizedTeamPrincipal;
 use tokenstat_sync::teams::{RepositoryRole, TeamCapability};
@@ -130,8 +129,7 @@ pub(super) fn stop_journal(directory: &Path, chat: &Conversation) {
         }
         Ok::<_, DispatchError>(())
     })();
-    // A failed journal cannot grant shared access after the canonical marker
-    // is cleared. Keep it for repair rather than replacing it with emptiness.
+
     let _ = result;
 }
 
@@ -293,8 +291,8 @@ impl Store {
                 let source = index.conversations.iter_mut().find(|chat| chat.id == id).ok_or_else(unavailable)?;
                 crate::chat_sessions::remember(&directory, source).map_err(|_| unavailable())?;
                 source.team_journal_initialized = true;
-                // Future turns must rebuild the visible conversation. The old
-                // private provider continuation is retained only in inspection.
+
+
                 source.resume_token = None; source.resume_tokens.clear(); source.standing_sent.clear();
                 self.write_team_index(&index)?;
             }

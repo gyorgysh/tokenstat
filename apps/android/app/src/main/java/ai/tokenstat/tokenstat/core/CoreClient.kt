@@ -19,27 +19,10 @@ import kotlinx.serialization.json.put
 
 class CoreFailure(val code: String, override val message: String) : Exception(message)
 
-/// What happened to a call that left this object. Installed once, at the
-/// root, so no screen has to remember to report. Port of `BridgeObserver`.
 object CoreObserver {
-    /// Method name, the peer it was addressed to when there was one, and the
-    /// failure, or null when it worked.
-    ///
-    /// The peer matters: "a machine is not answering" is a fact about that
-    /// machine, and folding every peer into one verdict made a laptop asleep
-    /// in a bag speak for the Mac being worked on.
     @Volatile
     var report: ((String, String?, Throwable?) -> Unit)? = null
 
-    /// Asked before a call is made. Returning a failure refuses it without
-    /// going near the transport.
-    ///
-    /// This exists for one case: a device with no internet. An account call
-    /// made in airplane mode sits on its patience budget and then fails with
-    /// the same answer it could have given immediately, and the screen waits
-    /// half a minute to say "offline". Nothing else belongs here: a gate that
-    /// starts guessing which calls are worth making is a gate that will block
-    /// the one that would have recovered.
     @Volatile
     var precheck: ((String) -> Throwable?)? = null
 
@@ -56,7 +39,6 @@ object CoreClient {
         if (initialized) return
         dataDir.mkdirs(); cacheDir.mkdirs()
         decodeResponse(NativeBridge.nativeInit(dataDir.absolutePath, cacheDir.absolutePath, deviceName))
-        // Optional local metadata; a previous bundled core may not know it.
         runCatching {
             NativeBridge.nativeCall("app.identify", buildJsonObject {
                 put("version", ai.tokenstat.tokenstat.BuildConfig.VERSION_NAME)

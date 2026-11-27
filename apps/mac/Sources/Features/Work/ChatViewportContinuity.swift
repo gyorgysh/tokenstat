@@ -3,9 +3,6 @@ import Foundation
 import CoreGraphics
 import Observation
 
-/// The live viewport belongs to a model selection, rather than a layout.
-/// A new selection still opens at the latest turn. A replacement presentation
-/// of that same selection resumes its last measured row.
 @MainActor
 @Observable
 final class ChatViewportContinuity {
@@ -53,8 +50,6 @@ final class ChatViewportContinuity {
         self.generation == generation && self.owner == owner
     }
 
-    /// Wake a displaced visible reader only when its current lease is free.
-    /// Teardown never changes the measured place or another owner's lease.
     @discardableResult
     func release(generation: UInt64, owner: UUID) -> Bool {
         guard owns(generation: generation, owner: owner) else { return false }
@@ -64,8 +59,6 @@ final class ChatViewportContinuity {
         return true
     }
 
-    /// Explicit Latest may arrive while a replacement waits for attachment.
-    /// It retires the place without letting that unattached view claim a lease.
     func chooseLatest(generation: UInt64) {
         guard self.generation == generation else { return }
         place = nil
@@ -75,8 +68,6 @@ final class ChatViewportContinuity {
         generation == currentGeneration && ticket == currentTicket && owns(generation: generation, owner: owner)
     }
 
-    /// Only a settled reading action can replace a measured place. Resizing
-    /// and programmatic placement can report usable-looking, temporary rows.
     func recordMeasurement(_ position: ChatReadingPosition, generation: UInt64,
                            owner: UUID, readerInitiated: Bool) {
         guard readerInitiated, isPlaced(generation: generation, owner: owner) else { return }
@@ -97,8 +88,6 @@ final class ChatViewportContinuity {
     }
 }
 
-/// Lazy row heights can resolve after the initial placement. Keep that
-/// correction bounded: unchanged geometry never earns another proxy walk.
 @MainActor
 final class ChatReadingHold {
     private var mark: ChatReadingMark?

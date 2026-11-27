@@ -4,13 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Readable form of an automation transcript.
-//!
-//! Headless agent CLIs print NDJSON. The inspector must never see that stream:
-//! it is large, it is not written for a person, and putting it in a text view
-//! freezes the app. This module turns complete events into short display text
-//! while a run drains.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -77,7 +71,6 @@ pub enum Event {
         #[serde(rename = "mediaType")]
         media_type: Option<String>,
         size: u64,
-        /// Explicit tool provenance. Omitted for ordinary shared/reply files.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
     },
@@ -122,18 +115,12 @@ enum MuseAuthLine {
 }
 
 enum CursorReplay {
-    /// Waiting for the first record, which is what says where it resumed.
     Pending,
-    /// The boundary it resumed from, and how much of the turn it has
-    /// reproduced since. A replay is the same message being said again, so
-    /// what it repeats belongs to the message its first record continued.
     At { from: usize, at: usize },
 }
 
 enum Piece {
-    /// A streamed text delta. Consecutive ones join without a blank line.
     Text(String),
-    /// A tool line, an error, or any other standalone paragraph.
     Block(String),
 }
 
@@ -144,69 +131,25 @@ pub struct Parser {
     dropping_line: bool,
     last_block: String,
     last_was_text: bool,
-    /// Tool starts that have not seen a matching end yet. Closed on Done,
-    /// Failed, or [`Self::finish_events`], so a cancelled grok call cannot
-    /// leave the row spinning after the turn is over.
     open_tools: Vec<String>,
-    /// Start inputs for the tools above, kept only when they carry an edit
-    /// pair. The end event is the only thing chat keeps, so without this the
-    /// red/green of what changed would die with the start.
     tool_inputs: HashMap<String, Value>,
-    /// Claude repeats the final assistant text in its `result` record. Keep the
-    /// last assistant payload so structured chat events can drop that summary
-    /// copy while retaining result-only output from older CLI versions.
     last_claude_assistant: Option<String>,
     streams: crate::transcript_stream::Streams,
-    /// Cursor says every assistant message twice: word pieces, then the whole
-    /// message again. A `result` says the whole turn again after that, and a
-    /// stream that loses its connection resumes from a checkpoint and says
-    /// the turn again from the top. Only one copy of anything may reach the
-    /// transcript.
-    ///
-    /// `cursor_turn` is everything the turn has said, `cursor_msg_start` and
-    /// `cursor_run_start` index into it: the message in progress, and the run
-    /// since the last tool call. Comparing a record against those three is
-    /// what tells a snapshot from a new sentence. `cursor_repeats` counts the
-    /// copies already dropped, so a second identical *message* on its own is
-    /// kept rather than mistaken for a snapshot of the run.
     cursor_turn: String,
     cursor_msg_starts: Vec<usize>,
     cursor_run_start: usize,
     cursor_repeats: u32,
-    /// Where a reconnected stream has got to in the turn it is repeating. It
-    /// resumes at a message boundary, not always the first one, so the anchor
-    /// is chosen from `cursor_msg_starts` by what the replay actually says.
-    /// While the replay matches what is already on the transcript nothing is
-    /// added, and the first thing it says differently ends it.
     cursor_replay: Option<CursorReplay>,
-    /// The session this stream has already reported.
-    ///
-    /// Some CLIs announce the session once, others stamp it on every line.
-    /// Both are fine to parse from, as long as only the first reaches the
-    /// caller: a `Session` event writes the conversation index to disk, and
-    /// one per line would be one save per line.
     last_session: Option<String>,
-    /// Muse names a tool when its task is proposed, then gives its stable call
-    /// id when it is scheduled. Keep that tiny join until the card can start.
     muse_tasks: HashMap<String, String>,
-    /// The scheduled tool's name survives until its result, which older Muse
-    /// records can emit without correlation_facts.
     muse_calls: HashMap<String, String>,
-    /// A plain device login challenge can precede Muse's JSON stream and
-    /// wait forever for terminal input. Keep its URL/code out of chat.
     muse_auth: MuseAuthState,
     limit: Option<crate::provider_limit::Limit>,
-    /// The latest main-conversation request's context, for the prompt
-    /// cache record. Kept to the end of the turn, so the conversation is
-    /// written once per turn rather than once per request.
     context: Option<crate::chat_cache::Reading>,
-    /// The last reset a provider announced for a refused window, applied to
-    /// a later refusal that does not repeat it.
     reset_hint: Option<i64>,
     inspection: crate::chat_inspection::Snapshot,
     inspection_dirty: bool,
     last_timeline_plan: Option<(Vec<String>, Vec<bool>)>,
-    /// Todo tool calls shown as the plan card instead of a tool row.
     plan_tool_calls: HashSet<String>,
     images: crate::chat_images::Collector,
     collect_images: bool,
@@ -261,8 +204,6 @@ impl Parser {
         self.plan_event()
     }
 
-    /// A new plan, a changed step list or a step completing or reopening
-    /// is worth a timeline update. A step merely starting is not.
     fn plan_event(&mut self) -> Option<Event> {
         let plan = &self.inspection.activity.plan;
         if plan.is_empty() {
@@ -310,8 +251,6 @@ impl Parser {
         self.context.take()
     }
 
-    // Decode only complete records, so a pipe read splitting an emoji or
-    // accented character does not replace either half with U+FFFD.
     fn take_lines(&mut self, bytes: &[u8]) -> Vec<Option<String>> {
         let mut lines = Vec::new();
         for part in bytes.split_inclusive(|byte| *byte == b'\n') {
@@ -376,10 +315,6 @@ impl Parser {
         self.hide_plan_tools(events)
     }
 
-    /// A todo tool's only job is the plan, and the plan already reaches the
-    /// chat as its card (`Event::Plan`), the same card a `tokenstat-plan`
-    /// block draws. Showing its call as a tool row as well would make a plan
-    /// look different depending on which agent wrote it.
     fn hide_plan_tools(&mut self, events: Vec<Event>) -> Vec<Event> {
         events
             .into_iter()
@@ -433,8 +368,6 @@ impl Parser {
         out
     }
 
-    /// Prefix a paragraph break when the new piece is not a text continuation,
-    /// including across drain chunks where `out` starts empty.
     fn emit(&mut self, out: &mut String, piece: Piece) {
         match piece {
             Piece::Text(text) => {
@@ -444,10 +377,7 @@ impl Parser {
                     .last()
                     .or_else(|| out.chars().last())
                     .is_some_and(|last| last == ' ');
-                // Grok sends a lone space between tokens (" ship" + " " +
-                // "0.4.0"). Dropping that space glued words. Keep it only
-                // when it continues a paragraph already started, and only
-                // where there is not already one.
+
                 if text.trim().is_empty() {
                     let only_spaces = !text.is_empty() && text.chars().all(|byte| byte == ' ');
                     if self.last_was_text && !(only_spaces && spaced) {
@@ -456,17 +386,11 @@ impl Parser {
                     }
                     return;
                 }
-                // Cursor (and some Claude streams) repeat the whole segment
-                // after the deltas. Skip that exact copy.
+
                 if matches!(self.backend.as_str(), "claude" | "cursor") && text == self.last_block {
                     return;
                 }
                 if self.last_was_text {
-                    // Grok sends the separator *and* the next token's own
-                    // leading space, so every word after one arrived spaced
-                    // twice ("I'll  run  that"). Only spaces are folded: a
-                    // space after a newline is indentation and belongs to the
-                    // line it starts.
                     let text = if spaced {
                         text.trim_start_matches(' ')
                     } else {
@@ -522,11 +446,8 @@ impl Parser {
             MuseAuthLine::Pass => {}
         }
         if !cleaned.starts_with('{') {
-            if self.is_json_backend() {
-                // Truncated or escape-polluted JSON must not become the view.
-                if cleaned.contains("\"type\":") {
-                    return None;
-                }
+            if self.is_json_backend() && cleaned.contains("\"type\":") {
+                return None;
             }
             return Some(Piece::Block(cleaned.into_owned()));
         }
@@ -649,10 +570,6 @@ impl Parser {
                     }
                 }
                 Some("result") => {
-                    // A result repeats the whole turn, every message of it,
-                    // and it is the last word either way. It needs no guard:
-                    // unlike an assistant record it cannot be a second
-                    // message that happens to read the same.
                     let text = value.get("result").and_then(Value::as_str).unwrap_or("");
                     if !text.is_empty()
                         && (text == self.cursor_turn
@@ -663,13 +580,9 @@ impl Parser {
                     }
                     self.cursor_reset();
                 }
-                // A reconnect resumes the turn from its checkpoint and says
-                // it again from the top, so the whole turn is the message
-                // being repeated until the replay says something new.
+
                 Some("retry") => self.cursor_replay = Some(CursorReplay::Pending),
-                // Thinking and the connection noise ride between a message's
-                // pieces and its snapshot repeat, so they leave the buffers
-                // alone. Anything else bounds the message and the run.
+
                 Some("thinking") | Some("connection") | None => {}
                 _ => {
                     self.cursor_open_message_at(self.cursor_turn.len());
@@ -679,8 +592,7 @@ impl Parser {
             }
         }
         let mut events = self.take_events(events);
-        // Session ownership is applied before a goal carried by this same
-        // record, so a new session can immediately report its own goal.
+
         self.inspection_dirty |= self.inspection.observe(&self.backend, &value);
         if let Some(plan) = self.plan_event() {
             events.push(plan);
@@ -730,28 +642,16 @@ impl Parser {
         }
     }
 
-    /// The part of this piece of cursor prose not already on the transcript.
-    ///
-    /// None means drop it. Anything kept is appended to the turn, which is
-    /// what the next comparison is made against.
     fn cursor_delta(&mut self, text: &str) -> Option<String> {
         let replay = match self.cursor_replay {
-            Some(CursorReplay::Pending) => {
-                // The first record after a reconnect says where the stream
-                // resumed: the newest message boundary it continues from.
-                self.cursor_replay_anchor(text).map(|from| (from, from))
-            }
+            Some(CursorReplay::Pending) => self.cursor_replay_anchor(text).map(|from| (from, from)),
             Some(CursorReplay::At { from, at }) => {
                 let seen = self.cursor_since(at);
                 if seen.starts_with(text) || (!seen.is_empty() && text.starts_with(seen)) {
                     Some((from, at))
                 } else if let Some(from) = self.cursor_replay_anchor(text) {
-                    // A reconnect can drop again and resume at another
-                    // message, so the replay may carry on elsewhere.
                     Some((from, from))
                 } else {
-                    // What it repeated is the start of the message this
-                    // continues, so its closing snapshot still matches it.
                     self.cursor_open_message_at(from);
                     None
                 }
@@ -767,8 +667,7 @@ impl Parser {
                 });
                 return None;
             }
-            // A retry delta can span the end of the replayed text. Keep
-            // only its fresh suffix, even if the CLI changed chunk sizes.
+
             let delta = &text[seen_len..];
             self.cursor_replay = None;
             self.cursor_open_message_at(from);
@@ -783,9 +682,6 @@ impl Parser {
         if self.cursor_repeats >= 2
             && (text == self.cursor_turn || text == self.cursor_since(self.cursor_run_start))
         {
-            // The whole turn, or the run since the last tool call, after its
-            // messages. Two dropped copies behind it, so a second identical
-            // message on its own is kept rather than mistaken for one.
             self.cursor_end_message();
             return None;
         }
@@ -793,8 +689,6 @@ impl Parser {
         Some(text.to_string())
     }
 
-    /// The newest message boundary a replay could be resuming from: the last
-    /// one whose text this record starts.
     fn cursor_replay_anchor(&self, text: &str) -> Option<usize> {
         self.cursor_msg_starts.iter().rev().copied().find(|at| {
             let seen = self.cursor_since(*at);
@@ -811,8 +705,6 @@ impl Parser {
         self.cursor_open_message_at(self.cursor_turn.len());
     }
 
-    /// Say which message is being written now, without losing the boundaries
-    /// a later replay has to choose between.
     fn cursor_open_message_at(&mut self, at: usize) {
         if self.cursor_msg_start() == at {
             return;
@@ -847,9 +739,6 @@ impl Parser {
         for mut event in events {
             match &mut event {
                 Event::Session { id } => {
-                    // Startup failures can include sessionID:"". Emitting
-                    // that as a new session would overwrite the saved resume
-                    // token and suppress the next turn's history handover.
                     if id.trim().is_empty() || id.len() > 160 || id.chars().any(char::is_control) {
                         continue;
                     }
@@ -881,8 +770,7 @@ impl Parser {
                     if !self.open_tools.iter().any(|id| id == call_id) {
                         self.open_tools.push(call_id.clone());
                     }
-                    // Only edit pairs are worth holding: whole-file writes
-                    // must not sit in memory for the length of a turn.
+
                     if has_edit_pair(input) {
                         self.tool_inputs.insert(call_id.clone(), input.clone());
                     }
@@ -901,11 +789,7 @@ impl Parser {
                     out.extend(
                         self.close_open_tools(!cancelled, cancelled.then(|| status.clone())),
                     );
-                    // A backend's stream ending is not the process outcome.
-                    // In particular, grok reports `cancelled` when one of its
-                    // own tool calls is refused even though the process exits
-                    // successfully. The chat drain observes the real exit and
-                    // writes the conversation's single terminal Done event.
+
                     continue;
                 }
                 Event::Failed { text } => {
@@ -963,9 +847,6 @@ impl Parser {
                     .and_then(Value::as_str)
                     .and_then(|key| key.strip_prefix("tool:"));
                 if let (Some(task), Some(call)) = (task, call) {
-                    // Replay/attach can deliver `scheduled` before `proposed`.
-                    // Prefer the proposed name, fall back to the scheduled
-                    // record's own task kind so the start is not lost.
                     let name = self.muse_tasks.remove(task).or_else(|| {
                         payload
                             .pointer("/event/task_kind")
@@ -989,8 +870,6 @@ impl Parser {
                     .or_else(|| muse_result_name(payload))
                     .unwrap_or("tool");
                 if let Some(call) = call {
-                    // A result without a scheduled task is still useful when
-                    // attaching to a running Muse session.
                     if !self.open_tools.iter().any(|open| open == call) {
                         events.push(tool_start_with_id(
                             call,
@@ -1026,9 +905,6 @@ impl Parser {
     }
 }
 
-// Structured records normally contain no literal terminal escapes. Borrow
-// those bytes through trimming and notice removal; scan and allocate only
-// when the CLI actually decorated the line.
 fn clean_line(raw: &str) -> std::borrow::Cow<'_, str> {
     if !raw.as_bytes().contains(&0x1b) {
         return std::borrow::Cow::Borrowed(without_stdin_notice(
@@ -1041,13 +917,6 @@ fn clean_line(raw: &str) -> std::borrow::Cow<'_, str> {
     )
 }
 
-/// A line with the CLIs' notices about standard input taken out.
-///
-/// Run with input that is not a terminal, Codex says it is reading more input
-/// and Claude warns that none came. Both are about how the process was
-/// started, not anything the agent said, and on Windows stderr shares the
-/// reply's pipe, so they arrived in the chat as text. Claude's warning has no
-/// newline after it, so whatever follows on the line is kept.
 fn without_stdin_notice(line: &str) -> &str {
     const CODEX: &str = "Reading additional input from stdin...";
     const CLAUDE: &str = "Warning: no stdin data received in";
@@ -1067,9 +936,6 @@ fn without_stdin_notice(line: &str) -> &str {
     line
 }
 
-/// stderr shares the PTY with NDJSON. Codex's timestamped tracing records
-/// describe its runtime/history and are retained in the raw transcript; they
-/// are not assistant replies or evidence that the current tool failed.
 fn codex_diagnostic(line: &str) -> bool {
     let mut fields = line.split_whitespace();
     let Some(timestamp) = fields.next() else {
@@ -1089,9 +955,6 @@ fn codex_diagnostic(line: &str) -> bool {
     })
 }
 
-/// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
-/// turn, not the agent talking. Keep the original line unless it is one of
-/// the two refusals we have copy for.
 fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
     if backend == "cursor"
@@ -1105,9 +968,7 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
                 .into(),
         );
     }
-    // Headless `claude -p` cannot sign in by itself: /login only exists in
-    // the interactive terminal, so a logged-out turn dies with this instead
-    // of the usual "please run /login". Say where the login actually lives.
+
     if backend == "claude"
         && lower.contains("/login")
         && (lower.contains("isn't available")
@@ -1119,11 +980,7 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
                 .into(),
         );
     }
-    // A stored login that has run out and could not be renewed. Headless
-    // `claude -p` prints this as a plain line, and it read as the agent
-    // answering. The way back is the same interactive /login.
-    // Claude only: another agent's plain output may mention a token
-    // expiring without the turn having failed.
+
     if backend == "claude"
         && (lower.contains("failed to authenticate")
             || (lower.contains("oauth") && lower.contains("expired")))
@@ -1154,12 +1011,6 @@ fn cli_refusal_text(backend: &str, line: &str) -> Option<String> {
     None
 }
 
-/// What cursor prints on stderr when a turn dies, said in words.
-///
-/// `RetriableError: [resource_exhausted] Error` is a sentence about somebody's
-/// plan, and it reached the transcript as an assistant message: the chat read
-/// as though the agent had answered with a stack trace. These are failures,
-/// and they say what to do about them.
 fn cursor_error_text(lower: &str) -> Option<String> {
     let refusal = lower.strip_prefix("error:").unwrap_or(lower).trim_start();
     let sign_in_refusal = refusal.starts_with("authentication required.")
@@ -1195,8 +1046,6 @@ fn cursor_error_text(lower: &str) -> Option<String> {
     None
 }
 
-/// Decode one complete backend record. Keep this vocabulary here: the
-/// automation renderer and chat must agree on what a `Read` or `Edit` means.
 fn events_for_value(backend: &str, value: &Value) -> Vec<Event> {
     let events = match backend {
         "grok" => events_grok(value),
@@ -1402,9 +1251,7 @@ fn events_claude(value: &Value) -> Vec<Event> {
     }
     if kind == Some("result") {
         let result = value.get("result").and_then(Value::as_str);
-        // An error result is the turn failing, not the agent talking: an
-        // expired login came back as a reply bubble. Say it in words when
-        // there is copy for it, and keep Claude's own line otherwise.
+
         let failed = value.get("is_error").and_then(Value::as_bool) == Some(true)
             || value
                 .get("subtype")
@@ -1456,12 +1303,6 @@ fn claude_assistant_text(value: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// Detail for one Claude `tool_result` block.
-///
-/// `content` is polymorphic: a plain string, a list of content blocks
-/// (`{"type":"text","text":"..."}` plus images/documents the timeline has
-/// no use for), or nothing. Join the text parts so a Bash row shows its
-/// stdout instead of spinning until the turn ends.
 fn claude_tool_result_detail(block: &Value) -> Option<String> {
     match block.get("content") {
         None | Some(Value::Null) => None,
@@ -1492,11 +1333,6 @@ fn claude_tool_result_detail(block: &Value) -> Option<String> {
 
 fn events_cursor(value: &Value) -> Vec<Event> {
     match value.get("type").and_then(Value::as_str) {
-        // Not `assistant_event_text`: cursor streams word pieces and sends
-        // the space between two words as a delta of its own, which a
-        // whitespace filter drops and leaves "report line2". The whole
-        // record's text, spaces and all, is also exactly what the repeat
-        // check compares against.
         Some("assistant") => {
             let text = cursor_assistant_text(value);
             if text.is_empty() {
@@ -1505,9 +1341,7 @@ fn events_cursor(value: &Value) -> Vec<Event> {
                 vec![Event::Text { delta: text }]
             }
         }
-        // The session id is what `--resume` needs on the next turn. Without
-        // it every message in a cursor chat starts a conversation the agent
-        // has never had before.
+
         Some("system") => cursor_session(value),
         Some("thinking") => event_thinking(value.get("text").and_then(Value::as_str)),
         Some("result") => {
@@ -1551,15 +1385,6 @@ fn cursor_session(value: &Value) -> Vec<Event> {
         .unwrap_or_default()
 }
 
-/// One cursor `tool_call` record.
-///
-/// The map beside the call carries bookkeeping (`toolCallId`, `startedAtMs`,
-/// `hookAdditionalContexts`), and serde sorts object keys, so "the first
-/// entry" was `hookAdditionalContexts` on a start and `completedAtMs` on an
-/// end: two rows for one call, named after neither the tool nor each other,
-/// and every start left open until the turn closed it as `ended`. The tool is
-/// the entry whose key ends in `ToolCall`, and the id is the one both halves
-/// agree on.
 fn events_cursor_tool(value: &Value) -> Vec<Event> {
     let subtype = value
         .get("subtype")
@@ -1585,9 +1410,7 @@ fn events_cursor_tool(value: &Value) -> Vec<Event> {
         ok,
         detail,
     }];
-    // Cursor reports the diff only when the write has happened, so unlike the
-    // old/new pair other CLIs send up front, the change card can only be made
-    // here.
+
     events.extend(cursor_edit_event(&id, call));
     events
 }
@@ -1600,9 +1423,6 @@ fn cursor_tool_entry(calls: &serde_json::Map<String, Value>) -> Option<(&str, &V
         .map(|(key, value)| (key.as_str(), value))
 }
 
-/// The id both halves of a call carry. Cursor puts a two-line id on the
-/// record; the first line is the call, and a row id is never read out loud,
-/// so keep that half rather than a value with a newline in it.
 fn cursor_call_id(
     value: &Value,
     calls: &serde_json::Map<String, Value>,
@@ -1620,12 +1440,6 @@ fn cursor_call_id(
         .to_string()
 }
 
-/// Whether a finished call worked, and what to show under it.
-///
-/// A cursor result is one of four shapes. `rejected` is the one worth naming:
-/// it is what every shell command becomes when the CLI was not given
-/// permission to run tools, and it arrives with an empty reason, so a row
-/// that only said "failed" left nothing to act on.
 fn cursor_tool_result(call: &Value, subtype: &str) -> (bool, Option<String>) {
     let Some(result) = call.get("result") else {
         let detail = call
@@ -1674,9 +1488,6 @@ fn cursor_tool_result(call: &Value, subtype: &str) -> (bool, Option<String>) {
     (ok, cursor_success_detail(success))
 }
 
-/// What a finished call is worth showing: the shell's own output, the file a
-/// read returned, the paths a glob matched, or whatever sentence the tool
-/// wrote about itself.
 fn cursor_success_detail(success: &Value) -> Option<String> {
     const MAX_CHARS: usize = 4000;
     let mut parts: Vec<String> = Vec::new();
@@ -1724,9 +1535,6 @@ fn cursor_success_detail(success: &Value) -> Option<String> {
     Some(out)
 }
 
-/// The change card for a cursor write, built from the diff the CLI reports
-/// when the file has been written. Keyed on the result rather than the tool
-/// name, so a rename of the write tool cannot quietly lose the card.
 fn cursor_edit_event(call_id: &str, call: &Value) -> Option<Event> {
     let success = call.pointer("/result/success")?;
     let path = success
@@ -1772,9 +1580,6 @@ fn cursor_edit_event(call_id: &str, call: &Value) -> Option<Event> {
     })
 }
 
-/// Cursor's diff, without the two file headers. They repeat the path the card
-/// already names, and they are the one place a workspace's absolute path
-/// would be drawn twice inside a change nobody asked to see it in.
 fn cursor_patch(diff: &str) -> String {
     const MAX_CHARS: usize = 4000;
     let mut out = diff
@@ -1819,12 +1624,7 @@ fn events_codex(value: &Value) -> Vec<Event> {
                     codex_command_input(command),
                 )]
             }
-            // Codex reports first-class edits separately from shell commands.
-            // Keeping these as Edit cards makes the timeline show changes even
-            // when the agent used its apply-patch tool rather than a shell
-            // redirection. A single item can affect several files, so retain
-            // the whole change list as card input while using its first path
-            // for the collapsed-row target.
+
             Some("file_change") => vec![tool_start(item, "edit", codex_file_change_input(item))],
             Some("image_view") => vec![tool_start(item, "Read", json!({"path":item["path"]}))],
             Some("image_generation") => vec![tool_start(item, "Generate image", json!({}))],
@@ -1860,8 +1660,6 @@ fn events_codex(value: &Value) -> Vec<Event> {
                     .and_then(json_i32)
                     .map(|code| code == 0)
                     .unwrap_or_else(|| {
-                        // No exit code and no output: cancelled/killed, not
-                        // success. Stay failed rather than closing green.
                         detail.as_deref().is_some_and(|output| {
                             !output.trim().is_empty() && codex_rejection(Some(output)).is_none()
                         })
@@ -1906,8 +1704,7 @@ fn events_codex(value: &Value) -> Vec<Event> {
     }
     if kind == "turn.completed" {
         let mut events = event_usage(value);
-        // Codex includes cached input in input_tokens. Keep fresh input and
-        // cache separate, as the archive and the chat meter both do.
+
         for event in &mut events {
             if let Event::Usage {
                 input,
@@ -1967,15 +1764,7 @@ fn codex_file_change_input(item: &Value) -> Value {
     serde_json::json!({"path": path, "changes": changes})
 }
 
-/// Codex's CLI deliberately exposes local tools through one
-/// `command_execution` item. Recover the common intent from the command so
-/// the timeline can use the same Read/Write/Diff/Grep cards as other engines.
-/// Mixed or unknown commands remain Shell and retain their complete command.
 fn codex_command_kind(command: &str) -> &'static str {
-    // Tokenize the shell line so `echo "a > b"` is not a Write and
-    // `/bin/zsh -lc 'cp a b'` is still a copy. Quotes group arguments for
-    // execution, but the intent is inside them, so strip quote characters and
-    // split on whitespace/operators instead of respecting grouping.
     let flat = command.replace(['\'', '"'], " ");
     let tokens: Vec<String> = flat
         .split(|ch: char| ch.is_whitespace() || matches!(ch, '|' | ';' | '&' | '(' | ')'))
@@ -2021,8 +1810,6 @@ fn codex_command_kind(command: &str) -> &'static str {
         || has("tee")
         || command.contains('>')
     {
-        // `>` alone is still a redirect even when no copier ran, but an
-        // `echo` whose quoted text merely mentions one is not a Write.
         if has("cp") || has("mv") || has("rm") || has("mkdir") || has("touch") || has("tee") {
             return "write_file";
         }
@@ -2066,8 +1853,6 @@ fn codex_command_input(command: &str) -> Value {
         })
         .cloned()
         .or_else(|| {
-            // Repo-relative `diff -u src/a.rs src/b.rs`: no absolute path and
-            // no .txt/.md, so fall back to the last path-like argument.
             parts
                 .iter()
                 .rev()
@@ -2106,8 +1891,7 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
         .iter()
         .filter_map(|change| {
             let path = change.get("path").and_then(Value::as_str)?;
-            // Newer Codex builds may include the actual patch on each change.
-            // Preserve it verbatim so the client can render real +/- lines.
+
             if let Some(patch) = change
                 .get("diff")
                 .or_else(|| change.get("patch"))
@@ -2141,7 +1925,7 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
         .collect();
     (!lines.is_empty()).then(|| {
         let joined = lines.join("\n");
-        // Inspector text, not a patch dump: cap multi-file output.
+
         if joined.len() > 4000 {
             let mut end = 4000;
             while end > 0 && !joined.is_char_boundary(end) {
@@ -2154,14 +1938,10 @@ fn codex_file_change_detail(item: &Value) -> Option<String> {
     })
 }
 
-/// Muse `exec --json` stamps every record with the session that `--session-id`
-/// needs on the next chat turn.
 fn muse_session(value: &Value) -> Option<&str> {
     value.pointer("/stream/id").and_then(Value::as_str)
 }
 
-/// Task kinds are deliberately namespaced. Model tasks are plumbing; only the
-/// `tool.*` ones belong in the conversation timeline.
 fn muse_tool_name(kind: &str) -> Option<&str> {
     kind.strip_prefix("tool.")
 }
@@ -2172,9 +1952,7 @@ fn muse_result_name(payload: &Value) -> Option<&'static str> {
         return None;
     }
     let value: Value = serde_json::from_str(text).ok()?;
-    // Bash results can lack correlation facts while the command remains
-    // active. Require the CLI's execution envelope, not an arbitrary JSON
-    // document which happens to contain a command field.
+
     (value.get("command").is_some_and(Value::is_string)
         && ["chunk_id", "exit_code", "execution_state", "session_id"]
             .iter()
@@ -2182,9 +1960,6 @@ fn muse_result_name(payload: &Value) -> Option<&'static str> {
     .then_some("bash")
 }
 
-/// Muse starts omit arguments, but completed results carry explicit metadata.
-/// Use only those fields and the CLI's anchored status headers; search matches
-/// and fetched document text cannot establish the query or URL that was used.
 fn muse_result_input(payload: &Value, name: &str) -> Value {
     let mut input = serde_json::Map::new();
     if let Some(path) = payload.pointer("/edit_facts/path").and_then(Value::as_str) {
@@ -2239,12 +2014,6 @@ fn muse_result_input(payload: &Value, name: &str) -> Value {
     }
 }
 
-/// Muse's Bash tool returns a JSON document *as the text field* of its normal
-/// tool result. It is useful structured data, not assistant prose: unwrap it
-/// so a chat row reads like the other engines' command and stdout card.
-///
-/// The todo tools answer the same way (`{"ok":true,"revision":2,"items":4}`),
-/// which otherwise lands on the card as raw JSON.
 fn muse_tool_result_detail(payload: &Value) -> Option<String> {
     let text = payload.get("text").and_then(Value::as_str)?;
     let Ok(value) = serde_json::from_str::<Value>(text) else {
@@ -2272,12 +2041,7 @@ fn muse_tool_result_detail(payload: &Value) -> Option<String> {
     (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
-/// A todo write/read answer: a count, or the items themselves. Render the
-/// human line rather than the JSON so the collapsed card reads "4 todos
-/// (revision 2)" instead of `{"ok":true,...}`.
 fn muse_todo_detail(value: &Value) -> Option<String> {
-    // Requires the envelope (`ok`/`revision`) beside `items` so a Bash
-    // document that happens to mention items keeps its command card.
     if value.get("ok").is_none() && value.get("revision").is_none() {
         return None;
     }
@@ -2330,8 +2094,6 @@ fn muse_todo_detail(value: &Value) -> Option<String> {
     }
 }
 
-/// A `{"ok":false}` text body is a failed tool even when the lifecycle says
-/// nothing about the outcome. The todo tools answer this way.
 fn muse_text_ok(payload: &Value) -> bool {
     let Some(text) = payload.get("text").and_then(Value::as_str) else {
         return true;
@@ -2342,17 +2104,13 @@ fn muse_text_ok(payload: &Value) -> bool {
     value.get("ok").and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// `edit_facts` has the exact path and line counts that are missing from the
-/// task lifecycle. Pair it with the tool's textual unified patch so the UI
-/// gets its first-class, expandable edit row instead of a generic tool card.
 fn muse_edit_event(payload: &Value, call_id: &str) -> Option<Event> {
     let facts = payload.get("edit_facts")?;
     if facts.get("tool_name").and_then(Value::as_str) != Some("edit_file") {
         return None;
     }
     let path = facts.get("path").and_then(Value::as_str)?;
-    // The patch can arrive in a separate record. Emit the card with counts
-    // rather than dropping the edit entirely.
+
     let patch = payload.get("text").and_then(Value::as_str).unwrap_or("");
     Some(Event::Edit {
         call_id: call_id.into(),
@@ -2372,10 +2130,6 @@ fn muse_edit_event(payload: &Value, call_id: &str) -> Option<Event> {
 }
 
 fn events_opencode(value: &Value) -> Vec<Event> {
-    // Every line carries `sessionID`, and there is no `session` line at all,
-    // so waiting for one meant never learning the session and re-briefing a
-    // fresh agent on every turn. Read it from wherever it appears; the parser
-    // reports a session once and then stays quiet about it.
     let session = value
         .pointer("/session/id")
         .or_else(|| value.get("sessionID"))
@@ -2405,9 +2159,7 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 .cloned()
                 .unwrap_or(Value::Null);
             let id = item_id(part);
-            // OpenCode shapes vary: `tool`, `name`, `title`, or nested under
-            // `state`. Prefer an actual tool name and never record a status
-            // word ("running", "completed") as the verb.
+
             let tool_name = part
                 .get("tool")
                 .or_else(|| part.get("name"))
@@ -2427,12 +2179,6 @@ fn events_opencode(value: &Value) -> Vec<Event> {
                 .and_then(Value::as_str)
                 .unwrap_or("running");
             if matches!(status, "completed" | "error" | "failed") {
-                // OpenCode usually reports a call exactly once, already
-                // finished: there is no earlier running line to open the row
-                // from, and an end without a start renders as a generic
-                // "Tool" with no verb, no target and no diff. Synthesize the
-                // start from the same part so the row reads Edit/Read/Bash
-                // with its path, and the end carries the red/green.
                 let start = tool_start_with_id(&id, tool_name, input.clone());
                 let mut events = Vec::new();
                 if value["tokenstatToolStarted"] != true {
@@ -2462,8 +2208,7 @@ fn events_opencode(value: &Value) -> Vec<Event> {
             if tokens["input"].is_u64() || tokens["output"].is_u64() {
                 events.push(Event::Usage {
                     input: tokens["input"].as_u64().unwrap_or(0),
-                    // Legacy CLIs include reasoning in this bucket. The
-                    // native v2 adapter normalizes its separate buckets.
+
                     output: tokens["output"].as_u64().unwrap_or(0),
                     cache_read: tokens["cache"]["read"].as_u64().unwrap_or(0),
                     cache_write: tokens["cache"]["write"].as_u64().unwrap_or(0),
@@ -2482,13 +2227,6 @@ fn events_opencode(value: &Value) -> Vec<Event> {
 
 fn events_agy(value: &Value) -> Vec<Event> {
     match value.get("event").and_then(Value::as_str) {
-        // The id sits beside `init`, not inside it:
-        // `{"event":"init","conversation_id":"…","init":{"cwd":…}}`. It was
-        // read from inside only, so no conversation ever recorded a resume
-        // token, `--conversation` was never passed, and every turn started an
-        // agent with no memory that then had to be handed the whole summary
-        // again. Both shapes are accepted, because one of them is what the
-        // fixture and an older CLI say.
         Some("init") => value
             .get("conversation_id")
             .or_else(|| value.get("session_id"))
@@ -2605,9 +2343,6 @@ fn done(status: &str, exit_code: Option<i32>) -> Event {
     }
 }
 
-/// The text one cursor `assistant` record carries: its content blocks joined.
-/// This is both what reaches the transcript and what a snapshot copy is
-/// compared against, so the two can never disagree about what was said.
 fn cursor_assistant_text(value: &Value) -> String {
     value
         .pointer("/message/content")
@@ -2752,8 +2487,6 @@ fn is_char_boundary(bytes: &[u8], index: usize) -> bool {
     index == bytes.len() || (bytes[index] as i8) >= -0x40
 }
 
-/// Join a new paragraph. `had_prior` is true when a previous `push` already
-/// emitted something, so a drain chunk that starts a block still gets a break.
 fn append_piece(out: &mut String, piece: &str, had_prior: bool) {
     if piece.is_empty() {
         return;
@@ -2819,8 +2552,6 @@ fn render_cursor(value: &serde_json::Value) -> Option<Piece> {
         "assistant" => assistant_texts(value).map(Piece::Text),
         "result" => nonempty(value.get("result").and_then(|v| v.as_str())).map(Piece::Text),
         "tool_call" => {
-            // Only the start of a call. The completed event is the same name
-            // again and would double every tool in the inspector.
             let subtype = value.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
             if !subtype.is_empty() && subtype != "started" {
                 return None;
@@ -2873,10 +2604,6 @@ fn render_codex(value: &serde_json::Value) -> Option<Piece> {
     None
 }
 
-/// Antigravity `--output-format stream-json`. Tools are `step_update`
-/// with `step_type: tool`. Text arrives as `text_delta` on
-/// `agent_response`. A successful `result` repeats that text, so it is
-/// dropped. An ERROR result is the only place a failed launch is explained.
 fn render_agy(value: &serde_json::Value) -> Option<Piece> {
     let event = value.get("event")?.as_str()?;
     match event {
@@ -2885,8 +2612,6 @@ fn render_agy(value: &serde_json::Value) -> Option<Piece> {
             let kind = step.get("step_type").and_then(|v| v.as_str()).unwrap_or("");
             match kind {
                 "tool" => {
-                    // ACTIVE and DONE are the same call. Emit once, when it
-                    // starts, so the inspector does not double every row.
                     let state = step.get("state").and_then(|v| v.as_str()).unwrap_or("");
                     if state != "ACTIVE" {
                         return None;
@@ -3008,8 +2733,6 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
     }
 }
 
-/// One display paragraph for a tool: `Verb path`, plus an optional short
-/// `+/-` snippet when the call carried old and new text.
 fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
     let arg = tool_arg(input);
     let mut out = match arg {
@@ -3036,7 +2759,6 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
         "pattern",
         "globPattern",
         "query",
-        // Antigravity stream-json uses PascalCase.
         "TargetFile",
         "AbsolutePath",
         "CommandLine",
@@ -3099,7 +2821,6 @@ fn lookup_string<'a>(value: &'a Value, keys: &[&str], empty: bool) -> Option<&'a
     None
 }
 
-/// `filePath`, `file_path`, and `FilePath` are the same key.
 fn fold_key(key: &str) -> String {
     key.chars()
         .filter(|c| *c != '_')
@@ -3121,7 +2842,6 @@ fn json_i64(value: &serde_json::Value) -> Option<i64> {
         .or_else(|| value.as_f64().map(|n| n as i64))
 }
 
-/// Prefix a tool/error line with `HH:MM:SS` when the event carried a time.
 fn stamp(ts_ms: Option<i64>, body: String) -> String {
     match ts_ms.and_then(format_clock) {
         Some(clock) => format!("{clock} {body}"),
@@ -3140,7 +2860,6 @@ fn format_clock(ms: i64) -> Option<String> {
     ))
 }
 
-/// First lines of a tool's stdout, marked so the inspector can fold them.
 fn output_snippet(out: &str) -> String {
     const MAX_LINES: usize = 8;
     const MAX_CHARS: usize = 2000;
@@ -3189,11 +2908,6 @@ fn has_edit_pair(input: &Value) -> bool {
     edit_snippet(Some(input)).is_some()
 }
 
-/// Detail for a finished OpenCode call: stdout plus, for edits, the real diff.
-///
-/// The unified patch the CLI embeds in `state.metadata` is authoritative
-/// (it covers multi-file edits a single old/new pair cannot), so it wins.
-/// Otherwise the old/new pair from the input renders the red/green.
 fn opencode_tool_detail(part: &Value, input: &Value) -> Option<String> {
     let output = part
         .pointer("/state/output")
@@ -3212,8 +2926,6 @@ fn opencode_tool_detail(part: &Value, input: &Value) -> Option<String> {
     output.map(str::to_string)
 }
 
-/// Joined unified patches from an OpenCode tool state, capped so a huge
-/// refactor stays a timeline entry rather than a dump of the file.
 fn opencode_patch(part: &Value) -> Option<String> {
     const MAX_FILES: usize = 3;
     const MAX_CHARS: usize = 4000;
@@ -3246,11 +2958,6 @@ fn opencode_patch(part: &Value) -> Option<String> {
     Some(out)
 }
 
-/// Put an edit's red/green lines onto its end event.
-///
-/// Chat keeps the end and drops the start, so without this the row knows a
-/// file changed but cannot show what. Skipped when the output already reads
-/// as a diff, so the same lines never print twice.
 fn attach_edit_snippet(input: &Value, detail: Option<String>) -> Option<String> {
     let snippet = edit_snippet(Some(input))?;
     let out = detail.filter(|d| !d.trim().is_empty());
@@ -3267,7 +2974,6 @@ fn attach_edit_snippet(input: &Value, detail: Option<String>) -> Option<String> 
     }
 }
 
-/// Cap a preview so the inspector stays a timeline, not a dump of the file.
 fn render_edit_snippet(old: &str, new: &str) -> String {
     const MAX_EACH: usize = 6;
     const MAX_CHARS: usize = 2000;
@@ -3297,11 +3003,7 @@ fn render_edit_snippet(old: &str, new: &str) -> String {
     out
 }
 
-/// Canonical inspector verb. Grok titles are snake_case (`read_file`);
-/// Claude already sends `Read`. The Swift timeline matches these words.
 fn display_verb(name: &str) -> String {
-    // OpenCode sends lowercase single words (`read`, `bash`, `edit`).
-    // Normalise before matching so they land on the same verbs/icons.
     let lower = name.trim().to_ascii_lowercase();
     match lower.as_str() {
         "read" | "read_file" | "view_file" | "view_file_outline" | "view_code_item" => {
@@ -3425,8 +3127,6 @@ fn assistant_split(value: &serde_json::Value) -> (Vec<String>, Vec<String>) {
 }
 
 fn nonempty(s: Option<&str>) -> Option<String> {
-    // Keep leading and trailing spaces. Grok (and others) send text as
-    // word-sized deltas ("I'll", " start") and trim would glue them.
     s.filter(|s| !s.trim().is_empty()).map(str::to_string)
 }
 
@@ -3478,9 +3178,6 @@ pub fn strip_ansi(text: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Every backend's own plan record, whether a tool call or a protocol
-    /// update, reaches the chat as the same timeline plan card a
-    /// `tokenstat-plan` block draws.
     #[test]
     fn every_backend_plan_becomes_the_same_timeline_card() {
         let records = [
@@ -3816,7 +3513,7 @@ mod tests {
                 "cursor" => &["11111111-2222-3333-4444-555555555555"],
                 "opencode" => &["opencode-session"],
                 "opencode2" => &["opencode2-session"],
-                "grok" | "agy" => &[], // These records carry no session ID.
+                "grok" | "agy" => &[],
                 _ => unreachable!(),
             };
             let sessions: Vec<_> = events
@@ -3835,7 +3532,7 @@ mod tests {
                 "claude" => &[(12, 4, 0, 0, None)],
                 "grok" => &[(8, 3, 0, 0, None)],
                 "cursor" => &[(25_665, 262, 43_392, 0, None)],
-                _ => &[], // Missing counters must not become invented usage.
+                _ => &[],
             };
             let usage: Vec<_> = events
                 .iter()
@@ -3852,8 +3549,6 @@ mod tests {
                 .collect();
             assert_eq!(usage, expected_usage, "{backend} changed reported usage");
 
-            // Each call must close exactly once with its original identity,
-            // including providers whose end marker closes unfinished tools.
             let expected_calls: &[&str] = match backend {
                 "claude" => &["tool-1"],
                 "codex" => &["cmd-1"],
@@ -3891,8 +3586,6 @@ mod tests {
                 );
             }
 
-            // Pipes may split any record or deliver several at once. Compare
-            // every event field, including tool IDs, results and usage.
             for width in [1, 2, 7, 64, 1024] {
                 let mut fragmented = Parser::new(backend);
                 let actual: Vec<_> = raw
@@ -3958,8 +3651,6 @@ mod tests {
 
     #[test]
     fn muse_startup_device_login_is_a_private_sign_in_failure() {
-        // Synthetic device URL/code: no actual login challenge belongs in a
-        // fixture. The CLI waits for Enter after printing this plain prompt.
         let raw = concat!(
             "muse: workspace root: /tmp (explicit)\n",
             "Open this page to sign in:\n",
@@ -4092,9 +3783,6 @@ mod tests {
 
     #[test]
     fn muse_unwraps_shell_json_and_emits_a_real_edit() {
-        // Captured from Muse Spark 1.3 contributor: Bash serializes its
-        // command and stdout as JSON inside `tool.result.text`, while edits
-        // attach exact file facts alongside their textual unified patch.
         let raw = concat!(
             r#"{"payload_type":"tool.result","payload":{"call_id":"bash-1","text":"{\"command\":\"diff -u a b || true\",\"description\":\"Compare files\",\"output\":\"-old\\n+new\\n\"}","correlation_facts":{"tool_name":"bash","outcome":"success"}}}"#,
             "\n",
@@ -4126,10 +3814,6 @@ mod tests {
 
     #[test]
     fn muse_todo_results_show_as_the_plan_card_not_a_row() {
-        // Captured from Muse Spark: the todo tools answer with a bare
-        // status document inside `tool.result.text`, which used to land on
-        // the card as raw JSON. Chat now shows the plan card instead of the
-        // todo row.
         let raw = concat!(
             r#"{"payload_type":"tool.result","payload":{"call_id":"todo-1","text":"{\"ok\":true,\"revision\":2,\"items\":4}","correlation_facts":{"tool_name":"write_todos","outcome":"success"}}}"#,
             "\n",
@@ -4192,7 +3876,7 @@ mod tests {
             let events = Parser::new("muse").push_events(format!("{record}\n").as_bytes());
             assert!(events.iter().any(|event| matches!(event, Event::ToolStart { verb: actual, target: subject, .. } if actual == verb && subject == target)), "{events:?}");
         }
-        // A file edit's recorded facts identify the target independently of its patch.
+
         assert_eq!(
             muse_result_input(
                 &json!({"edit_facts":{"path":"/tmp/new.txt"},"text":"wrote 5 bytes"}),
@@ -4200,7 +3884,7 @@ mod tests {
             )["path"],
             "/tmp/new.txt"
         );
-        // Output bodies do not establish a search query or fetched URL.
+
         assert_eq!(
             muse_result_input(&json!({"text":"/tmp/a.txt:1:match"}), "search"),
             Value::Null
@@ -4257,7 +3941,7 @@ mod tests {
                 "{events:?}"
             );
         }
-        // Another backend and a tool's own login are not Cursor refusals.
+
         for (backend, line) in [
             ("codex", refused),
             (
@@ -4326,7 +4010,7 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::ToolEnd { ok: false, .. }))
         );
-        // Plain CLI refusals and another provider's output remain visible.
+
         assert!(
             !Parser::new("codex")
                 .push_events(b"Error: service tier unavailable\n")
@@ -4434,14 +4118,8 @@ mod tests {
         );
     }
 
-    /// Both CLIs announce their session somewhere other than where this
-    /// parser used to look, so neither ever produced a `Session` event. With
-    /// no session recorded, no resume flag was passed, every turn started an
-    /// agent with no memory of the conversation, and the transcript filled
-    /// with handovers to the agent that was already there.
     #[test]
     fn a_session_is_found_where_each_cli_actually_puts_it() {
-        // Antigravity puts the id beside `init`, not inside it.
         let mut agy = Parser::new("agy");
         let events = agy.push_events(
             br#"{"event":"init","conversation_id":"agy-1","init":{"permission_mode":"ask"}}
@@ -4452,7 +4130,6 @@ mod tests {
             "{events:?}"
         );
 
-        // opencode has no session line at all. Every line is stamped with it.
         let mut opencode = Parser::new("opencode2");
         let events = opencode.push_events(
             br#"{"type":"step_start","sessionID":"ses_1","part":{"type":"step-start"}}
@@ -4760,9 +4437,6 @@ mod tests {
 
     #[test]
     fn codex_file_changes_are_edit_cards_not_lost_as_shell_only() {
-        // Captured from `codex exec --json` using gpt-5.6-luna. Codex emits
-        // file changes as their own item type; it does not describe an
-        // apply-patch operation as command_execution.
         let raw = concat!(
             "{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"file_change\",\"changes\":[{\"path\":\"/tmp/check/sample.txt\",\"kind\":\"update\"}],\"status\":\"in_progress\"}}\n",
             "{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"file_change\",\"changes\":[{\"path\":\"/tmp/check/sample.txt\",\"kind\":\"update\"}],\"status\":\"completed\"}}\n",
@@ -4851,11 +4525,6 @@ mod tests {
 
     #[test]
     fn cursor_reads_the_call_not_the_bookkeeping_beside_it() {
-        // Recorded from cursor-agent stream-json. The map holds the call plus
-        // `hookAdditionalContexts`, `toolCallId` and the timestamps, and
-        // serde sorts it, so taking its first entry named a start after the
-        // hook contexts and an end after `completedAtMs`: two rows per call,
-        // neither of them matching, and every start left open.
         let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
         let mut parser = Parser::new("cursor");
         let mut events = parser.push_events(raw.as_bytes());
@@ -4907,8 +4576,6 @@ mod tests {
 
     #[test]
     fn cursor_reports_its_session_thinking_and_usage() {
-        // The session id is what `--resume` needs: without it every message
-        // in a chat starts a conversation the agent has never had before.
         let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(raw.as_bytes());
@@ -4941,9 +4608,6 @@ mod tests {
 
     #[test]
     fn cursor_edit_carries_the_diff_the_cli_reports() {
-        // Cursor names the change only once the file is written, so unlike
-        // the old/new pair other CLIs send up front, the card can only be
-        // built from the finished call.
         let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(raw.as_bytes());
@@ -4973,9 +4637,6 @@ mod tests {
 
     #[test]
     fn cursor_says_a_whole_turn_once() {
-        // The `result` record repeats every message of the turn, not only the
-        // last one, so comparing it against the run since the last tool call
-        // put the whole conversation on the transcript twice.
         let raw = include_str!("../../../fixtures/chat/cursor.ndjson");
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(raw.as_bytes());
@@ -4991,8 +4652,6 @@ mod tests {
 
     #[test]
     fn cursor_replay_after_a_reconnect_is_not_a_second_answer() {
-        // A turn that loses its connection resumes from a checkpoint and says
-        // the whole turn again. Only what it says differently is new.
         let raw = include_str!("../../../fixtures/chat/cursor-retry.ndjson");
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(raw.as_bytes());
@@ -5008,8 +4667,6 @@ mod tests {
 
     #[test]
     fn cursor_retry_delta_can_cross_the_end_of_previously_seen_text() {
-        // Reconnected streams need not keep the original chunk boundaries.
-        // A new delta can include both a replayed prefix and fresh text.
         for replay in [
             concat!(
                 r#"{"type":"assistant","message":{"content":[{"text":"hello, world. That is all."}]}}"#,
@@ -5055,8 +4712,6 @@ mod tests {
 
     #[test]
     fn cursor_distinct_replies_during_retries_remain_visible() {
-        // Retrying can regenerate a different answer, which is real model
-        // output. Only the CLI's exact snapshot copies should disappear.
         let replies = ["Hello.", "Hi there.", "Hey, how can I help?"];
         let mut parser = Parser::new("cursor");
         let mut events = Vec::new();
@@ -5086,9 +4741,6 @@ mod tests {
 
     #[test]
     fn cursor_names_a_refused_tool_call() {
-        // Without permission to run tools every shell command comes back
-        // rejected with an empty reason. A row that only said "failed" left
-        // nothing to act on.
         let raw = concat!(
             r#"{"type":"tool_call","subtype":"started","call_id":"c-1","tool_call":{"shellToolCall":{"args":{"command":"wc -l notes.txt"}},"hookAdditionalContexts":[],"toolCallId":"c-1","startedAtMs":"1"}}"#,
             "\n",
@@ -5119,9 +4771,6 @@ mod tests {
 
     #[test]
     fn cursor_stderr_is_a_failure_not_an_answer() {
-        // `RetriableError: [resource_exhausted] Error` reached the transcript
-        // as an assistant message, so a chat read as though the agent had
-        // replied with a stack trace.
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(b"RetriableError: [resource_exhausted] Error\n");
         assert!(
@@ -5150,10 +4799,6 @@ mod tests {
 
     #[test]
     fn cursor_message_and_turn_repeats_are_dropped() {
-        // Cursor streams every assistant message twice, word pieces then the
-        // whole message, plus a whole-turn repeat when no tool runs. Only one
-        // copy of each message may reach the transcript; the tool boundary
-        // still resets the run, and result-only text is kept.
         let raw = include_str!("../../../fixtures/chat/cursor-repeat.ndjson");
         let mut parser = Parser::new("cursor");
         let events = parser.push_events(raw.as_bytes());
@@ -5356,9 +5001,6 @@ mod tests {
 
     #[test]
     fn opencode_completed_only_call_opens_its_own_row() {
-        // Real `opencode run --format json`: one tool_use per call, already
-        // finished. Without a synthesized start the row has no verb, no
-        // target and no diff.
         let mut parser = Parser::new("opencode2");
         let events = parser.push_events(
             "{\"type\":\"tool_use\",\"timestamp\":1788490846932,\"part\":{\"partID\":\"prt_1\",\"type\":\"tool\",\"id\":\"call_1\",\"tool\":\"read\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"/tmp/a.txt\"},\"output\":\"Read file /tmp/a.txt, lines 1-1\\n1: hi\",\"title\":\"read\"}}}\n"
@@ -5452,8 +5094,6 @@ mod tests {
 
     #[test]
     fn a_separator_space_and_a_leading_space_are_one_space() {
-        // Grok sends both, and the renderer used to lay them end to end, so a
-        // reply read "I'll  run  that  command" everywhere it was shown.
         let out = feed(
             "grok",
             r#"{"type":"text","data":"I'll"}
@@ -5469,7 +5109,6 @@ mod tests {
 
     #[test]
     fn a_separator_space_still_holds_two_words_apart() {
-        // The reason the separator is kept at all: without it these glue.
         let out = feed(
             "grok",
             r#"{"type":"text","data":"ship"}
@@ -5522,8 +5161,6 @@ mod tests {
 
     #[test]
     fn readable_cap_does_not_split_a_multibyte_character() {
-        // `é` is two bytes. Place it so `len - READABLE_CAP` lands on its
-        // second byte, which is not a char boundary.
         let mut text = String::from("head\n");
         text.push('é');
         text.push_str(&"z".repeat(READABLE_CAP - 1));

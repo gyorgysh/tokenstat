@@ -6,21 +6,7 @@
 
 import SwiftUI
 
-/// The Files tab: the workspace's folders and files, expanded as they are
-/// opened.
-///
-/// One directory is read per expansion rather than the whole tree up front. A
-/// monorepo has hundreds of thousands of files and reading them to draw a
-/// dozen rows would stall the window for no benefit.
 struct WorkspaceFilesView: View {
-    /// Where the list is drawn, which decides what is behind it.
-    ///
-    /// The tree appears twice: in the inspector column, which sits on the same
-    /// translucent material as the rest of the chrome, and in the middle pane
-    /// as a session, which is content. Material in the middle made the file
-    /// list read a shade lighter than the editor, the diff and the browser it
-    /// shares that slot with, so the same folder changed colour depending on
-    /// which pane you opened it in.
     enum Surface {
         case chrome
         case content
@@ -119,8 +105,6 @@ struct WorkspaceFilesView: View {
             for entry in entries {
                 out.append(Row(entry: entry, depth: depth))
                 guard entry.isDir, model.isExpanded(entry.path, in: folder.id) else { continue }
-                // Absent means the read is still in flight. Nothing is appended,
-                // so the row simply has no children yet.
                 if let children = model.children(of: entry.path, in: folder.id) {
                     walk(children, depth: depth + 1)
                 }
@@ -158,8 +142,6 @@ private struct TreeRow: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            // Ignored entries are dimmed, not hidden: `target/` and a generated
-            // project file are things people go looking for.
             .opacity(entry.ignored ? 0.45 : 1)
             .padding(.leading, CGFloat(depth) * 12 + Theme.Space.m)
             .padding(.trailing, Theme.Space.m)

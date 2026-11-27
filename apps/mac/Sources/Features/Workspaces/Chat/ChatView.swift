@@ -167,44 +167,23 @@ struct ChatView: View {
     @State private var detail = ChatDetailPreference.shared
     let workspaceID: String
     var workspaceName: String? = nil
-    /// The folder's git state, when it has one. Chat is not drawn inside the
-    /// workspace surface, so it never inherited the header that carries the
-    /// branch control, and a chat about a repository could not say which
-    /// branch it was about or move to another one.
     var git: GitStatus? = nil
-    /// Refresh the folder after a checkout, so the chip and everything else
-    /// reading git agree about where the folder now is.
     var onBranchChanged: (() async -> Void)? = nil
-    /// Opens the folder's changes beside the chat, at one file or all of
-    /// them. Nil where this pane has no place to open them.
     var onReviewChanges: ((String?) -> Void)? = nil
     var onReviewTurnChanges: ((ChatTurnChanges, String?) -> Void)? = nil
     var onNewChat: (() -> Void)? = nil
     @Binding var showingOverview: Bool
-    /// Whether this pane is the one in front.
-    ///
-    /// The Mac keeps it mounted behind other screens so a transcript and the
-    /// place somebody had read to survive a trip to Insights and back. A pane
-    /// nobody can see does not poll, and it does not hold the shared model to
-    /// a folder that has since been left: it reloads when it comes forward.
     var isActive = true
     var loadsWorkspace = true
     var showsConversationToolbarActions = true
-    /// The composer's words live on the model, keyed to the conversation
-    /// rather than to this pane, so leaving and coming back finds them and
-    /// switching conversations does not carry them across.
     @State private var draftSelection = NSRange(location: 0, length: 0)
-    /// A row the transcript should jump to, set by the pending-approval bar.
     @State private var scrollTarget: String?
     @State private var follow = TranscriptFollowState()
     @State private var window = TranscriptWindow()
     @State private var settleMood: PersonaMood?
     @State private var settleTaskID = UUID()
     @State private var settledPresentation: ChatPresentationIdentity?
-    /// Only a new conversation raises the opening cover.
     @State private var settledSelection: ChatReadingIdentity?
-    /// Bumped on send so the transcript scrolls to the end synchronously,
-    /// instead of waiting for the first streamed token to trigger a pin.
     @State private var followPulse = 0
     /// Last instant (non-animated) pin. A scrollTo on a lazy stack walks
     /// every row in between, so silent pins from the settle loop, structural
@@ -216,31 +195,15 @@ struct ChatView: View {
     @State private var exactRows = TranscriptExactRows()
     #endif
     @State private var rowMounts = TranscriptRowMounts()
-    /// Whether rows are reporting where they are. Set from the scroll
-    /// callback as the top of the loaded conversation comes near, so the
-    /// geometry readers exist for the stretch that can need an anchor and
-    /// nowhere else.
     @State private var measuringRows = false
-    /// How many newest rows sit below the built slice. Zero glues the
-    /// ForEach to the end. Raised when the reader asks for older built
-    /// rows, reset when they jump back. The stack is lazy, but every
-    /// transaction still measures what it holds, so the slice stays a
-    /// fixed width rather than growing.
     @State private var olderOffset = 0
-    /// First row of the built slice, when it is not glued to the end.
-    /// `olderOffset` is counted from the newest row, so a turn arriving
-    /// below or a page landing above would otherwise replace what is on
-    /// screen. This id is what keeps those rows still.
     @State private var sliceAnchor: [String] = []
     @State private var paneDropTargeted = false
     @State private var transcriptDropTargeted = false
     @State private var dropPresentation: UInt64 = 0
     @State private var composerDropTargeted = false
-    /// Observed, so pinning from the sidebar or Home redraws the chrome
-    /// without leaving the conversation.
     @State private var pins = PinnedWorkStore.shared
     @State private var showingHandoff = false
-    /// The pull request for the folder's branch, from `pulls.branch`.
     @State private var branchPull: BranchPull?
     @State private var branchPullOwner: String?
     @State private var dropNotice: String?
@@ -262,9 +225,6 @@ struct ChatView: View {
                     }
                 }
             ) {
-                // New chat stays a button: it is the one thing people reach
-                // for here. The rest is one menu, so the bar has room for the
-                // project's own tabs.
                 ToolbarMenuButton(help: L10n.text("apple.chatview.more_for_this_conversation.314ed3c2")) {
                     Button(showingOverview ? L10n.text("apple.chatview.back_to_the_conversation.481c16c4") : L10n.text("apple.chatview.all_conversations.ecf200f4"), .layout) {
                         showingOverview.toggle()
@@ -296,7 +256,6 @@ struct ChatView: View {
                         }
                     }
                 }
-                // Narrow windows retain both actions in the conversation menu.
                 if showsConversationToolbarActions, !showingOverview, model.selected != nil, let reference = model.currentReference {
                     let pinned = pins.isPinned(reference)
                     let full = pins.pins(in: reference.scope).count >= PinnedWorkStore.capacity
@@ -339,8 +298,6 @@ struct ChatView: View {
                 }
             }
             #endif
-            // Keep the transcript mounted while browsing the library so its
-            // scroll view, rendered rows, and attachment views retain identity.
             ZStack {
             VStack(spacing: 0) {
             if let chat = model.selected {
@@ -358,8 +315,6 @@ struct ChatView: View {
                         .padding(.vertical, Theme.Space.s)
                         .frame(maxWidth: .infinity)
                 }
-                // A saved copy explains itself above the composer: what the
-                // rows are, when they were kept, and the way back to live.
                 if let copy = model.savedCopy {
                     ChatSavedCopyBanner(info: copy, checking: model.checkingSavedCopy) {
                         Task { await model.checkSavedCopyForUpdates() }
@@ -382,8 +337,6 @@ struct ChatView: View {
                         .padding(.bottom, Theme.Space.s)
                         .frame(maxWidth: .infinity)
                 }
-                // Pending writing stays available offline for copying or cancellation.
-                // Sending and receipt checks require a live, verified owner.
                 if !model.pendingQueue.isEmpty {
                     let queueOwner = model.currentReference
                     let queueCanSteer = model.busy && model.selected?.nativeSteer == true
@@ -458,11 +411,6 @@ struct ChatView: View {
             } else if model.isReady(for: workspaceID), model.chats.isEmpty {
                 empty
             } else {
-                // Either nothing has been asked yet, or this folder's
-                // conversations are known and one is about to be picked.
-                // "Start a chat" belongs to neither: it is a promise about a
-                // folder nobody has looked in, and it was being made every
-                // time this pane was rebuilt.
                 ChatPaneOpening()
             }
             }
@@ -488,8 +436,6 @@ struct ChatView: View {
         }
     }
 
-    // Opaque boundaries keep this pane's large content tree and modifier
-    // chain independently type-checkable on the shipping Xcode toolchains.
     private var presentedChat: some View {
         paneContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -523,10 +469,7 @@ struct ChatView: View {
 
     private var observedChat: some View {
         presentedChat
-        // Asked again when the branch moves and when a turn ends, since an
-        // agent may have just opened the pull request.
         .task(id: "\(workspaceID)|\(git?.branch ?? "")|\(model.busy)|\(isActive)") {
-            // Keep the last answer for this folder and branch while asking again.
             let owner = "\(workspaceID)|\(git?.branch ?? "")"
             if branchPullOwner != owner {
                 branchPull = nil
@@ -551,7 +494,6 @@ struct ChatView: View {
         }
         .onChange(of: showingOverview) { _, _ in dropPresentation &+= 1 }
         .onChange(of: model.readingIdentity) { previous, current in
-            // A sheet belongs to the conversation that opened it.
             showingHandoff = false
             if previous.generation != current.generation { settleMood = nil }
         }
@@ -577,9 +519,6 @@ struct ChatView: View {
             guard !model.consumePreparedInitialPresentation(workspaceID: workspaceID) else { return }
             await model.load(workspaceID: workspaceID)
         }
-        // What is on screen, for the notifier. This pane stays mounted behind
-        // other destinations, so `isActive` is the part `model.selected`
-        // cannot answer on its own.
         #if os(macOS)
         .onChange(of: "\(model.selected?.id ?? "")-\(isActive)", initial: true) { _, _ in
             UserPresence.shared.chatSurface(showing: isActive ? model.selected?.id : nil)
@@ -595,8 +534,6 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .chatAttachmentCachePurged)) { _ in
             model.clearCachedAttachmentMemory()
         }
-        // ⌥⌘↑ and ⌥⌘↓ from the View menu. Every chat pane that was ever
-        // opened stays mounted, so only the one in front answers.
         .onReceive(NotificationCenter.default.publisher(for: .chatStepRequested)) { note in
             guard isActive, !showingOverview, let step = note.object as? Int else { return }
             _ = model.stepConversation(step)
@@ -609,8 +546,6 @@ struct ChatView: View {
             UserPresence.shared.chatSurface(showing: nil)
         }
         #endif
-        // Unsent words are written a third of a second after the last
-        // keystroke. These two are the moments that can arrive sooner.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.saveDraftNow() }
             else {
@@ -630,8 +565,6 @@ struct ChatView: View {
         let _ = DebugUIHooks.printsChanges ? Self._printChanges() : ()
         #endif
         observedChat
-        // And the same fact to the host, which is the one deciding whether a
-        // phone hears about this turn.
         .watching(conversationID: model.selected?.id, peer: model.peer,
                   isActive: isActive && model.savedCopy == nil)
         .task(id: ChatPollWatchIdentity(owner: model.pollingIdentity,
@@ -647,14 +580,10 @@ struct ChatView: View {
             await model.refillBackendsIfIncomplete()
         }
         #if DEBUG && os(macOS)
-        // `key type:<text>` appends to the composer, one keystroke's worth of
-        // draft change each, so typing during a stream can be measured.
-        // `key clear-draft` empties it again.
         .onReceive(NotificationCenter.default.publisher(for: DebugUIHooks.keyRequested)) { note in
             guard isActive, let command = note.object as? String else { return }
             if command == "clear-draft" { model.draft = ""; return }
             if command == "update-prompt" {
-                // This chat's agent, shown as if a newer version were out.
                 if let chat = model.selected, var backend = model.backend(for: chat.backend) {
                     backend.updateAvailable = true
                     backend.latestVersion = backend.latestVersion.map { $0 + "-preview" } ?? "preview"
@@ -662,11 +591,8 @@ struct ChatView: View {
                 }
                 return
             }
-            // `key earlier` presses Earlier messages. `key where:<label>`
-            // logs the row at the top of the viewport and its offset.
             if command == "earlier" { window.requestArchivePage(); return }
             if command == "heights" {
-                // One line per row: kind, estimate, measured height (or -1).
                 let known = TranscriptProbe.shared.measuredHeights
                 let lines = visibleItems.map { item -> String in
                     let kind = String(describing: item.kind).prefix(while: { $0 != "(" })
@@ -687,12 +613,6 @@ struct ChatView: View {
         }
         #endif
         .onChange(of: isActive) { was, active in
-            // Coming back to a chat that paged far back gets a new scroll
-            // view whose older rows are only estimates, and the reader's
-            // first scroll from the latest message is what makes them resize
-            // under it. Open on the newest page instead, the same as Jump to
-            // latest: it is what arriving shows, and earlier pages load again
-            // on the way back.
             guard active, !was, model.canDiscardPagedHistory, !model.busy,
                   !TranscriptSlice.measuresWhole(visibleItems) else { return }
             Task { await model.reopenAtLatest() }
@@ -733,8 +653,6 @@ struct ChatView: View {
     }
 
     #if os(macOS)
-    /// Whether the older rows are laid out at their real heights. See
-    /// `TranscriptExactRows`.
     private static var exactHead: Bool {
         #if DEBUG
         return !UserDefaults.standard.bool(forKey: "debug.lazyHead")
@@ -744,8 +662,6 @@ struct ChatView: View {
     }
     #endif
 
-    /// What sits above the oldest row: the way to earlier messages, or the
-    /// start of the conversation.
     @ViewBuilder
     private func transcriptHeader(_ chat: ChatConversation) -> some View {
         #if !os(macOS)
@@ -783,9 +699,6 @@ struct ChatView: View {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-        // Once per pass, not once per reader of it. `visibleItems` copies the
-        // window out of the conversation every time it is asked, and the
-        // `ForEach` and the spinner both ask.
         let rows = visibleItems
         let spinning = TranscriptFollow.spinningRow(rows)
         let split = measuredTail.split(rows, generation: model.selectionGeneration,
@@ -799,9 +712,6 @@ struct ChatView: View {
         #endif
         ScrollViewReader { proxy in
             let scroll = ScrollView {
-                // Keep the bottom target measured even when a tall lazy row
-                // is offscreen. Following must reach a real frame, not walk
-                // toward an estimate until its correction budget runs out.
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if os(macOS)
                     if Self.exactHead {
@@ -822,12 +732,6 @@ struct ChatView: View {
                     #else
                     lazyHead(split.lazy, chat: chat, spinning: spinning, liveRowID: liveRowID)
                     #endif
-                    // See `TranscriptSlice.measuredTail`. The rows above the
-                    // newest sit in a stack of their own: a stream changes the
-                    // newest row's height on every revision, and a settled
-                    // stack keeps its size instead of every sibling being
-                    // sized again. Scrolling during a stream measured about
-                    // half the main-thread time this way.
                     if split.measured.count > 1 {
                         VStack(alignment: .leading, spacing: Theme.Space.m) {
                             ForEach(split.measured.dropLast()) { item in
@@ -897,9 +801,6 @@ struct ChatView: View {
                 TranscriptProbe.shared.scrolling = follow.scrolling
                 TranscriptProbe.shared.built = rows.count
                 #endif
-                // The slice flag first: note() treats a hidden newest as
-                // far from the end. Then the pin, then the window, which
-                // has to see that decision on the same frame.
                 follow.sliceHidesNewest = sliceOffset > 0
                 follow.note(metrics)
                 window.followingEnd = (follow.pinned || follow.settling) && sliceOffset == 0
@@ -929,8 +830,6 @@ struct ChatView: View {
                                     holdSliceStart: holdSliceStart)
             transcriptScroll
             .onChange(of: structureToken) { _, _ in
-                // Opening owns placement while the cached rows and the live
-                // page trade places. Later structural changes can follow normally.
                 guard settledPresentation == presentation,
                       presentation.reading == model.readingIdentity,
                       !follow.settling, !follow.atEnd else { return }
@@ -952,9 +851,6 @@ struct ChatView: View {
                 follow.suppressed = !ids.isEmpty
                 if follow.pinned, let id = ids.first { scrollTarget = "approval-\(id)" }
             }
-            // A scroll that has come to rest is a reader who has stopped
-            // somewhere. Wait a beat for the rows to say where they are:
-            // they report on the update this change itself causes.
             .onChange(of: follow.scrolling) { _, moving in
                 guard !moving, isActive else { return }
                 let reference = model.currentReference
@@ -972,16 +868,9 @@ struct ChatView: View {
                 if active {
                     follow.active = true
                 } else {
-                    // Drop metrics and pending repins before the stack tears
-                    // down; otherwise a last geometry sample can still mark
-                    // scrolling and invalidate work on the way out.
                     follow.freeze()
                 }
-                // The presentation-keyed task owns settling on reactivation.
             }
-            // A request that arrives while a reply is still streaming would
-            // otherwise be pushed off the top of the page before anyone saw
-            // it. Bring the card to them.
             .onChange(of: model.approvals.first?.id) { _, id in
                 guard let id else { return }
                 scrollTo("approval-\(id)", proxy, animated: true)
@@ -1029,8 +918,6 @@ struct ChatView: View {
                         }
                     }
                 }
-                // The cached tail can be measured while the live page loads.
-                // Reveal after the live page has stayed at its actual bottom.
                 while model.openingConversation {
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, settleTaskID == ticket,
@@ -1072,11 +959,6 @@ struct ChatView: View {
             }
         }
         #if os(macOS)
-        // Archive row IDs repeat across chats. Reusing the native scroll
-        // view also reused its lazy layout estimates and scroll targets,
-        // sometimes leaving a loaded conversation entirely offscreen after
-        // arrow navigation. Keep the composer/pane, but give each selected
-        // window its own scroll view. Paging and streaming retain this one.
         .id(ChatReadingIdentity(reference: presentation.reading.reference,
                                 generation: presentation.reading.generation))
         #endif
@@ -1097,7 +979,6 @@ struct ChatView: View {
     /// avoids it entirely by being measured whole.
     private func warmLazyEstimates(_ proxy: ScrollViewProxy, ticket: UUID,
                                    presentation: ChatPresentationIdentity) async {
-        // A short slice is measured whole and has no estimates to settle.
         guard !TranscriptSlice.measuresWhole(visibleItems),
               settledSelection != Self.selectionKey(presentation),
               let move = window.restoreMeasured else { return }
@@ -1122,7 +1003,6 @@ struct ChatView: View {
     private func prepareTranscript(_ presentation: ChatPresentationIdentity, rowCount: Int) {
         guard presentation.reading == model.readingIdentity else { return }
         #if os(macOS)
-        // A new scroll view needs fresh paging anchors and pin timing.
         window.release()
         window.clearRowFrames()
         window.followingEnd = true
@@ -1135,10 +1015,6 @@ struct ChatView: View {
             window.coveredLayoutMoved()
         }
         exactRows.canShift = { [window] in !window.followingEnd && !window.isRestoringPage }
-        // A page put in place under a moving viewport fights the momentum:
-        // the hold corrects, the fling carries on, and the held row is lost
-        // for frames. Wait until the reader's scroll has come to rest, as
-        // the phone does.
         window.canPage = { [follow] in !follow.scrolling }
         lastSilentPinAt = .distantPast
         DiagnosticsLog.note("chat viewport remount previousEnd=\(follow.atEnd) rows=\(rowCount)")
@@ -1209,39 +1085,22 @@ struct ChatView: View {
             alignment: .leading
         )
         .frame(maxWidth: .infinity, alignment: item.readingRoomAlignment)
-        // No geometry readers mid-fling: each one reports per
-        // frame, and a fast scroll turns those reports into a
-        // transaction per frame that placement never drains.
-        // Readers return 0.35s after the last moved frame, via
-        // `scrolling`, before any paging decision needs them.
-        // Near the top of a long conversation, where a page
-        // may land and the reader's place has to be held; and
-        // wherever the reader has stopped above the latest
-        // turn, because that place is worth keeping. Never
-        // mid-scroll: that is a report per row per frame.
         .transcriptRowFrame(
             item.id,
             watched: !follow.scrolling && (measuringRows || !follow.atEnd)
         )
     }
 
-    /// Bound the number of layout samples after the live page arrives.
     private static let settleFrames = 24
 
-    /// Rows the transcript builds this pass. A fixed-width slice, never a
-    /// growing suffix: appending below the viewport shifts nothing, earlier
-    /// pages arrive through the paging path, older built rows by sliding.
     private var visibleItems: [ChatDisplayItem] {
         TranscriptSlice.items(model.transcriptItems, olderOffset: sliceOffset)
     }
 
-    /// Rows above the built slice. Zero while the whole conversation fits.
     private var hiddenAboveCount: Int {
         TranscriptSlice.hiddenAbove(count: model.transcriptItems.count, olderOffset: sliceOffset)
     }
 
-    /// `olderOffset` counted from the live end, or the offset that still
-    /// starts on `sliceAnchor` after rows arrived above or below.
     private var sliceOffset: Int {
         if olderOffset > 0, !sliceAnchor.isEmpty {
             return TranscriptSlice.holding(sliceAnchor, in: model.transcriptItems, current: olderOffset)
@@ -1253,8 +1112,6 @@ struct ChatView: View {
         applySlice(0)
     }
 
-    /// Keep the slice on the row it starts on while a page lands (`true`),
-    /// then let a slice the page did not move glue to the end again.
     private func holdSliceStart(_ holding: Bool) {
         if holding {
             let start = visibleItems.prefix(8).map(\.id)
@@ -1267,22 +1124,12 @@ struct ChatView: View {
         }
     }
 
-    /// Slide the built slice towards the start, holding the reader's row
-    /// where it is. Without the hold the rows brought in above pushed the
-    /// conversation down by a whole slide, the reader landed at the top of
-    /// them, and that was the top of the slice again: the next slide fired,
-    /// and the one after, until the start of the chat.
     private func revealEarlier() {
-        // The window's flag runs ahead of the view after a page lands. With
-        // nothing actually above the slice, ask the archive instead of
-        // sliding a slice that cannot move, which was a loop at the top of
-        // the conversation with nothing loading.
         guard hiddenAboveCount > 0 else {
             window.hasHiddenEarlierRows = false
             window.ask()
             return
         }
-        // Never drop a row the reader can see from the bottom of the slice.
         let room = window.slideRoom(in: visibleItems.map(\.id), later: false)
         guard room > 0 else { return }
         follow.stopFollowing()
@@ -1294,15 +1141,11 @@ struct ChatView: View {
         )
     }
 
-    /// Slide back towards the newest rows as the reader reaches the end of
-    /// the slice. The rows dropped from the top move what is on screen up by
-    /// their height, so the place is held the same way.
     private func revealLater() {
         guard sliceOffset > 0 else {
             window.hasHiddenLaterRows = false
             return
         }
-        // Nor from its top.
         let room = window.slideRoom(in: visibleItems.map(\.id), later: true)
         guard room > 0 else { return }
         window.holdPlace("slide-later")
@@ -1313,8 +1156,6 @@ struct ChatView: View {
         )
     }
 
-    /// Slide the built window and remember its first row so later inserts
-    /// cannot replace what is on screen.
     private func applySlice(_ offset: Int) {
         let clamped = TranscriptSlice.clampOffset(offset, count: model.transcriptItems.count)
         olderOffset = clamped
@@ -1330,8 +1171,6 @@ struct ChatView: View {
     }
 
 
-    /// A reopened transcript owns its new viewport and places it at the end.
-    /// Only a jump within the current transcript may use this scroll proxy.
     private func returnToLatest(_ proxy: ScrollViewProxy, for reading: ChatReadingIdentity) async {
         guard !Task.isCancelled, isActive, reading == model.readingIdentity,
               !model.openingConversation, !follow.settling else { return }
@@ -1366,14 +1205,8 @@ struct ChatView: View {
         }
     }
 
-    /// How many frames one press of Jump to latest may spend arriving.
     private static let chaseFrames = 24
 
-    /// Let the scroll callback put the viewport back on the end.
-    ///
-    /// Weak, because the state owns the closure and the closure would
-    /// otherwise own the state. The proxy and the model are both fine to hold:
-    /// neither is owned by what is holding this.
     private func installRepin(_ proxy: ScrollViewProxy, for presentation: ChatPresentationIdentity) {
         let state = follow
         let model = model
@@ -1438,11 +1271,6 @@ struct ChatView: View {
         }
     }
 
-    /// Whether a scroll to the end is the actual latest turn.
-    ///
-    /// The ForEach is a bounded slice, so walking it is cheap. A slice that
-    /// has dropped the newest rows is not the end, and pinning it would pin
-    /// a sentinel under old messages.
     private var canScrollToEnd: Bool { sliceOffset == 0 }
 
     /// See `TranscriptRowMounts`. Pinning again does not rebuild the rows:
@@ -1459,7 +1287,6 @@ struct ChatView: View {
         while !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard presentation.reading == model.readingIdentity else { return }
-            // The repair must not compete with opening placement.
             if settledPresentation != presentation || rowMounts.showsRows(viewportHeight: window.viewportHeight) || visibleItems.isEmpty
                 || model.openingConversation || follow.settling || follow.scrolling || !follow.pinned || !canScrollToEnd {
                 emptySamples = 0
@@ -1485,11 +1312,6 @@ struct ChatView: View {
 
     @discardableResult
     private func pinToLatest(_ proxy: ScrollViewProxy, animated: Bool) -> Bool {
-        // A pending request owns the view. Streaming text must not scroll it
-        // back out from under somebody who is reading it to decide.
-        // And a hidden pane owns no viewport: this view stays mounted behind
-        // other destinations, and scrolling its zero-size proxy is what left
-        // it painted off-origin until a resize.
         guard isActive, follow.pinned, model.approvals.isEmpty else { return false }
         guard canScrollToEnd else {
             follow.stopFollowing()
@@ -1505,14 +1327,7 @@ struct ChatView: View {
     }
 
     private func scrollTo(_ id: String, _ proxy: ScrollViewProxy, animated: Bool) {
-        // Every scroll here is programmatic. Say so, or the frames of the
-        // animation read as the reader leaving and unpin mid-flight.
-        // Instant pins land on the same frame and only need a short window;
-        // the long one is what locked out slow scrollback during streams.
-        // Hidden panes do not scroll at all (see pinToLatest).
         guard isActive else { return }
-        // The end always exists. Anything else may sit outside the built
-        // slice: slide to it first, or the scroll lands nowhere.
         if id != TranscriptFollow.bottomID {
             model.revealRow(id)
             applySlice(TranscriptSlice.revealing(id, in: model.transcriptItems))
@@ -1541,8 +1356,6 @@ struct ChatView: View {
         }
     }
 
-    /// Only an explicit search/shared-reading request overrides opening at
-    /// the latest turn. Passive reading history does not move a new selection.
     private func restoreReadingPlace(_ proxy: ScrollViewProxy) async -> TranscriptReading.Restoration {
         guard let reference = model.currentReference,
               let mark = ChatReadingStore.shared.takeRequest(for: reference) else { return .unavailable }
@@ -1551,8 +1364,6 @@ struct ChatView: View {
         }
     }
 
-    /// Put one row where the reader had it, with the rest of the conversation
-    /// below it and the earlier part one button above.
     private func placeRow(_ id: String, _ proxy: ScrollViewProxy, at point: UnitPoint) {
         guard isActive else { return }
         applySlice(TranscriptSlice.holding([id], in: model.transcriptItems, current: 0))
@@ -1565,7 +1376,6 @@ struct ChatView: View {
             }
         }
         #if os(macOS)
-        // A row that is not laid out cannot be scrolled to: lay it out first.
         if Self.exactHead, !exactRows.ensureDrawn(id) {
             DispatchQueue.main.async { scroll() }
             return
@@ -1574,8 +1384,6 @@ struct ChatView: View {
         scroll()
     }
 
-    /// The folder's uncommitted work and the branch's pull request, just
-    /// above the composer. Nothing at all when there is neither.
     @ViewBuilder
     private var changesRow: some View {
         ChatGitStatusStrip(git: git, pull: branchPull,
@@ -1607,14 +1415,9 @@ struct ChatView: View {
             followPulse += 1
             return
         }
-        // Enqueue first: a full queue reports an error and returns nil, and
-        // the words must survive that path rather than being wiped.
         if sendNow {
             guard let item = model.enqueue(text, atFront: true) else { return }
             model.clearDraft()
-            // Sending is engaging: follow is the default, so a new turn resumes
-            // it even if it was paused before. Pausing again is one tap. The
-            // pulse scrolls now; the token pins take over as content arrives.
             showNewest()
             follow.jump()
             followPulse += 1
@@ -1641,9 +1444,6 @@ struct ChatView: View {
                 return
             }
         }
-        // The agent this chat runs on is behind. Offer the update before the
-        // message goes, once per version. The words stay in the composer
-        // until the answer.
         if !updateAnswered, model.updatingAgentID == nil,
            AgentUpdatePrompt.isDue(model.backend(for: chat.backend), peer: model.peer),
            let backend = model.backend(for: chat.backend) {
@@ -1653,8 +1453,6 @@ struct ChatView: View {
             }
             return
         }
-        // A long pause emptied the prompt cache: this message would make the
-        // agent read the whole conversation again. Ask first.
         if !cacheConfirmed,
            !ChatPromptCacheRule.isSuppressed(ChatPromptCacheRule.idleSuppressedKey),
            let idle = ChatPromptCacheRule.idle(chat, nowMs: ChatModel.nowMs),
@@ -1662,8 +1460,6 @@ struct ChatView: View {
             askBeforeColdSend(chat, text: text, idleMs: idle, tokens: cache.tokens)
             return
         }
-        // The composer empties, the stored copy does not: it is dropped when
-        // the host has the words and put back when it refuses them.
         guard model.holdDraftForSending(text) else { return }
         showNewest()
         follow.jump()
@@ -1673,8 +1469,6 @@ struct ChatView: View {
 
     private func askBeforeColdSend(_ chat: ChatConversation, text: String, idleMs: Int64, tokens: UInt64) {
         let peer = model.peer
-        // Files are uploaded into this chat, so a message carrying them
-        // cannot move to another one.
         let movable = model.attachments.isEmpty && model.savedCopy == nil
         Task { @MainActor () -> Void in
             let canStart = movable ? await RemoteHostFeature.chatContinue.isSupported(peer: peer) : false
@@ -1698,8 +1492,6 @@ struct ChatView: View {
                                               tokens: tokens, proceed: proceed)
     }
 
-    /// Move this message into a new chat that continues this one, and send it
-    /// there. The words go back where they were if the new chat cannot be made.
     private func continueInNewChat(_ text: String, from chat: ChatConversation) {
         guard model.selected?.id == chat.id,
               model.draft.trimmingCharacters(in: .whitespacesAndNewlines) == text,
@@ -1720,7 +1512,6 @@ struct ChatView: View {
         (paneDropTargeted || transcriptDropTargeted || composerDropTargeted) && showsDropTargets
     }
 
-    /// Leaves out the folder list read, so it does not redraw the pane. `acceptsDrops` checks it on drop.
     private var showsDropTargets: Bool {
         isActive && !showingOverview && !model.sending
             && model.folderID == workspaceID
@@ -1847,11 +1638,6 @@ struct ChatView: View {
     }
 }
 
-/// The pane between arriving and knowing.
-///
-/// It says nothing at first, because most opens are quicker than a spinner is
-/// worth and a spinner that appears for one frame is itself the flicker. A
-/// slow host still gets to admit it is waiting.
 private struct ChatPaneOpening: View {
     @State private var waited = false
 
@@ -1869,8 +1655,6 @@ private struct ChatPaneOpening: View {
     }
 }
 
-/// The transcript and composer share one desktop grid. Prose keeps a readable
-/// measure in its centre while structured content can use the full lane.
 private extension ChatDisplayItem {
     var prefersWideReadingRoom: Bool {
         switch kind {
@@ -1893,8 +1677,6 @@ private extension ChatDisplayItem {
     }
 }
 
-/// One themed promise for every chat drop target, from a wide Mac transcript
-/// to an empty iPad conversation.
 struct ChatDropExperience: View {
 
     var body: some View {
@@ -1950,8 +1732,6 @@ private struct ConversationPreviewHover: ViewModifier {
 }
 #endif
 
-/// Keep the transcript laid out behind the cover. Delay the wireframe so a
-/// fast selection can appear directly at the latest message.
 private struct OpeningSkeleton: View {
     @State private var showsSkeleton = false
 
@@ -1973,20 +1753,9 @@ private struct OpeningSkeleton: View {
 }
 
 #if os(macOS)
-/// Keep the native clip view within its document while the reader is at an
-/// edge. A rubber-band frame can make the lazy history change its estimates
-/// and trigger a follow correction while the scroll view is springing back.
 #if DEBUG
-/// A reader's wheel gesture, delivered to the transcript's own scroll view.
-///
-/// Built as real phased scroll events rather than an offset change, so the
-/// transcript sees what it sees from a trackpad: `interacting`, then rest.
-/// `ai.tokenstat.debug.key` with `wheel:<points per step>:<steps>`. Positive
-/// points move towards the start of the conversation.
 @MainActor
 enum DebugTranscriptWheel {
-    /// Every transcript reports in. Retained panes keep hidden ones alive,
-    /// so the one a gesture goes to is the visible one, not the last laid out.
     private static let reporters = NSHashTable<TranscriptScrollBounds.Reporter>.weakObjects()
     fileprivate static var reporter: TranscriptScrollBounds.Reporter? {
         get {
@@ -1999,10 +1768,6 @@ enum DebugTranscriptWheel {
         set { if let newValue { reporters.add(newValue) } }
     }
 
-    /// A trackpad gesture as the window receives it: finger phases, then a
-    /// momentum tail, delivered to the window so hit
-    /// testing and the scroll view's own handling all run the way they do
-    /// for a real swipe. `momentum` is how many decaying tail events follow.
     static func gesture(points: Int32, steps: Int, momentum: Int = 0) {
         guard let scrollView = reporter?.enclosingScrollView, let window = scrollView.window else { return }
         // An event made here has no window, so AppKit reports its screen
@@ -2052,8 +1817,6 @@ enum DebugTranscriptWheel {
         event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(points))
         event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Int64(points) << 16)
         guard let nsEvent = NSEvent(cgEvent: event) else { return }
-        // A local monitor only sees events the app dequeues, and a Debug
-        // hook runs in the background, so do what the monitor does first.
         if points != 0 { reporter?.noteWheel(towardEarlier: points > 0) }
         reporter?.window?.sendEvent(nsEvent)
     }
@@ -2111,8 +1874,6 @@ private struct TranscriptScrollBounds: NSViewRepresentable {
 
         private var picture: NSView?
 
-        /// A still picture of the scroll view, laid over it. See
-        /// `TranscriptWindow.coverPageLanding`.
         func cover() {
             uncover()
             guard window != nil, !isHiddenOrHasHiddenAncestor, let scroll = enclosingScrollView,
@@ -2146,10 +1907,6 @@ private struct TranscriptScrollBounds: NSViewRepresentable {
             if scrollView.verticalScrollElasticity != .none {
                 scrollView.verticalScrollElasticity = .none
             }
-            // The window object outlives each conversation's scroll view, and
-            // an old view on its way out can update after the new one. Only a
-            // reporter that is on screen installs the correction, and it finds
-            // its scroll view when it runs rather than keeping one that went.
             guard window != nil, !isHiddenOrHasHiddenAncestor else { return }
             transcript?.cover = { [weak self] in self?.cover() }
             transcript?.uncover = { [weak self] in self?.uncover() }
@@ -2183,12 +1940,6 @@ final class TranscriptMeasuredTail {
     private var key: Key?
     private var start = 0
 
-    /// `streaming` keeps the usual tail while a turn is written. `docked`
-    /// is the reader on the
-    /// latest turn, the only place a change of layout cannot move what
-    /// somebody is reading. A slice measured whole stays whole until a
-    /// turn streams, wherever the reader goes. Past `measuredWhole` rows
-    /// the usual tail applies either way.
     func split(_ rows: [ChatDisplayItem], generation: UInt64, streaming: Bool, docked: Bool)
         -> (lazy: ArraySlice<ChatDisplayItem>, measured: ArraySlice<ChatDisplayItem>) {
         // Rows arriving above the reader (an earlier page) keep a whole
@@ -2198,11 +1949,6 @@ final class TranscriptMeasuredTail {
         let whole = docked || (sameReading && key?.whole == true)
         let next = Key(generation: generation, count: rows.count, first: rows.first?.id, last: rows.last?.id,
                        whole: whole)
-        // Rows arriving at the end, which is a reply streaming in (a long
-        // one adds a piece just before its live one), join the measured
-        // rows. Moving the boundary for them moved rows between the two
-        // stacks on every new piece: the view fell behind the reply and
-        // lurched back, and a reader could not scroll away from it.
         if let key, sameReading, key.first == rows.first?.id, rows.count >= key.count, start <= rows.count {
             self.key = next
             return TranscriptSlice.split(rows, measuredFrom: start)
@@ -2233,32 +1979,20 @@ final class TranscriptMeasuredTail {
 /// the view by the same amount in the same update.
 @MainActor @Observable
 final class TranscriptExactRows {
-    /// The first and last row drawn, by id, so rows a page adds above keep
-    /// the same rows drawn.
     private(set) var firstDrawn: String?
     private(set) var lastDrawn: String?
-    /// Rows laid out out of sight so their height is known before they are
-    /// drawn. See `noteMeasured`.
     private(set) var measuring: [String] = []
-    /// Moves when a space changes size, so it is laid out again.
     private(set) var revision = 0
 
-    /// Move the view by a number of points, keeping what is on screen in
-    /// place, and say so to whoever anchors the reading row.
     @ObservationIgnored var shift: ((CGFloat) -> Void)?
-    /// False while something else owns the viewport: following the end, a
-    /// page being put in place.
     @ObservationIgnored var canShift: (() -> Bool)?
 
     @ObservationIgnored private var heights: [String: CGFloat] = [:]
     @ObservationIgnored private var ids: [String] = []
     @ObservationIgnored private var index: [String: Int] = [:]
     @ObservationIgnored private var sizes: [CGFloat] = []
-    /// `tops[i]` is row i's top below the first row's top, spacing included.
-    /// One entry more than rows.
     @ObservationIgnored private var tops: [CGFloat] = [0]
     @ObservationIgnored private var stale = true
-    /// The first row's top in the transcript, learned from drawn rows.
     @ObservationIgnored private var base: CGFloat = 40
     @ObservationIgnored private var lastTop: CGFloat?
     @ObservationIgnored private var lastViewport: CGFloat = 0
@@ -2269,14 +2003,10 @@ final class TranscriptExactRows {
     /// row reports where it is on every frame of a scroll, so this is kept
     /// close to what a lazy stack keeps built.
     private static let ahead: CGFloat = 0.75
-    /// How far beyond the drawn rows heights are measured, in screens, and
-    /// the most rows measured at once.
     private static let measuredAbove: CGFloat = 2.5
     private static let measuredBelow: CGFloat = 1
     private static let measuredMost = 40
 
-    /// The rows in order. Called while the transcript is drawn, so it
-    /// changes nothing a view observes.
     func setRows(_ items: ArraySlice<ChatDisplayItem>, generation: UInt64) {
         if generation != self.generation {
             self.generation = generation
@@ -2295,13 +2025,8 @@ final class TranscriptExactRows {
         }
     }
 
-    /// Moves when the rows change. Handed to the spaces as a plain value:
-    /// a page that adds rows above changes neither the drawn rows nor a
-    /// measured height, and the space above stayed the size it was until
-    /// something else redrew it, a whole page too short.
     @ObservationIgnored private(set) var rowsVersion = 0
 
-    /// The rows drawn, as positions in the rows last set.
     var drawn: ClosedRange<Int> {
         guard !ids.isEmpty else { return 0...0 }
         let last = ids.count - 1
@@ -2309,11 +2034,9 @@ final class TranscriptExactRows {
            lower <= upper {
             return lower...upper
         }
-        // Nothing placed yet: the newest rows, where a transcript opens.
         return max(0, last - 30)...last
     }
 
-    /// The empty space above and below the drawn rows.
     func spaces(around drawn: ClosedRange<Int>) -> (above: CGFloat, below: CGFloat) {
         guard !ids.isEmpty else { return (0, 0) }
         rebuildTops()
@@ -2323,8 +2046,6 @@ final class TranscriptExactRows {
         return (max(0, above), max(0, below))
     }
 
-    /// Lay out a row that is about to be scrolled to. True when it already
-    /// was.
     func ensureDrawn(_ id: String) -> Bool {
         guard let row = index[id] else { return true }
         if drawn.contains(row) { return true }
@@ -2336,11 +2057,6 @@ final class TranscriptExactRows {
         return false
     }
 
-    /// A row laid out out of sight measured itself.
-    ///
-    /// Its space takes the real height now, before the row is drawn. A space
-    /// above the reader that changes size moves everything below it, so the
-    /// view moves by the same amount in the same update.
     func noteMeasured(_ id: String, _ height: CGFloat) {
         guard height > 0, let row = index[id] else { return }
         heights[id] = height
@@ -2354,8 +2070,6 @@ final class TranscriptExactRows {
         if above, canShift?() != false { shift?(delta) }
     }
 
-    /// A drawn row measured itself. Its own report moves the reading row's
-    /// anchor if it changed size, so nothing moves the view here.
     func noteHeight(_ id: String, _ height: CGFloat) {
         guard height > 0, let row = index[id] else { return }
         heights[id] = height
@@ -2364,12 +2078,6 @@ final class TranscriptExactRows {
         stale = true
     }
 
-    /// The header above the rows ends at `bottom` in the transcript: the
-    /// first row starts one spacing below it.
-    ///
-    /// The header changes size too: reaching the start of a conversation
-    /// turns the way to earlier messages into its first lines. Everything
-    /// below moves with it, so the view moves by as much, as for a row.
     func noteHeaderBottom(_ bottom: CGFloat) {
         let next = bottom + Self.spacing
         let delta = next - base
@@ -2383,7 +2091,6 @@ final class TranscriptExactRows {
     }
     @ObservationIgnored private var baseKnown = false
 
-    /// Where the reader is: `top` is the viewport's top in the transcript.
     func update(top: CGFloat, viewport: CGFloat) {
         lastTop = top
         lastViewport = viewport
@@ -2395,16 +2102,12 @@ final class TranscriptExactRows {
             place(want)
             return
         }
-        // What must be drawn this frame: the screen and a little either side.
         let need = rows(from: top - viewport * 0.25, to: top + viewport * 1.25)
         if need.lowerBound < current.lowerBound || need.upperBound > current.upperBound
             || need.upperBound < current.lowerBound || need.lowerBound > current.upperBound {
-            // The screen reached rows that are not drawn: a jump, or a fling
-            // faster than the rows are being drawn. Draw where it is now.
             place(want)
             return
         }
-        // Nothing to do while a screen of drawn rows is left either side.
         let near = rows(from: top - viewport * 0.5, to: top + viewport * 1.5)
         if current.lowerBound <= near.lowerBound, current.upperBound >= near.upperBound {
             planMeasuring(around: current)
@@ -2442,13 +2145,8 @@ final class TranscriptExactRows {
         planMeasuring(around: range)
     }
 
-    /// How many rows the drawn range grows by in one frame.
     private static let rowsPerFrame = 8
 
-    /// The rows just outside the drawn ones with no real height yet, enough
-    /// to cover the next stretch the reader can reach before more are
-    /// drawn. Counted in points: a dozen one-line steps are less than a
-    /// screen.
     private func planMeasuring(around drawn: ClosedRange<Int>) {
         var next: [String] = []
         var covered: CGFloat = 0
@@ -2469,7 +2167,6 @@ final class TranscriptExactRows {
         if next != measuring { measuring = next }
     }
 
-    /// The rows that cross `from...to`, in transcript coordinates.
     private func rows(from: CGFloat, to: CGFloat) -> ClosedRange<Int> {
         let last = ids.count - 1
         let lower = min(last, max(0, rowAt(from - base)))
@@ -2496,10 +2193,6 @@ final class TranscriptExactRows {
         self.tops = tops
     }
 
-    /// What a row nobody has measured is likely to take. From a long chat
-    /// of every kind of row: a one-line step 24, usage 14, a turn's changes
-    /// about 100, a plan about 40 plus 26 a step, a picture about 300. Text
-    /// wraps at about 105 characters a line in the reading lane.
     static func estimatedHeight(_ item: ChatDisplayItem) -> CGFloat {
         func prose(_ text: String, padding: CGFloat) -> CGFloat {
             var lines = 0
@@ -2525,26 +2218,15 @@ final class TranscriptExactRows {
     }
 }
 
-/// The older rows: the drawn ones between two spaces that stand for the
-/// rest. See `TranscriptExactRows`.
-///
-/// Each part watches only what it draws. A space changes size every time a
-/// row is measured, and redrawing the head for that compared every drawn
-/// row again, dozens of times a scroll.
 private struct TranscriptExactHead<Header: View, Row: View, Measure: View>: View {
     let items: ArraySlice<ChatDisplayItem>
     let rows: TranscriptExactRows
     @ViewBuilder let header: () -> Header
     let row: (ChatDisplayItem) -> Row
-    /// The same row with nothing that reports it as on screen.
     let measure: (ChatDisplayItem) -> Measure
 
     var body: some View {
         VStack(alignment: .leading, spacing: TranscriptExactRows.spacing) {
-            // Where the rows start, from the header above them, on every
-            // layout. Learning it only from drawn rows left it wrong when
-            // none were on screen, and then the rows were drawn where the
-            // screen was not.
             header()
                 .onGeometryChange(for: CGFloat.self) {
                     $0.frame(in: .named(TranscriptFollow.contentSpaceName)).maxY
@@ -2564,7 +2246,6 @@ private struct TranscriptExactHead<Header: View, Row: View, Measure: View>: View
 private struct TranscriptExactSpace: View {
     let rows: TranscriptExactRows
     let above: Bool
-    /// See `TranscriptExactRows.rowsVersion`.
     let version: Int
 
     var body: some View {
@@ -2596,8 +2277,6 @@ private struct TranscriptExactDrawn<Row: View>: View {
     }
 }
 
-/// Out of sight and out of the layout: these rows only say how tall they
-/// are.
 private struct TranscriptExactMeasuring<Measure: View>: View {
     let items: ArraySlice<ChatDisplayItem>
     let rows: TranscriptExactRows

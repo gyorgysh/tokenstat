@@ -169,9 +169,6 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         let row = match row {
             Ok(row) => row,
             Err(e) => {
-                // Surface the first unreadable row: the scan still advances
-                // this file's watermark, so silence would make a truncated
-                // read indistinguishable from a complete one.
                 if !row_failed {
                     out.warnings.push(Warning::Unreadable {
                         path: path.to_path_buf(),
@@ -196,14 +193,11 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             .find(|s| !s.is_empty())
             .unwrap_or("unknown")
             .to_string();
-        // A negative (corrupt data) clamps to zero; a NULL stays unknown.
         let output = row.output.map(|v| v.max(0) as u64);
         let reasoning = row
             .reasoning
             .map(|v| v.max(0) as u64)
             .filter(|&r| r > 0)
-            // Reasoning is the part of output it is, so it can never exceed
-            // the output it is reported against.
             .map(|r| match output {
                 Some(o) => r.min(o),
                 None => r,
@@ -265,8 +259,6 @@ struct Row {
     model: String,
     task: String,
     provider: String,
-    /// `None` when the vendor reported no figure for the bucket. Only a real
-    /// number may clear `has_unknown`; a missing one must not become a zero.
     input: Option<i64>,
     output: Option<i64>,
     cache_read: Option<i64>,
@@ -282,13 +274,6 @@ struct Row {
 }
 
 impl Row {
-    /// Whether this row is money or plan.
-    ///
-    /// A provider reached over OAuth is a signed-in subscription, which is what
-    /// `xai-oauth` on a real row means, and a subscription is plan usage. An
-    /// API key is metered. Where the vendor priced it, a non-zero cost settles
-    /// it outright; `cost_status` of `unknown` with a zero cost is the vendor
-    /// saying it could not price the call, which is not the same as free.
     fn billing(&self) -> BillingMode {
         if self.actual_cost > 0.0 || self.estimated_cost > 0.0 {
             return BillingMode::Metered;
@@ -303,7 +288,6 @@ impl Row {
     }
 }
 
-/// Whether this database has that table, so an older install is quiet.
 fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -317,8 +301,6 @@ fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// The real schema, narrowed to the columns this reads, holding the two
-    /// rows a real session produced.
     fn temp_db() -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -365,7 +347,6 @@ mod tests {
             ],
         )
         .unwrap();
-        // The auxiliary task the session's own counters leave out.
         conn.execute(
             insert,
             rusqlite::params![
@@ -398,9 +379,6 @@ mod tests {
 
     #[test]
     fn two_endpoints_for_one_model_stay_two_events() {
-        // Hermes can bill the same model through a proxy and directly in one
-        // session. Its own primary key separates those rows, so ours must too,
-        // or the archive keeps the larger and loses the other outright.
         let path = temp_db();
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute(

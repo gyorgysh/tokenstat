@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Keep an explicit null result distinct from a missing result. T may itself
-/// be Optional for receipts and lookups; decodeIfPresent would erase that
-/// valid answer before the bridge can unwrap it.
 struct BridgeEnvelope<T: Decodable>: Decodable {
     struct Failure: Decodable {
         let code: String

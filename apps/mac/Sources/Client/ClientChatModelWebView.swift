@@ -3,9 +3,6 @@
 import SwiftUI
 import WebKit
 
-/// A profile-free, offline WebGL surface for portable game model files.
-/// The document CSP denies network access and only the selected attachment's
-/// bytes cross into its renderer. File access remains inside the app bundle.
 struct ClientChatModelWebView: View {
     let name: String
     let data: Data?
@@ -102,7 +99,6 @@ private struct ModelWebSurface: ViewRepresentable {
                           size > 0, size <= limit,
                           let handle = try? FileHandle(forReadingFrom: file) else { return nil }
                     defer { try? handle.close() }
-                    // Bound the read even if the file grows after checking its size.
                     guard let bytes = try? handle.read(upToCount: limit + 1),
                           !bytes.isEmpty, bytes.count <= limit else { return nil }
                     return bytes.base64EncodedString()
@@ -173,14 +169,6 @@ private typealias ViewRepresentable = UIViewRepresentable
 #endif
 
 #if os(iOS)
-/// Keeps a drag that starts on a 3D model for the model.
-///
-/// The chat transcript and a sheet's pull-down are pan recognizers on an
-/// ancestor view. They took a vertical drag before the model's own orbit
-/// handling saw it, so turning the model moved the page instead. This begins
-/// on touch down, never cancels the model's touches, and makes every ancestor
-/// pan except the edge swipe wait for it to fail, which it does not do while
-/// a finger is down.
 final class ModelTouchClaim: UIGestureRecognizer, UIGestureRecognizerDelegate {
     private var touching: Set<UITouch> = []
 
@@ -221,8 +209,6 @@ final class ModelTouchClaim: UIGestureRecognizer, UIGestureRecognizerDelegate {
     }
 
     override func shouldBeRequiredToFail(by other: UIGestureRecognizer) -> Bool {
-        // The edge swipe back stays available: it starts outside the model's
-        // inset and nobody means to orbit from the screen edge.
         guard other is UIPanGestureRecognizer, !(other is UIScreenEdgePanGestureRecognizer),
               let mine = view, let theirs = other.view else { return false }
         return mine !== theirs && mine.isDescendant(of: theirs)

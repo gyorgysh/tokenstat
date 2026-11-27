@@ -7,19 +7,11 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Previous commits in this folder, newest first.
-///
-/// The Mac inspector's History tab, as a pushed section. Read-only: a phone
-/// can browse what already landed, it cannot stage or commit. `workspace.log`
-/// is empty both when the folder is not a repository and when it has no
-/// commits yet, so this screen asks `status` as well and draws a different
-/// picture for each.
 struct ClientWorkspaceHistoryView: View {
     let peer: String
     let workspaceID: String
     let folder: WorkspaceFolder
     let hostName: String
-    /// Inspector panes already name this surface. Compact pushes still need the title.
     var showsNavigationTitle: Bool = true
 
     @Environment(AccountModel.self) private var account: AccountModel?
@@ -118,9 +110,6 @@ struct ClientWorkspaceHistoryView: View {
         }
     }
 
-    /// Newest pushed commit, so a later unpushed commit can reuse that
-    /// author's picture by email. The peer is part of the key because two
-    /// machines can host the same workspace id.
     private var pictureCacheKey: HistoryAvatarCache.Key {
         let from = commits.first(where: { !$0.unpushed })?.id ?? ""
         return .init(owner: WorkSessionContext.shared.generation, peer: peer, workspace: workspaceID, from: from)
@@ -210,7 +199,6 @@ private struct ClientCommitRow: View {
     }
 }
 
-/// One commit in full: what it says, then every file it changed.
 struct ClientCommitDetailView: View {
     let peer: String
     let workspaceID: String
@@ -262,8 +250,6 @@ struct ClientCommitDetailView: View {
         }
     }
 
-    /// The fixed summary reserves room for code; its message and tags remain
-    /// available in full through a separate sheet, including in landscape.
     private func metadata(expanded: Bool, compact: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(commit.subject)

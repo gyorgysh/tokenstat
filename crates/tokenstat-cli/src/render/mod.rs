@@ -38,15 +38,12 @@ use tokenstat_core::{Bucket, Counters, EquivalentValue, PriceTable, display_usag
 
 use crate::ui;
 
-/// Calendar volume includes fresh input, output, cache reads and writes.
 pub(super) fn daily_tokens(days: &[Bucket]) -> Vec<(String, u64)> {
     days.iter()
         .map(|d| (d.key.clone(), d.counters.total()))
         .collect()
 }
 
-/// Activity-only rows have no model/project/billing attribution. Include them
-/// only when they can truthfully contribute to this report's date window.
 pub(super) fn unmeasured_days(
     store: &tokenstat_core::Store,
     q: &tokenstat_core::Query,
@@ -64,7 +61,6 @@ pub(super) fn unmeasured_days(
         .collect()
 }
 
-/// Render `Some(n)` compactly, `None` as a dash.
 pub(super) fn cell(v: Option<u64>) -> String {
     match v {
         Some(n) => ui::tokens(n),
@@ -72,20 +68,13 @@ pub(super) fn cell(v: Option<u64>) -> String {
     }
 }
 
-/// Total with a `+` suffix when some contributing field was never reported.
 pub(super) fn total_cell(c: &Counters) -> String {
     let t = ui::tokens(c.total());
     if c.has_unknown() { format!("{t}+") } else { t }
 }
 
-/// List-rate equivalent for a row, or `-` when the model is unknown / unpriced.
-/// Never a cash charge: subscription usage is valued the same way.
-/// Estimates (e.g. Cursor Auto → Composer floor) get a `~` prefix, same idea
-/// as tokenstat.ai and the upcoming CLI 0.1.2 note on opaque routers.
 pub(super) fn price_cell(prices: &PriceTable, model: &str, c: &Counters) -> String {
     let lookup = display_usage_model_id(model);
-    // A model served on this machine costs nothing. Say so, rather than a
-    // $0 that reads like a free tier.
     if prices.is_local(&lookup) {
         return "local".to_string();
     }
@@ -102,7 +91,6 @@ pub(super) fn model_label(model: &str) -> String {
     display_usage_model_id(model)
 }
 
-/// Sum model-priced slices, preserving missing prices and estimate markers.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct RowValue {
     pub micros: i64,
@@ -185,7 +173,6 @@ pub(super) fn today_summary(days: &[Bucket], values: &ValueMap, date: &str) -> S
     }
 }
 
-/// Cache read tokens only. Writes stay in `total` / the priced figure.
 pub(super) fn cache_cell(c: &Counters) -> String {
     cell(c.cache_read)
 }
@@ -222,7 +209,6 @@ pub(super) fn json_opt(v: Option<&str>) -> String {
     }
 }
 
-/// One bucket as a JSON object, without the surrounding array.
 pub(super) fn bucket_json(r: &Bucket) -> String {
     let c = &r.counters;
     format!(
@@ -239,12 +225,6 @@ pub(super) fn bucket_json(r: &Bucket) -> String {
     )
 }
 
-/// Bucket array with the list-rate equivalent attached, for model rows.
-///
-/// The table has always had a value column and `models --detail --json` has
-/// always carried `value_usd`; plain `models --json` dropping it meant the
-/// cheapest machine-readable path was also the least informative one.
-/// `value_usd` is `null` when the model has no list price, never zero.
 pub(super) fn print_json_model_buckets(rows: &[Bucket], prices: &PriceTable) -> Result<()> {
     use anstream::println;
     let out: Vec<String> = rows
@@ -262,11 +242,6 @@ pub(super) fn print_json_model_buckets(rows: &[Bucket], prices: &PriceTable) -> 
     Ok(())
 }
 
-/// A correctly escaped JSON string, quotes included.
-///
-/// Model ids and plan names come from vendor feeds, so they are not ours to
-/// assume anything about. Escaping by hand here would be one backslash away
-/// from emitting a document no parser accepts.
 pub(super) fn json_string(s: &str) -> String {
     serde_json::Value::String(s.to_string()).to_string()
 }
@@ -276,8 +251,6 @@ pub(super) fn json_string_array(items: &[String]) -> String {
     format!("[{}]", parts.join(","))
 }
 
-/// " as @handle" in bold, or nothing. Every login print shares this, so
-/// a handleless account reads "logged in" rather than "logged in as @?".
 pub(super) fn login_as_suffix(handle: Option<&str>) -> String {
     match handle {
         Some(handle) => format!(" as {BOLD}@{handle}{BOLD:#}", BOLD = crate::ui::BOLD),
@@ -285,17 +258,12 @@ pub(super) fn login_as_suffix(handle: Option<&str>) -> String {
     }
 }
 
-/// Replace control characters in a log-derived label.
-///
-/// Keys come from files this tool did not write. A raw `\x1b` in a model id or
-/// project path would otherwise reach the terminal as an escape sequence.
 pub(super) fn sanitize_label(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
         .collect()
 }
 
-/// Unreported stays `null` in JSON, so a consumer can tell it from zero.
 pub(super) fn num(v: Option<u64>) -> String {
     v.map(|n| n.to_string()).unwrap_or_else(|| "null".into())
 }

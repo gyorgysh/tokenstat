@@ -49,15 +49,12 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Timezone for daily bucketing, for example Europe/Budapest
     #[arg(long, global = true, value_name = "TZ")]
     tz: Option<String>,
 
-    /// Database location
     #[arg(long, global = true, value_name = "PATH")]
     db: Option<std::path::PathBuf>,
 
-    /// Emit JSON instead of a table
     #[arg(long, global = true)]
     json: bool,
 }
@@ -69,30 +66,21 @@ enum Command {
     /// Safe to run again at any time. Each step reports what is already done and
     /// skips it, so this is also the answer to "did that work?".
     Setup {
-        /// Take the default for every prompt (yes to scheduling, no to anything
-        /// that needs a code you have not given). For install scripts and CI.
         #[arg(long, short = 'y')]
         yes: bool,
-        /// Pairing code from tokenstat.ai/link, to connect an account as part of
-        /// the run instead of being asked
         #[arg(long, value_name = "WXYZ-1234")]
         code: Option<String>,
-        /// Skip the account step entirely
         #[arg(long, conflicts_with = "code")]
         local_only: bool,
-        /// Skip installing the hourly scan schedule
         #[arg(long)]
         no_schedule: bool,
-        /// API origin for the account step: `sandbox`, `prod`, or a URL
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,
     },
     /// Read new data from your tools into the local archive
     Scan {
-        /// Discard existing events and rebuild from scratch
         #[arg(long)]
         reset: bool,
-        /// Internal marker for the launchd/systemd scheduled scan.
         #[arg(long, hide = true)]
         scheduled: bool,
     },
@@ -106,8 +94,6 @@ enum Command {
     Models {
         #[command(flatten)]
         window: Window,
-        /// Add what the catalog knows: publisher, context window, capabilities,
-        /// and public benchmark scores. Needs `tokenstat catalog --refresh`.
         #[arg(long)]
         detail: bool,
     },
@@ -117,7 +103,6 @@ enum Command {
     Sessions {
         #[command(flatten)]
         window: Window,
-        /// How many sessions to show
         #[arg(long, default_value_t = 20)]
         top: usize,
     },
@@ -128,7 +113,6 @@ enum Command {
     Heatmap(Window),
     /// Year-in-review retrospective from the local archive
     Wrapped {
-        /// Calendar year (defaults to the current local year)
         #[arg(long, value_name = "YYYY")]
         year: Option<i32>,
     },
@@ -143,14 +127,8 @@ enum Command {
     /// on every prompt, and it prints nothing rather than an error if there is
     /// no data yet.
     Statusline {
-        /// Placeholders: {today}, {month}, {today_value}, {month_value},
-        /// {today_in_out}, {month_in_out}, {stale}
         #[arg(long, default_value = "{today} today · {month} this month")]
         format: String,
-        /// Append a marker when the archive was last scanned longer ago than
-        /// this many seconds. 0 disables the check. When stale, a background
-        /// `tokenstat scan` is started behind a lock (statusline itself stays
-        /// archive-only and never waits on the network).
         #[arg(long, default_value_t = 900)]
         max_age: u64,
     },
@@ -160,16 +138,12 @@ enum Command {
     /// pass --install. Re-running --install repairs a previous install: refreshes
     /// paths and intervals, and removes sync/update entries that no longer belong.
     Schedule {
-        /// Write and activate the scheduler entry for this platform
         #[arg(long)]
         install: bool,
-        /// How often to scan, in minutes
         #[arg(long, default_value_t = 60)]
         every: u64,
-        /// How often to sync, in minutes. Defaults to your plan's interval.
         #[arg(long, value_name = "MINUTES")]
         sync_every: Option<u64>,
-        /// Only schedule scanning, even when an account is linked
         #[arg(long)]
         no_sync: bool,
     },
@@ -181,22 +155,17 @@ enum Command {
     Export {
         #[command(flatten)]
         window: Window,
-        /// csv or json
         #[arg(long, default_value = "csv")]
         format: String,
-        /// Write to this path instead of stdout
         #[arg(long, value_name = "PATH")]
         out: Option<std::path::PathBuf>,
     },
     /// Validate and emit an interactive chart for a chat reply, without reading the archive
     Chart {
-        /// Chart JSON file, or - for standard input
         #[arg(conflicts_with_all = ["schema", "examples"])]
         input: Option<std::path::PathBuf>,
-        /// Print the versioned chart JSON schema
         #[arg(long, conflicts_with = "examples")]
         schema: bool,
-        /// Print synthetic examples of every chart family
         #[arg(long)]
         examples: bool,
     },
@@ -208,30 +177,23 @@ enum Command {
     /// credential the vendor app already left in the OS keychain (local only).
     /// Pass `--token` to paste a session cookie instead.
     Auth {
-        /// cursor or antigravity (optional with --status)
         vendor: Option<String>,
-        /// Optional paste. If omitted, discover from the vendor app keychain.
         #[arg(long)]
         token: Option<String>,
-        /// Forget the stored token
         #[arg(long, conflicts_with = "token")]
         logout: bool,
-        /// Show whether tokens are available (no secrets printed)
         #[arg(long, conflicts_with_all = ["vendor", "token", "logout"])]
         status: bool,
     },
     /// Fetch Cursor usage and Antigravity IDE/quota into the archive (30m cache)
     Fetch {
-        /// Ignore the cache and hit the network
         #[arg(long)]
         force: bool,
     },
     /// List-rate price book from tokenstat.ai's local snapshot
     Pricing {
-        /// Download a fresh snapshot into the local data directory
         #[arg(long)]
         refresh: bool,
-        /// Accept rate moves greater than 50% vs the prior snapshot
         #[arg(long, requires = "refresh")]
         force: bool,
     },
@@ -241,7 +203,6 @@ enum Command {
     /// the models in your archive. Also supplies a marked estimate for models
     /// the list-rate book has never heard of, so they stop showing a dash.
     Catalog {
-        /// Download fresh catalog and plans snapshots into the data directory
         #[arg(long)]
         refresh: bool,
     },
@@ -250,7 +211,6 @@ enum Command {
     /// Product prices, not API list rates, shown next to what your own usage
     /// would have cost per token. Refresh them with `tokenstat catalog --refresh`.
     Plans {
-        /// Only plans from this vendor, for example `anthropic`
         #[arg(long)]
         vendor: Option<String>,
     },
@@ -260,13 +220,10 @@ enum Command {
     /// never as money charged. With no flags, prints today's and this month's
     /// status. Use `--daily` / `--monthly` to set caps, or `--clear` to remove.
     Budget {
-        /// Daily cap in USD list-rate equivalent
         #[arg(long, value_name = "USD")]
         daily: Option<f64>,
-        /// Monthly cap in USD list-rate equivalent
         #[arg(long, value_name = "USD")]
         monthly: Option<f64>,
-        /// Remove all budget caps
         #[arg(long, conflicts_with_all = ["daily", "monthly"])]
         clear: bool,
     },
@@ -279,11 +236,8 @@ enum Command {
     /// downloads and applies when a newer version exists. Use `--check` to only
     /// report.
     Update {
-        /// Report only; do not download
         #[arg(long)]
         check: bool,
-        /// Turn automatic daily updates on or off (default on; `--auto off` opts
-        /// out and removes the daily schedule entry)
         #[arg(
             long,
             value_name = "on|off",
@@ -291,18 +245,13 @@ enum Command {
             conflicts_with_all = ["check", "scheduled"]
         )]
         auto: Option<String>,
-        /// Run as a background job: wait a spread-out delay, skip when the user
-        /// opted out, and stay quiet about it
         #[arg(long, conflicts_with = "check")]
         scheduled: bool,
     },
     /// Link this machine to a tokenstat.ai account (device login)
     Login {
-        /// API origin: `sandbox`, `prod`, or an absolute http(s) URL
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,
-        /// Redeem a pairing code from tokenstat.ai/link instead of opening a
-        /// browser. The site shows the whole line to paste.
         #[arg(long, value_name = "WXYZ-1234")]
         code: Option<String>,
     },
@@ -313,13 +262,10 @@ enum Command {
     /// prints the name, the platform and the machine id. `--name` writes the
     /// name locally and, when this machine is signed in, on the account.
     Device {
-        /// Call this machine something
         #[arg(long, value_name = "NAME")]
         name: Option<String>,
-        /// Go back to the name the system reports
         #[arg(long, conflicts_with = "name")]
         clear: bool,
-        /// API origin: `sandbox`, `prod`, or an absolute http(s) URL
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,
     },
@@ -338,20 +284,14 @@ enum Command {
     Sync {
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,
-        /// Allow the server to accept a replace that would drop data
         #[arg(long)]
         prune: bool,
-        /// Inclusive window `YYYY-MM-DD..YYYY-MM-DD`
         #[arg(long, value_name = "FROM..TO")]
         window: Option<String>,
-        /// Print account status (`GET /api/v1/me`) instead of uploading
         #[arg(long, conflicts_with_all = ["prune", "window", "dry_run", "scheduled"])]
         status: bool,
-        /// Print the canonical JSON payload and exit without uploading
         #[arg(long)]
         dry_run: bool,
-        /// Run as a background job: wait a short spread-out delay, skip the run
-        /// when the plan's interval has not elapsed, and stay quiet about both.
         #[arg(long, conflicts_with_all = ["prune", "dry_run"])]
         scheduled: bool,
     },
@@ -359,25 +299,18 @@ enum Command {
 
 #[derive(clap::Args, Clone, Default)]
 struct Window {
-    /// Earliest date to include, YYYY-MM-DD
     #[arg(long, value_name = "DATE")]
     since: Option<String>,
-    /// Latest date to include, YYYY-MM-DD
     #[arg(long, value_name = "DATE")]
     until: Option<String>,
-    /// Only this model
     #[arg(long)]
     model: Option<String>,
-    /// Only this project
     #[arg(long)]
     project: Option<String>,
-    /// Only the last N days
     #[arg(long, value_name = "N", conflicts_with_all = ["since", "until"], value_parser = parse_last)]
     last: Option<u32>,
 }
 
-/// `--last` counts back from today, so 0 would start tomorrow and match
-/// nothing. Reject it at parse time rather than printing an empty table.
 fn parse_last(s: &str) -> Result<u32, String> {
     let n: u32 = s
         .parse()
@@ -460,9 +393,6 @@ fn main() -> Result<()> {
         None => Store::default_path().context("locating the tokenstat data directory")?,
     };
 
-    // Bare `tokenstat` enters the interactive client on a TTY. Piped, scripted,
-    // or `--json` use gets the one-shot summary, so machine-readable output
-    // never takes over the terminal.
     let command = cli.command.unwrap_or_else(|| {
         if !cli.json && std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
             Command::Interactive
@@ -471,7 +401,6 @@ fn main() -> Result<()> {
         }
     });
 
-    // Scan owns the write path, everything else only reads.
     if let Command::Setup {
         yes,
         ref code,
@@ -507,8 +436,6 @@ fn main() -> Result<()> {
         if !cli.json {
             render::scan_report(&report, false)?;
         }
-        // Cursor and Antigravity IDE/quota use a 30 minute cache. IDE sync only
-        // works while the Antigravity app is open. Soft-fails per vendor.
         if !scheduled || tokenstat_sync::scheduled_network_allowed() {
             match tokenstat_sync::fetch_remotes(&mut store, &tz, false) {
                 Ok(remote) => {
@@ -530,7 +457,6 @@ fn main() -> Result<()> {
         if cli.json {
             println!("{json_report}");
         }
-        // Soft update check (24h TTL). Applies when auto-update is on (default).
         if !scheduled || tokenstat_sync::scheduled_network_allowed() {
             render::maybe_notify_update(cli.json);
         }
@@ -673,8 +599,6 @@ fn main() -> Result<()> {
         );
     }
 
-    // A statusline must never break a shell prompt. Any failure, including a
-    // missing database on a fresh install, exits quietly with no output.
     if let Command::Statusline { format, max_age } = &command {
         if let Ok(store) = Store::open(&db_path) {
             let _ = render::statusline(&store, &tz, format, *max_age, &db_path, cli.tz.as_deref());
@@ -699,8 +623,6 @@ fn main() -> Result<()> {
 
     if let Command::Interactive = command {
         if cli.json {
-            // `--json interactive` must stay machine-readable, never take over
-            // the TTY. Same path as bare `tokenstat --json`.
             let store = Store::open(&db_path)?;
             let totals = store.totals(&Query::default())?;
             if totals.events == 0 {
@@ -714,8 +636,6 @@ fn main() -> Result<()> {
 
     let store = Store::open(&db_path)?;
 
-    // Doctor always runs, including on an empty archive, so a fresh install
-    // still gets source coverage and a clear next step.
     if let Command::Doctor = command {
         return render::doctor(&store, &db_path, cli.json);
     }

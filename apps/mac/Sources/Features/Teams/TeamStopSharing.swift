@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// One folder's sharing on this computer, about to end. A folder can be
-/// shared with more than one team, and stopping it from the sidebar ends all
-/// of them, because the sidebar names the folder rather than a team.
 struct TeamStopSharingRequest: Identifiable {
     let id = UUID()
     let name: String
@@ -11,9 +8,6 @@ struct TeamStopSharingRequest: Identifiable {
 }
 
 extension TeamStore {
-    /// Ends these publications on this computer. Only the sharing ends: the
-    /// folder, its chats and its history stay as they are. Returns whether
-    /// the account server still has cleanup to do for any of them.
     func stopSharing(_ publications: [TeamLocalPublication]) async throws -> Bool {
         guard let context = mutationContext else { throw CancellationError() }
         var cleanupPending = false
@@ -25,26 +19,19 @@ extension TeamStore {
                 cleanupPending = cleanupPending || result.accountCleanupPending == true
             }
         } catch {
-            // Some may have stopped before the failure. Show what is true now.
             await refreshLocalProjects()
             throw error
         }
         await refreshLocalProjects()
-        // The team's lists count sharing computers, so read them again.
         await reloadAfterChange()
         return cleanupPending
     }
 }
 
-/// Asks before ending sharing, and says plainly that the project stays here.
 struct TeamStopSharingConfirm: ViewModifier {
     let store: TeamStore
     @Binding var request: TeamStopSharingRequest?
-    /// Runs as soon as the attempt ends, to reread what it changed.
     var onStopped: () -> Void = {}
-    /// Runs once sharing has stopped and the person has seen any notice. A
-    /// sheet that closes itself belongs here: closing it earlier would take
-    /// the alert with it, and after a failure it stays open for a retry.
     var onFinished: () -> Void = {}
     @State private var outcome: String?
     @State private var failed = false

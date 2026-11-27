@@ -37,8 +37,6 @@ internal sealed record TeamSharedFileData(string Name, string MediaType, byte[] 
 
 internal static class TeamSharedFileSave
 {
-    /// Stage the downloaded bytes and their Windows Internet-zone mark on the
-    /// destination volume, then move them together. Never publish unmarked data.
     internal static async Task WriteMarked(string destination, byte[] bytes, Func<bool> current)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();

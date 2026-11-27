@@ -8,11 +8,6 @@ using Windows.UI;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>
-/// The fixed features of one character, derived from its seed. Deterministic
-/// and cheap: the same persona is the same creature on every launch with
-/// nothing stored but the number. Nothing here changes with mood.
-/// </summary>
 internal sealed class PersonaTraits
 {
     internal enum BodyShape { Ball, Star, Heart, Tortilla }
@@ -43,13 +38,10 @@ internal sealed class PersonaTraits
 
     public bool HasAntenna { get; }
 
-    /// <summary>How wide this creature's mouth sits, as a multiplier.</summary>
     public double MouthWidth { get; }
 
-    /// <summary>Stiffness multiplier. Below one is slime, above one is gel.</summary>
     public double Firmness { get; }
 
-    /// <summary>A permanent radial offset per node: this creature's own dents.</summary>
     public double[] Lumps { get; }
 
     private static readonly (double X, double Y)[] HeartOutline = Enumerable.Range(0, 64).Select(i =>
@@ -87,7 +79,6 @@ internal sealed class PersonaTraits
             return bits % modulo;
         }
 
-        // Preserve random draw order so existing identities keep their hue.
         _ = Next(10);
         EyeCount = 2;
         Eye = Next(4) == 0 ? EyeShape.Round : EyeShape.Oval;
@@ -97,8 +88,6 @@ internal sealed class PersonaTraits
         HasAntenna = false;
         MouthWidth = 0.72 + Next(9) * 0.035;
         Firmness = 0.95 + Next(9) * 0.03;
-        // Two low harmonics rather than per-node noise. Noise reads as a
-        // damaged circle, harmonics read as a shape somebody drew.
         double firstPhase = Next(360) * Math.PI / 180;
         double secondPhase = Next(360) * Math.PI / 180;
         double firstAmount = 0.10 + Next(100) / 100.0 * 0.15;
@@ -122,13 +111,8 @@ internal sealed class PersonaTraits
     }
 }
 
-/// <summary>Colour helpers the persona renderer needs.</summary>
 internal static class PersonaColor
 {
-    /// <summary>
-    /// Blend towards another colour. Walks the accent-to-secondary arc so a
-    /// persona's tint is always a colour this app already owns.
-    /// </summary>
     public static Color MixedWith(this Color from, Color to, double amount)
     {
         double k = Math.Clamp(amount, 0, 1);
@@ -139,7 +123,6 @@ internal static class PersonaColor
             (byte)(from.B + (to.B - from.B) * k));
     }
 
-    /// <summary>The colour with its alpha scaled. Values outside zero to one clamp.</summary>
     public static Color WithOpacity(this Color color, double opacity)
     {
         return Color.FromArgb(
@@ -150,11 +133,6 @@ internal static class PersonaColor
     }
 }
 
-/// <summary>
-/// A face for something that has no persona. Derived from the conversation's
-/// own id, so it is that chat's face for as long as the chat exists. The same
-/// FNV-1a as the Mac client, so both platforms draw the same family of faces.
-/// </summary>
 internal static class PersonaSeed
 {
     public static ulong For(string identifier)

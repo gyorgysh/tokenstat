@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use serde_json::Value;
 use std::io::{self, Seek, SeekFrom, Write};
 

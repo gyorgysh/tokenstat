@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Cache deletion waits for earlier writes to the same scope. A suspended
-/// transport must not let an older write finish after a successful clear.
 actor WorkCacheMutationQueue {
     static let shared = WorkCacheMutationQueue()
     private struct Pending { let id: UUID; let tail: Task<Void, Never> }

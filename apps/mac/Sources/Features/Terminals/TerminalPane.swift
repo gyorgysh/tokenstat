@@ -9,9 +9,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// The centre pane below the workspace header: the session strip on top, the
-/// selected session's terminal below, or the launch surface while the folder
-/// has no session.
 struct TerminalPane: View {
     let folder: WorkspaceFolder
     @Bindable var terminals: TerminalsModel
@@ -20,12 +17,7 @@ struct TerminalPane: View {
     @Bindable var ssh: SSHLibraryModel
     @Bindable var sshSessions: SSHSessionsModel
     var onManageServers: () -> Void
-    /// Routes launcher destinations that live outside this terminal surface.
     var onOpenSection: (WorkspaceSection) -> Void
-    /// False while the workspace surface is kept mounted but another
-    /// destination (Home, Insights, …) is in front. The stack stays in the
-    /// hierarchy so paint is not lost; focus and keystroke-speed polling only
-    /// apply when this is true.
     var isSurfaceActive: Bool = true
     @State private var focusOwner = UUID()
     @State private var closingSession: WorkspaceTerminal?
@@ -39,8 +31,6 @@ struct TerminalPane: View {
         terminals.workspaceTerminals(in: folder.id)
     }
 
-    /// What this pane is showing. One value, so no two surfaces can both
-    /// think they are in front.
     private var front: WorkspaceSurface {
         workspaces.front(in: folder.id)
     }
@@ -58,15 +48,10 @@ struct TerminalPane: View {
         return parts.count == 3 && parts[0] == "remote" ? parts[1] : nil
     }
 
-    /// What to offer in the launcher: this machine's harnesses for a local
-    /// folder, the owning machine's for a remote one. Installed only; the
-    /// launch surface additionally shows what could be installed.
     private var launcherProfiles: [LaunchProfile] {
         let all: [LaunchProfile] = {
             guard let peer else { return launcher.available }
             let profiles = launcher.remoteAvailable(for: peer)
-            // The catalog answer is still in flight: fall back to a shell so
-            // the strip never reads as having nothing to launch.
             if profiles.isEmpty { return [LaunchProfile.shellFallback] }
             return profiles
         }()
@@ -75,48 +60,29 @@ struct TerminalPane: View {
         return all.filter { !$0.hidden && !visibility.isHidden($0.id, scope: scope) }
     }
 
-    /// Every supported harness on the owning machine, installed or not, for
-    /// the launch surface to draw installed tiles vividly and the rest muted.
     private var launcherCatalog: [LaunchProfile] {
         guard let peer else { return launcher.catalog }
         let profiles = launcher.remoteCatalog(for: peer)
-        // Same fallback as above: a remote folder with no catalog answer yet
-        // still offers a shell and the install rows rather than an empty grid.
         if profiles.isEmpty { return [LaunchProfile.shellFallback] }
         return profiles
     }
 
-    /// The harnesses a local model selection means anything to. With none of
-    /// them installed the model control has nothing to act on, so it is not
-    /// drawn at all.
     private var modelProfiles: [LaunchProfile] {
         launcherProfiles.filter { LaunchProfile.acceptsLocalModel($0.id) }
     }
 
     @State private var paneSize: CGSize = .zero
 
-    /// The grid a new session should start at.
-    ///
-    /// Spawning at 24x80 and letting the first layout correct it means the
-    /// shell prints its prompt at one size and immediately redraws at another,
-    /// and an agent CLI repaints its whole interface. That is the flash when a
-    /// session opens. Measuring first costs nothing and removes it.
     private var spawnGrid: (rows: Int, cols: Int) {
         TerminalMetrics.grid(fitting: paneSize)
     }
 
-    /// The Open port popover in the strip menu, for a remote folder.
     @State private var showingPort = false
 
-    /// The session to display: the globally selected one when it belongs to
-    /// this folder, otherwise the folder's first.
     private var active: WorkspaceTerminal? {
         terminals.activeTerminal(in: folder.id)
     }
 
-    /// Sessions the user can actually see. A split names two. Nothing while a
-    /// file, a commit or the browser is over the top, or while another
-    /// destination is in front of this whole surface.
     private var focusedSessionIDs: Set<String> {
         guard isSurfaceActive, showsTerminal else { return [] }
         return Set(visibleSessions.compactMap { $0.local?.id })
@@ -158,10 +124,6 @@ struct TerminalPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Only the session actually on screen polls at keystroke speed. The
-        // rest keep draining the host's buffer, just slower, which is the
-        // difference between a few round trips a second and a few hundred when
-        // several agents are running at once.
         .onChange(of: focusedSessionIDs, initial: true) {
             terminals.focus(owner: focusOwner, ids: focusedSessionIDs)
         }
@@ -176,22 +138,9 @@ struct TerminalPane: View {
                 }
             }
         }
-        // Asking the login shell for the real PATH (once per launch, off the
-        // main actor), and a remote folder's owner what it can launch. Both
-        // fill in when they answer.
-        //
-        // Keyed on the owning machine, because this pane is reused across
-        // folders: an id-less task runs once, for whichever folder happened to
-        // be selected first, so switching from a local folder to a remote one
-        // never asked its owner anything. That is what left the launcher on
-        // the fallback shell with no + tile, and nothing installable on a
-        // remote machine from this Mac at all.
         .task(id: peer) {
             await launcher.resolve()
             guard let peer else { return }
-            // Retry while the answer is missing, bounded: the peer may be
-            // offline or return empty. An unbounded loop polls forever with
-            // a no-op fetch after the first attempt.
             var attempts = 0
             while !Task.isCancelled, attempts < 6 {
                 await launcher.resolveRemote(peer: peer)
@@ -200,9 +149,6 @@ struct TerminalPane: View {
                 try? await Task.sleep(for: .seconds(5))
             }
         }
-        // Three buttons and not two, because "Cancel" and "Don't Save" are
-        // different answers and a two-button dialog forces one of them to mean
-        // both.
         .confirmationDialog(
             L10n.text("apple.terminalpane.save_changes_before_closing.6239f0dc"),
             isPresented: closingUnsaved,
@@ -266,9 +212,6 @@ struct TerminalPane: View {
                 let size = proxy.size
                 TerminalStack(
                     sessions: sessions,
-                    // Nothing is shown while a file or a commit is open, so the
-                    // terminals stay mounted underneath rather than being torn
-                    // down. Positions stay put when focus moves.
                     leading: showsTerminal
                         ? (splitLayout.isSplit
                             ? terminals.leadingTerminal(in: folder.id)
@@ -298,22 +241,11 @@ struct TerminalPane: View {
                     }
                 }
 
-                // Starting state over the stack: pending host spawn, or the
-                // process is up but has not painted yet. Agent CLIs spend
-                // several seconds in that gap; an empty live terminal there
-                // is what read as a 10s hang.
                 if showsTerminal, !splitLayout.isSplit, let active = active?.local, active.showsStartingState {
                     SessionStartingView(command: active.command)
                         .frame(width: size.width, height: size.height)
                 }
 
-                // Notices float over the terminal instead of standing under it.
-                // A view under the emulator changes the emulator's height, which
-                // resizes the pty, which raises SIGWINCH, which makes a full
-                // screen program repaint from scratch and lose where it was
-                // scrolled to. "Output paused" arrives and leaves with the
-                // reader's backlog, so in the flow it did that every time the
-                // process printed hard, which is exactly when it hurts.
                 Color.clear
                     .frame(width: size.width, height: size.height)
                     .overlay(alignment: .bottomTrailing) {
@@ -324,12 +256,6 @@ struct TerminalPane: View {
                     }
                     .allowsHitTesting(false)
 
-                // Also the size a new session is spawned at, so it never opens at
-                // 24x80 and jumps.
-                // Quantised to the cell grid's order of magnitude. This only feeds
-                // the spawn size, so sub-pixel precision buys nothing, and writing
-                // it every frame of a drag rebuilds this whole pane for a value no
-                // terminal can use.
                 Color.clear
                     .onAppear { paneSize = size }
                     .onChange(of: CGSize(width: quantised(size.width, step: 8),
@@ -349,10 +275,6 @@ struct TerminalPane: View {
 
     @ViewBuilder
     private var coverFill: some View {
-        // The launcher wins over every other surface when toggled on: that is
-        // its whole point, to put a new launch in front even while sessions
-        // are running underneath. Any real navigation (opening a file,
-        // browser, terminal) clears the flag.
         if front == .launcher {
             if isSurfaceActive {
                 LaunchSurface(
@@ -422,7 +344,6 @@ struct TerminalPane: View {
         }
     }
 
-    /// Empty right / bottom half, positioned over the unused split frame.
     private func trailingPlaceholder(in size: CGSize) -> some View {
         let fraction = terminals.fraction(for: folder.id)
         return TerminalSplitPlaceholder()
@@ -441,7 +362,6 @@ struct TerminalPane: View {
         )
     }
 
-    // MARK: - Session strip
 
     private var browserPane: some View {
         VStack(spacing: 0) {
@@ -533,10 +453,6 @@ struct TerminalPane: View {
                             .id("session:" + session.id)
                         }
 
-                        // Every open surface is a chip, drawn from one list in the order
-                        // it was opened. A commit and the working tree are as closeable as
-                        // a file, and none of them can claim to be selected while another
-                        // is the one on screen.
                         ForEach(tabs) { tab in
                             chip(for: tab)
                                 .id(tab.id)
@@ -641,10 +557,6 @@ struct TerminalPane: View {
                 .accessibilityLabel(L10n.text("apple.terminalpane.split_terminals.d4e7a34f"))
             }
 
-            // What the next launch will do, on the row that launches it. Both
-            // apply to every way of starting a session, including this strip's
-            // own menu, so they sit beside it rather than on a surface that
-            // disappears once anything is running.
             if !modelProfiles.isEmpty {
                 LocalModelControl(folder: folder, peer: peer, workspaces: workspaces)
             }
@@ -664,8 +576,6 @@ struct TerminalPane: View {
         }
     }
 
-    /// The sessions on screen right now, in reading order. One unless the
-    /// pane is split.
     private var visibleSessions: [WorkspaceTerminal] {
         if splitLayout.isSplit {
             // Deduplicated: a leading pin whose session has gone falls back to
@@ -694,8 +604,6 @@ struct TerminalPane: View {
         }
     }
 
-    /// The Launch tab is the workspace home: selected while the grid is up,
-    /// including the empty-folder case where the grid shows without the flag.
     private var isLaunchSelected: Bool {
         front == .launcher || (sessions.isEmpty && front == .sessions)
     }
@@ -714,8 +622,6 @@ struct TerminalPane: View {
             ) {
                 Task { await workspaces.openFile(path, in: folder.id) }
             } onClose: {
-                // Asks first when the file has unsaved changes. A tab close
-                // is one click from a tab select.
                 workspaces.requestClose(path, in: folder.id)
             }
         case let .browser(id):
@@ -754,10 +660,6 @@ struct TerminalPane: View {
                 workspaces.close(tab, in: folder.id)
             }
         case .changes:
-            // The working tree opens in the same pane as a commit and reads
-            // the same way, so it gets the same tab rather than a "Back to
-            // terminal" button of its own. Two surfaces that behave alike
-            // should be closed alike.
             FileChip(
                 path: "Uncommitted changes in \(folder.name)",
                 symbol: "plusminus",
@@ -769,7 +671,6 @@ struct TerminalPane: View {
                 workspaces.closeWorkingTreeReview(in: folder.id)
             }
         case .sessions, .launcher:
-            // Not tabs. `WorkspaceSurface.isTab` keeps them out of the strip.
             EmptyView()
         }
     }
@@ -785,14 +686,8 @@ struct TerminalPane: View {
     }
 
     private func start(_ profile: LaunchProfile) {
-        // A new session is what the user now wants to look at, so get any open
-        // file out of the way.
         workspaces.showTerminal(in: folder.id)
         let grid = spawnGrid
-        // Bypass applies to every launch from this folder, including agent
-        // harnesses. Skipping it for harnessID left Codex/Claude/Muse asking
-        // while the chrome said Bypass on; the remembered toggle is the
-        // person's choice for the next session, not shells alone.
         let args = workspaces.bypassPermissions(for: folder.id)
             ? profile.args + profile.bypassArgs
             : profile.args
@@ -854,8 +749,6 @@ struct TabCloseButton: View {
     }
 }
 
-/// Always-on tab that brings the launch grid back. Not closeable: it is the
-/// workspace home, not a session you can throw away.
 private struct LaunchChip: View {
     let isSelected: Bool
     let onSelect: () -> Void
@@ -926,9 +819,6 @@ private struct SessionChip: View {
             if isSelected || isHovering {
                 TabCloseButton(help: L10n.text("apple.terminalpane.close_this_session.fa2af1b6"), action: onClose)
             } else {
-                // Holds the width the button would take, so a tab does not
-                // change size when the pointer crosses it and shove every tab
-                // after it sideways.
                 Color.clear.frame(width: 20, height: 20)
             }
         }
@@ -966,14 +856,10 @@ private struct SessionChip: View {
 }
 
 private struct FileChip: View {
-    /// The full thing, for the tooltip: a path, or a commit's subject.
     let path: String
     let symbol: String
     let label: String
     let isSelected: Bool
-    /// Marks a file with unsaved changes, the way every editor does. Without
-    /// it, an unsaved file is only visible on the tab you are already looking
-    /// at, which is the one tab that does not need telling.
     var isDirty: Bool = false
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -1090,13 +976,6 @@ struct TerminalHost: View {
     }
 }
 
-/// What a live terminal has to say about its own output, floated over the
-/// bottom of the emulator rather than stacked under it.
-///
-/// Nothing here may change the terminal's frame. Both facts arrive while the
-/// process is printing hard, and taking a strip's worth of height at that
-/// moment resizes the pty and makes the program repaint, which is what threw
-/// away the scroll position.
 private struct TerminalNotices: View {
     let sessions: [TerminalSession]
 
@@ -1112,36 +991,20 @@ private struct TerminalNotices: View {
 private struct TerminalNotice: View {
     let session: TerminalSession
 
-    /// A pause is normal and brief while the reader drains a burst. Showing it
-    /// the instant it appears made a pill blink on and off through every busy
-    /// stretch, so it has to hold before it is worth a word.
     @State private var pauseHasHeld = false
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            // A zero-size anchor that is always there. Modifiers on a
-            // container that renders nothing attach to nothing, so with only
-            // the two conditional pills below, the timer never started while
-            // there was nothing to show, and the pause pill it gates could
-            // never appear at all.
             Color.clear.frame(width: 0, height: 0)
             if session.droppedOutput {
                 pill {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(Theme.font(10))
                         .foregroundStyle(Theme.warning)
-                    // Plain words for what a person actually sees: a gap in
-                    // the scrollback. "The reader fell behind its buffer" is
-                    // how this end thinks about it, not how it reads.
                     Text(L10n.text("apple.terminalpane.some_lines_are_missing_here.5f8ee2b3"))
                         .font(Theme.caption)
                         .foregroundStyle(.primary)
                 }
-                // It says its piece and goes, like a toast. A pill that waits
-                // to be dismissed is a permanent mark on the terminal for
-                // something that already happened and cannot be acted on, and
-                // asking somebody to clear it is asking them to tidy up after
-                // a message they did not want.
                 .transition(.opacity)
                 .allowsHitTesting(false)
             } else if session.outputPaused, pauseHasHeld {
@@ -1151,8 +1014,6 @@ private struct TerminalNotice: View {
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
-                // Nothing to press, and it sits over the terminal: a click in
-                // that corner belongs to the emulator underneath.
                 .allowsHitTesting(false)
             }
         }
@@ -1185,8 +1046,6 @@ private struct TerminalNotice: View {
     }
 }
 
-/// Shown while a folder has no session. The launches are the same agent CLIs
-/// the archive counts, so a session and its bill line up.
 private struct LaunchSurface: View {
     let folder: WorkspaceFolder
     let terminals: TerminalsModel
@@ -1197,42 +1056,17 @@ private struct LaunchSurface: View {
     let onOpenServer: (SSHHost) -> Void
     let onManageServers: () -> Void
     let onOpenSection: (WorkspaceSection) -> Void
-    /// The grid to spawn at, measured by the pane. Passed in rather than
-    /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
-    /// What can be launched: this machine's harnesses for a local folder, the
-    /// owning machine's for a remote one. The whole supported catalog, so the
-    /// grid can show what is installed to start and what could be installed.
     let profiles: [LaunchProfile]
-    /// The machine to probe for local model servers. A remote folder's model
-    /// picker must use the remote host, not the Mac displaying this surface.
     let modelPeer: String?
 
-    /// The tile that was pressed, while the host is still working on it.
-    ///
-    /// A spawn is a socket round trip and, on the first one of the daemon's
-    /// life, a login shell resolve behind it. Until it returns, `sessions` is
-    /// still empty and this whole surface is still on screen, so without this
-    /// the click produced nothing at all and people clicked again.
     @State private var launching: String?
-    /// What an install said when it failed, shown under the grid so the
-    /// installer's own message is what the user reads.
     @State private var installError: String?
-    /// The + tile opens the rest of the catalog: not installed, and installed
-    /// tiles the user hid. Closed by default so the grid is what they launch.
     @State private var showingCatalog = false
     @State private var pendingInstall: LaunchProfile?
     @State private var pendingHide: LaunchProfile?
-    /// Keeps the Chat tile responsive while a first conversation is created.
     @State private var openingChat = false
-    /// Open pull requests, for the tile's count. The same store the sidebar
-    /// badge reads, so the launcher and the row cannot say different numbers.
     @State private var pullCounts = PullCountStore.shared
-    /// The Chat tile's own preview. Read-only: asking the shared chat model
-    /// for it steered the open transcript (a `selectFirst: false` load still
-    /// sets the folder and clears the selection), so a launcher showing
-    /// behind the chat pane won the generation race and left one-chat
-    /// folders on the opening state.
     @State private var previewChats: [ChatConversation] = []
     @State private var previewGeneration: UInt64 = 0
 
@@ -1243,10 +1077,6 @@ private struct LaunchSurface: View {
         profiles.filter { LaunchProfile.acceptsLocalModel($0.id) && $0.installed }
     }
 
-    /// Installed and still on the grid. Hidden ones live under +.
-    ///
-    /// Host `hidden` and this device's defaults both count: a hide from the
-    /// phone lands as catalog.hidden, a hide on an older host is local only.
     private var visibleProfiles: [LaunchProfile] {
         profiles.filter { $0.installed && !isOffGrid($0) }
     }
@@ -1259,9 +1089,6 @@ private struct LaunchSurface: View {
         profile.hidden || visibility.isHidden(profile.id, scope: visibilityScope)
     }
 
-    /// The workspace's stored selection. The list itself lives in the chrome
-    /// row's control, which owns loading it and is on screen whether or not
-    /// this surface is.
     private var selectedModel: (provider: String, model: String)? {
         LocalModelSelection.stored(for: folder.id, in: workspaces)
     }
@@ -1327,10 +1154,6 @@ private struct LaunchSurface: View {
 
                 launcherHeading(L10n.text("apple.terminalpane.run_an_agent.b7046310"))
 
-                // Both settings live in the strip above, where they stay
-                // reachable once a session is running. This line is what is
-                // left of them here: enough to find them, without a column of
-                // controls between the intro and the tiles.
                 settingsHint
 
                 LazyVGrid(
@@ -1430,15 +1253,8 @@ private struct LaunchSurface: View {
             openingChat = true
             Task {
                 if chat.folderID != folder.id {
-                    // Default selection: the folder's remembered conversation,
-                    // not a preview pick. A `selectFirst: false` load here
-                    // set the shared folder and cleared the selection, which
-                    // is how reopening a one-chat folder landed on nothing.
                     await chat.load(workspaceID: folder.id)
                 }
-                // A load above already selected the conversation to open.
-                // Only pick when there is nothing open: a fresh folder, or
-                // one whose selection went away with a delete.
                 if chat.folderID == folder.id, chat.selected == nil {
                     if let recent = chat.mostRecent {
                         await chat.select(recent)
@@ -1446,8 +1262,6 @@ private struct LaunchSurface: View {
                         await chat.create()
                     }
                 }
-                // Keep the tile's count honest for the next visit without
-                // steering the transcript again.
                 if let list = try? await Bridge.chats(workspaceID: folder.id) {
                     previewChats = list
                 }
@@ -1516,8 +1330,6 @@ private struct LaunchSurface: View {
         .foregroundStyle(.tertiary)
     }
 
-    /// A slim line instead of a full card, so the launcher content below stays
-    /// within the default view.
     private var runningSessionsBanner: some View {
         HStack(spacing: Theme.Space.s) {
             Label(
@@ -1611,8 +1423,6 @@ private struct LaunchSurface: View {
         }
     }
 
-    /// A profile with no bundled installer yet: shown because it is a
-    /// supported harness, but with nothing to offer but its name.
     private func unavailableTile(_ profile: LaunchProfile) -> some View {
         VStack(spacing: Theme.Space.s) {
             if let harness = profile.harnessID, harnessBrandAsset(harness) != nil {
@@ -1662,11 +1472,6 @@ private struct LaunchSurface: View {
                 )
                 workspaces.showTerminal(in: folder.id)
                 Task {
-                    // The selection's own arguments are added by the host,
-                    // beside the environment half of the same contract. A
-                    // front end that mapped one and not the other could point
-                    // a session at a local server and still ask it for a
-                    // cloud model.
                     let started = await terminals.complete(
                         session,
                         args: args,
@@ -1685,8 +1490,6 @@ private struct LaunchSurface: View {
         )
     }
 
-    /// One destination tile. `count` draws the same corner badge the Chat
-    /// tile carries, so a number means the same thing wherever it appears.
     private func utilityButton(
         _ label: String,
         symbol: String,
@@ -1729,11 +1532,6 @@ private struct LaunchSurface: View {
     }
 }
 
-/// One agent tile: mark, name, and a settings mark in the corner.
-///
-/// The mark opens a sheet, the same shape as New automation, so the handful
-/// of settings that change a long session are a form rather than a bubble.
-/// Save is the only write.
 private struct LaunchTile: View {
     let profile: LaunchProfile
     let peer: String?
@@ -1745,8 +1543,6 @@ private struct LaunchTile: View {
     @State private var configuring = false
 
     var body: some View {
-        // Badge outside the launch Button so a click on settings never starts
-        // a session, and so hover is not stolen by the button's hit testing.
         ZStack(alignment: .topTrailing) {
             Button(action: onBegin) {
                 VStack(spacing: Theme.Space.s) {
@@ -1822,13 +1618,6 @@ private struct LaunchTile: View {
     }
 }
 
-/// One muted agent tile for a harness that is not installed.
-///
-/// The quiet treatment is the point: installed harnesses are vivid tiles you
-/// start a session from, and these are the same grid a row down, so they use
-/// the heatmap's trick of drawing the less important thing with less colour.
-/// The click runs the tool's official installer through the host, and the
-/// tile becomes a launch tile when the catalog re-resolves.
 private struct LaunchInstallTile: View {
     let profile: LaunchProfile
     let isInstalling: Bool
@@ -1877,11 +1666,6 @@ private struct LaunchInstallTile: View {
     }
 }
 
-/// Opens a service on the other machine's localhost in a browser tab.
-///
-/// The daemon binds a loopback port on this machine and bridges it over the
-/// authenticated stream, so the tab is an ordinary local URL and the remote
-/// machine never exposes anything to its own network.
 private struct RemotePortForm: View {
     let folder: WorkspaceFolder
     @Bindable var workspaces: WorkspacesModel

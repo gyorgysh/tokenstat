@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A key on its way through the vault, private half included. This shape exists
-/// only inside an encrypted record and is never written to disk in the clear.
 struct SSHVaultSyncedKey: Codable {
     var id: String
     var label: String
@@ -10,8 +8,6 @@ struct SSHVaultSyncedKey: Codable {
     var publicKey: String
     var privateKey: String
     var hardwareBacked: Bool
-    /// Missing on records written by a build without merge stamps, which reads
-    /// as 0 and loses to anything stamped.
     var updatedMs: Int64 = 0
 }
 

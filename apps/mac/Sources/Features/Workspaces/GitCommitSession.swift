@@ -16,7 +16,6 @@ struct GitCommitDraft: Codable, Equatable, Sendable {
     }
 }
 
-/// One target's writing and submitted operation outlive sheets and layouts.
 @MainActor @Observable
 final class GitCommitSession: Identifiable {
     let target: GitCommitTarget
@@ -116,8 +115,6 @@ final class GitCommitSession: Identifiable {
         } catch { saveError = error.localizedDescription }
     }
 
-    /// Coalesce changes through one writer. Commit awaits this before the host
-    /// call so a process restart still knows which operation to reconcile.
     @discardableResult
     func persist() async -> Bool {
         if let persisting { return await persisting.value }
@@ -197,7 +194,6 @@ final class GitCommitSession: Identifiable {
             adopt(try await service.commit(submission))
             await persist()
         } catch {
-            // No rollback, retry or new ID follows a lost response.
             errorMessage = L10n.text("apple.gitcommitsession.the_commit_outcome_has_not_been_confirmed.5b129e15", "\(error.localizedDescription)")
         }
     }
@@ -248,8 +244,6 @@ final class GitCommitSession: Identifiable {
     }
 }
 
-/// Shared within the current app, scoped by verified account and computer.
-/// Returning to a workspace reuses its writing, even after its view was removed.
 @MainActor
 enum GitCommitSessions {
     private struct Key: Hashable {

@@ -10,12 +10,6 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// A folder's sessions on a connected host, and the launcher that starts one.
-///
-/// Pushed from `ClientWorkspaceDetailView`, which is the folder's section
-/// list. Launch lives here rather than a level up because starting an agent
-/// and watching one are the same job, and the Mac puts them in the same
-/// surface for the same reason.
 struct ClientWorkspaceSessionsView: View {
     let peer: String
     let hostName: String
@@ -44,27 +38,14 @@ struct ClientWorkspaceSessionsView: View {
     @State private var showPort = false
     @State private var portText = "5173"
     @State private var isOpeningPort = false
-    /// Read-only launcher state for the Chat tile's count and character.
     @State private var chatPreview = ChatModel()
-    /// Open pull requests, for the tile's count. Shared with the section
-    /// list, so both say the same number without asking twice.
     @State private var pullCounts = PullCountStore.shared
-    /// False until the first `pty.list` and catalog answer land. An empty list
-    /// and an unasked question look identical and mean opposite things.
     @State private var loaded = false
-    /// Whether the next launch from this phone skips permission prompts.
-    /// Remembered per folder on this device, same key the Mac uses.
     @State private var bypassOn = false
-    /// The agent login the next launch uses. See `LaunchAgentProfile`.
     @State private var launchProfiles: AgentProfiles?
     @State private var launchProfile: String?
-    /// Model servers on the host, for pointing a launch at a local model.
     @State private var localProviders: [LocalProvider] = []
     @State private var localModelKey: String?
-    /// How many launch tiles this host had last time, so the grid opens at the
-    /// size it will end up. Without it the row painted one Shell tile and then
-    /// jumped to eight when the catalog answered. Per host: two machines with
-    /// different catalogs must not set each other's placeholder count.
     private var launchTileCountKey: String { "client.launchTileCount.\(peer)" }
     private var rememberedTileCount: Int {
         UserDefaults.standard.object(forKey: launchTileCountKey) as? Int ?? 6
@@ -85,15 +66,10 @@ struct ClientWorkspaceSessionsView: View {
     private var visibility: LauncherVisibility { LauncherVisibility.shared }
     private var visibilityScope: String { peer }
 
-    /// Installed and still on the row. Hidden ones live under +.
-    ///
-    /// Host `hidden` and this device's defaults both count: a hide on the
-    /// Mac lands as catalog.hidden even when this phone has never hid it.
     private var visibleCatalog: [RemoteLaunchProfile] {
         catalog.filter { $0.installed && !isOffGrid($0) }
     }
 
-    /// Not installed, or installed and hidden.
     private var extraCatalog: [RemoteLaunchProfile] {
         catalog.filter { !$0.installed || isOffGrid($0) }
     }
@@ -119,10 +95,6 @@ struct ClientWorkspaceSessionsView: View {
         .navigationTitle(title ?? L10n.text("apple.clientworkspacedetailview.sessions.6fa3cbf4"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            // Its own key. The section list this was pushed from pulls on
-            // "workspace-<id>", and `ClientRefresh` throttles by key, so
-            // sharing one meant a pull here right after a pull there was
-            // swallowed while the spinner said otherwise.
             await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
         }
         .onChange(of: folder.id, initial: true) {
@@ -136,13 +108,6 @@ struct ClientWorkspaceSessionsView: View {
             await loadLocalModels()
         }
         .task(id: workspaceID) {
-            // Keyed on the folder: the sidebar can swap folders under this
-            // screen, and an unkeyed task would keep showing the old one's
-            // sessions with the new one's bypass switch.
-            // A wireframe that cannot end is worse than the spinner it
-            // replaced: it promises an answer is on its way. If the host has
-            // not answered in ten seconds, stop promising and show what is
-            // known, which is nothing and why.
             let watchdog = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(10))
                 guard !Task.isCancelled, !loaded else { return }
@@ -158,9 +123,6 @@ struct ClientWorkspaceSessionsView: View {
             await chatPreview.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
             #if WORKBENCH_QA
             if ProcessInfo.processInfo.environment["WORKBENCH_BROWSER"] == "1", browserSession == nil {
-                // The web view's policy allows about: pages without a host.
-                // Real forwarded pages arrive over the tunnel; this proves
-                // the beside-work layout, not the tunnel.
                 browserSession = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
                 browserSession?.showFixture()
             }
@@ -239,11 +201,6 @@ struct ClientWorkspaceSessionsView: View {
         .onChange(of: WorkSessionContext.shared.scope) { _, _ in closeBrowser() }
     }
 
-    /// The forwarded browser beside the launcher when the window is regular
-    /// both ways (iPad, an open iPhone Duo), instead of over it. Compact layouts keep the full-screen browser. The URL is the
-    /// tunnel proxy's, so host localhost resolves through the tunnel and
-    /// never touches this device's own localhost. Rotation only moves the
-    /// presentation: the port forward and the URL survive it.
     private var showsBrowserPane: Bool {
         browserSession != nil
             && ClientLayout.hasRoom(horizontal: sizeClass, vertical: verticalSizeClass)
@@ -319,7 +276,6 @@ struct ClientWorkspaceSessionsView: View {
         localProviders = loaded
     }
 
-    /// The folder's local model, for a tool that can use one.
     private func localSelection(for profile: RemoteLaunchProfile) -> (provider: String, model: String)? {
         guard LocalModelLaunch.accepts(profile.id) else { return nil }
         return LocalModelLaunch.parse(localModelKey)
@@ -331,8 +287,6 @@ struct ClientWorkspaceSessionsView: View {
         }
     }
 
-    /// Which model the agents launched here use: each tool's own, or one
-    /// loaded on the host in LM Studio or Ollama. Hidden until one is.
     @ViewBuilder
     private var localModelCard: some View {
         let choices = localChoices
@@ -365,8 +319,6 @@ struct ClientWorkspaceSessionsView: View {
         }
     }
 
-    /// One launch setting in the same card as Bypass. The whole card opens
-    /// its choices, like the rest of the rows here.
     private func launchChoiceRow(symbol: String, caption: String, value: String, opens: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
             ZStack {
@@ -403,8 +355,6 @@ struct ClientWorkspaceSessionsView: View {
         WorkspacePreference.setLocalModel(key, for: folder.id)
     }
 
-    /// Which agent login a launch here uses, beside the bypass switch.
-    /// Hidden until there is a profile other than the computer's own.
     @ViewBuilder
     private var profileCard: some View {
         if let profiles = launchProfiles, !profiles.named.isEmpty {
@@ -437,8 +387,6 @@ struct ClientWorkspaceSessionsView: View {
         }
     }
 
-    /// Bypass, the switch the Mac keeps next to Launch. Branch lives on the
-    /// folder now, one selector per folder instead of one per section.
     private var bypassCard: some View {
         HStack(spacing: Theme.Space.s) {
             ZStack {
@@ -595,16 +543,10 @@ struct ClientWorkspaceSessionsView: View {
                 spacing: Theme.Space.s
             ) {
                 if !loaded, catalog.isEmpty {
-                    // Placeholders at the count this host had last time. The
-                    // real tiles replace them in place, so nothing moves under
-                    // a thumb already reaching for one.
                     ForEach(0..<max(2, rememberedTileCount), id: \.self) { index in
                         ClientLaunchTilePlaceholder(phase: Double(index) * 0.08)
                     }
                 } else if catalog.isEmpty {
-                    // The host answered and has no catalog: keep the surface
-                    // useful. Once one arrives it supplies the host's actual
-                    // shell, and the Shell tile is not added a second time.
                     launchTile(RemoteLaunchProfile(
                         id: "shell",
                         name: L10n.text("apple.clientworkspacedetailview.shell.a7332854"),
@@ -801,7 +743,6 @@ struct ClientWorkspaceSessionsView: View {
                 if let ws = session.workspaceID, !ws.isEmpty {
                     return ws == workspaceID
                 }
-                // Fall back to cwd match when the host did not tag workspace.
                 return session.cwd == folder.path || session.cwd.hasPrefix(folder.path + "/")
             }
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
@@ -809,11 +750,6 @@ struct ClientWorkspaceSessionsView: View {
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
-        // Outside the catch, like every other section screen: the question has
-        // been asked and answered, and a refusal is an answer. Without this the
-        // wireframe only ever ended on the watchdog, which the `.task` cancels
-        // the moment a *successful* load returns, so the screen that worked was
-        // the one that pulsed forever.
         loaded = true
     }
 
@@ -859,7 +795,6 @@ struct ClientWorkspaceSessionsView: View {
         do {
             try await ClientRemote.launcherHide(peer: peer, id: profile.id)
         } catch {
-            // Older host: the local set is the whole answer.
         }
         catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
         adoptHostHidden()
@@ -870,7 +805,6 @@ struct ClientWorkspaceSessionsView: View {
         do {
             try await ClientRemote.launcherShow(peer: peer, id: profile.id)
         } catch {
-            // Older host: the local set is the whole answer.
         }
         catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
         adoptHostHidden()
@@ -897,8 +831,6 @@ struct ClientWorkspaceSessionsView: View {
         )
         openSession = pending
         do {
-            // Bypass applies to every launch, including agent harnesses. The
-            // chrome switch is the person's choice for the next session.
             let args = bypassOn
                 ? profile.args + profile.bypassArgs
                 : profile.args
@@ -924,7 +856,6 @@ struct ClientWorkspaceSessionsView: View {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
-        // The process is already up. A failed browser connection leaves it running.
         guard let page = profile.openUrl, let target = BrowserTarget(page) else { return }
         let browser = ProjectBrowserOwner.make(workspaceID: workspaceID, peer: peer)
         await browser.open(target.url)
@@ -952,8 +883,6 @@ struct ClientWorkspaceSessionsView: View {
         browserSession = browser
     }
 
-    /// True when the harness answered. The local proxy writes 502 while the
-    /// peer port is still closed, so that status is "not yet", not ready.
     private static func waitForPage(_ url: URL, timeout: TimeInterval = 40) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -972,7 +901,6 @@ struct ClientWorkspaceSessionsView: View {
     }
 }
 
-// MARK: - Files
 
 struct ClientFilesView: View {
     let peer: String
@@ -982,10 +910,6 @@ struct ClientFilesView: View {
     @Environment(ClientEditorStore.self) private var editors
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    /// Tabs when the window has room, and for as long as any tab is open in
-    /// this folder. Folding an iPhone Duo with a tab open keeps the strip:
-    /// hiding it let the same file open a second time from the host copy,
-    /// and whichever of the two was saved last overwrote the other.
     private var usesEditorTabs: Bool {
         ClientLayout.hasRoom(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
             || !editors.tabs(peer: peer, workspace: workspace).isEmpty
@@ -995,9 +919,6 @@ struct ClientFilesView: View {
     @State private var children: [TreeEntry] = []
     @State private var errorMessage: String?
     @State private var openFile: OpenFile?
-    /// False until this folder has answered. An empty list and a folder nobody
-    /// has read yet look identical and mean opposite things, so the empty
-    /// state waits rather than calling a full folder empty for a moment.
     @State private var loaded = false
     @State private var loadRevision = UUID()
     @State private var openRevision = UUID()
@@ -1062,8 +983,6 @@ struct ClientFilesView: View {
                 .listRowBackground(Color.clear)
             }
         }
-        // The platform's grouped grey is not our dark. Rows paint
-        // themselves; the list is only the scroll behind them.
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle(currentPath.isEmpty ? folderName : (currentPath as NSString).lastPathComponent)
@@ -1156,12 +1075,6 @@ private struct OpenFile: Identifiable {
     var content: String
 }
 
-/// One file from the host, open for editing.
-///
-/// Backed by the same `EditorDocument` the Mac editor uses, so the phone gets
-/// the same colours from the same parse. `highlight` is a sessionless host
-/// method over the buffer rather than the path, so it answers in this process
-/// without asking the machine that owns the file.
 struct ClientFileEditor: View {
     let peer: String
     let workspace: String
@@ -1250,12 +1163,7 @@ struct ClientFileEditor: View {
                 }
                 .safeAreaInset(edge: .bottom) { status }
         }
-        // Next/previous match stay discoverable when the bar is hidden: the
-        // same chord opens the bar, and navigates once it is open. Save and
-        // Find ride on their toolbar buttons above.
         .clientShortcuts(findShortcuts)
-        // The first parse, before anybody types. Colour is not worth blocking
-        // the sheet on, so the text is up either way.
         .task { await document.highlightNow() }
         .onAppear { visible = true }
         .onDisappear {
@@ -1284,10 +1192,6 @@ struct ClientFileEditor: View {
         }
     }
 
-    /// The line under the buffer: unsaved state, save outcome, and colour
-    /// notes. A failed save is the loud case; a file with no grammar is the
-    /// quiet one, and saying so beats leaving somebody to wonder why their
-    /// config is grey.
     @ViewBuilder
     private var status: some View {
         if let errorMessage {
@@ -1325,8 +1229,6 @@ struct ClientFileEditor: View {
         }
     }
 
-    /// The find chords for this sheet, routed to the same session the bar
-    /// drives. Hidden presses open the bar; open presses move the match.
     private var findShortcuts: [ClientShortcut] {
         let state = EditorShortcutState(
             canNavigate: find.canNavigate,
@@ -1397,8 +1299,6 @@ struct ClientFileEditor: View {
         let generation = saveGeneration
         guard ownsSave(generation), conflictHostContent != nil, !isSaving else { return }
         if keepMine {
-            // Explicit choice: write the draft through without re-verifying.
-            // Re-reading first would raise the same conflict again.
             conflictHostContent = nil
             errorMessage = nil
             let sent = document.text
@@ -1434,7 +1334,6 @@ struct ClientFileEditor: View {
     }
 }
 
-// MARK: - Browser
 
 @MainActor @Observable
 private final class ClientBrowserPresentation {

@@ -6,9 +6,6 @@ import SwiftUI
 @main
 struct PersonaLabApp: App {
     init() {
-        // Command-line rendering deliberately has no app activation or dock
-        // presence. It is used by scripts and exits as soon as the image or
-        // benchmark has been written.
         if LabShots.run(arguments: CommandLine.arguments) {
             exit(0)
         }

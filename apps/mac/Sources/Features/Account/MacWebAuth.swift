@@ -29,15 +29,11 @@ import SwiftUI
 final class MacWebAuth: NSObject {
     static let shared = MacWebAuth()
 
-    /// The scheme the site redirects to when approval finishes. The same one
-    /// the phone uses, because it is the same approval.
     private static let callbackScheme = "tokenstat"
 
     private var session: ASWebAuthenticationSession?
 
     func start(_ url: URL) {
-        // `app=mac` and not `mobile=1`: the Mac wants the site's chrome gone,
-        // not the phone's full-width layout.
         let tagged = url.appending(queryItems: [URLQueryItem(name: "app", value: "mac")])
 
         let session = ASWebAuthenticationSession(
@@ -47,7 +43,6 @@ final class MacWebAuth: NSObject {
             self?.session = nil
         }
         session.presentationContextProvider = self
-        // Off, so the provider session already in Safari is the one used.
         session.prefersEphemeralWebBrowserSession = false
         self.session = session
         session.start()
@@ -62,9 +57,6 @@ final class MacWebAuth: NSObject {
 extension MacWebAuth: ASWebAuthenticationPresentationContextProviding {
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         MainActor.assumeIsolated {
-            // The window somebody is looking at. `windows.first` can be a
-            // panel or a window behind everything else, and the sheet would
-            // attach to that.
             NSApplication.shared.keyWindow
                 ?? NSApplication.shared.mainWindow
                 ?? NSApplication.shared.windows.first

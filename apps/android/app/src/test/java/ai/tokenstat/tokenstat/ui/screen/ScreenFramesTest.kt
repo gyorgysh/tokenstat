@@ -6,10 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// What the host sends and what goes back, pinned. The decoder itself needs a
-/// device, so what can be tested here is the framing it hands to the platform.
-/// `MachinePlaneTest` covers the envelope and the pointer shapes; this covers
-/// the byte stream, the side channels and the keyboard.
 class ScreenFramesTest {
     private fun videoFrame(
         payload: ByteArray,
@@ -47,9 +43,6 @@ class ScreenFramesTest {
         assertTrue(payload.contentEquals(frame.payload))
     }
 
-    /// The bug behind a black picture on every Android device: MediaCodec
-    /// reads the byte stream, so units go in behind start codes and not
-    /// behind four-byte lengths.
     @Test
     fun `units are repacked behind four-byte start codes, not lengths`() {
         val sps = byteArrayOf(0x67, 0x42, 0x00)
@@ -111,8 +104,6 @@ class ScreenFramesTest {
         assertNull(ScreenFrames.metadata("""[1,2]""".toByteArray(Charsets.UTF_8)))
     }
 
-    /// Unknown types parse and fall through: the reader ignores what it does
-    /// not know rather than failing the whole answer.
     @Test
     fun `an unknown metadata type parses and is ignored`() {
         val metadata = ScreenFrames.metadata(
@@ -162,8 +153,6 @@ class ScreenFramesTest {
         assertEquals("dataSaver", ScreenQuality.DataSaver.wire)
     }
 
-    /// The host clamps wheel movement to whole pixels, so a scroll expressed
-    /// as a fraction of the picture scrolls nothing at all.
     @Test
     fun `scroll carries pixels rather than a fraction of the picture`() {
         val json = ScreenFrames.scroll(0.5, 0.5, 0.0, -42.0)

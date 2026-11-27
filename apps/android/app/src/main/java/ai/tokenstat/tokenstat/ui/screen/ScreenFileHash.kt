@@ -10,7 +10,6 @@ import kotlinx.coroutines.withContext
 
 internal data class ScreenFileHash(val size: Long, val sha256: String)
 
-/** A content provider may block, and large selections must remain cancellable. */
 internal suspend fun hashScreenFile(open: () -> InputStream): ScreenFileHash = withContext(Dispatchers.IO) {
     val digest = MessageDigest.getInstance("SHA-256")
     var size = 0L

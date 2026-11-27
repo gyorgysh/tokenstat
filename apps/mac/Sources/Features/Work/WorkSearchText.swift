@@ -2,7 +2,6 @@
 import Foundation
 import Darwin
 
-/// Literal search terms, never regular expressions or database syntax.
 struct WorkSearchQuery: Equatable, Sendable {
     static let maximumCharacters = 512
     static let maximumUTF8Bytes = 16 * 1024
@@ -20,12 +19,9 @@ struct WorkSearchQuery: Equatable, Sendable {
     }
 }
 
-/// Disposable memory only. Character boundaries map folded matches back to
-/// the original words so accents and multi-scalar emoji remain intact.
 struct WorkSearchText: Sendable {
     struct Excerpt: Equatable, Sendable {
         let text: String
-        /// UTF-16 ranges in text, suitable for native attributed strings.
         let highlights: [NSRange]
     }
 
@@ -43,9 +39,6 @@ struct WorkSearchText: Sendable {
         }
     }
 
-    /// A small rejection filter for long messages. Every consecutive byte
-    /// triple sets a bit; collisions only cause a full literal search, never
-    /// a missing match. Short labels do not need the extra storage.
     private static func signature(_ bytes: [UInt8]) -> [UInt64]? {
         guard bytes.count >= 3 else { return nil }
         var bits = [UInt64](repeating: 0, count: 16)
@@ -71,9 +64,6 @@ struct WorkSearchText: Sendable {
 
     func contains(_ term: String) -> Bool { contains(Needle(term)) }
 
-    /// Both sides are already case-folded NFC. Literal UTF-8 byte matching
-    /// has the same boundaries as a valid Unicode needle, without rebuilding
-    /// Foundation string-search state for every field of every message.
     func contains(_ term: Needle) -> Bool {
         guard !term.bytes.isEmpty else { return false }
         if let signature, let required = term.signature {
@@ -89,8 +79,6 @@ struct WorkSearchText: Sendable {
 
     func excerpt(for query: WorkSearchQuery) -> Excerpt {
         let folded = String(decoding: foldedUTF8, as: UTF8.self)
-        // Mapping costs more memory than the text. Build it only for visible
-        // result excerpts, not for every indexed message.
         let rawMatches = query.terms.compactMap { term in
             folded.range(of: term, options: .literal).map { NSRange($0, in: folded) }
         }.sorted { $0.location < $1.location }
@@ -101,8 +89,6 @@ struct WorkSearchText: Sendable {
         var contextRemaining = Self.maximumExcerptCharacters
         for character in characters {
             if character.asciiValue != nil {
-                // Swift treats CRLF as one Character with ASCII value LF,
-                // but its normalized UTF-16 position still advances by two.
                 offset += character == "\r\n" ? 2 : 1
             } else { offset += Self.normalize(String(character)).utf16.count }
             foldedOffsets.append(offset)
@@ -124,8 +110,6 @@ struct WorkSearchText: Sendable {
 
         let matches = rawMatches.compactMap { utf16 -> Range<Int>? in
             guard utf16.location < offset else { return nil }
-            // A fold can expand one character (ß to ss). Highlight the
-            // whole original character, including a match within an expansion.
             return boundary(at: utf16.location, roundingUp: false)..<boundary(at: NSMaxRange(utf16), roundingUp: true)
         }
 
@@ -134,8 +118,6 @@ struct WorkSearchText: Sendable {
         var start = max(0, first - 48)
         let earliest = max(0, start - 24)
         while start > earliest, !characters[start - 1].isWhitespace { start -= 1 }
-        // A long unbroken token has no useful word boundary. Keep the
-        // original context budget rather than chasing its beginning.
         if start == earliest, start > 0, !characters[start - 1].isWhitespace { start = max(0, first - 48) }
         let prefix = start > 0 ? 1 : 0
         var end = min(characters.count, start + budget - prefix)

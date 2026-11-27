@@ -2,14 +2,11 @@
 
 import SwiftUI
 
-/// Which half of the editor is on screen. Phone uses one at a time. iPad
-/// shows both.
 enum AutomationFieldsSection: Hashable {
     case writing
     case settings
 }
 
-/// Creation and editing use the same writing space and settings vocabulary.
 struct AutomationFieldsView: View {
     @Binding var fields: AutomationEditorDraft
     let backends: [AgentBackend]
@@ -169,7 +166,6 @@ struct AutomationFieldsView: View {
     }
 }
 
-/// Frequency block shared by the Mac sheet and the mobile editor.
 struct AutomationScheduleFields<Draft: JobScheduleEditing>: View {
     @Binding var fields: Draft
     var hostName: String = ""

@@ -8,7 +8,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>A live working-tree review, separate from immutable turn and commit reviews.</summary>
 internal sealed class WorkspaceLiveReviewPage : Page
 {
     private readonly string _workspaceId;
@@ -60,8 +59,6 @@ internal sealed class WorkspaceLiveReviewPage : Page
     private void ReconcileAttachment()
     {
         var revision = ++_attachmentRevision;
-        // An old Unloaded can arrive after a quick remove/re-add. Cancelling
-        // there would stop the current review's polling and every later load.
         if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             if (revision != _attachmentRevision) return;

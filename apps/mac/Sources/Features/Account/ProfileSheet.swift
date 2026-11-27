@@ -6,9 +6,6 @@ import AppKit
 import UIKit
 #endif
 
-/// The profile window, behind the name in Account: the address, who can open
-/// it, and the way to see it. An account with no handle starts on choosing
-/// one, and the one-time offer is this same window.
 struct ProfileSheet: View {
     enum Purpose { case settings, offer }
 
@@ -103,7 +100,6 @@ struct ProfileSheet: View {
         )
     }
 
-    // MARK: Settings
 
     private var settings: some View {
         VStack(spacing: Theme.Space.l) {
@@ -141,8 +137,6 @@ struct ProfileSheet: View {
         }
     }
 
-    /// Both answers, always in view, with the current one checked. Going back
-    /// is the same tap as going there.
     private func choices(_ profile: AccountProfile) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(L10n.text("common.profile.who_can_open"))
@@ -157,8 +151,6 @@ struct ProfileSheet: View {
                 ThemeRule().padding(.leading, 58)
                 choice(icon: .browser, title: L10n.text("common.profile.public"),
                        detail: L10n.text("common.profile.public_detail"), selected: profile.isPublic) {
-                    // Going public shows things to strangers, so it is asked
-                    // once more. Going private is not.
                     confirmingPublish = true
                 }
             }
@@ -226,7 +218,6 @@ struct ProfileSheet: View {
         .contentShape(.rect)
     }
 
-    // MARK: Choosing a handle
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -243,7 +234,6 @@ struct ProfileSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: Footer
 
     @ViewBuilder
     private var footer: some View {
@@ -286,7 +276,6 @@ struct ProfileSheet: View {
         #endif
     }
 
-    // MARK: Actions
 
     private func startEditing() {
         error = nil
@@ -366,20 +355,15 @@ private struct ProfileCardSurface: ViewModifier {
     }
 }
 
-/// The name in Account, which opens the profile window.
 struct ProfileNameButton<Label: View>: View {
     let model: AccountModel
     let account: Account
-    /// Takes the row's width and ends in a chevron, as in Account. Off where
-    /// the name shares a row with other things, as on Home.
     var fills = true
     @ViewBuilder let label: () -> Label
 
     @State private var showing = false
 
     var body: some View {
-        // Nothing to open against a server without these settings, for an
-        // account that has no page either.
         if account.profile != nil || !(account.handle ?? "").isEmpty {
             Button { showing = true } label: {
                 HStack(spacing: Theme.Space.m) {
@@ -405,8 +389,6 @@ struct ProfileNameButton<Label: View>: View {
     }
 }
 
-/// The line under the name: the handle and whether its page is public, or the
-/// invitation to have one.
 struct ProfileNameLine: View {
     let account: Account
     let font: Font
@@ -429,13 +411,8 @@ struct ProfileNameLine: View {
     }
 }
 
-/// Offers a handle once, to an account that has none, when Home is quiet.
-///
-/// "Once" is the account's: the answer is kept on the server, so skipping on a
-/// phone is not asked again on the computer.
 struct HandleOffer: ViewModifier {
     let model: AccountModel
-    /// Home is in front with nothing over it.
     let ready: Bool
     @Binding var showing: Bool
 
@@ -443,12 +420,10 @@ struct HandleOffer: ViewModifier {
         content
             .task(id: ready && model.handleOfferDue) {
                 guard ready, model.handleOfferDue else { return }
-                // Behind the setup tour, which waits a little less.
                 try? await Task.sleep(for: .seconds(1.8))
                 guard !Task.isCancelled, ready, model.handleOfferDue, model.beginHandleOffer() else { return }
                 showing = true
             }
-            // Closing it any way at all is an answer, including swiping it away.
             .sheet(isPresented: $showing, onDismiss: answer) {
                 ProfileSheet(purpose: .offer, model: model)
             }

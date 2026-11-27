@@ -69,18 +69,9 @@ final class ClientAppDelegate: NSObject, UIApplicationDelegate {
 }
 #endif
 
-/// The transport handshake, chosen once and awaited by the launch gate.
-///
-/// `Bridge.connect()` can sit for the interactive patience on a host that
-/// accepts the socket and then says nothing, and in the initializer that wait
-/// landed before the first frame. It runs here instead, off the main thread;
-/// `LaunchState.prepare` awaits it under the splash, and the launch work that
-/// could touch the bridge waits with it, so no view calls across a transport
-/// that has not been chosen.
 enum BridgeLaunch {
     @MainActor private static var handshake: Task<Void, Never>?
 
-    /// Start the handshake once, without waiting for it.
     @MainActor static func begin() {
         guard handshake == nil else { return }
         handshake = Task.detached(priority: .userInitiated) {
@@ -88,7 +79,6 @@ enum BridgeLaunch {
         }
     }
 
-    /// Wait until the transport has been chosen.
     static func wait() async {
         let task = await MainActor.run { handshake }
         await task?.value
@@ -100,19 +90,13 @@ extension Notification.Name {
     static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
     static let toggleLeftSidebar = Notification.Name("ai.tokenstat.toggleLeftSidebar")
     static let searchWorkRequested = Notification.Name("ai.tokenstat.searchWorkRequested")
-    /// Previous or next conversation from the View menu. The object is -1 or 1.
     static let chatStepRequested = Notification.Name("ai.tokenstat.chatStepRequested")
     static let chatStepGroupsToggleRequested = Notification.Name("ai.tokenstat.chatStepGroupsToggleRequested")
     static let toggleRightSidebar = Notification.Name("ai.tokenstat.toggleRightSidebar")
     #endif
-    /// The local archive gained or changed events (scan, remote fetch). Home
-    /// re-reads its heatmap without a full window restart.
     static let archiveDidChange = Notification.Name("ai.tokenstat.archiveDidChange")
     static let hostRecoveryStarted = Notification.Name("ai.tokenstat.hostRecoveryStarted")
     static let hostRecoveryFinished = Notification.Name("ai.tokenstat.hostRecoveryFinished")
-    /// The host stayed silent past the call's patience. Not the same as being
-    /// gone: it is usually busy, or the tunnel is mid-reconnect after a path
-    /// change.
     static let hostBecameSilent = Notification.Name("ai.tokenstat.hostBecameSilent")
     static let hostBecameUnreachable = Notification.Name("ai.tokenstat.hostBecameUnreachable")
 }
@@ -134,41 +118,19 @@ struct TokenstatApp: App {
     @UIApplicationDelegateAdaptor(ClientAppDelegate.self) private var delegate
     #endif
 
-    /// Pick the transport before any view can call across it.
-    ///
-    /// Started here rather than in a `.task`, because a view that renders
-    /// first would make its opening calls in-process and its later ones over
-    /// the daemon, so the terminals a session starts with would belong to a
-    /// different owner than the ones it ends with. The handshake itself is
-    /// not waited on until the launch gate: `Bridge.connect()` can block for
-    /// the interactive patience on a host that never answers, and that wait
-    /// must not sit in front of the first frame. See `BridgeLaunch`.
     init() {
         #if os(macOS)
-        // Before anything else, so a crash during launch still leaves a line.
         DiagnosticsLog.start()
         #endif
-        // First, and before any view exists. A font registered after the first
-        // Text is built leaves that screen in the fallback face until
-        // something redraws it.
         AppFonts.register()
         Self.adoptPreferencesFromPreviousBundleID()
-        // After the preferences above are in place and before any screen asks
-        // whose work this is.
         AccountIdentityPins.shared.activate()
         Self.excludeSecretsFromBackup()
         BridgeLaunch.begin()
         Task.detached(priority: .utility) { TokenstatAppShortcuts.updateAppShortcutParameters() }
-        // Before anything can deliver: a delegate installed later loses the
-        // callbacks for whatever arrived first, and on a Mac that is the
-        // difference between a banner and silence while the app is in front.
         NotificationPresenter.install()
         Task { await ChatAttachmentCache.shared.maintain() }
         #if os(macOS)
-        // A device can ask to see this screen, or to open the work on it, at
-        // any moment. The poll is what turns that into a sheet or a banner.
-        // It reads through the bridge, so it waits for the transport like
-        // every other piece of launch work.
         Task {
             await BridgeLaunch.wait()
             DeviceAccessRequests.shared.start()
@@ -179,18 +141,9 @@ struct TokenstatApp: App {
         // then on every launch, because iOS reissues them.
         PushRegistrar.shared.refresh()
         #endif
-        // Before anything asks for a figure. A machine with no price book
-        // renders every value as unknown, and on a platform with no CLI and no
-        // daemon the bundled book is the only one there will be until a refresh
-        // lands. Never replaces a fetched book, so this is safe every launch.
         Task {
             await BridgeLaunch.wait()
             await Bridge.pricingSeed()
-            // Seed only copies the bundled book when none exists. A machine
-            // with no CLI still needs a fetch, or Home prices against that
-            // snapshot until someone types `tokenstat pricing --refresh`.
-            // hostd and DesktopSyncScheduler keep going after this. One shot
-            // here covers iPhone and iPad, which have neither loop.
             _ = try? await Bridge.pricingRefresh()
         }
         #if os(macOS)
@@ -201,8 +154,6 @@ struct TokenstatApp: App {
             ScreenCaptureCoordinator.shared.start()
         }
         #endif
-        // Host bring-up is owned by `LaunchState.prepare` (the splash in
-        // RootView). A second ensureHosted here would race that path.
     }
 
     /// Keep the machine key and the login bearer out of iCloud / Time Machine
@@ -245,8 +196,6 @@ struct TokenstatApp: App {
         defaults.set(true, forKey: marker)
         guard let previous = UserDefaults(suiteName: "ai.tokenstat.Tokenstat") else { return }
         for (key, value) in previous.dictionaryRepresentation() {
-            // Skip the global domain's own keys, which every suite reports and
-            // none of which belong to this app.
             guard !key.hasPrefix("Apple"), !key.hasPrefix("NS"), !key.hasPrefix("com.apple.") else {
                 continue
             }
@@ -260,27 +209,17 @@ struct TokenstatApp: App {
             #if os(macOS)
             RootView()
                 .modifier(AppAppearanceScheme())
-                // The minimum is the detail column alone. The sidebar overlays
-                // on a tiled half-screen, and a content minimum larger than
-                // the tile overflows: the layout is built at the minimum and
-                // the trailing edge is cut. The inspector closes itself below
-                // its own threshold instead.
                 .frame(
                     minWidth: RootView.minimumContentWidth,
                     minHeight: RootView.minimumContentHeight
                 )
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             #else
-            // The phone and the iPad get their own root, not a narrow window.
-            // A minimum size would be meaningless here: the scene is whatever
-            // the device is.
             ClientRootView()
                 .modifier(AppAppearanceScheme())
             #endif
         }
         #if os(macOS)
-        // Unified toolbar and a hidden title give the rounded, chrome-light
-        // window the plan asks for, without drawing custom window controls.
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(Self.initialWindowSize)
@@ -291,28 +230,18 @@ struct TokenstatApp: App {
             CommandGroup(replacing: .appInfo) {
                 AboutMenuItem()
             }
-            // Adding a folder is the app's "open", so it belongs in the File
-            // menu with the shortcut people already try. The model that does
-            // the work belongs to the window, so this posts and the window
-            // acts, rather than the menu holding a second copy of the state.
             CommandGroup(after: .newItem) {
                 Button(L10n.text("apple.tokenstatapp.add_project.94d63fa2")) {
                     NotificationCenter.default.post(name: .addWorkspaceRequested, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
-            // Search across the work in every project. In the menu rather
-            // than on each screen's bar, so the shortcut is always there and
-            // the bars carry only what belongs to their screen.
             CommandGroup(after: .textEditing) {
                 Button(L10n.text("apple.tokenstatapp.search_work.7b7bfbb6")) {
                     NotificationCenter.default.post(name: .searchWorkRequested, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: [.command])
             }
-            // Sidebar toggles live on RootView. The menu posts and the window
-            // acts, same shape as Add Project, so the shortcut works when a
-            // text field would otherwise claim ⌘B for bold.
             CommandGroup(after: .sidebar) {
                 Button(L10n.text("apple.tokenstatapp.toggle_sidebar.1d4c17db")) {
                     NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
@@ -338,8 +267,6 @@ struct TokenstatApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .option])
                 }
             }
-            // Note: help strings on the toolbar marks also carry ⌘B / ⌥⌘B so
-            // the hover tooltip teaches the shortcut without opening the menu.
         }
         #endif
 
@@ -349,9 +276,6 @@ struct TokenstatApp: App {
                 .modifier(AppAppearanceScheme())
         }
         .windowResizability(.contentSize)
-        // Nothing outside the app opens this, and without the empty match a
-        // URL or a document open can be routed to it instead of the main
-        // window.
         .handlesExternalEvents(matching: [])
 
         // A real window, not a sheet. Sheets cannot enter AppKit full screen,
@@ -372,16 +296,6 @@ struct TokenstatApp: App {
     #if os(macOS)
     static let aboutWindowID = "about"
 
-    /// The window's opening size, clamped to the display it opens on.
-    ///
-    /// 1260×825, a slightly wider-than-4:3 window in the shape of the other
-    /// agentic desktop apps, clamped to the display it opens on: a window born
-    /// wider or taller than its screen reads as one that does not fit. Start
-    /// inside the visible frame and let the user make it bigger.
-    ///
-    /// At 1260 the fixed inspector column does not fit (its edge is 1450), so
-    /// the default state is overlay mode: the pane floats in on hover rather
-    /// than taking a column.
     private static var initialWindowSize: CGSize {
         let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         return CGSize(
@@ -393,10 +307,6 @@ struct TokenstatApp: App {
 }
 
 #if os(macOS)
-/// The application menu's About item.
-///
-/// Its own view because `openWindow` is an environment value, and a
-/// `CommandGroup` closure is not a view body that can read one.
 private struct AboutMenuItem: View {
     @Environment(\.openWindow) private var openWindow
 

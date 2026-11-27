@@ -16,10 +16,6 @@ struct ThemedSheet<Content: View, Actions: View>: View {
     let subtitle: String
     let icon: ActionIcon?
     let scrolls: Bool
-    /// Occupy the sheet body from the top, instead of sitting between spacers.
-    ///
-    /// Editors that need the remaining height for a prompt use this. Short
-    /// confirmations keep the default, which centres a small stack.
     let fills: Bool
     let embedded: Bool
     let onClose: () -> Void
@@ -77,8 +73,6 @@ struct ThemedSheet<Content: View, Actions: View>: View {
                     #else
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: Theme.Space.s) { actions() }
-                        // A horizontal Spacer becomes vertical in this
-                        // fallback. Keep it from consuming the sheet body.
                         VStack(alignment: .leading, spacing: Theme.Space.s) { actions() }
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -102,9 +96,6 @@ struct ThemedSheet<Content: View, Actions: View>: View {
             GeometryReader { viewport in
                 let padding = embedded ? Theme.Space.m : Theme.Modal.bodyPadding
                 ScrollView {
-                    // Native pickers and checkbox labels can have a wider
-                    // minimum than a sheet. Keep that minimum inside the
-                    // scrolling body instead of widening its header/footer.
                     content()
                         .frame(width: max(0, viewport.size.width - padding * 2), alignment: .topLeading)
                         .padding(padding)
@@ -151,11 +142,6 @@ extension ThemedSheet where Actions == EmptyView {
     }
 }
 
-/// Title, optional mark, and a close control that sits in the header rather
-/// than against the window curve.
-///
-/// Large sheets that cannot use `ThemedSheet`'s generic body still share this
-/// header so the top of every task window is the same object.
 struct ModalHeader: View {
     let title: String
     let subtitle: String
@@ -198,8 +184,6 @@ struct ModalHeader: View {
     }
 }
 
-/// One row of actions, Cancel-shaped on the left and the primary action on
-/// the right, on the same sidebar surface as the header.
 struct ModalFooter<Actions: View>: View {
     @ViewBuilder var actions: () -> Actions
 
@@ -216,8 +200,6 @@ struct ModalFooter<Actions: View>: View {
     }
 }
 
-/// A short fact in a sheet body. A themed mark, not a numbered disc, so two
-/// notes cannot be mistaken for a three-step wizard.
 struct ModalInfoRow: View {
     let icon: ActionIcon
     let title: String
@@ -258,8 +240,6 @@ extension View {
 }
 
 #if os(macOS)
-/// Keep native sheet focus and keyboard behavior while making its dimmed
-/// parent a dismissal target. Consume the click so it cannot activate the parent.
 struct SheetOutsideDismiss: NSViewRepresentable {
     let dismiss: () -> Void
     func makeNSView(context: Context) -> OutsideDismissView { OutsideDismissView() }

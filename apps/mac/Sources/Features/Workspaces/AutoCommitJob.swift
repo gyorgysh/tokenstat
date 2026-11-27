@@ -2,9 +2,6 @@
 
 import Foundation
 
-/// The reusable once-job Changes starts. One folder has one Auto commit job.
-/// The scheduler never calls gitwrite. The agent commits because a person
-/// pressed the button.
 enum AutoCommitJob {
     static let name = L10n.text("apple.autocommitjob.auto_commit.2559934f")
     static let budgetSeconds: UInt64 = 900
@@ -17,7 +14,6 @@ enum AutoCommitJob {
         L10n.text("apple.autocommitjob.commit_the_pending_work_in_this_git_reposi.ab4eb7ed", "\(workspaceName)")
     }
 
-    /// Agents that can write a commit. Shell stays out even if it was stored.
     static func commitBackends(_ backends: [AgentBackend], keeping id: String? = nil) -> [AgentBackend] {
         var out = backends.filter { $0.id != "sh" && !$0.models.isEmpty }
         if let id, !id.isEmpty, id != "sh", !out.contains(where: { $0.id == id }),

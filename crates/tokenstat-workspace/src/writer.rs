@@ -291,8 +291,6 @@ fn lock_root() -> Result<PathBuf, Error> {
     }
 }
 
-// A missing Git executable or damaged .git must never turn a repository into
-// an unfenced plain folder. Plain folders work without Git installed.
 fn git_marker(folder: &Path) -> Result<bool, Error> {
     for path in folder.ancestors() {
         match std::fs::symlink_metadata(path.join(".git")) {
@@ -300,7 +298,6 @@ fn git_marker(folder: &Path) -> Result<bool, Error> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(Error::Unavailable),
         }
-        // Bare repositories have no .git entry.
         if path.join("HEAD").is_file() && path.join("objects").is_dir() {
             return Ok(true);
         }
@@ -310,8 +307,6 @@ fn git_marker(folder: &Path) -> Result<bool, Error> {
 
 fn common_directory(folder: &Path) -> Result<PathBuf, Error> {
     use std::io::Read;
-    // A file avoids a blocked pipe-reader thread when a failed Git wrapper
-    // leaves a descendant holding stdout. Only this owned child is stopped.
     let mut output = tempfile::tempfile().map_err(|_| Error::Unavailable)?;
     let mut command = crate::gitwrite::git_command(folder);
     command
@@ -375,7 +370,6 @@ fn common_directory(folder: &Path) -> Result<PathBuf, Error> {
     };
     #[cfg(not(unix))]
     let path = PathBuf::from(String::from_utf8(bytes).map_err(|_| Error::Unavailable)?);
-    // Leave leading/trailing whitespace in folder names intact.
     Ok(if path.is_absolute() {
         path
     } else {

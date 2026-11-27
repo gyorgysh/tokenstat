@@ -1,31 +1,18 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Repository choice, writing and setup stay local until an explicit Send.
-/// The ordinary chat composer edits an isolated in-memory model, so starting
-/// a conversation offers the same attachment and agent controls as continuing
-/// one.
-///
-/// The repository choice comes first, and a disabled Send explains what is missing.
 struct ChatStartPage: View {
     @Bindable var draft: ChatStartDraft
     let repositories: [WorkspaceFolder]
     var isFullScreen = false
     var hostPicker: AnyView? = nil
     var allowsSend = true
-    /// A mobile New Chat with known computers keeps the composer visible while
-    /// the person chooses its computer and repository in the same place.
     var showsEmptyComposer = false
     var requiresHostSelection = false
-    /// The repository list is still being read, so an empty one says nothing
-    /// yet and the page must not offer first-run help on the strength of it.
     var repositoriesLoading = false
     let onAdd: () -> Void
     let onSend: () -> Void
-    /// Adds dropped folders as repositories. Only offered where a folder can
-    /// be dropped at all.
     var onAddFolders: (([URL]) -> Void)? = nil
-    /// Spend for the glance row under the composer. Nil hides that panel.
     var glance: ChatStartGlanceData? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -65,8 +52,6 @@ struct ChatStartPage: View {
         }
     }
     private var writing: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    /// Nothing to talk about yet. The page teaches the first steps instead
-    /// of offering a composer that cannot send.
     private var needsRepository: Bool {
         !showsEmptyComposer && repositories.isEmpty && !repositoriesLoading && draft.text.isEmpty && draft.attachments.isEmpty
     }
@@ -79,8 +64,6 @@ struct ChatStartPage: View {
             && owner.scope == WorkSessionContext.shared.scope && owner.session == WorkSessionContext.shared.generation
     }
 
-    /// The narrowest pane that fits the glance's three cards with their text
-    /// readable, padding included.
     private static let glanceMinimumWidth: CGFloat = 600
 
     var body: some View {
@@ -97,10 +80,6 @@ struct ChatStartPage: View {
                         } else {
                             composer
                             if showsStarters {
-                                // Facts about what you are starting first, then
-                                // ideas for what to ask. Three cards need room
-                                // to read: on a phone they would only be
-                                // truncated labels, so the ideas stand alone.
                                 if pane.size.width >= Self.glanceMinimumWidth {
                                     ChatStartGlance(repository: selected, data: glance, backend: draft.agent?.backend,
                                                     localProvider: LocalChatModel.parse(draft.agent?.model)?.provider)
@@ -118,12 +97,8 @@ struct ChatStartPage: View {
                     .frame(maxWidth: 620)
                     .padding(.horizontal, 24)
                     .padding(.top, 48)
-                    // Centre the content with a small upward optical bias.
                     .padding(.bottom, 48 + min(96, pane.size.height * 0.07))
                     .frame(maxWidth: .infinity, minHeight: pane.size.height, alignment: .center)
-                    // A click on the empty page sends a ring of code out
-                    // through the grid. The composer's own controls sit on
-                    // top and keep their clicks. Reduce Motion has no ring.
                     .contentShape(Rectangle())
                     .onTapGesture(coordinateSpace: .named(ChatStartBackdrop.space)) { point in
                         if !reduceMotion { pointer.ripple(at: point) }
@@ -162,8 +137,6 @@ struct ChatStartPage: View {
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { agentPickerFocused = focused }
         })
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Plain state on the pointer object, so following the mouse redraws
-        // nothing but the backdrop's own next frame.
         .onContinuousHover(coordinateSpace: .named(ChatStartBackdrop.space)) { phase in
             switch phase {
             case .active(let point): pointer.target = point
@@ -246,8 +219,6 @@ struct ChatStartPage: View {
 
     private var onboarding: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // A client picks its computer here too. Another one may already
-            // have repositories, so the choice stays on the page.
             if let hostPicker { HStack { hostPicker; Spacer(minLength: 0) } }
             ChatStartOnboarding(onAdd: onAdd, acceptsFolderDrops: onAddFolders != nil, dropTargeted: folderDropTargeted)
         }
@@ -257,11 +228,6 @@ struct ChatStartPage: View {
         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
     }
 
-    /// Opens on the repository used last, from this launch or an earlier
-    /// one, once it is in the list. With exactly one repository there is
-    /// nothing to choose, so the page chooses it. Several and none
-    /// remembered still asks. An unavailable remembered repository waits for
-    /// discovery or an explicit choice. A choice already made is never replaced.
     private func chooseDefaultRepository() {
         draft.chooseDefaultRepository(available: repositories.map(\.id), isLoading: repositoriesLoading)
     }
@@ -277,9 +243,6 @@ struct ChatStartPage: View {
         model.landingBlockReason = blockReason
     }
 
-    /// What Send says while it cannot be pressed. A disabled control that
-    /// names the missing piece teaches the requirement; one that is absent
-    /// leaves a first-time reader with nothing to aim at.
     private var blockReason: String? {
         if draft.isSubmitting { return nil }
         if requiresHostSelection { return L10n.text("common.new_chat.choose_host") }
@@ -315,8 +278,6 @@ struct ChatStartPage: View {
             }
         } catch {
             guard !Task.isCancelled, active, catalogLease == lease, catalogOwner == requested else { return }
-            // Keep the previous repository's setup for a retry. A failed
-            // catalog is unavailable, rather than evidence it was uninstalled.
             catalogError = error.localizedDescription
         }
     }
@@ -397,7 +358,6 @@ struct ChatStartPage: View {
             #endif
             .chatControlChrome(cornerRadius: 10)
             .overlay {
-                // Lit until the choice is made. Nothing else on the page is.
                 if selected == nil {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1)
@@ -421,15 +381,11 @@ struct ChatStartPage: View {
         .help(repository.isGeneral ? L10n.text("common.new_chat.no_repository_help") : repository.path)
     }
 
-    /// Each computer offers its "No repository" folder before its projects.
     static func generalFirst(_ folders: [WorkspaceFolder]) -> [WorkspaceFolder] {
         folders.filter(\.isGeneral) + folders.filter { !$0.isGeneral }
     }
 }
 
-/// A folder dropped on the first-run page becomes a repository. Only
-/// directories count: a file has nowhere to go until there is a
-/// conversation to attach it to.
 private struct FolderDrop: ViewModifier {
     let enabled: Bool
     @Binding var isTargeted: Bool

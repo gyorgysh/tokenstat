@@ -3,8 +3,6 @@
 import SwiftUI
 import UIKit
 
-/// Native interactive paging around the current image. The data source
-/// creates adjacent pages on demand; remote loading stays with the viewer.
 struct ChatImagePager: UIViewControllerRepresentable {
     let resources: [ChatImageResource]
     let selection: Int

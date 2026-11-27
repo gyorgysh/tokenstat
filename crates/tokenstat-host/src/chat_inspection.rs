@@ -198,8 +198,7 @@ impl Snapshot {
                 .is_some_and(|v| v == "model_completed");
         let agy_init = backend == "agy" && value["event"] == "init";
         let grok_tools = backend == "grok" && kind == "available_commands";
-        // Claude result usage is a whole-turn total. Its last assistant
-        // message is the prompt footprint; never use the result total here.
+
         let usage = match (backend, kind) {
             ("claude", "assistant") | ("cursor", "assistant") => value.pointer("/message/usage"),
             ("grok", "usage") => Some(value.get("usage").unwrap_or(value)),
@@ -253,7 +252,7 @@ impl Snapshot {
                 .as_str()
                 .and_then(name)
                 .or_else(|| self.model.clone());
-            // Muse includes cache reads and writes in input_tokens.
+
             if let Some(used) = prompt_tokens(&event["usage"], false) {
                 self.context_used = Some(used);
                 self.context_breakdown = prompt_breakdown(&event["usage"], false);
@@ -335,7 +334,6 @@ impl Snapshot {
             && kind == "result"
             && let Some(models) = value["modelUsage"].as_object()
         {
-            // Mixed-model turns do not have a single unambiguous window.
             let selected = self
                 .model
                 .as_ref()
@@ -382,7 +380,7 @@ fn status(value: Option<&str>) -> String {
             | "authenticationRequired",
         ) => value.unwrap(),
         Some("needs-auth") => "authenticationRequired",
-        // A discovered tool catalog does not prove a server is still connected.
+
         _ => "unknown",
     }
     .into()
@@ -406,8 +404,6 @@ pub(crate) struct ReportedWindow {
     pub tokens: u64,
 }
 
-/// The same capped, nonblocking regular-file reader is used for external
-/// configuration and our small sidecar. A project FIFO must never park a host.
 fn read(path: &Path) -> Option<String> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);

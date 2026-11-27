@@ -41,7 +41,7 @@ fun ProjectWorktrees(model: AppViewModel, peer: String, folder: JsonObject, onBu
     val scope = rememberCoroutineScope()
     LaunchedEffect(working) { onBusyChanged(working) }
     DisposableEffect(Unit) { onDispose { onBusyChanged(false) } }
-    BackHandler(enabled = working) { /* Keep a submitted creation visible until its result arrives. */ }
+    BackHandler(enabled = working) { }
     LaunchedEffect(peer, workspace, attempt) {
         reading = true
         error = null

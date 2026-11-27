@@ -30,7 +30,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
-/// A server this phone has agreed to trust, and the keys it showed then.
 internal data class TrustedServer(
     val hostId: String,
     val label: String,
@@ -38,7 +37,6 @@ internal data class TrustedServer(
     val fingerprints: List<String>,
 )
 
-/// Port of the Apple `SSHKnownHost` rows, answered by `ssh.knownhost.list`.
 internal fun trustedServers(answer: JsonElement?): List<TrustedServer> =
     (answer as? JsonArray).orEmpty().mapNotNull { row ->
         val item = row as? JsonObject ?: return@mapNotNull null
@@ -54,8 +52,6 @@ internal fun trustedServers(answer: JsonElement?): List<TrustedServer> =
         )
     }
 
-/// Every trusted server, and the way to take it back. Forgetting one is what
-/// makes the next connection ask again, after a server was reinstalled.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun TrustedServersSheet(

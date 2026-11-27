@@ -2,8 +2,6 @@
 
 import Foundation
 
-/// The host's immutable selection, including the branch and index it was read
-/// from. Sending this back cannot silently commit a newer worktree snapshot.
 struct GitCommitReview: Codable, Sendable, Equatable {
     let branch: String
     let head: String?
@@ -38,8 +36,6 @@ struct GitCommitReceipt: Codable, Sendable, Equatable {
     var unresolved: Bool { state != "succeeded" && state != "failed" }
 }
 
-/// A persisted submitted snapshot belongs to its original target and ID.
-/// Reopening a composer reconciles this record before allowing another commit.
 struct GitCommitSubmission: Codable, Sendable, Equatable {
     let operationID: String
     let review: GitCommitReview
@@ -51,8 +47,6 @@ struct GitCommitSubmission: Codable, Sendable, Equatable {
     }
 }
 
-/// Mobile always supplies a peer. Only desktop callers may target the local
-/// host, so a failed mobile connection never falls back to another repository.
 protocol GitCommitService: Sendable {
     func status() async throws -> WorkspaceFolder
     func supportsReviewedCommit() async -> Bool

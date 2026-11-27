@@ -20,9 +20,6 @@ class TranscriptFollowTest {
     @Test
     fun `growth nobody scrolled for never unpins`() {
         val follow = TranscriptFollowState()
-        // A streaming turn pushes the end away for hundreds of frames while
-        // the viewport sits still. Unpinning here is what would stall a reply
-        // mid-screen behind Jump to latest.
         repeat(10) { follow.note(atBottom = false, userScroll = false) }
         assertTrue(follow.pinned)
         assertFalse(follow.showJump)
@@ -53,8 +50,6 @@ class TranscriptFollowTest {
         val follow = TranscriptFollowState()
         follow.pause()
         assertFalse(follow.pinned)
-        // Stationary frames at the bottom must not resume on their own, or
-        // the pause could never hold where it was pressed.
         follow.note(atBottom = true, userScroll = false)
         assertTrue(follow.paused)
         assertFalse(follow.pinned)
@@ -103,7 +98,6 @@ class TranscriptFollowTest {
         assertTrue(isAtBottom(lastVisibleIndex = 9, totalItems = 10, distancePx = 0, thresholdPx = 56f))
         assertTrue(isAtBottom(lastVisibleIndex = 9, totalItems = 10, distancePx = 56, thresholdPx = 56f))
         assertFalse(isAtBottom(lastVisibleIndex = 9, totalItems = 10, distancePx = 57, thresholdPx = 56f))
-        // The last item is not even laid out: far from the end.
         assertFalse(isAtBottom(lastVisibleIndex = 7, totalItems = 10, distancePx = 0, thresholdPx = 56f))
         assertFalse(isAtBottom(lastVisibleIndex = null, totalItems = 10, distancePx = 0, thresholdPx = 56f))
         assertTrue(isAtBottom(lastVisibleIndex = null, totalItems = 0, distancePx = 0, thresholdPx = 56f))

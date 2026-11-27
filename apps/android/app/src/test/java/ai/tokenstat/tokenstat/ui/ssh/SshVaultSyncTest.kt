@@ -8,8 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SshVaultSyncTest {
-    // vaultVerdict — port of the merge rule in SSHLibraryModel: newer wins,
-    // missing loses, equal stamps tie.
     @Test fun verdictTakesMissingAndNewer() {
         assertEquals(VaultVerdict.TAKE_REMOTE, vaultVerdict(10L, null))
         assertEquals(VaultVerdict.TAKE_REMOTE, vaultVerdict(10L, 5L))
@@ -18,8 +16,6 @@ class SshVaultSyncTest {
         assertEquals(VaultVerdict.SAME, vaultVerdict(0L, 0L))
     }
 
-    // vaultEnvelopeOf — tombstones and undecodable rows decode to null so
-    // the pull walks past them instead of dying on them.
     @Test fun envelopeSkipsTombstonesAndGarbage() {
         val tombstone = buildJsonObject { put("id", "host:a"); put("deleted", true) }
         assertNull(vaultEnvelopeOf(tombstone))
@@ -32,8 +28,6 @@ class SshVaultSyncTest {
         assertEquals("host", vaultEnvelopeOf(good)?.get("kind").toString().trim('"'))
     }
 
-    // orderVaultRecords — folders first, each after its own parent, then the
-    // rest in arrival order; orphans go out last rather than never.
     @Test fun ordersFoldersBeforeHosts() {
         fun record(id: String, folderId: String? = null, parentId: String? = null) = buildJsonObject {
             put("id", id)

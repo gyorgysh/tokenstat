@@ -144,11 +144,6 @@ fn key_usage() -> ProviderLimits {
     };
     if !response.status().is_success() {
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            // No quota endpoint for this account yet. There was an estimate
-            // here, built from local message costs against dollar ceilings
-            // written down in this file. Those ceilings were a guess, so every
-            // percentage it drew was a guess wearing a real number's clothes.
-            // Saying nothing is the honest answer until OpenCode reports one.
             return unavailable("OpenCode does not report quota for this account yet.".to_string());
         }
         return unavailable(format!(
@@ -270,7 +265,6 @@ mod tests {
         let reading = cli_reading(&answer, 7).unwrap();
         assert_eq!(reading.source, "opencode");
         assert_eq!(reading.observed_at_ms, 7);
-        // An impossible figure is dropped, not clamped.
         assert_eq!(
             reading
                 .windows

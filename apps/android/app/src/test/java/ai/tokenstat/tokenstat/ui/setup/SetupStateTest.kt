@@ -8,8 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the setup journey rules ported from `ClientSetupState.swift`: the
-/// identity check, milestone words, and code-based failure mapping.
 class SetupStateTest {
 
     @Test

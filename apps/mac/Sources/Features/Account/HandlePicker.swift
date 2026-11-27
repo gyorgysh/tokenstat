@@ -2,7 +2,6 @@
 import Observation
 import SwiftUI
 
-/// A handle being chosen, and whether it can be had.
 @MainActor @Observable
 final class HandlePicker {
     enum State: Equatable {
@@ -10,8 +9,6 @@ final class HandlePicker {
         case checking
         case available
         case refused(String)
-        /// The question could not be asked. The claim is still offered: it is
-        /// the claim that decides, and it will say so if the network is gone.
         case unknown(String)
     }
 
@@ -41,7 +38,6 @@ final class HandlePicker {
         }
     }
 
-    /// A refusal the claim itself returned, shown where the check's would be.
     func refuse(_ message: String) {
         pending?.cancel()
         state = .refused(message)
@@ -73,8 +69,6 @@ final class HandlePicker {
     }
 }
 
-/// The address with the handle as the part somebody fills in, and a line under
-/// it that always says where the name stands.
 struct HandleField: View {
     @Bindable var picker: HandlePicker
     let host: String
@@ -90,8 +84,6 @@ struct HandleField: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .accessibilityHidden(true)
-                // Never rewritten as it is typed: changing the text under the
-                // field drops characters. The plate above shows the address.
                 TextField(L10n.text("common.handle.placeholder"), text: $picker.text)
                     .textFieldStyle(.plain)
                     .focused($focused)
@@ -160,8 +152,6 @@ struct HandleField: View {
         .foregroundStyle(tint)
     }
 
-    /// The line changes while focus stays in the field, so a screen reader
-    /// would otherwise never hear that a name is free.
     private func announce(_ state: HandlePicker.State) {
         let words: String
         switch state {

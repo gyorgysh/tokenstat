@@ -41,11 +41,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// Review Changes and History for the folder that produced a task result.
-///
-/// Ports `TaskResultWorkspaceLinks`: whole-surface rows in the shape of the
-/// folder's own sections, so the destination reads as the folder rather than
-/// a second run action. Compact layouts push the section and return here.
 @Composable
 fun TaskResultDialog(
     model: AppViewModel,

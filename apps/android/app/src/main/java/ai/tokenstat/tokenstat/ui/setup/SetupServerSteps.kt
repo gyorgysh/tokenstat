@@ -30,33 +30,15 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlin.coroutines.coroutineContext
 
-/// Setting up a machine from this phone, one step at a time. Ported from
-/// `ClientSetupModel.swift`.
-///
-/// This is the provisioning plane, and it has one rule: it may install and
-/// enroll, and it may not do work. The moment the server is a peer, setup is
-/// finished and hands over to the agent and project steps, which use the same
-/// tunnel methods every other machine uses.
-///
-/// Nothing here is a second copy of anything. The saved servers and keys are
-/// the SSH library's, the install line is composed by the host so every
-/// surface shows the same one, and the check is the host's verdict rather
-/// than this screen's reading of raw facts.
 class SetupConnectState {
-    /// Where. A draft record, saved to the library only once it is trusted:
-    /// a half-typed address is not a server somebody owns.
     var hostname by mutableStateOf("")
     var username by mutableStateOf("root")
     var label by mutableStateOf("")
 
-    /// A saved server picked instead of typing one.
     var pickedHostId by mutableStateOf<String?>(null)
 
-    /// How to sign in. Resolved into an auth payload per call, because the
-    /// private key lives in this device's vault and nowhere else.
     var credential: SetupCredential by mutableStateOf(SetupCredential.None)
 
-    /// Typed once, used once, never stored.
     var password by mutableStateOf("")
 
     var fingerprint by mutableStateOf<String?>(null)
@@ -64,16 +46,11 @@ class SetupConnectState {
 
     var check by mutableStateOf<JsonObject?>(null)
 
-    /// What this machine will be called on the account.
     var machineName by mutableStateOf("server")
     var agents: List<String> by mutableStateOf(listOf("claude_code"))
 
-    /// The install shell, once the line is typed into it. Watching it is the
-    /// install step's whole second half.
     var installSessionId by mutableStateOf<String?>(null)
 
-    /// The machine's own answer, once it is a peer. The finish step reads
-    /// this rather than believing what scrolled past in the terminal.
     var finished by mutableStateOf<JsonObject?>(null)
     var expectedPeer by mutableStateOf<String?>(null)
     var manualInstall by mutableStateOf(false)
@@ -82,9 +59,6 @@ class SetupConnectState {
     var working by mutableStateOf(false)
     var failure by mutableStateOf<SetupFailure?>(null)
 
-    /// The saved servers and keys, loaded once and shared by every step.
-    /// Nothing here is a second copy: trusting a host key writes through to
-    /// the same library the SSH screen reads.
     var libraryHosts by mutableStateOf<List<JsonObject>?>(null)
     var libraryKeys by mutableStateOf<List<JsonObject>?>(null)
 
@@ -99,10 +73,6 @@ class SetupConnectState {
         }
     }
 
-    /// The probe, check, install or wait in flight, so Stop has something to
-    /// stop. A TCP connect to a host that is not answering sits there until
-    /// the socket times out, which is around a minute, and for that whole
-    /// minute the step must still do something when asked to stop.
     var job: Job? = null
 
     fun cancel() {
@@ -110,8 +80,6 @@ class SetupConnectState {
         job = null
     }
 
-    /// Typing another server must stop referring to a saved record. Clear its
-    /// identity too, so confirming the new fingerprint creates a new row.
     fun editServer(field: ServerField, value: String) {
         if (pickedHostId != null) {
             pickedHostId = null
@@ -126,7 +94,6 @@ class SetupConnectState {
         }
     }
 
-    /// The host record as it stands, whether picked or typed.
     fun resolvedHost(hosts: List<JsonObject>): JsonObject {
         val picked = pickedHostId
         if (picked != null) {
@@ -146,7 +113,6 @@ class SetupConnectState {
     fun whereReady(): Boolean =
         pickedHostId != null || (hostname.trim().isNotEmpty() && username.trim().isNotEmpty())
 
-    /// Re-entering the address step invalidates every result tied to it.
     fun resetServer() {
         cancel()
         fingerprint = null
@@ -171,10 +137,6 @@ class SetupConnectState {
         get() = !manualInstall || expectedPeer != null ||
             SetupIdentity.normalize(manualMachineKey) != null
 
-    /// Ask the server for its host key, before any credential is offered.
-    ///
-    /// The one screen in this wizard where a mistake is permanent, which is
-    /// why it is a step of its own rather than a line in another one.
     suspend fun probe(model: AppViewModel, hosts: List<JsonObject>) {
         fingerprint = null
         trusted = false
@@ -197,10 +159,6 @@ class SetupConnectState {
         }
     }
 
-    /// Keep the fingerprint, and the server with it.
-    ///
-    /// This is where a typed address becomes a saved one: trusting a host key
-    /// is the moment somebody says this server is theirs.
     suspend fun trust(model: AppViewModel, hosts: List<JsonObject>) {
         val pin = fingerprint ?: return
         runGuarded {
@@ -219,9 +177,6 @@ class SetupConnectState {
         }
     }
 
-    /// What the server is, before anything is written to it. One fixed script
-    /// on its own channel, so nothing appears in the person's shell and
-    /// nothing on the server changes.
     suspend fun inspect(model: AppViewModel, context: Context, hosts: List<JsonObject>, keys: List<JsonObject>) {
         runGuarded {
             val host = resolvedHost(hosts)
@@ -239,11 +194,6 @@ class SetupConnectState {
         }
     }
 
-    /// Mint a code, put it on the server as a private file, and type the line.
-    ///
-    /// The code never reaches the command line: there it would land in the
-    /// shell history and, briefly, in `/proc`. It goes down its own channel
-    /// into a 0600 file, and the line names that file.
     suspend fun install(
         model: AppViewModel,
         hosts: List<JsonObject>,
@@ -292,9 +242,6 @@ class SetupConnectState {
                 val id = opened.sshString("id")
                     ?: throw IllegalStateException(L10n.text("android.setupserversteps.the_session_opened_without_an_id.09911388"))
                 coroutineContext.ensureActive()
-                // A moment for the shell to draw its prompt. Typing into a
-                // shell that has not started echoing yet loses the first
-                // characters.
                 delay(700)
                 coroutineContext.ensureActive()
                 model.core(
@@ -320,9 +267,6 @@ class SetupConnectState {
         }
     }
 
-    /// Ask the machine itself whether it is set up, over the tunnel it now
-    /// has. Polled rather than assumed: the installer's output scrolling past
-    /// is not the same as a machine that answers.
     suspend fun waitForMachine(model: AppViewModel, hosts: List<JsonObject>, keys: List<JsonObject>, context: Context) {
         runGuarded {
             if (expectedPeer == null) {
@@ -345,9 +289,6 @@ class SetupConnectState {
                 }
             }
             val peer = expectedPeer ?: return@runGuarded
-            // The key arrived over the verified SSH session, which is the
-            // same consent as typing it by hand. Approve it here so the
-            // tunnel calls below are not refused as unapproved.
             runCatching { model.pairPeer(peer, machineName) }
             val deadline = System.currentTimeMillis() + 180_000
             while (System.currentTimeMillis() < deadline) {
@@ -406,12 +347,6 @@ enum class ServerField { HOSTNAME, USERNAME, LABEL }
 private fun JsonObject.with(key: String, value: kotlinx.serialization.json.JsonElement): JsonObject =
     JsonObject(toMutableMap().also { it[key] = value })
 
-/// One auth payload, built from the chosen credential and the private
-/// material already loaded for it. Pure, so unit tests pin the same answers.
-///
-/// Built on this device because only this device can open the vault. A
-/// password is used for the connection and never written anywhere. Ported
-/// from `ClientSetupModel.authPayload`.
 fun setupAuthPayload(
     credential: SetupCredential,
     password: String,
@@ -448,8 +383,6 @@ fun setupAuthPayload(
     }
 }
 
-/// Resolve the chosen credential into an auth payload, loading the private
-/// half off the main thread. The suspend half of [setupAuthPayload].
 suspend fun setupAuth(
     credential: SetupCredential,
     password: String,
@@ -470,8 +403,6 @@ suspend fun setupAuth(
 
 class SetupAuthMissing(message: String) : Exception(message)
 
-/// Everything `ssh.session.open` and the provision calls need about a host,
-/// in one place. Ported from `Bridge.sessionParams`.
 fun setupSessionParams(host: JsonObject, auth: JsonObject, rows: Int, cols: Int): JsonObject =
     buildJsonObject {
         put("hostname", host.sshString("hostname") ?: "")
@@ -487,15 +418,12 @@ fun setupSessionParams(host: JsonObject, auth: JsonObject, rows: Int, cols: Int)
         put("auth", auth)
     }
 
-/// A name somebody would recognise, offered rather than imposed: the
-/// distro's first word, when the machine is still called "server".
 fun suggestMachineName(check: JsonObject, current: String): String? {
     if (current != "server") return null
     return check.sshString("distro")?.split(" ")?.firstOrNull()
         ?.takeIf { it.isNotBlank() }?.lowercase()
 }
 
-/// The finish step's facts, read from `host.provisionStatus`.
 data class SetupProvisionInfo(
     val signedInHandle: String?,
     val alwaysOn: Boolean,
@@ -529,15 +457,6 @@ data class SetupProvisionInfo(
     }
 }
 
-/// Where a recovery action goes.
-///
-/// One table for the whole wizard rather than a closure per screen: the
-/// answer to "the fingerprint changed" is the fingerprint screen wherever
-/// somebody was standing when it happened. Every destination is reached
-/// through the address, so the stack is built rather than pushed onto:
-/// arriving at the credential screen with no way back to the address would
-/// be a dead end of its own. Ported from `recover` in
-/// `ClientSetupServerSteps.swift`.
 fun recoverSetupPath(action: SetupAction): List<SetupStep>? = when (action.step()) {
     SetupStep.WHERE -> listOf(SetupStep.WHERE)
     SetupStep.CREDENTIAL -> listOf(SetupStep.WHERE, SetupStep.CREDENTIAL)

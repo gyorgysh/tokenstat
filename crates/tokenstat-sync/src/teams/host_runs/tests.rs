@@ -162,8 +162,6 @@ fn retries_only_the_same_unresolved_renewal_without_extending_its_original_budge
         v["renew"]["proof"]
     );
     drop(requests);
-    // The reply arrived at t+15, but its original request was t+10. Sleep
-    // past t+40 with a rolled-back wall clock cannot give it another 5s.
     {
         let mut time = now.lock().unwrap();
         time.stamp.boot += Duration::from_secs(25);

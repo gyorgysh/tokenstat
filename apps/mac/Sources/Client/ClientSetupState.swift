@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// Public identity, not a mutable display name, binds provisioning to a peer.
 enum ClientSetupIdentity {
     static func normalize(_ key: String) -> String? {
         let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -18,17 +17,11 @@ enum ClientSetupIdentity {
     }
 }
 
-/// The service origin and account identity are both required. The device key
-/// also prevents a restored app backup from adopting another device's progress.
 struct ClientSetupScope: Codable, Equatable {
     var origin: String
     var account: String
     var deviceKey: String
 
-    /// Whose setup this is. One rule for the whole app, and a new account
-    /// with no handle still gets setup. An empty answer
-    /// means the draft goes unpersisted. The store is keyed by scope, and
-    /// one account must never resume another's.
     static func accountIdentity(handle: String?, id: String?) -> String {
         WorkReference.Scope.accountIdentity(handle: handle, id: id) ?? ""
     }
@@ -44,9 +37,6 @@ enum ClientSetupMilestone: String, Codable {
         }
     }
 
-    /// What happened, in the words somebody would use about their own server.
-    /// The installing states say what setup will do next, because the honest
-    /// answer after an interruption is that nobody knows how far it got.
     var summary: String {
         switch self {
         case .trusted:
@@ -104,17 +94,6 @@ enum ClientSetupDraftError: Error, LocalizedError {
     }
 }
 
-/// A failure somebody can act on, rather than a sentence they can only read.
-///
-/// Three things, every time: what failed, what changed if anything, and one
-/// concrete next action. The action is chosen from the host's error code, never
-/// from the words in the message: those are free to be reworded and one day
-/// translated, and a screen that branches on English breaks silently when
-/// either happens.
-///
-/// The raw message is kept beside the explanation rather than instead of it.
-/// Somebody debugging a server wants the transport's own words, and somebody
-/// setting one up does not.
 struct ClientSetupFailure: Equatable {
     enum Action: Equatable {
         case checkAddress
@@ -141,12 +120,6 @@ struct ClientSetupFailure: Equatable {
             }
         }
 
-        /// Where this action goes inside the wizard, when it is a place.
-        ///
-        /// A failure whose answer is a screen navigates to it. The two that
-        /// are not a place at all, signing in to the account and updating the
-        /// machine, both happen outside this wizard, and a button that cannot
-        /// take somebody there would be a button that does nothing.
         var destination: SetupStep? {
             switch self {
             case .checkAddress: .where
@@ -159,11 +132,6 @@ struct ClientSetupFailure: Equatable {
             }
         }
 
-        /// Whether a button for this is worth drawing.
-        ///
-        /// `.retry` is not: every screen's own primary button already is the
-        /// retry, and a second one beside it would be the same action twice.
-        /// The two that happen elsewhere say so in words instead.
         var isActionable: Bool {
             switch self {
             case .signInToAccount, .updateMachine, .retry: false
@@ -189,11 +157,6 @@ struct ClientSetupFailure: Equatable {
     var action: Action
     var details: String?
 
-    /// Read a failure from whatever was thrown.
-    ///
-    /// Codes come from `tokenstat-host::error`. Anything unrecognised keeps
-    /// its own message and offers a retry, which is honest: an unknown failure
-    /// is not evidence that nothing can be done.
     static func from(_ error: Error) -> ClientSetupFailure {
         guard case let BridgeError.core(code, message) = error else {
             return ClientSetupFailure(
@@ -271,8 +234,6 @@ struct ClientSetupFailure: Equatable {
                 details: message
             )
         default:
-            // No code this app knows. Two shapes are still worth naming,
-            // because both used to arrive as a sentence nobody could act on.
             let lower = message.lowercased()
             if lower.contains("unknown method") {
                 return ClientSetupFailure(
@@ -282,10 +243,6 @@ struct ClientSetupFailure: Equatable {
                 )
             }
             if lower.contains("not logged in") {
-                // The wizard is behind the sign-in, so this is only reachable
-                // when a token was revoked mid-flow. The shared message tells
-                // somebody to run a CLI command, which is not an answer a
-                // person holding an iPhone or iPad can act on.
                 return ClientSetupFailure(
                     explanation: L10n.text("apple.clientsetupstate.this_device_is_signed_out_sign_in_again_th.868697cc"),
                     action: .signInToAccount,
@@ -297,12 +254,6 @@ struct ClientSetupFailure: Equatable {
     }
 }
 
-/// Wizard destinations, shared with failure recovery on every build target.
-///
-/// A step per screen rather than one long form, because each of them can fail
-/// on its own and each failure has its own thing to say. Trusting a host key
-/// in particular is the one place where a mistake is permanent, so it is not a
-/// row inside somebody else's screen.
 enum SetupStep: Hashable {
     case `where`
     case credential
@@ -310,14 +261,9 @@ enum SetupStep: Hashable {
     case check
     case install
     case finish
-    /// The project, which is what all of it was for.
     case project
     case needServer
-    /// The install line, for somebody who would rather run it themselves.
     case byHand
-    /// Door three, which ends by handing over to `where` with the addresses
-    /// already known.
     case cloud
-    /// Door one, which is a screen that watches rather than one that acts.
     case mac
 }

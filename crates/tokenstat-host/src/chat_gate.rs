@@ -1,41 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! How a chat turn's agent is made to ask before it acts.
-//!
-//! Every supported CLI runs a lifecycle hook before a tool call, and every one
-//! of them takes that hook as **a shell command line**, not as an argv. This
-//! module owns building that line and the private configuration each backend
-//! reads it from, because the gate failed silently for exactly as long as
-//! those two jobs were spread across three files.
-//!
-//! ## What went wrong, so it cannot go wrong the same way again
-//!
-//! The hook command was built as `format!("{command} hook claude pre")` with no
-//! quoting, and on macOS the helper lives at
-//! `~/Library/Application Support/tokenstat/bin/tokenstat-hostd`. The shell
-//! split that at "Application", the hook died with 127 before it could ask
-//! anybody anything, and Claude Code treats a hook that fails to run as a
-//! non-blocking error. The tool then ran. Standard mode had never once stopped
-//! a tool call, on any backend, and nothing anywhere said so.
-//!
-//! Three defences now, because one is what was there before:
-//!
-//! 1. [`hook_command`] shell-quotes the path. That is the actual fix.
-//! 2. [`stable_hook_path`] keeps a space-free symlink beside the helper and
-//!    prefers it, so a future consumer that does its own naive splitting still
-//!    works.
-//! 3. `hook_command_survives_a_path_with_spaces` runs the built line through a
-//!    real shell and checks the process started.
-//!
-//! ## Timeouts are part of the contract
-//!
-//! A hook is a process a CLI waits on, and each one caps that wait: 60 seconds
-//! for Claude Code by default, 5 for grok, and 5 for whatever we wrote into
-//! codex's and agy's hook files. A person cannot answer a permission card in
-//! five seconds. Every hook entry this module writes therefore carries
-//! [`GATE_TIMEOUT_SECONDS`], and the hook process is given a deadline slightly
-//! inside it so an unanswered request becomes an explicit denial rather than a
-//! killed process, which every one of these CLIs reads as "carry on".
 
 use std::path::{Path, PathBuf};
 
@@ -97,13 +62,6 @@ pub fn hook_command(helper: &Path, flavor: &str, phase: &str) -> String {
     )
 }
 
-/// A path to the helper with no space in it, when one can be had.
-///
-/// Maintains `<parent>/hostd-hook` as a symlink beside the running binary and
-/// returns it only if the resulting path really is space-free. Belt to
-/// [`shell_quote`]'s braces: quoting is correct and sufficient today, and this
-/// costs one `symlink` call to also survive a consumer that splits on
-/// whitespace before a shell ever sees the line.
 fn stable_hook_path(helper: &Path) -> PathBuf {
     let Some(parent) = helper.parent() else {
         return helper.to_path_buf();
@@ -118,8 +76,7 @@ fn stable_hook_path(helper: &Path) -> PathBuf {
         if std::fs::read_link(&link).is_ok_and(|target| target == helper) {
             return link;
         }
-        // Never unlink a hook another turn may be executing. A symlink follows
-        // an in-place binary replacement without being rebuilt for each call.
+
         if std::fs::symlink_metadata(&link).is_ok_and(|meta| !meta.file_type().is_symlink()) {
             return helper.to_path_buf();
         }
@@ -146,14 +103,6 @@ pub fn claude_settings(helper: &Path) -> String {
     hooks_document(helper, "claude").to_string()
 }
 
-/// The `hooks.json` body for a backend that reads Claude Code's shape.
-///
-/// Both spellings of the wait are written, always. Claude Code and grok take
-/// `timeout` in **seconds**; codex reads `timeout_ms` in **milliseconds** and
-/// ignores `timeout` entirely, which is not a difference any of them announce.
-/// Codex therefore killed the hook at its own short default, the tool ran, and
-/// the approval the person had been shown was answered into a process that no
-/// longer existed. Writing both costs one line and cannot be got wrong later.
 fn hooks_document(helper: &Path, flavor: &str) -> Value {
     let entry = |phase: &str, seconds: u64| {
         json!({
@@ -196,7 +145,7 @@ pub(crate) fn team_hooks_document(helper: &Path, flavor: &str) -> Value {
             }
         }
     }
-    // Post hooks carry no Team capability and cannot annotate private chats.
+
     document["hooks"]
         .as_object_mut()
         .expect("hook document")
@@ -285,7 +234,6 @@ pub fn clear_codex_hooks(home: &Path) -> Result<(), String> {
     }
 }
 
-/// The person's own Codex home: `$CODEX_HOME` when set, else `~/.codex`.
 fn user_codex_home() -> Option<PathBuf> {
     let user_home = tokenstat_paths::home_dir()?;
     let source = credential_source(
@@ -297,40 +245,14 @@ fn user_codex_home() -> Option<PathBuf> {
     source.parent().map(Path::to_path_buf)
 }
 
-/// Personal files a chat's Codex reads from the person's own home, linked
-/// rather than copied so an edit there reaches the next turn.
 const SHARED_CODEX_FILES: &[&str] = &["AGENTS.md"];
 
-/// Directories whose entries are linked one by one. Entries the private home
-/// already holds as real files are left alone, which covers what Codex
-/// installs into every home it runs in (`skills/.system`).
 const SHARED_CODEX_ENTRIES: &[&str] = &["skills", "rules"];
 
-/// Caches Codex rewrites on its own schedule. A copy, never a link: Codex
-/// replaces the file when it refreshes, which would turn a link back into a
-/// private file that then goes stale.
 const SHARED_CODEX_CACHES: &[&str] = &["models_cache.json"];
 
-/// The first line of a `config.toml` tokenstat wrote, so a file Codex or the
-/// person put there is never mistaken for one we may remove.
 const CHAT_CONFIG_MARKER: &str = "# Written by tokenstat from your Codex config.toml before every chat turn. Edits here are replaced.";
 
-/// Bring a chat's private Codex home up to date with the person's own.
-///
-/// `CODEX_HOME` relocates everything Codex keeps, not just hooks, and a home
-/// that only links the sign-in forks the rest on its first turn: the model
-/// list, instructions, skills and configuration then stay as they were the
-/// day the chat started. This runs before every turn so a Codex update or an
-/// edit to `~/.codex` reaches existing chats too.
-///
-/// What stays private is what makes the home private: `hooks.json`,
-/// `sessions/` (resume history) and Codex's own state databases.
-///
-/// Optional files are shared best effort. Preparing the gated configuration
-/// must succeed before the turn starts.
-///
-/// Test-only, and unix-only with the symlink tests that use it: Windows
-/// builds no caller, so an ungated definition trips deny-warnings dead code.
 #[cfg(all(test, unix))]
 fn share_codex_home(source: &Path, home: &Path, gated: bool) -> std::io::Result<()> {
     share_codex_home_config(source, home, gated, false)
@@ -370,7 +292,6 @@ fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
 }
 
-/// Link one file, or retire our link once the person removed the original.
 fn share_file(source: &Path, target: &Path) {
     if source.is_file() {
         let _ = link_path(source, target);
@@ -379,8 +300,6 @@ fn share_file(source: &Path, target: &Path) {
     }
 }
 
-/// Link each entry of `source` into `target`, and drop links of ours whose
-/// original is gone. A real entry already in `target` is never replaced.
 fn share_entries(source: &Path, target: &Path) {
     if is_link(target) {
         return;
@@ -432,7 +351,6 @@ fn remove_shared_link(source: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::remove_file(target)
 }
 
-/// A personal file that already exists in this home belongs to that home.
 fn link_path(source: &Path, target: &Path) -> std::io::Result<()> {
     if std::fs::symlink_metadata(target).is_ok() {
         return Ok(());
@@ -451,8 +369,6 @@ fn link_path(source: &Path, target: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Copy the person's cache over the chat's when theirs is newer. A chat whose
-/// own Codex refreshed more recently keeps its copy.
 fn refresh_cache(source: &Path, target: &Path) {
     let modified = |path: &Path| {
         std::fs::metadata(path)
@@ -471,7 +387,6 @@ fn refresh_cache(source: &Path, target: &Path) {
     let _ = write_replacing(target, &bytes);
 }
 
-/// Write through a sibling temporary file so Codex never reads half a file.
 fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -484,8 +399,6 @@ fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .map_err(|error| error.error)
 }
 
-/// Publish a managed configuration atomically. An unmanaged file is retained
-/// for ungated turns and blocks a gated turn because it could switch hooks off.
 fn write_chat_config(
     source: Option<&Path>,
     target: &Path,
@@ -527,17 +440,6 @@ fn write_chat_config(
     Ok(())
 }
 
-/// Keys removed from the person's config before a chat turn reads it.
-///
-/// - `hooks`: their hook trust records name their own `hooks.json`, and
-///   inline hooks would run beside the gate under its trust bypass.
-/// - `projects`: project trust would load a repository's own `.codex` layer,
-///   hooks included, under that same bypass.
-/// - `plugins`, `marketplaces`: Codex installs enabled plugins into the home
-///   it runs in, which would be a full copy per chat.
-/// - `notify`: a script that expects to hear about the person's own turns.
-/// - `approval_policy`, `sandbox_mode`: the chat's autonomy sets these on the
-///   command line, and a config value must not compete with it.
 const STRIPPED_CODEX_KEYS: &[&str] = &[
     "hooks",
     "projects",
@@ -569,8 +471,6 @@ fn codex_config(text: &str, gated: bool, own_login: bool) -> Option<String> {
         }
     }
     if gated {
-        // On by default today. Saying so keeps the gate from depending on a
-        // default a later Codex might change.
         match document
             .get_mut("features")
             .and_then(toml_edit::Item::as_table_like_mut)
@@ -608,7 +508,7 @@ fn scrub_codex_table(table: &mut dyn toml_edit::TableLike, gated: bool, own_logi
     if !gated {
         return;
     }
-    // A gated turn with hooks switched off runs every tool unasked.
+
     if let Some(features) = table
         .get_mut("features")
         .and_then(toml_edit::Item::as_table_like_mut)
@@ -742,25 +642,17 @@ fn credential_source(
     home.join(directory).join(file)
 }
 
-/// Point `target` at `source`, replacing a stale file but never silently
-/// reusing a credential that points elsewhere.
 #[cfg(unix)]
 fn ensure_symlink(source: &Path, target: &Path) -> Result<(), String> {
     use std::os::unix::fs::symlink;
 
-    // Attempt the link without a prior existence check: check-then-act
-    // races with a concurrent creator. An existing target is only
-    // tolerated when it already points at this source; a stale file
-    // (or a link elsewhere) is replaced so a previous credential is
-    // never silently reused.
     match symlink(source, target) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             if std::fs::read_link(target).is_ok_and(|p| p.as_path() == source) {
                 return Ok(());
             }
-            // A regular file from a previous run: replace it. Anything
-            // else (e.g. a directory in the way) surfaces as an error.
+
             std::fs::remove_file(target).map_err(|error| error.to_string())?;
             symlink(source, target).map_err(|error| error.to_string())
         }
@@ -768,19 +660,7 @@ fn ensure_symlink(source: &Path, target: &Path) -> Result<(), String> {
     }
 }
 
-/// Link one file from the person's own agent directory into a private home.
-///
-/// A link, never a bare copy while one can be had. This is somebody else's
-/// credential: tokenstat reads it only by pointing the tool that owns it back
-/// at its own file, and a copy would be a second place for a token to live
-/// and go stale. Windows symlinks need Developer Mode or a privilege most
-/// machines do not grant, so there a hard link is next (same bytes, no
-/// privilege needed) and a copy is last, rewritten every turn so it cannot
-/// age past the turn that made it.
 fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), String> {
-    // Not `$HOME`: a headless daemon started by a scheduler has none, and the
-    // credential to link sits under the real home whether or not the
-    // service's environment names it.
     let Some(user_home) = tokenstat_paths::home_dir() else {
         return Ok(());
     };
@@ -799,8 +679,6 @@ fn link_credential(home: &Path, directory: &str, file: &str) -> Result<(), Strin
 pub(crate) fn route_cli_credential(source: &Path, target: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
-        // A dangling link is intentional after sign-out. Leaving an old
-        // link or legacy copy here would reuse the previous account instead.
         ensure_symlink(source, target)
     }
     #[cfg(not(unix))]
@@ -832,21 +710,12 @@ pub(crate) fn route_team_cli_credential(source: &Path, target: &Path) -> Result<
     }
 }
 
-/// Point `target` at `source`, replacing a stale file but never silently
-/// reusing a credential that points elsewhere.
-///
-/// Whatever a previous run left behind is removed first, so a stale regular
-/// file (or a link elsewhere) can never survive into this turn. A directory
-/// in the way is not removed: that surfaces as an error and the turn refuses
-/// to run unsigned rather than guessing.
 #[cfg(not(unix))]
 fn ensure_credential_file(source: &Path, target: &Path) -> Result<(), String> {
     if std::fs::symlink_metadata(target).is_ok() {
         std::fs::remove_file(target).map_err(|error| error.to_string())?;
     }
-    // A hard link or copy outlives the original file. Signing out of the
-    // tool must retire that private credential too, rather than leave this
-    // chat using the previous login on its next turn.
+
     if !source.try_exists().map_err(|error| error.to_string())? {
         return Ok(());
     }
@@ -876,10 +745,6 @@ pub(crate) fn muse_config_directory(
         .or_else(|| user_home.map(|home| home.join(".config/muse")))
 }
 
-/// One PostLLMCall command appended to a muse settings document.
-///
-/// An existing object is kept. A missing or non-object `hooks` map is replaced.
-/// The new entry is appended, so a Stop hook and earlier PostLLMCall entries stay.
 #[cfg_attr(not(unix), allow(dead_code))]
 fn muse_settings_with_note(existing: Option<&Value>, command: &str) -> Value {
     let mut root = match existing {
@@ -914,10 +779,6 @@ fn muse_settings_with_note(existing: Option<&Value>, command: &str) -> Value {
     Value::Object(root)
 }
 
-/// A path a muse settings command can name without quoting.
-///
-/// The command is the script path alone. A space, quote, or backslash would
-/// be split or swallowed before the script runs.
 #[cfg(unix)]
 fn path_is_bare(path: &Path) -> bool {
     let Some(text) = path.to_str() else {
@@ -927,7 +788,6 @@ fn path_is_bare(path: &Path) -> bool {
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-'))
 }
 
-/// A fresh private directory whose `hook` path is safe to put in settings.
 #[cfg(unix)]
 fn muse_hook_directory() -> Result<PathBuf, String> {
     let mut bytes = [0u8; 8];
@@ -951,7 +811,6 @@ fn muse_hook_directory() -> Result<PathBuf, String> {
     Ok(root)
 }
 
-/// The script muse runs after a model step. The turn credential stays in the file.
 #[cfg(unix)]
 fn muse_hook_script(hostd: &Path, socket: &Path, turn_file: &Path) -> Result<String, String> {
     let hostd = hostd.to_str().ok_or(MUSE_NOTE_PREPARE)?;
@@ -996,11 +855,6 @@ fn write_private_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String
         .map_err(|_| MUSE_NOTE_PREPARE.to_string())
 }
 
-/// Point the private muse directory at the person's config, except settings.
-///
-/// Settings are rewritten for this turn. Everything else is a symlink, so a
-/// credential is never copied. `auth.json` failing to link is its own error:
-/// the turn would otherwise run signed out.
 #[cfg(unix)]
 fn mirror_muse_config(user_config: Option<&Path>, private_muse_dir: &Path) -> Result<(), String> {
     let Some(user_config) = user_config else {
@@ -1029,10 +883,6 @@ fn mirror_muse_config(user_config: Option<&Path>, private_muse_dir: &Path) -> Re
     Ok(())
 }
 
-/// `XDG_CONFIG_HOME` is inherited by every tool the agent runs, not only by
-/// muse. Link the rest of the person's config root beside the private `muse`
-/// directory so git, gh and the others still find their own settings and
-/// sign-ins. Best effort: a sibling that cannot be linked only loses itself.
 #[cfg(unix)]
 fn mirror_xdg_siblings(user_config: Option<&Path>, root: &Path) {
     let Some(user_config) = user_config else {
@@ -1060,10 +910,6 @@ fn mirror_xdg_siblings(user_config: Option<&Path>, root: &Path) {
     }
 }
 
-/// Build `root/muse/settings.json` and `root/hook` for one turn.
-///
-/// `root` is what muse sees as `XDG_CONFIG_HOME`. A second call on a root that
-/// already exists fails before it touches the first files.
 #[cfg(unix)]
 fn install_muse_note_home_at(
     root: &Path,
@@ -1140,8 +986,7 @@ mod tests {
         let target = root.path().join("private-auth.json");
         std::fs::write(&source, "fictional-before").unwrap();
         route_team_cli_credential(&source, &target).unwrap();
-        // A copy would leave the native sign-in stale after this write and
-        // the private home would discard its refreshed token at teardown.
+
         std::fs::write(&target, "fictional-refreshed").unwrap();
         assert_eq!(
             std::fs::read_to_string(&source).unwrap(),
@@ -1251,10 +1096,6 @@ mod tests {
         );
     }
 
-    /// The regression test for the defect this module was written around.
-    ///
-    /// Not a string comparison: the failure was that a real shell could not
-    /// start the process, so a real shell has to be the thing that says it can.
     #[test]
     #[cfg(unix)]
     fn hook_command_survives_a_path_with_spaces() {
@@ -1274,9 +1115,7 @@ mod tests {
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let line = hook_command(&helper, "claude", "pre");
-        // Another test thread can fork while this script is still open for
-        // writing, and Linux then refuses to run it for a moment ("text file
-        // busy"). A few tries separate that race from a real failure.
+
         let mut status = None;
         for _ in 0..10 {
             let ran = Command::new("/bin/sh")
@@ -1306,19 +1145,14 @@ mod tests {
             };
             let entry = &document["hooks"]["PreToolUse"][0]["hooks"][0];
             assert_eq!(entry["timeout"], GATE_TIMEOUT_SECONDS, "{flavor} seconds");
-            // Codex reads only this one, in milliseconds. A hook entry that
-            // carries the wait in one spelling is a hook some backend kills at
-            // its own default while a person is still reading the card.
+
             assert_eq!(
                 entry["timeout_ms"],
                 GATE_TIMEOUT_SECONDS * 1000,
                 "{flavor} milliseconds"
             );
         }
-        // The hook has to answer before its CLI gives up, or it is killed and
-        // the tool runs anyway. A compile-time check, because getting this
-        // ordering wrong reopens the fail-open the whole module exists to
-        // close and no test run should be what discovers it.
+
         const _: () = assert!(GATE_DEADLINE_SECONDS < GATE_TIMEOUT_SECONDS);
     }
 
@@ -1431,7 +1265,7 @@ command = "node"
         std::fs::write(source.join("AGENTS.md"), b"be brief").unwrap();
         std::fs::write(source.join("config.toml"), b"model = \"m\"\n").unwrap();
         std::fs::write(source.join("models_cache.json"), b"new").unwrap();
-        // What Codex installs into every home it runs in stays private.
+
         std::fs::create_dir_all(home.join("skills/.system/own")).unwrap();
         std::fs::write(home.join("models_cache.json"), b"old").unwrap();
         let past = SystemTime::now() - Duration::from_secs(3600);
@@ -1467,7 +1301,6 @@ command = "node"
         assert!(config.contains("model = \"m\""), "{config}");
         assert!(config.contains("hooks = true"), "{config}");
 
-        // A chat whose own Codex refreshed later keeps its copy.
         std::fs::write(home.join("models_cache.json"), b"chat").unwrap();
         std::fs::File::options()
             .write(true)
@@ -1481,7 +1314,6 @@ command = "node"
             b"chat"
         );
 
-        // Removing the originals retires our links and our config, nothing else.
         std::fs::remove_dir_all(source.join("skills")).unwrap();
         std::fs::remove_dir_all(source.join("rules")).unwrap();
         std::fs::remove_file(source.join("AGENTS.md")).unwrap();
@@ -1501,7 +1333,6 @@ command = "node"
             b"history"
         );
 
-        // A config.toml tokenstat did not write is never removed.
         std::fs::write(home.join("config.toml"), b"model = \"theirs\"\n").unwrap();
         assert!(share_codex_home(&source, &home, true).is_err());
         share_codex_home(&source, &home, false).unwrap();
@@ -1565,9 +1396,6 @@ command = "node"
         assert_eq!(std::fs::read_link(&target).unwrap(), source);
     }
 
-    /// The private home must carry the person's sign-in on Windows too: a
-    /// gated turn that relocates CODEX_HOME without its auth.json runs
-    /// signed out and fails closed as a 401 rather than as anyone's answer.
     #[test]
     #[cfg(not(unix))]
     fn windows_credential_file_carries_the_sign_in_and_replaces_stale_files() {
@@ -1598,8 +1426,7 @@ command = "node"
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("auth.json");
         let target = root.path().join("private-auth.json");
-        // Force the fallback's durable file, regardless of whether this
-        // machine allows credential symlinks.
+
         std::fs::write(&source, b"previous login").unwrap();
         std::fs::hard_link(&source, &target).unwrap();
         std::fs::remove_file(&source).unwrap();

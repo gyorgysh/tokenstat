@@ -6,7 +6,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>One persistent desktop workbench per local or remote workspace.</summary>
 internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, IToolbarItems, IInspectorRequest, IInspectorDismissRequest
 {
     private readonly WorkspaceTabStrip _tabStrip = new();
@@ -113,7 +112,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             section != WorkspaceSection.Launcher);
     }
 
-    /// <summary>A section's page, with a chat's Review wired to the Changes inspector.</summary>
     private Page Created(WorkspaceSection section)
     {
         var page = _create(section);
@@ -129,10 +127,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
         return page;
     }
 
-    /// <summary>
-    /// Open Changes beside the chat, where a turn's files can be read,
-    /// committed, pushed and pulled. A companion pane steps aside for it.
-    /// </summary>
     public void ShowChangesInspector(string? path = null)
     {
         if (ActivePage is ChatPage)
@@ -237,10 +231,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     /// </summary>
     public void WhenLoaded(Action action) => _tabsMount.Enqueue(action);
 
-    /// <summary>
-    /// <see cref="WhenLoaded"/> for async work, so the caller still sees its
-    /// failure. Canceled when the workbench was left before it ever loaded.
-    /// </summary>
     public Task WhenLoadedAsync(Func<Task> work)
     {
         var done = new TaskCompletionSource();
@@ -274,10 +264,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
             writing = true;
             try
             {
-                // Dispatcher callbacks can fail outside XAML's unhandled event.
-                // Keep only structural metadata from this disposable CI window.
-                // Before unwind, Exception.StackTrace may contain only the
-                // external throw site. The current stack retains our caller.
                 var frames = new System.Diagnostics.StackTrace(false).GetFrames()
                     .Select(frame => frame.GetMethod())
                     .Where(method => method?.DeclaringType?.Namespace is { } ns && (ns == "Tokenstat" || ns.StartsWith("Tokenstat.", StringComparison.Ordinal)))
@@ -287,7 +273,7 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
                 remaining--;
                 Program.LogStartup($"Workbench managed exception: type={args.Exception.GetType().Name}; HRESULT=0x{args.Exception.HResult:x8}; frames={string.Join(" > ", frames)}");
             }
-            catch { /* Diagnostics must preserve the original exception. */ }
+            catch { }
             finally { writing = false; }
         };
     }
@@ -332,8 +318,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     public double MinimumInspectorWidth => ActivePage is ChatPage ? 320 : ShellWidths.Minimum;
     public IList<UIElement> ToolbarActions()
     {
-        // A copy: the switch is inserted at the front, and a page is free to
-        // hand back a fixed array or a list it keeps.
         var actions = new List<UIElement>(CompanionActions((ActiveSource as IToolbarItems)?.ToolbarActions() ?? new List<UIElement>()));
         if (ActivePage is WorkspacePage { Section: WorkspaceSection.Launcher or WorkspaceSection.Sessions }
             or WorkspaceTerminalPane or TerminalPage)
@@ -364,8 +348,6 @@ internal sealed partial class WorkspaceTabsPage : Page, IInspectorContent, ITool
     private void RefreshChrome()
     {
         var hasCompanion = ActivePage is ChatPage;
-        // One tree keeps expansion, selection and its loaded directory cache
-        // while moving between the Files page and the workspace inspector.
         var filesPage = ReferenceEquals(ActivePage, _editor);
         if (filesPage && !ReferenceEquals(_editor.Content, _editor.FileTree))
         {

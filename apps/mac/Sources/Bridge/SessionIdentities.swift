@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Verified native identifiers are metadata, never opaque authentication or
-/// resume blobs. Hosts omit this object when they cannot report identifiers.
 struct SessionIdentities: Codable, Sendable, Hashable {
     struct Record: Codable, Sendable, Hashable {
         var backend = ""
@@ -16,8 +14,6 @@ struct SessionIdentities: Codable, Sendable, Hashable {
             case backend, id, status, sourceConversationId, firstSeenAtMs, lastSeenAtMs
         }
         init(from decoder: Decoder) throws {
-            // Optional decoration must not break the surrounding chat/terminal
-            // if a newer host adds an unfamiliar record shape.
             guard let c = try? decoder.container(keyedBy: CodingKeys.self) else { return }
             backend = (try? c.decode(String.self, forKey: .backend)) ?? ""
             id = (try? c.decode(String.self, forKey: .id)) ?? ""
@@ -51,8 +47,6 @@ struct SessionIdentities: Codable, Sendable, Hashable {
     }
 }
 
-/// Presentation preserves the host's current/saved/historical distinction.
-/// Local UI UUIDs and pending PTY placeholders are never offered as host IDs.
 struct SessionIdentityEntry: Identifiable, Equatable {
     enum Kind: String { case conversation, terminal, current, saved, historical, sourceConversation }
     let kind: Kind
@@ -95,8 +89,6 @@ enum SessionIdentityPresentation {
         return result
     }
     private static func rank(_ status: String) -> Int { status == "current" ? 0 : status == "saved" ? 1 : 2 }
-    /// Match the host's verified native-ID projection. Arbitrary resume or
-    /// authorization objects cannot become copyable IDs through optional data.
     static func validNativeID(backend: String, id: String) -> Bool {
         if backend == "opencode" || backend == "opencode2" {
             let bytes = Array(id.utf8)

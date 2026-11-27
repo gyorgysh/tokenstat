@@ -1,25 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Encrypted on-device copies of already-authorized work.
-//!
-//! A conversation opened on this device can be opened again while its machine
-//! is asleep or unreachable, but only from a copy saved here earlier. This is
-//! that copy: conversation pages, explicitly viewed diffs and small attachment
-//! previews, each sealed with a per-scope key the caller holds. The key arrives
-//! with every call that needs it and is never written beside the ciphertext,
-//! so a leaked cache directory exposes sizes and timestamps, not words.
-//!
-//! What this deliberately cannot hold is defined by the methods that exist:
-//! there is no call that stores terminal scrollback, secrets, environment
-//! dumps, repositories or unopened file contents, so none of those can reach
-//! the file no matter what a front end asks for. Unsent drafts are durable
-//! user data with their own store and are never evicted with these entries.
-//!
-//! Quotas come with every mutating call and default to 100 MB kept for 30
-//! days, with pins surviving age eviction inside a 500 MB hard budget. A front
-//! end that offers settings passes its own numbers; the defaults are what a
-//! device without settings gets. All sensitive operations refuse remote
-//! dispatch: the daemon never answers these for another machine.
 
 use std::collections::HashMap;
 use std::fs;
@@ -44,11 +24,8 @@ pub const DEFAULT_BUDGET_BYTES: u64 = 100 * 1024 * 1024;
 pub const HARD_BUDGET_BYTES: u64 = 500 * 1024 * 1024;
 /// Unpinned entries older than this are evicted on the next mutating call.
 pub const DEFAULT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
-/// One record's plaintext, sealed as one message. A conversation page with
-/// rendered text fits; a repository never does, which is also enforcement.
 const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
-// Format safety ceiling, separate from user quotas. Allows the supported
-// 1,000 MB cache plus Base64 and metadata overhead without unbounded I/O.
+
 const MAX_STORE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_ID_LEN: usize = 256;
 const MAX_SCOPE_LEN: usize = 160;
@@ -62,8 +39,6 @@ fn valid_token(value: &str, max: usize) -> bool {
     !value.is_empty()
         && value.len() <= max
         && value.bytes().all(|b| {
-            // Scopes and ids are JSON keys and associated data, never paths
-            // or commands, so percent-encoded storage keys are harmless here.
             b.is_ascii_alphanumeric()
                 || matches!(b, b'-' | b'_' | b'.' | b'|' | b':' | b'/' | b'@' | b'%')
         })
@@ -77,7 +52,6 @@ struct Record {
     item_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     revision: Option<String>,
-    /// Ciphertext bytes. Quota counts what is stored, not what it decrypts to.
     bytes: u64,
     created_ms: i64,
     updated_ms: i64,
@@ -95,7 +69,6 @@ struct Store {
     scopes: HashMap<String, HashMap<String, Record>>,
 }
 
-// Validate encoded lengths without decoding every encrypted record on each list.
 fn encoded_size(value: &str) -> Option<usize> {
     if value.is_empty() || !value.len().is_multiple_of(4) {
         return None;
@@ -158,8 +131,6 @@ fn path() -> PathBuf {
         })
 }
 
-/// Which file a parsed store came from. A save replaces the file by rename,
-/// so the inode changes with every write, from this process or another one.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileSignature {
     len: u64,
@@ -185,12 +156,6 @@ impl FileSignature {
     }
 }
 
-/// The last store read or written, with the file it matches.
-///
-/// The whole cache is one JSON file of tens of megabytes, and every call
-/// parsed all of it, a quarter of a second per `cache.get`. While the file on
-/// disk is still the one this copy came from, the copy is the answer. Only
-/// touched under `lock()`, like the file itself.
 fn parsed() -> &'static Mutex<Option<(FileSignature, Store)>> {
     static PARSED: OnceLock<Mutex<Option<(FileSignature, Store)>>> = OnceLock::new();
     PARSED.get_or_init(|| Mutex::new(None))
@@ -204,14 +169,6 @@ fn forget_parsed() {
     *parsed().lock().unwrap_or_else(PoisonError::into_inner) = None;
 }
 
-/// Read the store, quarantining a damaged file rather than failing forever.
-///
-/// A cache is reconstructible by re-opening the work, so a corrupt file is
-/// moved aside and answered as empty. The move is the whole recovery: the
-/// next call starts clean, and the quarantined copy keeps whatever was there
-/// for inspection instead of being deleted. A one-shot marker records that a
-/// quarantine happened, so the call that finds the empty store can say the
-/// previous contents were lost rather than silently starting over.
 fn load() -> Result<(Store, bool), String> {
     let path = path();
     let marker = path.with_extension("repaired");
@@ -245,8 +202,7 @@ fn load() -> Result<(Store, bool), String> {
     }
     let mut reader = BufReader::new(file).take(MAX_STORE_BYTES + 1);
     let decoded = serde_json::from_reader::<_, Store>(&mut reader);
-    // The descriptor may grow after metadata was checked. Exhausting this
-    // bound is a size failure, never evidence that the file should be repaired.
+
     if reader.limit() == 0 {
         return Err("saved work file exceeds supported size".into());
     }
@@ -295,7 +251,6 @@ impl<W: Write> Write for LimitedWriter<W> {
     }
 }
 
-// Caller holds the transaction lock from before load through replacement.
 fn save(store: &mut Store) -> Result<(), String> {
     save_bounded(store, MAX_STORE_BYTES)
 }
@@ -324,12 +279,10 @@ fn save_bounded(store: &mut Store, limit: u64) -> Result<(), String> {
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
     }
-    // Whatever happens next, the copy in memory no longer matches the file
-    // until the rename below has landed and been measured.
+
     forget_parsed();
     temp.persist(&path).map_err(|e| e.to_string())?;
-    // Persist the replacement directory entry before acknowledging a removal
-    // or clear, matching the durable-store convention on Unix platforms.
+
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
         fs::File::open(parent)
@@ -359,8 +312,6 @@ fn parse_key(encoded: &str) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-/// The slot a record is sealed into, as associated data. Ciphertext copied
-/// into another scope or id does not open there.
 fn context(scope: &str, id: &str) -> Vec<u8> {
     let mut context = Vec::with_capacity(scope.len() + id.len() + 1);
     context.extend_from_slice(scope.as_bytes());
@@ -461,9 +412,6 @@ fn pinned_bytes(store: &Store) -> u64 {
         .sum()
 }
 
-/// Make room for `need` bytes, oldest unpinned first, never touching pins or
-/// the record being written. Returns the ids removed, or None when even an
-/// empty store (besides pins and the new record) would exceed the budget.
 fn make_room(
     store: &mut Store,
     need: u64,
@@ -609,8 +557,6 @@ fn put(params: &PutParams) -> Result<Value, String> {
     let bytes = (b64decode(&ciphertext).map_err(|e| e.to_string())?.len()
         + b64decode(&nonce).map_err(|e| e.to_string())?.len()) as u64;
 
-    // The record being replaced does not count against the room it needs:
-    // measure without it, then put it back.
     let previous = store
         .scopes
         .get(&params.scope)
@@ -619,8 +565,7 @@ fn put(params: &PutParams) -> Result<Value, String> {
     if let Some(records) = store.scopes.get_mut(&params.scope) {
         records.remove(&params.id);
     }
-    // New clients distinguish disposable recent work from explicitly kept
-    // copies. Older callers retain their original total-budget semantics.
+
     let budget = if let Some(hard) = params.hard_budget_bytes {
         pinned_bytes(&store)
             .saturating_add(if previous.as_ref().is_some_and(|record| record.pinned) {
@@ -637,7 +582,6 @@ fn put(params: &PutParams) -> Result<Value, String> {
     match make_room(&mut store, bytes, &params.scope, &params.id, budget) {
         Some(evicted) => freed.extend(evicted),
         None => {
-            // Restore what was there rather than failing into deletion.
             if let Some(prev) = previous {
                 store
                     .scopes
@@ -971,9 +915,6 @@ mod tests {
         format!("t{}", NEXT.fetch_add(1, Ordering::Relaxed))
     }
 
-    /// Each test gets its own file, because the module path is process-wide.
-    /// The lock holds across the run because tests share the process and the
-    /// path override is an environment variable, not a parameter.
     fn with_path(path: PathBuf, run: impl FnOnce()) {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
         let _held = GUARD.get_or_init(|| Mutex::new(())).lock();
@@ -1035,8 +976,6 @@ mod tests {
         });
     }
 
-    /// The parsed copy is an answer only while the file is the one it came
-    /// from. A file replaced by another writer must be read again.
     #[test]
     fn a_store_replaced_on_disk_is_read_again() {
         with_path(fresh_path(), || {
@@ -1085,7 +1024,6 @@ mod tests {
             assert_eq!(got["payload"]["messages"][0]["text"], json!("hello"));
             assert_eq!(got["revision"], json!("r1"));
 
-            // A different scope's key does not open it, and the record survives.
             let wrong = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
             assert!(
                 get(&KeyedParams {
@@ -1178,7 +1116,7 @@ mod tests {
             recent.hard_budget_bytes = Some(used * 4);
             put(&recent).expect("a kept copy does not consume the recent allowance");
             assert_eq!(stats(Some("s")).unwrap()["records"], 2);
-            // Lowering the ceiling refuses new work without deleting a pin.
+
             recent.id = "refused".into();
             recent.hard_budget_bytes = Some(used);
             assert!(put(&recent).is_err());
@@ -1200,9 +1138,7 @@ mod tests {
             let mut first = params("s", "old");
             first.now_ms = Some(1_000);
             put(&first).unwrap();
-            // Room for one record plus a little slack, not two: the older
-            // one has to go. Measured rather than guessed, because sealed
-            // sizes are an implementation detail.
+
             let used = stats(Some("s")).expect("stats")["bytes"].as_u64().unwrap();
             let mut second = params("s", "new");
             second.now_ms = Some(2_000);
@@ -1218,8 +1154,6 @@ mod tests {
                 .is_err()
             );
 
-            // Pins are never evicted for room; the put fails instead and the
-            // pinned record is still there.
             pin(&PinParams {
                 scope: "s".into(),
                 id: "new".into(),
@@ -1240,8 +1174,6 @@ mod tests {
                 .is_ok()
             );
 
-            // A pin past the hard budget is refused rather than silently
-            // dropping other kept work.
             pin(&PinParams {
                 scope: "s".into(),
                 id: "new".into(),
@@ -1304,8 +1236,7 @@ mod tests {
         with_path(fresh_path(), || {
             put(&params("s", "c1")).unwrap();
             fs::write(path(), b"not json").unwrap();
-            // The failing read reports corruption; the file is already moved
-            // aside, so the next call starts clean and says so.
+
             assert!(
                 get(&KeyedParams {
                     key: KEY.into(),
@@ -1499,9 +1430,7 @@ mod tests {
             let mut bad_kind = params("s", "c1");
             bad_kind.kind = "terminal-scrollback".into();
             assert!(put(&bad_kind).is_err());
-            // Scopes and ids are JSON keys, never paths, so dots, slashes
-            // and percent-encoded storage keys are harmless. Control
-            // characters, blanks and emptiness are not.
+
             assert!(put(&params("acc%7Calice", "c1")).is_ok());
             let mut bad_scope = params("s", "c1");
             bad_scope.scope = "has space".into();

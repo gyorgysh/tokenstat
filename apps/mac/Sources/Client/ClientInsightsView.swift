@@ -9,19 +9,9 @@ import Charts
 
 #if !os(macOS)
 
-/// Where the money went, across every device on the account.
-///
-/// **Three cuts, not five.** The Mac's Insights has Models, Projects, Harnesses
-/// and Sessions because it reads this machine's archive, where all four exist.
-/// The account holds day, source and model and nothing else: a project key
-/// arrives as an opaque HMAC and a session id never leaves the machine it was
-/// made on. So the phone offers Models, Tools and Days, and does not grow a
-/// Projects tab that could only ever be empty. That is the privacy boundary
-/// showing through the interface, which is the correct place for it to show.
 struct ClientInsightsView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientNavigationModel.self) private var navigation
-    /// The session's, from `ClientSessionModels`, so a layout swap keeps it.
     @Environment(ClientInsightsModel.self) private var model
     @State private var search = ""
 
@@ -33,15 +23,9 @@ struct ClientInsightsView: View {
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
-            // Clear of the floating tab bar and of the search field that sits
-            // in the same glass.
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        // Always, not based on size. `basedOnSize` stops a short screen from
-        // bouncing, and a screen that cannot bounce cannot be pulled: the
-        // refresh gesture quietly disappeared exactly when the page was empty,
-        // which is when somebody most wants to pull it.
         .scrollBounceBehavior(.always, axes: .vertical)
         .refreshable {
             await ClientRefresh.pull("insights") { await model.refresh() }
@@ -56,7 +40,6 @@ struct ClientInsightsView: View {
         }
     }
 
-    // MARK: - Pieces
 
     private var cutPicker: some View {
         @Bindable var model = model
@@ -65,9 +48,6 @@ struct ClientInsightsView: View {
             selection: $model.cut
         ) { $0.label }
         .onChange(of: model.cut) { _, _ in
-            // Each cut keeps its own rows, so going back to one already seen is
-            // instant and costs nothing. The host serves them all from one
-            // cached series anyway.
             Task { await model.load() }
         }
     }
@@ -76,9 +56,6 @@ struct ClientInsightsView: View {
     private var content: some View {
         if let rows = model.rows(for: model.cut) {
             if rows.isEmpty {
-                // Not a dead end. An account with nothing on it has one thing
-                // to do next, and it is on Home: a tab that only confirms the
-                // emptiness leaves somebody to find that on their own.
                 ClientEmptyState(
                     kind: .nothingYet,
                     title: L10n.text("apple.clientinsightsview.nothing_recorded_yet.cb77e288"),
@@ -134,13 +111,7 @@ struct ClientInsightsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, Theme.Space.s)
                 } else {
-                    // A share bar needs something to be a share of, and the
-                    // largest row is a steadier reference than the total: with
-                    // 40 models every bar would otherwise be a sliver.
                     let peak = shown.map(\.valueMicros).max() ?? 1
-                    // The breakdown had no name at all, so the cards under the
-                    // chart read as a continuation of it rather than as the
-                    // answer to a different question. The cut names itself.
                     ClientSectionTitle(title: model.cut.label, mark: "mark_insights")
                     ClientAdaptiveCards {
                     ForEach(shown) { row in
@@ -185,9 +156,6 @@ struct ClientInsightsView: View {
                 countLabel: model.cut.label,
                 formatCompact: formatTokens
             )).padding(.top, Theme.Space.s)
-            // A remembered answer says so. The numbers are real, they are just
-            // not this minute's, and a figure with no date is a quiet claim to
-            // be current.
             if let age = model.ageDescription {
                 Text(age)
                     .font(ClientType.caption)
@@ -236,8 +204,6 @@ struct ClientInsightsView: View {
     }
 }
 
-/// One row of a breakdown: what it is, what it was worth, and how big a share
-/// of the screen's largest row that is.
 private struct InsightRow: View {
     let row: Bucket
     let cut: ClientInsightsModel.Cut
@@ -259,9 +225,6 @@ private struct InsightRow: View {
                         .font(ClientType.label.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    // Compact, because these are read at a glance and compared,
-                    // not audited. "1.6B" beside a name is a size; the full
-                    // ten digits is a wall the eye slides off.
                     Text(L10n.text("apple.clientinsightsview.0_tokens_1_events.8b30d61d", "\(formatTokens(row.counters.total))", "\(row.events.formatted())"))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)

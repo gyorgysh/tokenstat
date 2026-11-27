@@ -4,13 +4,8 @@
 
 import SwiftUI
 
-/// The offline stretch as a card above the sync card, in the same visual
-/// language: warning tint, one-line title, one-line subtitle. The subtitle
-/// names the retry cadence so "why is this still here" has an answer.
 struct OfflineCard: View {
     var connectivity: ConnectivityModel
-    /// The other two things that can be wrong. Optional so a caller that has
-    /// no connection model still gets the offline card it always had.
     var connection: ConnectionModel?
 
     var body: some View {
@@ -51,9 +46,6 @@ struct OfflineCard: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.bottom, Theme.Space.s)
         } else if let connection, connection.severity != .ok, !connection.isDismissed {
-            // Online, and something else is not answering: the service, or a
-            // machine that is not on the tunnel. Same card, same language, so
-            // the two are not learned as different kinds of news.
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: connection.serviceFailing
                     ? "exclamationmark.icloud"

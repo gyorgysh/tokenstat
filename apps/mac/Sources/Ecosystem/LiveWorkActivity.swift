@@ -45,8 +45,6 @@ struct LiveWorkOverview: Codable, Hashable, Sendable {
     var offline = 0
     var items: [LiveWorkOverviewItem] = []
     var phase: LiveWorkPhase { waiting > 0 ? .waiting : working > 0 ? .working : .idle }
-    // Completion is a presentation state. Keep the delivery phase idle so
-    // the combined activity can receive the next session or turn.
     var displayPhase: LiveWorkPhase {
         if waiting > 0 { return .waiting }
         if working > 0 { return .working }
@@ -115,8 +113,6 @@ struct LiveWorkAttributes: Codable, Hashable, Sendable {
         var overview: LiveWorkOverview? = nil
         var displayPhase: LiveWorkPhase { overview?.displayPhase ?? phase }
         func displayPhase(stale: Bool) -> LiveWorkPhase {
-            // An overview stays live between turns. A past completion cannot
-            // establish its current status once the host stops reporting.
             overview != nil && stale ? .idle : displayPhase
         }
         var computersOffline: Bool {
@@ -131,7 +127,6 @@ struct LiveWorkAttributes: Codable, Hashable, Sendable {
     var revision: String
     var projectName: String
     var route: String
-    // Local labels/routes never pass through the push service.
     struct Hint: Codable, Hashable, Sendable { var name: String; var route: String }
     var overviewPeers: [String]? = nil
     var overviewHints: [String: Hint]? = nil
@@ -151,7 +146,6 @@ struct LiveWorkAttributes: Codable, Hashable, Sendable {
     }
 
     static func destination(kind: LiveWorkKind, id: String, peer: String, workspaceID: String, owner: String) -> EcosystemRoute {
-        // Mobile models can carry a raw host workspace ID or the app's qualified ID.
         let prefix = "remote:\(peer):"
         let projectID = workspaceID.hasPrefix(prefix) ? workspaceID : prefix + workspaceID
         return EcosystemRoute(screen: .workspaces, projectID: projectID, owner: owner,

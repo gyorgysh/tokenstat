@@ -1,25 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Getting a repository onto a machine that has none.
-//!
-//! A folder has to exist before it can be registered, and on a fresh server
-//! nothing does. This is the one step that fills that gap, and it runs in a
-//! **terminal** rather than as a captured command. Three reasons, all of them
-//! about what a person sees:
-//!
-//! - the existing terminal stream already carries progress, so there is no new
-//!   kind of stream to invent,
-//! - a clone that wants a passphrase or an unknown host key can be answered,
-//! - a clone that hangs looks like a terminal that has stopped moving, rather
-//!   than a spinner that never ends.
-//!
-//! It mutates, so the rules of `gitwrite` apply: it runs because a person
-//! pressed a button, and never from a watcher or a timer. The one background
-//! thread here waits for that command to finish and registers what it made. It
-//! starts nothing of its own.
-//!
-//! Nothing is ever deleted, including a clone that failed halfway. It is
-//! somebody's disk.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -41,8 +21,6 @@ fn jobs() -> &'static Mutex<HashMap<String, Job>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Targets with a clone currently starting, so two concurrent calls for the
-/// same folder do not both pass the `exists` check and spawn into one path.
 fn inflight_targets() -> &'static Mutex<HashSet<PathBuf>> {
     static TARGETS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
     TARGETS.get_or_init(|| Mutex::new(HashSet::new()))
@@ -73,14 +51,9 @@ impl Drop for TargetClaim {
     }
 }
 
-/// Clones running at once. Each spawns a watcher thread polling every 400ms;
-/// unbounded, a granted device can grow threads without limit.
 const MAX_RUNNING_CLONES: usize = 8;
-/// Finished outcomes kept for `cloneStatus`. Unbounded, the map only grows.
 const MAX_RETAINED_JOBS: usize = 32;
 
-// A permit covers both starting and running work, including the interval before
-// the PTY has an id. It is released on every spawn failure and watcher exit.
 static ACTIVE_CLONES: AtomicUsize = AtomicUsize::new(0);
 
 struct ClonePermit<'a>(&'a AtomicUsize);
@@ -127,8 +100,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 
 fn start(params: &str) -> Result<Value, String> {
     let p: CloneParams = serde_json::from_str(params.trim()).map_err(|error| error.to_string())?;
-    // The same roots as the folder picker, so a clone cannot land somewhere
-    // browsing would not have shown.
+
     let parent = crate::fs_browse::resolve_root(std::path::Path::new(&p.parent))?;
     let name = match p.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
         Some(name) => name.to_string(),
@@ -137,9 +109,7 @@ fn start(params: &str) -> Result<Value, String> {
     };
     let args = tokenstat_workspace::gitwrite::clone_command(&p.url, &name)?;
     let target = parent.join(&name);
-    // Claim the target for this call so a second concurrent clone for the same
-    // name fails cleanly instead of both passing `exists` and spawning into
-    // one path. The watcher keeps the claim until the process finishes.
+
     let claim = claim_target(&target)?;
     if target.exists() {
         return Err(format!(
@@ -147,12 +117,9 @@ fn start(params: &str) -> Result<Value, String> {
         ));
     }
     let permit = ClonePermit::acquire(&ACTIVE_CLONES)?;
-    // Acquire bookkeeping before spawning: a failed lock must not leave an
-    // untracked child. Watchers only hold this lock for short metadata updates.
+
     let mut tracked = jobs().lock().map_err(|_| "clone jobs unavailable")?;
-    // Finished outcomes are the only droppable ones, and room has to exist
-    // before the insert at the end. Running jobs stay: their watchers still
-    // need the entry to register the folder.
+
     if tracked.len() >= MAX_RETAINED_JOBS {
         let finished: Vec<String> = tracked
             .iter()
@@ -163,8 +130,6 @@ fn start(params: &str) -> Result<Value, String> {
             tracked.remove(&id);
         }
         if tracked.len() >= MAX_RETAINED_JOBS {
-            // Unreachable while `MAX_RUNNING_CLONES` is far smaller, but the
-            // insert must never grow the map past its cap.
             return Err("too many clones are still running. Wait for one to finish.".into());
         }
     }
@@ -198,11 +163,6 @@ fn start(params: &str) -> Result<Value, String> {
     Ok(value)
 }
 
-/// Wait for the command a person started, and register what it made.
-///
-/// A thread rather than registering on the next poll, so the answer does not
-/// depend on somebody still watching: an app closed mid-clone must not leave a
-/// folder on disk that the machine does not know about.
 fn watch(session: String, permit: ClonePermit<'static>, claim: TargetClaim) {
     std::thread::spawn(move || {
         let _permit = permit;
@@ -291,7 +251,7 @@ mod tests {
                     if permit.is_some() {
                         accepted.fetch_add(1, Ordering::Relaxed);
                     }
-                    // No permit is released until every contender has tried.
+
                     barrier.wait();
                     drop(permit);
                 });
@@ -310,7 +270,6 @@ mod tests {
             let _permit = ClonePermit::acquire(&active).unwrap();
             let _claim = claim_target(&target).unwrap();
             assert!(claim_target(&target).is_err());
-            // Simulate returning early when the PTY cannot be spawned.
         }
         assert_eq!(active.load(Ordering::Relaxed), 0);
         assert!(claim_target(&target).is_ok());

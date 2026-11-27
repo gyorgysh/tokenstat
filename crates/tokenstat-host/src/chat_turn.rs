@@ -1,24 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! What a chat turn says, and which channel each part of it travels on.
-//!
-//! A turn used to be one string: the person's sentence with three
-//! machine-written paragraphs glued onto it. Agents read those paragraphs as
-//! part of the request and answered them, which is why a conversation that
-//! opened with "Hey" came back describing a temporary folder nobody had
-//! mentioned. The machinery was indistinguishable from the ask.
-//!
-//! So composition is split here.
-//!
-//! - [`Composed::user_text`] is what the person wrote, and per-turn facts that
-//!   are genuinely about this message. Nothing standing, nothing procedural.
-//! - [`Composed::standing_text`] is the conversation's rules: its persona brief
-//!   and how to hand a file back. It travels on the backend's own
-//!   system-prompt flag where one exists, and is prepended once per backend
-//!   where one does not.
-//!
-//! The rule that decides which is simple: **if it would be true again next
-//! turn, it is standing text.** A path the person just attached is not.
 
 use std::path::{Path, PathBuf};
 
@@ -56,7 +38,7 @@ impl PromptFile {
             .map_err(|error| error.to_string())?;
         let owner = Self(path);
         let written = file.write_all(argv.last().expect("prompt argument").as_bytes());
-        // Windows cannot unlink an open file if a write fails.
+
         drop(file);
         written.map_err(|error| error.to_string())?;
         argv.truncate(argv.len() - 2);
@@ -175,11 +157,6 @@ pub fn compose(inputs: Inputs<'_>) -> Composed {
     }
 }
 
-/// The rules that hold for every turn of this conversation.
-///
-/// Name first, then the voice, then the plumbing. The file rule ends by
-/// telling the agent not to narrate it: without that sentence, an opening turn
-/// with nothing else to do answers the plumbing instead of the person.
 fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> String {
     let mut text = String::new();
     let name = persona_name.trim();
@@ -480,8 +457,6 @@ mod tests {
         assert!(composed.standing_text.contains("Do not mention this rule"));
     }
 
-    /// "Send me a picture" has to mean this chat, not a side channel the
-    /// backend already knows how to use.
     #[test]
     fn the_file_rule_says_this_chat_is_the_delivery_channel() {
         let composed = compose(Inputs {
@@ -535,8 +510,6 @@ mod tests {
         );
     }
 
-    /// Renaming a persona changes what its conversations are told, so the
-    /// rules have to be sent again rather than assumed unchanged.
     #[test]
     fn renaming_a_persona_re_sends_the_standing_rules() {
         let with = |name: &str| {

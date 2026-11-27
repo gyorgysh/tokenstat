@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! Daemon-owned agent jobs: a backend, a prompt, a schedule, and a budget.
-//!
-//! Automations are deliberately separate from `tokenstat_workspace::gitwrite`.
-//! This module owns persistence, scheduling, and the run budget. A job may run
-//! an agent that changes a repository, but no timer calls a gitwrite function.
-//!
-//! A run is an agent CLI launched headless in a pty, exactly as a person would
-//! launch it in a terminal. Output drains into a transcript file as it is
-//! produced, so a run can be watched live and replayed later. The pty is owned
-//! by the host and killed when the budget expires, so an automation can never
-//! run away.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::io::Write;
@@ -34,28 +24,16 @@ pub const DEFAULT_BUDGET_SECONDS: u64 = 180 * 60;
 /// Default number of agent runs that may execute at once.
 pub const DEFAULT_MAX_CONCURRENT: u32 = 2;
 
-/// How often the scheduler looks for due jobs.
 const TICK: Duration = Duration::from_secs(5);
 
 const DRAIN_POLL: Duration = Duration::from_millis(20);
 
-/// How long to keep reading after the process has gone.
-///
-/// Short enough that nobody waits on it, long enough for the terminal's own
-/// reader to hand over what the process wrote on its way out.
 const DRAIN_TAIL: Duration = Duration::from_millis(300);
 
-/// How long to wait for a finished process to report its exit code.
-///
-/// Output can end a moment before the process is reaped, and a run that exited
-/// cleanly must not be filed as an error because the code had not landed yet.
 const EXIT_SETTLE: Duration = Duration::from_secs(2);
 
-/// Monday through Friday as a bitset, Monday = bit 0.
 const WEEKDAYS_MASK: u8 = 0b0001_1111;
 
-/// An interval longer than this is a typo, and the multiplication in
-/// `next_run_ms` must not overflow.
 const MAX_INTERVAL_SECONDS: u64 = 365 * 24 * 60 * 60;
 
 /// The kinds a schedule can take.
@@ -144,9 +122,6 @@ impl ScheduleSpec {
         }
     }
 
-    /// Days of the week this schedule fires on, Monday = bit 0.
-    /// Zero means "not a multi-day wall-clock mask": Daily ignores this and
-    /// uses every day at the call site; Once/Interval never consult it.
     fn day_mask(&self) -> u8 {
         match self.kind {
             ScheduleKind::Once | ScheduleKind::Interval | ScheduleKind::Daily => 0,
@@ -190,14 +165,6 @@ impl ScheduleSpec {
     }
 }
 
-/// Next occurrence of hour:minute in `tz`, optionally restricted to a day mask.
-///
-/// The mask uses Monday = bit 0 so the picker matches the calendar the app
-/// already draws. Pass `None` for every day. The result is strictly after
-/// `from_ms`. Civil times that do not exist (spring-forward gaps) or that
-/// happen twice (fall-back folds) use jiff's compatible disambiguation: the
-/// later offset in a gap, the earlier offset in a fold. A daily 09:00 stays
-/// 09:00 on both sides of a transition, which is not "24 hours later".
 fn next_wall_clock(
     from_ms: i64,
     hour: u8,
@@ -322,9 +289,6 @@ pub(crate) fn agent_command_in(
                     p,
                     "--output-format",
                     "stream-json",
-                    // Claude refuses `--print --output-format=stream-json`
-                    // without this ("requires --verbose"); every run failed at
-                    // launch until it was added.
                     "--verbose",
                     "--include-partial-messages",
                     "--dangerously-skip-permissions",
@@ -361,9 +325,7 @@ pub(crate) fn agent_command_in(
             if let Some(e) = effort {
                 args.extend(["--reasoning-effort", e].map(str::to_string));
             }
-            // Muse is deliberately Bypass-only in chat and automation runs:
-            // its own `--yolo` contract disables both tool approval and the
-            // workspace sandbox for this explicitly trusted action.
+
             args.extend(["--yolo", "--", p].map(str::to_string));
         }
         "grok" => {
@@ -394,11 +356,7 @@ pub(crate) fn agent_command_in(
                 args.push("--model".into());
                 args.push(m.into());
             }
-            // `--trust` trusts the workspace, it does not allow a tool.
-            // Without `--force` every shell command comes back `rejected`
-            // with an empty reason, which is a run that reads as though the
-            // agent chose not to work. Both flags are stripped together when
-            // the turn is not a bypass one.
+
             args.extend(
                 [
                     "-p",
@@ -419,10 +377,7 @@ pub(crate) fn agent_command_in(
                 args.push("--model".into());
                 args.push(m.into());
             }
-            // Effort lives in the model id (`gemini-3.6-flash-high`). Passing
-            // `--effort` on top is rejected as unsupported for those models.
-            // Host drain is the real stop. Give print enough room that a
-            // 180-minute job is not killed by this first.
+
             let timeout = agy_print_timeout(budget_seconds);
             args.extend(
                 [
@@ -432,8 +387,6 @@ pub(crate) fn agent_command_in(
                     "stream-json",
                     "--print-timeout",
                     timeout.as_str(),
-                    // Headless: agy cannot prompt, so a tool that needs
-                    // "command" is denied unless this is on.
                     "--dangerously-skip-permissions",
                 ]
                 .map(str::to_string),
@@ -444,9 +397,6 @@ pub(crate) fn agent_command_in(
             args.extend(["run", "--auto", "--format", "json"].map(str::to_string));
             let generation = crate::opencode_cli::require_generation(backend)?;
             if generation == crate::opencode_cli::Generation::V2 {
-                // Per-turn configuration and hook credentials must reach the
-                // server that executes this turn, even if a shared service
-                // is already running with a different version or environment.
                 args.extend(["--standalone", "--thinking"].map(str::to_string));
             }
             args.extend(crate::opencode_cli::model_arguments(
@@ -528,11 +478,6 @@ pub fn persona_draft_command(
     )
 }
 
-/// Index at which extra flags can be spliced without splitting a
-/// `--flag value` pair. Headless CLIs put the prompt at `-p` / `--print` /
-/// `--single` or after `--`. Inserting at `len - 1` used to land between
-/// `--output-format` and `streaming-json`, which is the clap error a grok
-/// Standard turn printed as its whole reply.
 fn command_word_positions(argv: &[String]) -> Vec<usize> {
     let mut positions = Vec::new();
     let mut index = 1;
@@ -542,8 +487,7 @@ fn command_word_positions(argv: &[String]) -> Vec<usize> {
         if argument == "--" {
             break;
         }
-        // Values are opaque, even when the model, prompt or resume token is
-        // spelled like another flag or subcommand.
+
         index += if matches!(
             argument,
             "--model"
@@ -636,7 +580,7 @@ pub fn chat_agent_command(
     chat_agent_command_in(backend, prompt, model, effort, budget_seconds, launch, None)
 }
 
-#[allow(clippy::too_many_arguments)] // The public launch contract plus its host working directory.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn chat_agent_command_in(
     backend: &str,
     prompt: &str,
@@ -647,20 +591,15 @@ pub(crate) fn chat_agent_command_in(
     directory: Option<&Path>,
 ) -> Result<Vec<String>, String> {
     let plan = launch.mode == "plan";
-    // Everything this function has to say to the model, in one tagged block
-    // ahead of the turn, rather than several bare paragraphs the model cannot
-    // tell apart from the person's own words.
+
     let mut instructions = String::new();
-    // Codex and OpenCode do not expose the same first-class plan switch as the
-    // other backends. Give them an explicit turn instruction; Codex also gets
-    // a read-only sandbox below, while OpenCode loses its headless auto grant.
+
     if plan && matches!(backend, "codex" | "opencode" | "opencode2" | "muse") {
         instructions.push_str(
             "Plan mode: inspect and reason only. Do not modify files, run commands that change state, or perform external side effects. Return a proposed plan instead.",
         );
     }
-    // A backend with a system-prompt flag receives the standing rules there
-    // instead, further down, where they cannot be mistaken for the request.
+
     if !crate::chat_turn::accepts_system_prompt(backend)
         && let Some(standing) = launch
             .system_append
@@ -674,9 +613,7 @@ pub(crate) fn chat_agent_command_in(
     }
     let composed = crate::chat_turn::as_prompt_prefix(&instructions, prompt);
     let prompt = composed.as_str();
-    // Cursor's Free plan refuses every named model. An empty pick used to
-    // omit `--model` and let the CLI choose, which on this machine was not
-    // Auto. Always name Auto unless the person picked something else.
+
     let cursor_default = matches!(backend, "cursor")
         && model
             .map(|value| value.trim().is_empty() || value.trim() == "auto")
@@ -684,11 +621,6 @@ pub(crate) fn chat_agent_command_in(
     let model = if cursor_default { Some("auto") } else { model };
     let mut argv = agent_command_in(backend, prompt, model, effort, budget_seconds, directory)?;
     if backend == "muse" && (!launch.bypass || plan) {
-        // `agent_command` is shared with unattended automations, where Muse
-        // must be allowed to run its workspace tools. A persona draft is a
-        // plan-only chat turn instead: remove the full-bypass flag and make
-        // the CLI's own write and shell tools unavailable. The UI exposes
-        // Muse as Bypass-only, but retain this guard for older saved chats.
         if let Some(index) = command_word_at(&argv, "--yolo") {
             argv.remove(index);
         }
@@ -697,29 +629,9 @@ pub(crate) fn chat_agent_command_in(
             argv.splice(at..at, ["--disable-write".into(), "--disable-shell".into()]);
         }
     }
-    // Automations are an explicit background action and retain their existing
-    // bypass contract. Chat is interactive: until a backend's hook-based
-    // approval channel decides otherwise, it must not inherit those flags.
-    // Removing them means a CLI that cannot prompt headlessly fails closed
-    // instead of silently editing the workspace.
-    // Agy is the exception, and it is deliberate. Its own permission layer
-    // *auto-denies* anything it would have to prompt for in headless mode,
-    // after the hook has already run, so a guarded turn that keeps this flag
-    // reaches the person for an answer and is then refused anyway by a
-    // decision nobody made. Handing agy the flag puts tokenstat's `PreToolUse`
-    // hook in sole charge, which is the same arrangement codex
-    // (`--dangerously-bypass-hook-trust`) and opencode (`permission: allow`
-    // plus a plugin) already run under. It is only safe *because* the hook is
-    // installed: `write_agy_home` is fallible and its failure aborts the turn
-    // before anything spawns, so there is no path where the flag ships without
-    // the gate behind it.
+
     let agy_gated = backend == "agy" && !plan && launch.hook_helper.is_some();
-    // Cursor is the same arrangement as agy, measured on the 2026.10 CLI.
-    // Without `--force` its own headless permission layer rejects every write
-    // after the hook allowed it, with an empty reason. With `--force` the
-    // hook's `deny` still blocks, and the hook is written `failClosed`, so a
-    // hook that crashes or times out blocks too. The flags stay only when the
-    // plugin is actually there.
+
     let cursor_gated = backend == "cursor"
         && !plan
         && launch.hook_helper.is_some()
@@ -740,49 +652,11 @@ pub(crate) fn chat_agent_command_in(
         extra.extend(["--agent".into(), "plan".into()]);
     }
     if backend == "grok" {
-        // Rebuild the pair as a whole. Stripping `bypassPermissions` and then
-        // splicing at `len - 1` used to leave `--output-format` without a
-        // value, which is the error a Standard grok turn printed instead of
-        // answering.
         remove_cli_options(
             &mut argv,
             &["--permission-mode", "--always-approve", "--yolo"],
         );
-        // A guarded turn runs grok's own permission layer wide open, because
-        // the hook is the gate and grok's layer cannot be one here.
-        //
-        // Grok's hook contract, in its own words: "An `allow` means only 'not
-        // blocked' - it does not auto-approve a call the user would otherwise
-        // be asked about." So under `default` the hook answering allow is not
-        // permission, it is only the absence of a refusal, and grok then goes
-        // to its own permission prompt. There is nobody at a `-p
-        // --output-format streaming-json` session to answer one, so the call
-        // is cancelled and the transcript reads "User cancelled the execution
-        // for tool `web_fetch`" over a card the person had just approved. It
-        // only ever showed on the tools grok itself asks about, which is why
-        // reads and greps looked fine.
-        //
-        // `bypassPermissions` makes grok's layer approve, and hooks are a
-        // separate mechanism that still run: by grok's documentation, "only an
-        // explicit `deny` decision returned by the hook blocks a tool call".
-        // So tokenstat's `PreToolUse` hook becomes the single gate, which is
-        // the arrangement agy, codex and opencode already run under here.
-        //
-        // Safe only *because* the hook is installed. `write_grok_home` is
-        // fallible and its failure aborts the turn before anything spawns, so
-        // there is no path where this ships without the gate behind it. With
-        // no helper the answer stays `dontAsk`, which refuses rather than
-        // asking nobody.
-        //
-        // Plan mode is the same cancellation on a different tool. Grok's
-        // `--permission-mode plan` is the edit gate (writes fail, even under
-        // always-approve). `spawn_subagent` is not a read-only auto-approval,
-        // so a headless plan turn cancelled it as "User cancelled the
-        // execution for tool `spawn_subagent`". Grok's own docs keep
-        // always-approve armed underneath plan mode: non-edit tools run, file
-        // edits stay blocked. The hook is still the gate when one is
-        // installed. Bypass with no hook gets the same pair, or plan would
-        // keep overriding Bypass and cancel the spawn anyway.
+
         let permission = if plan {
             "plan"
         } else if launch.bypass || launch.hook_helper.is_some() {
@@ -794,19 +668,14 @@ pub(crate) fn chat_agent_command_in(
         if plan && (launch.bypass || launch.hook_helper.is_some()) {
             extra.push("--always-approve".into());
         }
-        // Saved always-allow answers still ride as rules. A rule that matches
-        // is approved without a hook round trip, so "always allow" stays
-        // instant rather than becoming a card the person answers twice.
+
         if !launch.bypass && !plan {
             for rule in launch.grok_allow_rules {
                 extra.extend(["--allow".into(), rule.clone()]);
             }
         }
     }
-    // Append, never override. Replacing a CLI's own system prompt would take
-    // away the tool descriptions and safety text it was built around in order
-    // to deliver two sentences of ours. Sent on every turn, resumes included,
-    // so editing a persona takes effect on the next thing the person says.
+
     if let Some(standing) = launch
         .system_append
         .map(str::trim)
@@ -818,9 +687,7 @@ pub(crate) fn chat_agent_command_in(
             _ => {}
         }
     }
-    // Claude's own question tool needs somebody at a terminal, and a print
-    // turn has nobody there. Chat asks through `chat_question` instead, the
-    // same way on every backend, so the agent is not offered a dead end.
+
     if backend == "claude" {
         extra.extend(["--disallowedTools".into(), "AskUserQuestion".into()]);
     }
@@ -837,8 +704,6 @@ pub(crate) fn chat_agent_command_in(
         && !launch.bypass
         && let Some(helper) = launch.hook_helper
     {
-        // Claude accepts its settings document directly as one argument, so
-        // the gate needs no file in the person's project or home directory.
         insert_flags(
             &mut argv,
             [
@@ -848,15 +713,9 @@ pub(crate) fn chat_agent_command_in(
         );
     }
     if backend == "codex" && !launch.bypass && launch.hook_helper.is_some() {
-        // Codex otherwise silently skips an untrusted hook. The caller gives
-        // it a private, tokenstat-owned CODEX_HOME, so this flag is safe only
-        // beside that setup and must never be used for the user's home.
         let at = command_word_at(&argv, "exec").unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
         if !plan {
-            // A private Codex home has no user sandbox setting, so the CLI
-            // defaults to read-only even after our hook approves a write.
-            // Keep the hook gate and allow edits inside this workspace.
             extra.extend(["--sandbox".into(), "workspace-write".into()]);
         }
     }
@@ -878,11 +737,7 @@ pub(crate) fn chat_agent_command_in(
             ["--add-dir".into(), directory.display().to_string()],
         );
     }
-    // These two CLIs accept image files natively. The other backends receive
-    // the staged paths in the turn text, which lets their normal Read tool
-    // make the same files available without pretending they have image
-    // support. `chat_turn` owns the same predicate so the path is named in
-    // exactly one of the two places, never both.
+
     if crate::chat_turn::accepts_attachment_flags(backend) {
         let flag = if backend == "codex" { "-i" } else { "-f" };
         let at = command_word_at(&argv, "--").unwrap_or(argv.len());
@@ -899,7 +754,6 @@ pub(crate) fn chat_agent_command_in(
                 extra.extend(["--resume".into(), token.into()]);
             }
             "codex" => {
-                // `codex exec resume <thread>` is a different subcommand shape.
                 if let Some(at) = command_word_at(&argv, "exec") {
                     argv.splice(at + 1..at + 1, ["resume".into(), token.into()]);
                 }
@@ -918,27 +772,24 @@ pub(crate) fn chat_agent_command_in(
     if !extra.is_empty() {
         insert_flags(&mut argv, extra);
     }
-    if backend == "codex" && launch.resume.is_some_and(|token| !token.trim().is_empty()) {
-        // `--sandbox` and `--dangerously-bypass-hook-trust` belong to
-        // `codex exec`, not its `resume` subcommand. `insert_flags` and the
-        // resume splice can leave them after `resume <session>`; move both
-        // back across the subcommand so resumed turns parse.
-        if let Some(exec) = command_word_at(&argv, "exec") {
-            if let Some(at) = command_word_at(&argv, "--sandbox")
-                && let Some(value) = argv.get(at + 1).cloned()
-            {
-                argv.drain(at..=at + 1);
-                let exec = command_word_at(&argv, "exec").unwrap_or(exec);
-                argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
-            }
-            if let Some(at) = command_word_at(&argv, "--dangerously-bypass-hook-trust") {
-                argv.remove(at);
-                let exec = command_word_at(&argv, "exec").unwrap_or(exec);
-                argv.splice(
-                    exec + 1..exec + 1,
-                    ["--dangerously-bypass-hook-trust".into()],
-                );
-            }
+    if backend == "codex"
+        && launch.resume.is_some_and(|token| !token.trim().is_empty())
+        && let Some(exec) = command_word_at(&argv, "exec")
+    {
+        if let Some(at) = command_word_at(&argv, "--sandbox")
+            && let Some(value) = argv.get(at + 1).cloned()
+        {
+            argv.drain(at..=at + 1);
+            let exec = command_word_at(&argv, "exec").unwrap_or(exec);
+            argv.splice(exec + 1..exec + 1, ["--sandbox".into(), value]);
+        }
+        if let Some(at) = command_word_at(&argv, "--dangerously-bypass-hook-trust") {
+            argv.remove(at);
+            let exec = command_word_at(&argv, "exec").unwrap_or(exec);
+            argv.splice(
+                exec + 1..exec + 1,
+                ["--dangerously-bypass-hook-trust".into()],
+            );
         }
     }
     Ok(argv)
@@ -1043,8 +894,7 @@ pub(crate) fn interactive_agent_command_in(
                 args.push("--model".into());
                 args.push(m.into());
             }
-            // A positional prompt is ignored. `-i` / `--prompt-interactive`
-            // starts the TUI with that first message.
+
             args.extend(
                 ["--dangerously-skip-permissions", "--prompt-interactive", p].map(str::to_string),
             );
@@ -1052,9 +902,6 @@ pub(crate) fn interactive_agent_command_in(
         "opencode" | "opencode2" => {
             let generation = crate::opencode_cli::require_generation(backend)?;
             if generation == crate::opencode_cli::Generation::V2 {
-                // The full-screen TUI rejects model flags. Mini accepts the
-                // selection and submits its initial prompt without a timed
-                // synthetic Enter that could race startup or type twice.
                 args.extend([backend, "mini", "--standalone"].map(str::to_string));
                 args.extend(crate::opencode_cli::model_arguments(
                     backend, generation, model, effort, directory,
@@ -1062,9 +909,7 @@ pub(crate) fn interactive_agent_command_in(
                 args.extend(["--prompt", p].map(str::to_string));
                 return Ok(args);
             }
-            // `--prompt` only fills the TUI box. `run -i` sends the first
-            // message and stays in the interactive split-footer, so a task
-            // opened In front does not wait for Enter.
+
             args.push(backend.into());
             args.extend(["run", "-i", "--auto"].map(str::to_string));
             args.extend(crate::opencode_cli::model_arguments(
@@ -1077,7 +922,6 @@ pub(crate) fn interactive_agent_command_in(
     Ok(args)
 }
 
-/// Agy's print-session ceiling. `0` means no host budget, so use a day.
 fn agy_print_timeout(budget_seconds: u64) -> String {
     if budget_seconds == 0 {
         "24h".into()
@@ -1104,8 +948,6 @@ pub(crate) struct BackendSpec {
     pub efforts: &'static [&'static str],
 }
 
-// One catalog for automation discovery and shared-chat agent choices. Shell
-// executes owner-authored commands rather than conversational agent turns.
 const BACKENDS: &[BackendSpec] = &[
     BackendSpec {
         id: "sh",
@@ -1343,7 +1185,6 @@ struct Pending {
     job: Automation,
     run_id: String,
     transcript_path: PathBuf,
-    /// See `RunRecord::parent_run_id`.
     parent_run_id: Option<String>,
 }
 
@@ -1377,11 +1218,7 @@ pub struct Store {
     creations: Mutex<BTreeMap<String, receipts::CreationReceipt>>,
     launches: Mutex<BTreeMap<String, receipts::LaunchReceipt>>,
     waiting: Mutex<VecDeque<Pending>>,
-    /// Slots currently in use. Separate from the runs list so a count
-    /// cannot race a status write.
     active: Mutex<u32>,
-    /// Run ids the user asked to stop. Drain records those as stopped
-    /// rather than as an error from the signal.
     killed: Mutex<HashSet<String>>,
 }
 
@@ -1481,8 +1318,6 @@ impl Store {
         let mut recovered = false;
         for run in &mut runs {
             if matches!(run.status.as_str(), "starting" | "running" | "queued") {
-                // The pty belongs to the old daemon process. A queued run
-                // lost its pending payload. Do not resurrect either.
                 run.status = "interrupted".into();
                 run.ended_at_ms = Some(now_ms());
                 run.pty_id = None;
@@ -1518,7 +1353,6 @@ impl Store {
             .map_or(Ok(()), |error| Err(error.clone()))
     }
 
-    /// Every jobs-file writer holds the jobs mutex until disk and memory agree.
     fn save(&self, jobs: &[Automation]) -> Result<(), String> {
         let queue = *self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         let creations = self
@@ -1603,8 +1437,6 @@ impl Store {
         self.write_runs(&runs)
     }
 
-    /// The caller holds the runs lock through the atomic write, so an older
-    /// snapshot cannot overwrite a newer launch or completion.
     fn write_runs(&self, runs: &[RunRecord]) -> Result<(), String> {
         self.ensure_runs_available()?;
         let result = (|| -> Result<(), String> {
@@ -1740,9 +1572,7 @@ impl Store {
         job.revision = current.revision;
         job.last_run_at_ms = last_run_at_ms;
         job.last_run_id = last_run_id;
-        // Always recompute next run from the schedule the client just sent.
-        // Preserving a stale next_run_at_ms left edits that changed time/days
-        // (or switched to Once) still due on the previous schedule.
+
         if !job.enabled {
             job.next_run_at_ms = None;
         } else {
@@ -1798,7 +1628,6 @@ impl Store {
             .clone()
     }
 
-    /// Insert a job without recomputing its schedule. Tests only.
     #[cfg(test)]
     fn seed(&self, job: Automation) {
         self.jobs
@@ -1916,9 +1745,6 @@ impl Store {
         Ok(())
     }
 
-    /// Delete a run's raw and readable transcripts once its record is
-    /// evicted. A run that has not finished, or a path another record still
-    /// points at, keeps its files.
     fn remove_run_files(&self, run: &RunRecord, kept: &HashSet<String>) {
         if matches!(run.status.as_str(), "running" | "queued") {
             return;
@@ -1940,9 +1766,7 @@ impl Store {
             return;
         }
         let _ = std::fs::remove_file(&raw);
-        // The readable sibling is derived from the raw path, but it is still
-        // checked rather than trusted: it is a second delete, and a second
-        // delete earns its own containment proof.
+
         let readable = transcript::readable_path(&raw);
         if !readable.is_absolute() {
             return;
@@ -2002,20 +1826,17 @@ impl Store {
         } else {
             false
         };
-        // A live drain creates an empty readable file on purpose. Do not
-        // stomp it by re-parsing the raw stream while it is still growing.
-        // Serve the in-memory prose when rematerialize ran, so a sibling
-        // write that failed still never returns NDJSON.
-        if missing || (empty && !running) {
-            if let Some(text) = transcript::rematerialize(&raw, &backend, false) {
-                return Ok(transcript::slice_reply(text.as_bytes(), offset));
-            }
-        } else if !running && offset == 0 && raw.is_file() {
-            // Finished runs reparse from raw on first read so a better
-            // parser (paths, edit snippets) applies to old transcripts.
-            if let Some(text) = transcript::rematerialize(&raw, &backend, true) {
-                return Ok(transcript::slice_reply(text.as_bytes(), offset));
-            }
+
+        if (missing || (empty && !running))
+            && let Some(text) = transcript::rematerialize(&raw, &backend, false)
+        {
+            return Ok(transcript::slice_reply(text.as_bytes(), offset));
+        } else if !running
+            && offset == 0
+            && raw.is_file()
+            && let Some(text) = transcript::rematerialize(&raw, &backend, true)
+        {
+            return Ok(transcript::slice_reply(text.as_bytes(), offset));
         }
         if !readable.is_file() {
             return Ok(("(No readable output)".into(), 0));
@@ -2032,7 +1853,6 @@ impl Store {
             ));
         }
         if transcript::looks_like_ndjson(&bytes) {
-            // A stale readable that is actually the raw file. Rebuild it.
             if let Some(text) = transcript::rematerialize(&raw, &backend, true) {
                 return Ok(transcript::slice_reply(text.as_bytes(), offset));
             }
@@ -2103,8 +1923,7 @@ impl Store {
             parent_run_id: None,
             interactive,
         };
-        // Nothing can execute before this record is on disk. A repeated ID is
-        // refused here even if a caller accidentally tries the same launch twice.
+
         if let Err(error) = self.push_run(run.clone()) {
             if owns_slot {
                 self.release_slot();
@@ -2116,7 +1935,7 @@ impl Store {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push_back(pending);
-            // A slot may have opened between the initial check and enqueueing.
+
             self.pump();
             return Ok(self.get_run(&run_id).unwrap_or(run));
         }
@@ -2270,9 +2089,6 @@ impl Store {
         ))
     }
 
-    /// Write the row, then start drain. A drain that starts before the row
-    /// exists can finish into a missing record, then the write leaves a
-    /// forever-running job with no pty.
     fn persist_and_drain(
         self: &Arc<Store>,
         run: RunRecord,
@@ -2404,8 +2220,7 @@ impl Store {
                 .ok_or_else(|| format!("no automation with id {id}"))?
         };
         let run = self.run_adhoc(snapshot.clone())?;
-        // The process has already been accepted. A later metadata failure must
-        // not report a rejected launch that an older client would repeat.
+
         let mut accepted = self
             .note_started(id, run.started_at_ms, &run.id, true)
             .ok()
@@ -2447,7 +2262,6 @@ impl Store {
     /// run as stopped when the process is gone. A queued run is pulled off
     /// the wait list and marked stopped.
     pub fn kill_run(&self, run_id: &str) -> Result<(), String> {
-        // Mark first so a pump that already popped this id will not spawn it.
         self.mark_killed(run_id);
         let removed = {
             let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
@@ -2475,7 +2289,6 @@ impl Store {
             return Ok(());
         }
         if matches!(status.as_str(), "starting" | "queued") {
-            // pump owns it now. spawn_pending / pump will see the kill mark.
             return Ok(());
         }
         if status != "running" {
@@ -2500,8 +2313,7 @@ impl Store {
         let budget = (budget_seconds != 0).then(|| Duration::from_secs(budget_seconds));
         let mut file = std::fs::File::create(path).ok();
         let readable_path = transcript::readable_path(path);
-        // Create the readable file immediately so a live tail never falls
-        // through to the raw JSON while the first event is still arriving.
+
         let _ = std::fs::write(&readable_path, b"");
         let mut readable_body = String::new();
         let mut parser = Parser::new(backend);
@@ -2527,11 +2339,6 @@ impl Store {
         loop {
             let alive = manager.info(pty_id).map(|i| i.alive).unwrap_or(false);
             if !alive {
-                // The last of the output arrives after the process that wrote
-                // it has gone: the thread reading the terminal is a moment
-                // behind the process being reaped. Reading once here lost the
-                // entire transcript of a command that exited as fast as it
-                // printed, which is most of them.
                 let tail = Instant::now() + DRAIN_TAIL;
                 while Instant::now() < tail {
                     if let Ok(chunk) = manager.read_for_stream(pty_id, &reader_id, offset)
@@ -2583,18 +2390,7 @@ impl Store {
         };
         let _ = manager.close(pty_id);
         self.finish_run(run_id, exit_code, status);
-        // Tell this account's phones, if it has any. Only here, at the end of
-        // a drain: the other `finish_run` callers are a run somebody stopped
-        // by hand and a launch that never started, and neither is news to the
-        // person who just pressed the button. A stopped run is not a failure
-        // either, so it goes out as "finished" or not at all.
-        //
-        // The Mac notifies itself locally from the app, so this is for a
-        // phone with the app closed. Fire and forget: a run that finished is
-        // finished whether or not Apple was reachable.
-        // A workflow step is not news either: the workflow itself says how it
-        // went when it ends, and a five-node workflow otherwise buzzed a phone
-        // five times on the way there. See `RunRecord::parent_run_id`.
+
         let is_step = self
             .get_run(run_id)
             .is_some_and(|run| run.parent_run_id.is_some());
@@ -2608,9 +2404,6 @@ impl Store {
         }
     }
 
-    /// Wait, briefly, for a process that has stopped producing output to report
-    /// how it ended. `None` once the wait is up, which is the honest answer:
-    /// the run ended, but with no status anyone can quote.
     fn settle_exit_code(pty_id: &str) -> Option<i32> {
         let manager = tokenstat_pty::manager();
         let deadline = Instant::now() + EXIT_SETTLE;
@@ -2680,9 +2473,7 @@ fn validate(job: &Automation) -> Result<(), String> {
     if job.workspace_id.is_empty() {
         return Err("an automation needs a workspace".into());
     }
-    // 0 is a real answer: no time limit. The queue settings own the default.
-    // backend and prompt are checked where the command is built, so both errors
-    // are the ones a user sees when they try to run it.
+
     Ok(())
 }
 
@@ -2716,8 +2507,6 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Process-wide counter that keeps two runs started in the same millisecond
-/// from sharing a record id and a transcript path.
 static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn mint_run_id() -> String {
@@ -2739,8 +2528,6 @@ mod tests {
 
     static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
-    /// A new agent must arrive with a way to show its plan, or its plans
-    /// silently never reach the chat.
     #[test]
     fn every_agent_backend_is_told_how_to_keep_a_plan() {
         for spec in BACKENDS.iter().filter(|spec| spec.id != "sh") {
@@ -2791,7 +2578,7 @@ mod tests {
         let original_jobs = serde_json::to_value(store.list()).unwrap();
         let original_queue = serde_json::to_value(store.queue_config()).unwrap();
         std::fs::remove_file(&path).unwrap();
-        std::fs::create_dir(&path).unwrap(); // Atomic replacement must fail.
+        std::fs::create_dir(&path).unwrap();
         let mut edited = first.clone();
         edited.prompt = "must not apply".into();
         assert!(store.edit(edited, first.revision).is_err());
@@ -3052,7 +2839,6 @@ mod tests {
 
     #[test]
     fn custom_schedule_uses_the_day_bitset() {
-        // Tuesday and Thursday only (bits 1 and 3).
         let s = ScheduleSpec {
             kind: ScheduleKind::Custom,
             hour: 8,
@@ -3087,16 +2873,15 @@ mod tests {
 
     #[test]
     fn a_daily_nine_stays_nine_across_spring_forward() {
-        // 7 Mar 2026 09:00 EST to 8 Mar 2026 09:00 EDT is 23 hours, not 24.
         let s = ScheduleSpec {
             kind: ScheduleKind::Daily,
             hour: 9,
             minute: 0,
             ..ScheduleSpec::default()
         };
-        let from = 1_772_892_000_000; // 2026-03-07 09:00 EST
+        let from = 1_772_892_000_000;
         assert_eq!(s.next_run_ms_in(from, ny()), Some(1_772_974_800_000));
-        let earlier = 1_772_888_400_000; // 2026-03-07 08:00 EST
+        let earlier = 1_772_888_400_000;
         assert_eq!(s.next_run_ms_in(earlier, ny()), Some(from));
         assert_ne!(
             s.next_run_ms_in(from, ny()),
@@ -3107,40 +2892,35 @@ mod tests {
 
     #[test]
     fn a_missing_civil_time_on_spring_forward_uses_compatible_offset() {
-        // 8 Mar 2026 02:00 EST jumps to 03:00 EDT. 02:30 does not exist.
         let s = ScheduleSpec {
             kind: ScheduleKind::Daily,
             hour: 2,
             minute: 30,
             ..ScheduleSpec::default()
         };
-        let from = 1_772_949_600_000; // 2026-03-08 01:00 EST
+        let from = 1_772_949_600_000;
         let next = s.next_run_ms_in(from, ny()).unwrap();
         assert!(next > from);
         let zoned = jiff::Timestamp::from_millisecond(next)
             .unwrap()
             .to_zoned_datetime(ny());
-        // Compatible disambiguation lands after the gap, still on that date.
+
         assert_eq!(zoned.date().to_string(), "2026-03-08");
         assert!(zoned.hour() >= 3);
     }
 
     #[test]
     fn a_folded_civil_time_on_fall_back_fires_once() {
-        // 1 Nov 2026 02:00 EDT falls back to 01:00 EST. 01:30 happens twice.
         let s = ScheduleSpec {
             kind: ScheduleKind::Daily,
             hour: 1,
             minute: 30,
             ..ScheduleSpec::default()
         };
-        let from = 1_793_507_400_000; // 2026-11-01 00:30 EDT
-        assert_eq!(s.next_run_ms_in(from, ny()), Some(1_793_511_000_000)); // first 01:30
+        let from = 1_793_507_400_000;
+        assert_eq!(s.next_run_ms_in(from, ny()), Some(1_793_511_000_000));
         let after_first = 1_793_511_000_000 + 1;
-        assert_eq!(
-            s.next_run_ms_in(after_first, ny()),
-            Some(1_793_601_000_000) // 2 Nov 01:30 EST, not the second 01:30
-        );
+        assert_eq!(s.next_run_ms_in(after_first, ny()), Some(1_793_601_000_000));
     }
 
     #[test]
@@ -3152,7 +2932,7 @@ mod tests {
             minute: 0,
             ..ScheduleSpec::default()
         };
-        let from = 1_789_315_200_000; // Sunday 13 Sep 2026 12:00 New York
+        let from = 1_789_315_200_000;
         assert_eq!(s.next_run_ms_in(from, ny()), Some(1_789_390_800_000));
     }
 
@@ -3249,7 +3029,7 @@ mod tests {
             assert!(!argv.is_empty(), "{backend} produced no command");
             assert!(argv.iter().any(|a| a == "do it"));
         }
-        // Regression: claude rejects stream-json print output without this.
+
         let claude = agent_command("claude", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(claude.iter().any(|a| a == "--verbose"));
         assert!(claude.iter().any(|a| a == "--include-partial-messages"));
@@ -3324,11 +3104,6 @@ mod tests {
         );
     }
 
-    /// Standing rules must never look like something the person typed.
-    ///
-    /// Claude and grok take them on a flag. The rest get one tagged block
-    /// ahead of the turn, which is still separable, unlike the bare paragraphs
-    /// that used to be glued on and answered as though they were the request.
     #[test]
     fn standing_rules_travel_beside_the_turn_not_inside_it() {
         let launch = |backend: &'static str| {
@@ -3368,8 +3143,6 @@ mod tests {
                 .any(|pair| pair[0] == "--rules" && pair[1] == "You explain Rust errors patiently.")
         );
 
-        // Codex has no such flag, so the rules ride ahead of the turn inside a
-        // block the model can tell apart from the ask.
         let codex = launch("codex");
         let turn = codex.last().expect("codex puts the prompt last");
         assert!(turn.starts_with("<system-instructions>\nYou explain Rust errors patiently."));
@@ -3377,15 +3150,6 @@ mod tests {
         assert!(!codex.iter().any(|arg| arg == "--append-system-prompt"));
     }
 
-    /// Agy keeps `--dangerously-skip-permissions` in a guarded turn, and that
-    /// looks alarming until you know why: its own permission layer auto-denies
-    /// anything it would have to prompt for in headless mode, *after* the hook
-    /// has run. Without the flag a person is asked, answers Allow, and the
-    /// tool is refused anyway. The hook is the gate; this asserts it is
-    /// present whenever the flag is.
-    /// Cursor rejects every write in a headless turn without `--force`, after
-    /// the hook already allowed it. So a guarded turn keeps the flag, but only
-    /// beside the plugin that carries the gate, and never in plan mode.
     #[test]
     fn cursor_keeps_force_only_beside_its_gate_plugin() {
         let plugin = std::path::PathBuf::from("/tmp/cursor-hook");
@@ -3471,7 +3235,6 @@ mod tests {
             "the flag is only safe beside tokenstat's own hook"
         );
 
-        // No hook, no flag. Nothing may run ungated.
         let ungated = launch(None, "execute");
         assert!(
             !ungated
@@ -3480,7 +3243,6 @@ mod tests {
             "without a hook there is no gate, so nothing may bypass agy's own"
         );
 
-        // Plan mode is a read-only promise agy enforces itself. Leave it alone.
         let planning = launch(Some("/tmp/tokenstat-hostd"), "plan");
         assert!(
             !planning
@@ -3490,14 +3252,6 @@ mod tests {
         );
     }
 
-    /// Grok's own permission layer must be out of the way in a guarded turn,
-    /// for the same reason agy's is, and the reason is in grok's own hook
-    /// documentation: "An `allow` means only 'not blocked' - it does not
-    /// auto-approve a call the user would otherwise be asked about." Under
-    /// `default` a hook that answers allow therefore leaves grok to run its
-    /// own permission prompt, and a headless turn has nobody to answer it, so
-    /// the call comes back as "User cancelled the execution". The person had
-    /// approved it; nothing they did was a cancellation.
     #[test]
     fn grok_leaves_its_own_gate_open_only_when_ours_is_installed() {
         let launch = |helper: Option<&'static str>, mode: &'static str, bypass: bool| {
@@ -3533,7 +3287,7 @@ mod tests {
             "bypassPermissions",
             "a guarded grok turn must not be cancelled by a prompt nobody can answer"
         );
-        // No hook, no gate, so nothing may run: refuse rather than ask nobody.
+
         assert_eq!(mode_of(&launch(None, "execute", false)), "dontAsk");
         assert_eq!(mode_of(&launch(None, "plan", false)), "plan");
         assert!(
@@ -3591,8 +3345,7 @@ mod tests {
                 .position(|arg| arg == "--disallowedTools")
                 .unwrap();
             assert_eq!(argv[at + 1], "AskUserQuestion");
-            // The flag takes a list. Whatever follows must be another flag,
-            // or the prompt would be read as one more tool name.
+
             assert!(argv[at + 2].starts_with('-'), "{argv:?}");
             assert!(at < argv.iter().position(|arg| arg == "-p").unwrap());
         }
@@ -3831,10 +3584,6 @@ mod tests {
 
     #[test]
     fn a_guarded_cursor_turn_keeps_neither_permission_flag() {
-        // Cursor is Bypass-only in chat, so this is the older-conversation
-        // path. The two flags are one decision and must move together: a turn
-        // that keeps `--force` without the workspace trust, or the trust
-        // without the permission, is a turn that half-runs.
         let guarded = chat_agent_command(
             "cursor",
             "inspect this",
@@ -3890,8 +3639,6 @@ mod tests {
             ("codex", "--dangerously-bypass-approvals-and-sandbox"),
             ("muse", "--yolo"),
             ("cursor", "--trust"),
-            // Cursor's own permission layer, not the workspace trust prompt.
-            // Without it every tool call comes back rejected.
             ("cursor", "--force"),
             ("agy", "--dangerously-skip-permissions"),
             ("opencode", "--auto"),
@@ -4404,8 +4151,6 @@ mod tests {
 
     #[test]
     fn claude_advertises_the_full_effort_ladder() {
-        // Additive contract: older clients validate against low/medium/high,
-        // so this pins the ladder rather than letting it drift silently.
         let claude = backends(false)
             .into_iter()
             .find(|v| v.get("id").and_then(|id| id.as_str()) == Some("claude"))
@@ -4421,18 +4166,11 @@ mod tests {
         assert_eq!(efforts, ["low", "medium", "high", "xhigh", "max"]);
     }
 
-    /// Register `dir` in the shared registry and return its id.
-    ///
-    /// The registry is process-wide, so this adds rather than replaces. Tests
-    /// use their own temp folders, which keeps them independent of each other.
     fn sh_workspace(dir: &Path) -> String {
         let mut registry = crate::workspaces::write();
         registry.add(dir, now_ms()).unwrap().id
     }
 
-    /// The same script in whichever shell the platform has. Kept next to the
-    /// tests rather than reusing `shell_argv`, so a fixture cannot pass by
-    /// agreeing with the code it is checking.
     fn test_shell_command(unix: &str, windows: &str) -> (String, Vec<String>) {
         let _ = (unix, windows);
         #[cfg(unix)]
@@ -4661,8 +4399,6 @@ mod tests {
         let workspace_id = sh_workspace(&dir);
         let store = Arc::new(Store::at(dir.join("jobs.json")));
 
-        // A job due long ago on the harmless shell backend, enabled. Seeded
-        // directly because `create` would recompute the schedule.
         let mut due = job("due", ScheduleSpec::default(), 30);
         due.workspace_id = workspace_id.clone();
         due.backend = "sh".into();

@@ -9,20 +9,9 @@ import SwiftUI
 #if !os(macOS)
 import UIKit
 
-/// What a screen shows when it has no content, and why the three cases are
-/// three cases.
-///
-/// **Empty, unreachable and refused are not the same thing**, and rendering
-/// them the same is the mistake `limits.rs` already argues against for quota
-/// readings: "no data" and "we could not look" must never read alike. A quiet
-/// day is an answer. A host that is down is a problem. An account that does not
-/// include this is a decision somebody can act on, and it is the only one of
-/// the three that gets a button.
 enum ClientEmptyKind {
     case nothingYet
-    /// We could not get an answer.
     case unreachable
-    /// The answer is no, and signing in or upgrading is the fix.
     case needsAccount
 
     var symbol: String {
@@ -42,21 +31,14 @@ enum ClientEmptyKind {
     }
 }
 
-/// One card for all three cases above. One component so they cannot drift into
-/// three different tones of voice.
 struct ClientEmptyState: View {
     let kind: ClientEmptyKind
     let title: String
     var message: String?
-    /// Shown only when there is something the person can actually do.
     var actionTitle: String?
-    /// The glyph on that action. Callers that retry or open plans must pass
-    /// `.refresh` or `.plans`. The default is only for forward navigation.
     var actionIcon: ActionIcon = .next
     var action: (() -> Void)?
     var mark: String?
-    /// A drawn scene instead of the mark, for the screens where "nothing here"
-    /// is worth a picture of the thing that is missing. See `ClientEmptyArt`.
     var art: EmptyArtKind?
     var secondaryActionTitle: String?
     var secondaryActionIcon: ActionIcon = .preview
@@ -84,10 +66,6 @@ struct ClientEmptyState: View {
                     .multilineTextAlignment(.center)
             }
             if let actionTitle, let action {
-                // The glyph is spelled out, like every other prominent button
-                // in the client. Left to the system's own label style inside
-                // a glass button it disappeared, and the empty state was the
-                // one screen offering a bare capsule with no mark on it.
                 Button(actionTitle, actionIcon, action: action)
                     .labelStyle(ActionLabelStyle())
                     .clientProminentStyle()
@@ -119,9 +97,6 @@ struct RemoteReachRecoveryCard: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
-            // This is a setup state, not an alarm. Giving the animation its
-            // own quiet stage makes the direction of the connection legible
-            // before somebody has to read the instructions.
             ClientEmptyArt(kind: .remoteReach)
                 .frame(width: 128, height: 84)
                 .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 18))
@@ -188,16 +163,9 @@ struct RemoteReachRecoveryCard: View {
     }
 }
 
-/// The same state, on a machine nobody can walk over to.
-///
-/// `RemoteReachRecoveryCard` tells somebody to wake a Mac and flip a switch on
-/// it. Neither instruction exists on a server: there is no window, the host is
-/// a service, and the person can genuinely go and look. So this names the two
-/// commands that answer it and offers the shell rather than a switch.
 struct HeadlessReachRecoveryCard: View {
     let name: String
     let retry: () -> Void
-    /// Opens an SSH session on that machine, when one can be opened from here.
     var openShell: (() -> Void)?
 
     var body: some View {
@@ -275,34 +243,15 @@ struct HeadlessReachRecoveryCard: View {
     }
 }
 
-/// A failure, drawn like part of the app rather than like a crash log.
-///
-/// One component for every error surface in the client, so a device that is
-/// asleep, a plan that does not include something and a helper that is not
-/// running are told apart by their icon and their sentence rather than by
-/// three shades of the same red paragraph. The machine's own words stay one
-/// tap away: they are useless to most people and the only useful thing to
-/// somebody reporting a bug.
 struct ClientErrorCard: View {
     let message: String
-    /// Shown as the card's action when the caller has something to retry.
     var retry: (() -> Void)?
     @State private var showingDetail = false
 
-    /// Optional on purpose. Every screen inside the client has this, and a
-    /// card drawn somewhere that does not simply keeps the sentence it was
-    /// given rather than crashing over a missing model.
     @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
 
     private var friendly: FriendlyError { FriendlyError.from(message) }
 
-    /// Offline rewrites the card, whatever the call happened to say.
-    ///
-    /// A device with no internet produces a different sentence per subsystem:
-    /// a timeout here, a refused socket there, a tunnel that cannot pair. All
-    /// of them have one cause and one answer, and a Retry that cannot work is
-    /// worse than no button. This is also what keeps a screen from
-    /// contradicting the chip in the top bar.
     private var isOffline: Bool { connectivity?.isOffline ?? false }
 
     private var offlineError: FriendlyError {
@@ -369,12 +318,6 @@ struct ClientErrorCard: View {
     }
 }
 
-/// A wireframe shaped like the content that is coming.
-///
-/// Shaped, not generic: a placeholder whose layout matches the real thing means
-/// nothing moves when the data lands. All bars start together on mobile: the
-/// old per-row delays made one placeholder look like several animation layers.
-/// The pulse remains `Skeleton.Bar`'s and still honours Reduce Motion.
 enum ClientWireframe {
     struct Totals: View {
         var body: some View {
@@ -396,8 +339,6 @@ enum ClientWireframe {
         }
     }
 
-    /// The year of squares, at the height the real grid will occupy, so the
-    /// card does not resize under the reader when it arrives.
     struct Heatmap: View {
         var body: some View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -410,10 +351,8 @@ enum ClientWireframe {
         }
     }
 
-    /// A list of rows: a mark, two lines of text, a figure.
     struct Rows: View {
         var count = 3
-        /// Fade towards the bottom, for a list that runs off the screen.
         var fades = false
         private static let titles: [CGFloat] = [0.62, 0.48, 0.7, 0.55, 0.42, 0.66]
         private static let details: [CGFloat] = [0.36, 0.44, 0.3, 0.4, 0.34, 0.28]
@@ -457,19 +396,12 @@ enum ClientWireframe {
         }
     }
 
-    /// A whole screen still waiting for its list.
     struct Page: View {
         var body: some View { Rows(count: 9, fades: true) }
     }
 }
 
 
-/// This device has asked another computer to let it in, and is waiting.
-///
-/// Its own card rather than a line of caption, because it is the one state on
-/// this screen where nothing at all will change until a person walks to
-/// another machine. It says which machine, it says what to do there, and it
-/// keeps a picture moving so it reads as pending rather than as failed.
 struct ClientAwaitingAccessCard: View {
     let hostName: String
     let peerKey: String
@@ -518,11 +450,6 @@ struct ClientAwaitingAccessCard: View {
     }
 }
 
-/// The numbered steps shared by the waiting card and the approval sheet.
-///
-/// One place so the card's inline help and the sheet cannot drift into two
-/// different answers. Headless hosts get SSH commands; Macs with a screen get
-/// the GUI path first and SSH as the fallback.
 struct ClientAccessApprovalSteps: View {
     let hostName: String
     var isHeadless: Bool
@@ -646,9 +573,6 @@ struct ClientAccessApprovalSteps: View {
         .accessibilityLabel(L10n.text("apple.clientstates.run_0_on_1.a4d886c6", "\(command)", "\(hostName)"))
     }
 
-    /// The secondary path as its own card, so it never reads as small print
-    /// under the real answer. Headless hosts offer the invite code; GUI hosts
-    /// offer SSH as the fallback.
     private func fallbackCard(symbol: String, title: String, detail: String, command: String, commandId: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.m) {
@@ -692,7 +616,6 @@ struct ClientAccessApprovalSteps: View {
 
 struct ClientAccessApprovalSheet: View {
     let hostName: String
-    /// The selected host key lets the device redeem its invite code here.
     let peerKey: String
     var isHeadless: Bool
     var requestNotice: String?

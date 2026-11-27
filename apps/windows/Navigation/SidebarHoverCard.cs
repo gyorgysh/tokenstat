@@ -10,7 +10,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Readable identity and usage; the Git inset alone carries a violet background.</summary>
 internal static class SidebarHoverCard
 {
     private sealed record Field(string Label, string Value, bool Numeric = false);
@@ -50,7 +49,7 @@ internal static class SidebarHoverCard
             async Task ReadSessions()
             {
                 try { sessions = (await Call(workspaceId, "chat.inspection", new() { ["id"] = Format.Text(chat, "id") }))["sessions"]; }
-                catch { /* Older hosts still provide the Tokenstat chat ID. */ }
+                catch { }
             }
             async Task ReadUsage()
             {
@@ -121,7 +120,6 @@ internal static class SidebarHoverCard
             var remote = RemoteWorkspaces.CachedFolder(workspaceId);
             var fields = Identity(Format.Text(folder, "name", remote?.Name ?? L10n.Text("windows.sidebarlive.project.98595978")), remote);
             fields.Add(new(L10n.Text("windows.machinespage.status.920e413c"), Format.Flag(session, "alive") ? Text("ready") : L10n.Text("windows.terminalpage.closed.c21ead06")));
-            // SessionLabel resolves the saved friendly name and suppresses connection addresses.
             return Task.FromResult(Card(SshHostPlatform.SessionLabel(session), L10n.Text("windows.sshhostplatform.ssh_session.25493005"), fields,
                 Format.Text(folder, "path", remote?.Path ?? ""), folder?["git"] ?? remote?.Git,
                 SessionIdentityRows.Build(Format.Text(session, "id"), "common.session_identity.terminal", SessionIdentities.Read(null))));

@@ -2,13 +2,7 @@
 
 import Foundation
 
-/// Wall-clock copy for jobs that fire on a connected computer.
-///
-/// The host scheduler owns the zone. A phone in another zone must not convert
-/// 09:00 there into the device clock, and it must not invent a zone when the
-/// host has not named one.
 enum HostScheduleClock {
-    /// IANA name the host sent, or nil when it is missing or unnamed.
     static func resolved(_ identifier: String?) -> String? {
         guard let identifier else { return nil }
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -16,7 +10,6 @@ enum HostScheduleClock {
         return trimmed
     }
 
-    /// Short place name. `America/New_York` becomes `New York`.
     static func place(_ identifier: String?) -> String? {
         guard let identifier = resolved(identifier) else { return nil }
         if identifier == "UTC" || identifier == "GMT" { return "UTC" }
@@ -24,15 +17,11 @@ enum HostScheduleClock {
         return String(identifier[identifier.index(after: slash)...]).replacingOccurrences(of: "_", with: " ")
     }
 
-    /// Hour and minute in the named zone. Tests use this so locale cannot hide a
-    /// conversion to the device clock.
     static func civilTime(_ date: Date, timezone: String?) -> (hour: Int, minute: Int)? {
         guard let parts = civilParts(date, timezone: timezone) else { return nil }
         return (parts.hour, parts.minute)
     }
 
-    /// Day in the host zone, without a time. `14 Sep`, or `14 Sep 2027` when
-    /// the year is not this one there.
     static func shortDay(_ date: Date, timezone: String?) -> String? {
         guard let parts = civilParts(date, timezone: timezone) else { return nil }
         let month = months[parts.month - 1]
@@ -42,10 +31,6 @@ enum HostScheduleClock {
         return "\(parts.day) \(month) \(parts.year)"
     }
 
-    /// Next-run timestamp in the host zone. Nil when the zone is unknown, so
-    /// the caller does not fall back to this device. Civil parts, not
-    /// `Date.FormatStyle`: a region override on English UI can print
-    /// year-first punctuation that still looks like this device's clock.
     static func wallClock(_ date: Date, timezone: String?) -> String? {
         guard let parts = civilParts(date, timezone: timezone),
               let day = shortDay(date, timezone: timezone)

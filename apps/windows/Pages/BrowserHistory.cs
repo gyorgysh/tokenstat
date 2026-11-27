@@ -5,7 +5,6 @@ using System.Text.Json;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Original project targets only. Tunnel addresses never enter this store.</summary>
 internal sealed class BrowserHistory
 {
     public const int Capacity = 8;

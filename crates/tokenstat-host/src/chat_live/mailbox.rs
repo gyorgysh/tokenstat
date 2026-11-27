@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Poll filesystem mailboxes by elapsed time rather than streamed event count.
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -26,7 +23,7 @@ impl Poll {
         if now < self.next {
             return false;
         }
-        // A delayed poll performs one check, without replaying missed ticks.
+
         self.next = now + INTERVAL;
         true
     }
@@ -55,7 +52,7 @@ impl Stop {
         if self.requested {
             return true;
         }
-        // Signals remain immediate, including between filesystem probes.
+
         if super::stop_signalled() || (self.poll.due_at(now) && self.path.is_file()) {
             self.requested = true;
         }

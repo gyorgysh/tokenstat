@@ -100,8 +100,6 @@ impl Store {
             let mut allocated = 0u64;
             let mut cumulative = 0u64;
             for (index, hour) in day_hours.iter().enumerate().filter(|(_, h)| h.tokens > 0) {
-                // Scale each hour by the same share, in 128 bits so a large
-                // day cannot overflow. Cumulative rounding preserves the total.
                 cumulative += hour.tokens;
                 let target =
                     (u128::from(cumulative) * u128::from(remainder) / u128::from(vendor)) as u64;
@@ -153,7 +151,7 @@ fn utc_day(day_ms: i64) -> String {
 mod tests {
     use super::*;
 
-    const NOV_10: i64 = 1_794_268_800_000; // 2026-11-10T00:00:00Z
+    const NOV_10: i64 = 1_794_268_800_000;
 
     fn hour(source: SourceId, offset_h: i64, model: &str, tokens: u64) -> VendorHour {
         VendorHour {

@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Hash-only batch proofs for canonical guardian output. Temporary intents are
-//! the sole exception; readers may settle written rows, never replay output.
-
 use super::*;
 use crate::chat_receipts::team_runs as runs;
 use crate::transcript::Event;
@@ -285,8 +281,7 @@ impl Journal {
         }
         let row: AgentRecord =
             serde_json::from_value(raw.clone()).map_err(|_| "Invalid output row")?;
-        // Event's ordinary parser tolerates vendor additions. Canonical Team
-        // proof does not: even an ignored nested field changes the exact row.
+
         if serde_json::to_value(&row).map_err(|_| "Invalid output row")? != *raw {
             return Err("Output row contains unproven fields");
         }

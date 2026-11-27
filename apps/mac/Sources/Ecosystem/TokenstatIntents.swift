@@ -36,8 +36,6 @@ struct TokenstatProjectEntity: AppEntity {
     var owner: String
 
     init(project: EcosystemProject, owner: String) {
-        // Include the owner so a saved shortcut cannot resolve another account's
-        // identically named project after sign-out.
         id = Data((owner + "\n" + project.id).utf8).base64EncodedString()
         self.owner = owner
         name = project.name
@@ -84,8 +82,6 @@ struct OpenTokenstatProjectIntent: AppIntent {
     }
 }
 
-/// The system content-opening schema is new in the 27 SDK. Keep the regular
-/// project intent above on older systems rather than raising the app's OS floor.
 #if compiler(>=6.4)
 @available(iOS 27.0, macOS 27.0, *)
 @AppIntent(schema: .system.open)
@@ -229,7 +225,6 @@ struct RefreshTokenstatIntent: AppIntent {
         #if !TOKENSTAT_WIDGET_EXTENSION
         try await EcosystemPublisher.refresh()
         #else
-        // This intent belongs in the containing app; never report a no-op as a refresh.
         try unavailableWidgetRefresh()
         #endif
         return .result()
@@ -249,7 +244,6 @@ struct RefreshTokenstatLimitsIntent: AppIntent {
         #if !TOKENSTAT_WIDGET_EXTENSION
         try await EcosystemPublisher.refreshLimitsOnly()
         #else
-        // This intent belongs in the containing app; never report a no-op as a refresh.
         try unavailableWidgetRefresh()
         #endif
         return .result()

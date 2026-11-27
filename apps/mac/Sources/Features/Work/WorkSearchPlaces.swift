@@ -1,42 +1,20 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// A screen or setting inside the app, offered by search beside saved work.
-///
-/// Search is the field somebody types into when they do not know where a thing
-/// lives, so it answers for the app as well as for the work in it. Nobody
-/// should have to know that the notification switch is behind the avatar, on
-/// the second pane of a sheet, to be able to find it.
-///
-/// The identifier says where the place goes, in a form the front end parses
-/// (`"tab:home"`, `"account:thisDevice:tabs"`). This layer stays ignorant of
-/// destinations so one sheet can serve a client that has tabs and a Mac that
-/// has windows.
 struct WorkSearchPlace: Identifiable, Hashable {
     let id: String
     let title: String
-    /// Where it lives, said the way a person would: "Account · This device".
     let detail: String
     let icon: ActionIcon
-    /// Words somebody might type for this that the title does not contain.
     var keywords: [String] = []
 }
 
-/// The places search offers and what opening one does. The client fills this
-/// in; the Mac leaves it out and search stays about work alone.
 struct WorkSearchPlaceSource {
     let matches: @MainActor (String) -> [WorkSearchPlace]
     let open: @MainActor (WorkSearchPlace) -> Void
 }
 
 enum WorkSearchPlaceMatch {
-    /// Every word typed has to start a word in the place, so "not" finds
-    /// Notifications and "tab bar" finds Tabs, while a word from nowhere in it
-    /// removes the place rather than ranking it last.
-    ///
-    /// Ranked by where the match landed: the title first, then the words kept
-    /// for searching, then the trail that says where it lives. A person typing
-    /// "plan" means the Plan card, not every setting that mentions a plan.
     static func rank(_ query: String, in places: [WorkSearchPlace], limit: Int = 6) -> [WorkSearchPlace] {
         let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
         guard !words.isEmpty else { return [] }
@@ -65,8 +43,6 @@ enum WorkSearchPlaceMatch {
     }
 }
 
-/// One place, drawn like a search result rather than like a settings row: this
-/// list is read by somebody scanning for a word they typed.
 struct WorkSearchPlaceRow: View {
     let place: WorkSearchPlace
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

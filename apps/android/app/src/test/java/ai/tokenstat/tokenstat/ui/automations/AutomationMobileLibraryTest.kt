@@ -5,8 +5,6 @@ import org.junit.Test
 
 class AutomationMobileLibraryTest {
     @Test fun naturalLanguageTemplatesUseAnAgent() {
-        // The shell backend executes the prompt as a command, so these
-        // instructions need a coding agent to interpret and carry them out.
         assertTrue(AutomationTemplates.suggested.all { it.backend == "claude" })
     }
 

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-//! The wrapped report must not let log-derived labels reach the terminal raw.
-
 use std::process::Command;
 use tokenstat_core::{
     BillingMode, Confidence, Counters, EventId, Extras, SourceId, Store, Timestamp, UsageEvent,
@@ -9,8 +7,6 @@ use tokenstat_core::{
 
 static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// An OSC sequence. The app never emits one itself, so any occurrence in
-/// captured output came from data, not formatting.
 const OSC: &str = "\u{1b}]0;PWNED\u{7}";
 
 #[test]

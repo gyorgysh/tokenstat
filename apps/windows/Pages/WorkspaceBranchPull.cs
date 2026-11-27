@@ -8,7 +8,6 @@ using Tokenstat.Navigation;
 
 namespace Tokenstat.Pages;
 
-/// <summary>The branch's pull request. Sidebar rows use only the host's cached metadata.</summary>
 internal static class WorkspaceBranchPull
 {
     public static async Task<JsonNode?> LoadAsync(string workspaceId, string branch, bool refresh = false)
@@ -43,8 +42,6 @@ internal static class WorkspaceBranchPull
     private static string Help(JsonNode pull) => L10n.Text("windows.branchpull.help", StateLabel(pull),
         Format.Text(pull, "number"), Format.Text(pull, "title"));
 
-    /// <summary>Every pull request a chat opened or talked about, newest first. A host
-    /// older than 1.26.0 only knows the branch's own.</summary>
     private static List<JsonNode> Pulls(JsonNode chat)
     {
         var rows = (chat["pulls"] as JsonArray)?.OfType<JsonObject>().Cast<JsonNode>().ToList() ?? [];
@@ -52,8 +49,6 @@ internal static class WorkspaceBranchPull
         return rows;
     }
 
-    /// <summary>The state of a chat's pull requests, and how many when there are several.
-    /// Drawing it never asks the forge. A click lists them, and a row opens one.</summary>
     public static UIElement? Badge(JsonNode chat, string folderId)
     {
         var pulls = Pulls(chat);
@@ -71,7 +66,6 @@ internal static class WorkspaceBranchPull
         if (pulls.Count > 1)
             row.Children.Add(new TextBlock { Text = pulls.Count.ToString(), FontSize = 11, Opacity = 0.6, VerticalAlignment = VerticalAlignment.Center });
         var help = string.Join(Environment.NewLine, pulls.Select(Help));
-        // A button, so the press stays here instead of opening the chat.
         var button = new Button
         {
             Content = row,
@@ -97,7 +91,6 @@ internal static class WorkspaceBranchPull
         return button;
     }
 
-    /// <summary>State, repository and number, and the size of the change.</summary>
     public static UIElement Summary(JsonNode pull)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };

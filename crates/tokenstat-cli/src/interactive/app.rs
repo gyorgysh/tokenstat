@@ -59,7 +59,6 @@ impl App {
         Ok(app)
     }
 
-    /// Re-read local sync pacing for the status bar without a network call.
     pub(super) fn refresh_sync_hint(&mut self) {
         self.sync_hint = tokenstat_sync::scheduling_info(None)
             .ok()
@@ -72,8 +71,6 @@ impl App {
         self.totals = store.totals(&q)?;
         self.days_unmeasured = crate::render::unmeasured_days(store, &q);
         self.empty = self.totals.events == 0;
-        // Invalidate lazy reports on every scan/filter change. Only Summary's
-        // data is eager; opening the CLI must not query every other tab.
         self.loaded_tabs.clear();
         self.values.clear();
         self.weeks.clear();
@@ -108,7 +105,6 @@ impl App {
         Ok(())
     }
 
-    /// Cache reports on first visit, and reuse them until scan/filter reload.
     pub(super) fn ensure_tab_loaded(&mut self) -> Result<()> {
         if matches!(self.tab, Tab::Summary | Tab::Daily | Tab::Models)
             || self.loaded_tabs.contains(&self.tab)
@@ -163,7 +159,6 @@ impl App {
         Ok(())
     }
 
-    /// Install the hourly scan LaunchAgent / systemd unit / Windows task.
     pub(super) fn install_scan_schedule(&mut self) -> Result<()> {
         use crate::schedule::{Unit, install};
 
@@ -192,10 +187,7 @@ impl App {
         Ok(())
     }
 
-    /// Whether the command palette should be drawn above the input.
     pub(super) fn showing_suggestions(&self) -> bool {
-        // Keep the catalog out of the way while browsing tabs. As soon as the
-        // user types, filter and show name + description prominently.
         let trimmed = self.input.trim();
         !trimmed.is_empty() && !trimmed.contains(' ')
     }
@@ -240,7 +232,6 @@ impl App {
     }
 
     pub(super) fn submit_input(&mut self) -> Result<()> {
-        // If the typed text is only a prefix, accept the highlighted suggestion.
         let cmds = self.filtered_commands();
         if !self.input.contains(' ')
             && let Some(cmd) = cmds.get(self.suggest_idx)
@@ -533,8 +524,6 @@ impl App {
         Ok(())
     }
 
-    /// Open a read-only report window (heatmap / wrapped / budget). Contents
-    /// are computed once here; the draw loop only renders and scrolls them.
     pub(super) fn open_detail(&mut self, kind: DetailKind) -> Result<()> {
         self.wizard = None;
         let store = Store::open(&self.db_path)?;

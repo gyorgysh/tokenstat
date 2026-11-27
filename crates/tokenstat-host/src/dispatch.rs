@@ -1,18 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 //! Method dispatch. One implementation, however the request arrived.
-//!
-//! Every method takes one JSON object and returns one JSON envelope:
-//!
-//! ```json
-//! {"ok": true, "result": ...}
-//! {"ok": false, "error": {"code": "...", "message": "..."}}
-//! ```
-//!
-//! A front end therefore has exactly one decoding path and one error path, no
-//! matter which method it called. The C ABI and the socket server both call
-//! straight into here, so a method cannot exist over one transport and not the
-//! other, and there is no second copy to keep in step.
 
 #[cfg(feature = "local-host")]
 use std::collections::HashMap;
@@ -44,7 +32,6 @@ use crate::dto::{WorkspaceDto, WorkspaceSummaryDto};
 use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
 
-/// A missing local archive cannot turn a failed account read into an empty account.
 fn account_calendar_fallback(
     calendar: Option<tokenstat_core::activity::HeatCalendar>,
     notice: String,
@@ -58,8 +45,7 @@ fn account_calendar_fallback(
             Some(code),
         ))
         .envelope(),
-        // Not signed in, and this machine has no days either: first use, not
-        // a failed read. Home's Getting Started is the right screen.
+
         None if code == "auth" => Ok(Value::Null),
         None => Err(DispatchError::new(code, failure)),
     }
@@ -83,8 +69,6 @@ struct QueryParams {
 #[serde(rename_all = "camelCase")]
 struct SplitParams {
     group: GroupByDto,
-    /// The second dimension. `project` split by `source` answers "which
-    /// harnesses ran in this folder".
     split_by: GroupByDto,
     #[serde(default)]
     query: QueryDto,
@@ -93,38 +77,20 @@ struct SplitParams {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CalendarParams {
-    /// Columns in the grid, clamped to 1..=53 by the core. 53 is the rolling
-    /// year the CLI draws.
     #[serde(default = "default_weeks")]
     weeks: usize,
     #[serde(default)]
     query: QueryDto,
-    /// `"local"` or `"account"`. Anything else is treated as local.
-    ///
-    /// Local is this machine's own archive: complete, offline, and including
-    /// whatever has not been uploaded yet. Account is every machine that syncs,
-    /// which needs the network and an account, so it can fail in ways a local
-    /// grid cannot. The caller picks, and is told which one it got.
     #[serde(default)]
     scope: Option<String>,
-    /// Drop the ten-minute series cache first. A pull-to-refresh after a
-    /// plan change must not redraw Free's locked year.
     #[serde(default)]
     force: bool,
 }
 
-/// Optional extras on `app.updateCheck`.
-///
-/// The desktop app sends its bundle marketing version so a host rebuilt from
-/// tip cannot hide an older app (or the reverse). Without it, the check only
-/// sees hostd's crate version.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct AppUpdateCheckParams {
-    /// `CFBundleShortVersionString` / Windows informational version.
     app_version: Option<String>,
-    /// Only clients that understand a paused check may receive retryAt instead
-    /// of an error. Older clients must not mistake it for an up-to-date result.
     supports_retry_after: bool,
 }
 
@@ -139,8 +105,6 @@ impl Default for CalendarParams {
     }
 }
 
-/// Params for `activity.day`: one `YYYY-MM-DD`, plus the same scope/weeks the
-/// calendar accepts so an account hover reuses the calendar's series cache.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DayDetailParams {
@@ -165,12 +129,9 @@ fn default_weeks() -> usize {
     53
 }
 
-/// Params for `account.report`: which dimension to fold by, over how long.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AccountReportParams {
-    /// `"model"`, `"source"` or `"day"`. See `account_activity::Dimension` for
-    /// why there is no `"project"`.
     #[serde(default)]
     group: Option<String>,
     #[serde(default = "default_weeks")]
@@ -186,11 +147,6 @@ impl Default for AccountReportParams {
     }
 }
 
-/// Params for `account.machineUsage`: which machines, over how many days.
-///
-/// The caller passes the ids because it already has them from `account.status`,
-/// and asking the service for the same list twice to answer one question is a
-/// round trip nobody needs.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MachineUsageParams {
@@ -209,8 +165,6 @@ impl Default for MachineUsageParams {
     }
 }
 
-/// A month. Long enough to say which computer does the work, short enough that
-/// one request per machine stays cheap.
 fn default_machine_days() -> u16 {
     30
 }
@@ -222,7 +176,6 @@ struct WorkspacePathParams {
     path: String,
 }
 
-/// `workspace.summary` takes an optional id: one folder, or every folder.
 #[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -246,16 +199,12 @@ struct WorkspaceIdParams {
     from: Option<String>,
     #[serde(default)]
     limit: Option<u32>,
-    /// Directory to list, for `workspace.tree`, or the file to diff, for
-    /// `workspace.diff`. Always relative to the workspace root.
     #[serde(default)]
     path: Option<String>,
-    /// Paths to stage or unstage.
     #[serde(default)]
     paths: Option<Vec<String>>,
     #[serde(default)]
     message: Option<String>,
-    /// Text content for `workspace.write`.
     #[serde(default)]
     content: Option<String>,
 }
@@ -318,7 +267,6 @@ struct LfsSetupParams {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtySpawnParams {
-    /// Workspace to run in. The command inherits its folder as the cwd.
     workspace_id: String,
     command: String,
     #[serde(default)]
@@ -329,44 +277,26 @@ struct PtySpawnParams {
     cols: u16,
     #[serde(default)]
     no_color: bool,
-    /// The client is painting a dark background. Absent from an older client,
-    /// which then spawns exactly as it did before.
     #[serde(default)]
     dark: Option<bool>,
-    /// Optional local model selection. The host converts this to environment
-    /// variables for the selected harness and never persists it.
     #[serde(default)]
     model_provider: Option<String>,
     #[serde(default)]
     model_id: Option<String>,
-    /// True for inspector consoles and other daemon-owned shells that must
-    /// not appear as a workspace tab. The process still runs in the folder.
     #[serde(default)]
     hidden: bool,
     profile_id: Option<String>,
 }
 
-/// Fold the activity sampler's verdict into a serialized session.
-///
-/// Added here rather than on `SessionInfo` itself: the pty crate owns
-/// processes and buffers and has no business measuring CPU, and the detector
-/// wants a sampling thread the pty crate should not own either. A session the
-/// sampler has not reached yet simply carries no verdict, which a client
-/// reads as "not known" rather than as "idle".
 #[cfg(feature = "local-host")]
 fn add_activity(item: &mut Value, siblings: &[(String, u64)]) {
-    // Started here rather than at daemon boot: a host that never lists a
-    // terminal never needs a sampling thread, and this is idempotent. The
-    // first verdict lands a tick later, which is why an unknown session
-    // carries no field instead of a made-up one.
     crate::activity::start();
     if let Some(pid) = item.get("pid").and_then(|v| v.as_u64())
         && let Some(reading) = crate::activity::reading(pid as u32)
         && let Some(map) = item.as_object_mut()
     {
         map.insert("activity".into(), json!(reading.activity.as_str()));
-        // Rounded to a tenth: this is a smoothed average of a noisy sample and
-        // printing it to six decimals would claim a precision it does not have.
+
         map.insert(
             "cpuPercent".into(),
             json!((reading.cpu_percent * 10.0).round() / 10.0),
@@ -380,8 +310,6 @@ fn add_activity(item: &mut Value, siblings: &[(String, u64)]) {
     add_meter(item, siblings);
 }
 
-/// The PTY owner validates reports before serialization. Explicit state wins
-/// even when CPU sampling failed or an old prompt remains in the output tail.
 #[cfg(feature = "local-host")]
 fn add_program_status(item: &mut Value) {
     let Some(status) = item.get("programStatus") else {
@@ -389,8 +317,7 @@ fn add_program_status(item: &mut Value) {
     };
     let activity = match status.get("state").and_then(Value::as_str) {
         Some("working") => "working",
-        // Preserve the legacy two-state field for older frontends. Rich
-        // states are additive, inside programStatus.
+
         Some("idle" | "blocked" | "done" | "error") => "idle",
         _ => return,
     };
@@ -411,9 +338,6 @@ fn add_program_status(item: &mut Value) {
     }
 }
 
-/// Other live processes of the same harness in the same folder, keyed by pty id.
-/// Values keep the sibling's id as well as its spawn time so equal timestamps
-/// still claim different logs.
 #[cfg(feature = "local-host")]
 fn meter_sibling_starts(
     sessions: &[tokenstat_pty::SessionInfo],
@@ -445,15 +369,6 @@ fn meter_sibling_starts(
     out
 }
 
-/// Fold the live token meter onto the same session object.
-///
-/// Independent of the CPU sampler: a session the sampler has not reached
-/// can still have a log, and a session with no log must not grow fake
-/// zeros. Fields are omitted until there is a real reading.
-///
-/// `siblings` is every other live process of the same harness in the same
-/// folder, as `(id, started_at_ms)`. Empty when this row is the only one,
-/// which is the independent-pick fallback.
 #[cfg(feature = "local-host")]
 fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
     let command = item
@@ -485,9 +400,6 @@ fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
     let Some(meter) =
         crate::session_meter::reading(&command, &cwd, &session_id, started_at_ms, &sibling_refs)
     else {
-        // A harness we can meter but which has not written a turn yet starts
-        // at zero rather than at nothing. The row then counts up from $0.00
-        // instead of showing the command and later jumping to a figure.
         if crate::session_meter::can_meter(&command)
             && let Some(map) = item.as_object_mut()
         {
@@ -513,9 +425,7 @@ fn add_meter(item: &mut Value, siblings: &[(String, u64)]) {
     if !meter.model.is_empty() {
         map.insert("model".into(), json!(meter.model));
     }
-    // The used figure ships on its own. Without a window there is no bar, but
-    // "142K of context" is still worth saying, and dropping both was what left
-    // a Grok row with nothing but a lifetime total.
+
     if let Some(used) = meter.context_used {
         map.insert("contextUsed".into(), json!(used));
     }
@@ -540,37 +450,16 @@ fn default_cols() -> u16 {
 #[serde(rename_all = "camelCase")]
 struct PtyIdParams {
     id: String,
-    /// `pty.read` only: where the caller got to last time.
     #[serde(default)]
     offset: u64,
-    /// `pty.write` only: base64, because a keystroke is bytes.
     #[serde(default)]
     data: Option<String>,
     #[serde(default)]
     rows: Option<u16>,
     #[serde(default)]
     cols: Option<u16>,
-    /// `pty.read` only: how long the host may hold the call open waiting for
-    /// output, in milliseconds. Zero is the old behaviour, answer with whatever
-    /// is there.
-    ///
-    /// This is what makes a terminal feel like a terminal. A client that polls
-    /// meets its own interval on every keystroke: the echo is ready a
-    /// millisecond after the write and sits in the buffer until the next
-    /// scheduled read asks for it. Holding the call open instead means the
-    /// answer leaves the moment the bytes exist, so the round trip is the only
-    /// delay left.
     #[serde(default)]
     wait_ms: Option<u64>,
-    /// Opaque id for the front end making the call, stable while it is showing
-    /// the session.
-    ///
-    /// A pty has one size and can have two front ends, so `pty.resize` states
-    /// what *this* viewer can show rather than what the session must become,
-    /// and the host sizes the session to suit every viewer at once. `pty.read`
-    /// carries it to keep the viewer's lease alive, and `pty.detach` gives it
-    /// up. Absent means an older client, which resizes the session outright
-    /// exactly as before.
     #[serde(default)]
     viewer: Option<String>,
 }
@@ -599,7 +488,6 @@ struct AutomationParams {
     id: Option<String>,
     job: Option<Automation>,
     enabled: Option<bool>,
-    /// `automation.transcript` only: where the caller got to last time.
     offset: Option<u64>,
     default_budget_seconds: Option<u64>,
     max_concurrent: Option<u32>,
@@ -608,8 +496,6 @@ struct AutomationParams {
     prompt: Option<String>,
     model: Option<String>,
     effort: Option<String>,
-    /// `automation.backends` only: probe the agent CLIs now instead of
-    /// serving the cached lists. Somebody pressed Refresh in the picker.
     refresh: Option<bool>,
     expected_revision: Option<u64>,
     operation_id: Option<String>,
@@ -659,9 +545,6 @@ struct ChatParams {
     allowed_shell_prefixes: Option<Vec<String>>,
     text: Option<String>,
     attachment_ids: Option<Vec<String>>,
-    /// `chat.send` and `chat.receipt`. The client's own name for one message,
-    /// so a send whose answer went missing can be repeated without running
-    /// the agent twice. See `chat_receipts`.
     client_message_id: Option<String>,
     client_message_created_at_ms: Option<i64>,
     expected_revision: Option<u64>,
@@ -690,13 +573,8 @@ struct ChatParams {
     call_id: Option<String>,
     ok: Option<bool>,
     detail: Option<String>,
-    /// `chat.toolResult` only. Take a parked note without recording a tool outcome.
-    /// A model-step hook has no tool call to record.
     note_only: Option<bool>,
     offset: Option<u64>,
-    /// Opaque, from a previous `chat.eventPage`. Absent asks for the newest
-    /// page. Never built by a client: it names a byte boundary in a file
-    /// whose shape is the store's business.
     cursor: Option<String>,
     tail_cursor: Option<String>,
     stable_positions: Option<bool>,
@@ -745,12 +623,8 @@ impl ChatParams {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct HighlightParams {
-    /// The buffer to colour, which is what is on screen rather than what is on
-    /// disk. `highlight.syntax` leaves it empty.
     text: String,
-    /// Used to work out the language. The file is never opened.
     path: String,
-    /// Overrides `path`, for a buffer whose name says nothing useful.
     language: Option<String>,
 }
 
@@ -783,18 +657,6 @@ struct GoogleActivateParams {
     purchase_token: String,
 }
 
-/// The store a subscription was bought from, in one spelling.
-///
-/// The account service writes `"google"` into `subscriptions.provider`, and
-/// every client was written against `"google_play"`, which it never sends. So
-/// a real Play subscriber was told "This plan is not a Google Play purchase.
-/// Manage it on the web" on the one screen that offers to manage it, and the
-/// route to change or cancel the plan disappeared with it.
-///
-/// Translating here is what the DTO layer is for: the server's vocabulary
-/// stops at this boundary and every front end sees the contract that
-/// `PLAY_RELEASE.md` already documents. Idempotent, so a server that starts
-/// sending the long form needs no second change.
 fn normalize_billing_provider(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
         "google" | "google_play" | "googleplay" | "play" => "google_play".to_string(),
@@ -859,8 +721,6 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
     })
 }
 
-/// A profile refusal keeps the reason the account named, prefixed so it can
-/// never be mistaken for one of this host's own codes.
 fn profile_error(error: tokenstat_sync::profile::ProfileError) -> DispatchError {
     use tokenstat_sync::profile::ProfileError;
     match error {
@@ -872,10 +732,6 @@ fn profile_error(error: tokenstat_sync::profile::ProfileError) -> DispatchError 
     }
 }
 
-/// Change the profile, then answer with a fresh account so the caller redraws
-/// without a second round trip. Reading through the snapshot also replaces the
-/// remembered status: scoped calls compare against the handle it holds, and a
-/// stale one would refuse the account that just claimed a name.
 fn profile_write(
     write: impl FnOnce() -> Result<(), tokenstat_sync::profile::ProfileError>,
 ) -> Result<Value, DispatchError> {
@@ -944,9 +800,7 @@ fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
 #[serde(rename_all = "camelCase", default)]
 struct SyncParams {
     dry_run: bool,
-    /// Ask the server to drop rows outside the window.
     prune: bool,
-    /// Window expression, for example `30d`. Server default when absent.
     window: Option<String>,
 }
 
@@ -962,19 +816,10 @@ fn err(code: &str, message: impl std::fmt::Display) -> String {
     .to_string()
 }
 
-/// Turn any failure into the envelope's error, under the general code.
-///
-/// Every fallible call inside [`dispatch`] ends with this. It replaced a
-/// hundred copies of `map_err(|e| e.to_string())`, which said the same thing at
-/// more length and left no room for a code. A method that has something more
-/// specific to say builds its [`DispatchError`] directly instead.
 trait IntoEnvelope<T> {
     fn envelope(self) -> Result<T, DispatchError>;
 }
 
-/// Keep the device-flow failure classes intact across the JSON bridge. The UI
-/// can retry a transport failure, but retrying a refused or already-consumed
-/// grant only produces a spinner that can never succeed.
 fn device_poll_error(error: tokenstat_sync::profile::ProfileError) -> DispatchError {
     use tokenstat_sync::profile::ProfileError;
     match error {
@@ -1002,9 +847,6 @@ impl<T, E: std::fmt::Display> IntoEnvelope<T> for Result<T, E> {
     }
 }
 
-/// Decode params, treating absent and empty as the default.
-///
-/// A transport that has no params to send should not have to invent `{}`.
 fn parse<T: for<'de> Deserialize<'de> + Default>(params: &str) -> Result<T, String> {
     let trimmed = params.trim();
     if trimmed.is_empty() || trimmed == "null" {
@@ -1013,7 +855,6 @@ fn parse<T: for<'de> Deserialize<'de> + Default>(params: &str) -> Result<T, Stri
     serde_json::from_str(trimmed).map_err(|e| e.to_string())
 }
 
-/// Wall clock in milliseconds, or 0 if the clock is before the epoch.
 #[cfg(feature = "local-host")]
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -1022,16 +863,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// When this account last synced, from anywhere.
-///
-/// Derived rather than read. `/api/v1/me` carries a `last_sync_at` per machine
-/// and none for the account, so reading the top level gave `None` and every
-/// front end said "never" for an account that had synced minutes earlier.
-/// Deriving it is also the more honest definition: an account's last sync is
-/// the most recent one across its machines, not this machine's.
-///
-/// Timestamps are RFC 3339 from the server, which sorts correctly as text, so
-/// this compares strings rather than parsing dates it would only re-serialize.
 fn latest_sync(raw_machines: &[Value]) -> Option<String> {
     raw_machines
         .iter()
@@ -1041,14 +872,6 @@ fn latest_sync(raw_machines: &[Value]) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The account's profile picture, as something a front end can fetch.
-///
-/// The API sends `/avatar/<name>`, relative, because it never hands out a third
-/// party URL: hotlinking a provider avatar would report every view of it back to
-/// that provider. Resolving it here rather than in each client means one place
-/// knows that a leading slash is relative to the host the token authenticated
-/// to. An absolute URL is passed through untouched, so the API can start
-/// sending one without breaking anything.
 fn avatar_url(host: &str, raw: &Value) -> Option<String> {
     let value = raw.get("avatar")?.as_str()?.trim();
     if value.is_empty() {
@@ -1064,17 +887,8 @@ fn avatar_url(host: &str, raw: &Value) -> Option<String> {
     ))
 }
 
-/// How long a folder's git description is reused without re-running git.
-///
-/// Long enough to absorb a launch fan-out and a file-watcher debounce burst,
-/// short enough that a save still shows up within a beat. Without this,
-/// every concurrent `workspace.list` and every 600ms refresh after a build
-/// paid three git process spawns per folder again.
 #[cfg(feature = "local-host")]
 const WORKSPACE_STATUS_TTL: Duration = Duration::from_millis(400);
-/// Git status starts several subprocesses per workspace. Give each status
-/// worker roughly two logical CPUs, so a four-core laptop runs two at a time
-/// while a newer machine can use more of its available headroom.
 #[cfg(feature = "local-host")]
 fn workspace_status_workers() -> usize {
     std::thread::available_parallelism()
@@ -1102,10 +916,6 @@ fn workspace_status_cache() -> &'static Mutex<WorkspaceStatusCache> {
     })
 }
 
-/// Drop cached git state for one folder, or for every folder.
-///
-/// Called after mutations that change what `git status` would report, so the
-/// next list is honest rather than a few hundred milliseconds behind the write.
 #[cfg(feature = "local-host")]
 fn invalidate_workspace_status(id: Option<&str>) {
     let Ok(mut cache) = workspace_status_cache().lock() else {
@@ -1119,10 +929,6 @@ fn invalidate_workspace_status(id: Option<&str>) {
     }
 }
 
-/// Describe a registered folder, reading git only when it is actually there.
-///
-/// A missing folder gets `git: None` rather than an empty status, so a caller
-/// cannot mistake "we did not look" for "nothing has changed".
 #[cfg(feature = "local-host")]
 fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
     if let Ok(cache) = workspace_status_cache().lock()
@@ -1153,10 +959,6 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
     dto
 }
 
-/// Apply a closure to the session.
-///
-/// A thin wrapper kept because it reads well at every call site and because it
-/// is the seam a future per-request permission check would sit in.
 fn with_session<T>(
     s: &mut Session,
     f: impl FnOnce(&mut Session) -> Result<T, DispatchError>,
@@ -1165,9 +967,6 @@ fn with_session<T>(
     f(s)
 }
 
-/// Static host facts included in both the standalone `info` response and an
-/// Insights snapshot. Keeping one builder prevents the two surfaces from
-/// drifting when diagnostics gain a field.
 fn info_dto(b: &Session) -> InfoDto {
     let peers = crate::remote::connection_counts();
     InfoDto {
@@ -1190,11 +989,6 @@ fn info_dto(b: &Session) -> InfoDto {
     }
 }
 
-/// Build the wire detail for a day, pricing every row at list rates.
-///
-/// The same `EquivalentValue` pricing the calendar's day buckets use, applied
-/// per `model × source` row, so the detail's value is the cell's value and the
-/// two surfaces cannot drift apart.
 fn day_detail_dto(
     date: &str,
     rows: &[DayPart],
@@ -1246,10 +1040,6 @@ pub fn call(session: &mut Session, method: &str, params: &str) -> String {
     result
 }
 
-/// Slow-call telemetry is deliberately terse and stays in the host's existing
-/// stderr log. Method names and elapsed time are enough to investigate a
-/// regression; parameters can contain private paths, terminal input, or chat
-/// content and must never enter diagnostics.
 fn note_slow_call(method: &str, elapsed: std::time::Duration, layer: &str) {
     if matches!(method, "pty.read" | "ssh.session.read" | "chat.events") {
         return;
@@ -1265,9 +1055,6 @@ fn note_slow_call(method: &str, elapsed: std::time::Duration, layer: &str) {
     }
 }
 
-/// Per-query detail for bundled reports. Unlike a SQL trace it contains no
-/// values, table rows, paths, or model names, but it tells us which aggregate
-/// was responsible when an Insights snapshot crosses the slow-call threshold.
 fn note_slow_archive_query(query: &str, elapsed: std::time::Duration) {
     let elapsed_ms = elapsed.as_millis();
     if elapsed_ms >= 150 {
@@ -1288,12 +1075,6 @@ fn group_name(group: GroupBy) -> &'static str {
     }
 }
 
-/// Account mutations, login, update downloads, and this machine's own
-/// settings belong to the person at it. An approved phone can work in a
-/// folder. It cannot log the host out, re-point the archive, admit another
-/// peer's update, change what leaves this machine, or unlink a device.
-/// Profiles are this machine's own logins, so a remote peer may neither sign
-/// in inside one nor ask about one.
 #[cfg(feature = "local-host")]
 fn refuse_remote_profile(profile: Option<&str>) -> Result<(), String> {
     if profile.is_some() && crate::request_context::remote_peer().is_some() {
@@ -1355,8 +1136,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         crate::request_context::refuse_remote("account and update methods")?;
     }
     match method {
-        // Re-open against a different archive or timezone. Owner only: a
-        // remote peer must not choose what every other caller reads.
         "open" => {
             let p: OpenParams = parse(params)?;
             *s = Session::open(&p)?;
@@ -1386,9 +1165,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // One snapshot instead of nine independently queued report calls.
-        // Every aggregate is intentionally built while the same archive
-        // session is held, so a scan cannot make the totals and tables disagree.
         "insights.snapshot" => {
             let p: QueryParams = parse(params)?;
             with_session(s, |b| {
@@ -1432,21 +1208,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // The activity calendar behind the Home screen's heatmap and streaks.
-        //
-        // Built here rather than in the client from a day report, because the
-        // grid has to align a real week to a column and the archive only stores
-        // days that had events. A client that packed those together would draw
-        // a plausible grid with every date in the wrong place.
         "activity.calendar" => {
             let p: CalendarParams = parse(params)?;
             let wants_account = p.scope.as_deref() == Some("account");
             with_session(s, |b| {
-                // The account's own grid, across every machine that syncs.
-                //
-                // Tried first when asked for, and it falls back rather than
-                // failing: an empty Home because the network is down is a worse
-                // answer than this machine's own year with a line saying so.
                 if wants_account {
                     if p.force {
                         crate::account_activity::invalidate();
@@ -1454,15 +1219,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     let today = tokenstat_core::activity::today(b.timezone());
                     match crate::account_activity::calendar(&b.prices, b.timezone(), p.weeks) {
                         Ok(account) if account.calendar.is_some() => {
-                            // Unwrapped rather than matched: the guard above is
-                            // the check, and `Some` is why we are here.
                             let Some(calendar) = account.calendar else {
                                 return Ok(Value::Null);
                             };
-                            // A remembered grid says so. The numbers are real
-                            // and they are dated, which is a different thing
-                            // from a fallback to another scope: this is still
-                            // the account's year, just not this minute's.
+
                             let (notice, code) = if account.stale {
                                 (
                                     Some(
@@ -1484,16 +1244,14 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                             }
                             return serde_json::to_value(dto).envelope();
                         }
-                        // A cached empty account is not proof it is still
-                        // empty after a failed refresh. Keep that failure out
-                        // of the successful-null onboarding path too.
+
                         Ok(account) if account.stale => {
                             return Err(DispatchError::new(
                                 "stale",
                                 "Could not refresh your activity. Try again when the connection is back.",
                             ));
                         }
-                        // Only a current empty answer can mean first use.
+
                         Ok(_) => return Ok(Value::Null),
                         Err(failure) => {
                             let code = match failure.reason {
@@ -1501,11 +1259,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                                 FailureReason::UpgradeRequired => "upgrade",
                                 FailureReason::Other => "other",
                             };
-                            // A client has no machine of its own to fall back
-                            // to, so the failure is the answer. It carries the
-                            // same code the notice would have, which is what the
-                            // front end reads to offer a sign-in, so one client
-                            // handles both shapes with one branch.
+
                             let Ok(engine) = b.engine() else {
                                 return Err(DispatchError::new(
                                     code,
@@ -1524,13 +1278,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                                 .iter()
                                 .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
                                 .collect();
-                            // The scope always says `local`, so the grid is
-                            // never labelled as the account's. The notice says
-                            // why in one line and the code tells the front end
-                            // what to do about it. An auth failure gets an
-                            // actionable sentence rather than a CLI incantation
-                            // quoted at someone who is already sitting in the
-                            // app; the front end offers a sign-in from the code.
+
                             let notice = match failure.reason {
                                 FailureReason::Authentication => {
                                     "Showing this machine only. Sign in to tokenstat.ai \
@@ -1553,33 +1301,21 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     .engine()?
                     .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
                     .envelope()?;
-                // Cost in microdollars: what the day's work actually spent.
-                // Token counts would favour high-volume cheap models over
-                // expensive ones; cost reflects real spend instead.
+
                 let days: Vec<(String, u64)> = rows
                     .iter()
                     .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
                     .collect();
-                // Anchored on today rather than on the newest day with data, so
-                // a quiet week reads as a quiet week instead of vanishing.
+
                 let today = tokenstat_core::activity::today(b.timezone());
                 match tokenstat_core::activity::calendar(&days, p.weeks, today) {
                     Some(calendar) => serde_json::to_value(CalendarDto::from(calendar)).envelope(),
-                    // An empty archive is not an error. The client draws an
-                    // empty grid and says the archive has nothing in it yet.
+
                     None => Ok(Value::Null),
                 }
             })
         }
 
-        // One day's hover detail for the Home heatmap: totals plus every
-        // `model × source` row, the same shape the public profile draws.
-        //
-        // Priced here against the same price book the calendar uses, so a
-        // hovered day's value always matches its cell. Local comes from the
-        // archive; account comes from the same cached series the account
-        // calendar is built from, so moving across the grid costs no extra
-        // network calls.
         "activity.day" => {
             let p: DayDetailParams = parse(params)?;
             with_session(s, |b| {
@@ -1589,10 +1325,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 } else {
                     b.engine()?.store().day_detail(&p.date).envelope()?
                 };
-                // Nothing happened that day. An answer, not an error: the
-                // client only asks for days the grid lit up, so a miss is
-                // usually the account cache being narrower than the local
-                // archive, and the hover just shows nothing to add.
+
                 if rows.is_empty() {
                     return Ok(Value::Null);
                 }
@@ -1601,16 +1334,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // The account's own breakdown, across every machine that syncs.
-        //
-        // The sibling of `report`, which reads this machine's archive. A client
-        // has no archive, so without this its Insights screen could only ever
-        // say "no local archive", and a phone is exactly where somebody wants to
-        // know which model ate the month.
-        //
-        // Built from the same cached series as `activity.calendar`, so the
-        // breakdown and the grid above it cannot disagree and opening the screen
-        // costs no network call of its own.
         "account.report" => {
             let p: AccountReportParams = parse(params)?;
             let group = p.group.as_deref().unwrap_or("model");
@@ -1643,9 +1366,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // What each machine on the account contributed. One request per machine,
-        // so this is asked for by a screen somebody opened rather than warmed
-        // behind one they might.
         "account.machineUsage" => {
             let p: MachineUsageParams = parse(params)?;
             with_session(s, |b| {
@@ -1679,8 +1399,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // Two-level report: "which harnesses ran in which project", and any
-        // other cross-tabulation. One query, not one per key.
         "report.split" => {
             let p: SplitParams = serde_json::from_str(params.trim()).envelope()?;
             let group = GroupBy::from(p.group);
@@ -1714,16 +1432,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // Long running. The caller must not run this on a UI thread.
         "scan" => with_session(s, |b| {
             let r = b.engine_mut()?.scan().envelope()?;
             serde_json::to_value(ScanReportDto::from(r)).envelope()
         }),
 
-        // Signed out is a state, not a failure. The bridge reports
-        // `signedIn: false` so the app can offer sign-in, and reserves the
-        // error path for a host that is unreachable or a token that was
-        // revoked, which need different words.
         "account.status" => {
             let host = tokenstat_sync::profile::resolve_api_host(None).envelope()?;
             let owner = crate::account_session::AccountSnapshot::capture().envelope()?;
@@ -1765,8 +1478,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             }
         }
 
-        // Bind a StoreKit transaction to the signed-in account, then return
-        // a fresh status so the paywall can redraw without a second round trip.
         "account.appleActivate" => {
             let p: AppleActivateParams = serde_json::from_str(params.trim()).envelope()?;
             if p.signed_transaction.trim().is_empty() {
@@ -1776,16 +1487,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 ));
             }
             tokenstat_sync::apple_activate(None, &p.signed_transaction).envelope()?;
-            // The Home grid caches Free's lock for ten minutes. A purchase
-            // just changed that answer, so the next calendar read must hit
-            // the account rather than replay the locked year.
+
             crate::account_activity::invalidate();
             let s = tokenstat_sync::sync_status(None).envelope()?;
             serde_json::to_value(account_dto_from_status(s)).envelope()
         }
 
-        // StoreKit queued a downgrade or turned auto-renew off. No new
-        // transaction yet. The signed renewal info is the proof.
         "account.appleRenewal" => {
             let p: AppleRenewalParams = serde_json::from_str(params.trim()).envelope()?;
             if p.signed_renewal_info.trim().is_empty() {
@@ -1800,8 +1507,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             serde_json::to_value(account_dto_from_status(s)).envelope()
         }
 
-        // Google Play purchase verification happens on the account service.
-        // The Android client cannot safely hold a Play Developer credential.
         "account.googleActivate" => {
             let p: GoogleActivateParams = serde_json::from_str(params.trim()).envelope()?;
             if p.package_name != "ai.tokenstat.tokenstat"
@@ -1825,7 +1530,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             serde_json::to_value(account_dto_from_status(s)).envelope()
         }
 
-        // Advice for a form while somebody types. The claim decides.
         "account.checkHandle" => {
             #[derive(Deserialize)]
             struct CheckParams {
@@ -1851,14 +1555,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             profile_write(|| tokenstat_sync::profile::handles::claim_handle(None, &p.handle))
         }
 
-        // "Not now" to the one-time offer. Answered on the account, so no
-        // other device asks again.
         "account.skipHandle" => {
             profile_write(|| tokenstat_sync::profile::handles::skip_handle_offer(None))
         }
 
-        // Publish or unpublish the profile page. Nothing else on the account
-        // changes, and going private keeps the handle.
         "account.setVisibility" => {
             #[derive(Deserialize)]
             struct VisibilityParams {
@@ -1878,11 +1578,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // Begin a device authorization. Returns the code to show and the URL to
-        // open. Opening the browser is the front end's job: this crate has no
-        // business deciding how a window behaves.
         "account.deviceStart" => {
-            // Phones declare client so they do not upload usage. They still use a slot.
             #[cfg(feature = "local-host")]
             let device = tokenstat_sync::device_start(None).envelope()?;
             #[cfg(not(feature = "local-host"))]
@@ -1895,9 +1591,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             serde_json::to_value(dto).envelope()
         }
 
-        // Poll once. Never sleeps, so the caller controls the cadence and can
-        // cancel. On confirmation the token lands in the keychain, the same
-        // entry the CLI reads.
         "account.devicePoll" => {
             let pending = with_session(s, |b| {
                 b.pending_login
@@ -1956,7 +1649,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 tokenstat_sync::logout(None)
             })
             .envelope()?;
-            // The remembered grid belongs to the account that just left.
+
             crate::account_activity::invalidate();
             with_session(s, |b| {
                 b.pending_login = None;
@@ -1965,13 +1658,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             Ok(json!({"host": host}))
         }
 
-        // Push notifications. A phone with the app closed cannot see a run
-        // end, so it asks the account to be told. Registration is per device
-        // and repeated on every launch: iOS reissues the token when it likes,
-        // and the server keys devices by the token itself.
-        //
-        // The payload a device can ask for is a fixed reason, never text. See
-        // `tokenstat_sync::push` and the website's `lib/push.js`.
         "push.register" => {
             #[derive(Default, Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -2052,24 +1738,18 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             Ok(json!({"registered": false}))
         }
 
-        // "Send a test notification", from the app's own settings. Answers how
-        // many devices took it, which is the only way somebody can tell the
-        // difference between "off" and "on but nothing has happened yet".
         "push.test" => {
             let sent =
                 tokenstat_sync::push::notify(tokenstat_sync::push::Reason::Test).envelope()?;
             Ok(json!({
                 "sent": sent.devices,
-                // Whether the server has a push key at all. A test that sent
-                // to nobody and a server that cannot send are different
-                // answers and the settings row says different things.
+
+
                 "enabled": sent.enabled,
                 "signedIn": sent.signed_in,
             }))
         }
 
-        // Opt-in plan-limits posting (P2). Stored in SyncConfig so CLI and app
-        // share one switch. Default off.
         "config.limitsSync" => {
             #[derive(Default, Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -2104,8 +1784,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             }))
         }
 
-        // Long running and it talks to the network. Same rule as `scan`: not
-        // from a thread that draws.
         "sync.run" => {
             let p: SyncParams = parse(params)?;
             with_session(s, |b| {
@@ -2122,8 +1800,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 )
                 .envelope()?;
                 if !r.dry_run {
-                    // Same reason as the scheduled run: what the account holds
-                    // just changed, and the cached grid predates it.
                     crate::account_activity::invalidate();
                 }
                 serde_json::to_value(SyncResultDto {
@@ -2138,12 +1814,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // Adopt the price book an app bundle ships with, when this machine has
-        // none of its own. Cheap, offline, and safe to call on every launch:
-        // an existing book is never replaced. See `crate::pricing::seed`.
         "pricing.seed" => {
-            // The path is arbitrary disk access and the book is what every
-            // report prices against. A remote peer gets neither.
             crate::request_context::refuse_remote("price book changes")?;
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -2162,16 +1833,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
-        // Long running and it talks to the network, same rule as `sync.run`:
-        // not from a thread that draws. This is the in-process path to the
-        // refresh the daemon already runs on its own schedule — a machine
-        // with no host agent installed has no scheduler of its own, so the
-        // app asks for it.
         "pricing.refresh" => with_session(s, |b| {
             let refreshed = tokenstat_sync::pricing::refresh(false).envelope()?;
-            // The session's cached book predates this fetch. Reload it here so
-            // the very next report prices against the new rates instead of the
-            // empty book the session opened with.
+
             crate::pricing::reload(b);
             serde_json::to_value(json!({
                 "effectiveFrom": refreshed.effective_from,
@@ -2181,8 +1845,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             .envelope()
         }),
 
-        // Remote vendor usage is fetched only after an explicit user action.
-        // Local log scanning remains separate and never needs the network.
         "fetch" => with_session(s, |b| {
             let tz = b.timezone().clone();
             let reports =
@@ -2203,14 +1865,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
     }
 }
 
-/// Automations: local work, and nothing to do with the archive.
-///
-/// Split out of the big match so the whole family carries one `cfg` rather than
-/// fifteen. Still called from `dispatch`, so an automation runs under the
-/// session lock. Its sibling family, the todo board, is answered from
-/// `sessionless` instead: see the note there. Automations stayed because they
-/// start and stop real processes, which is a larger change to make on the
-/// strength of the same argument.
 #[cfg(feature = "local-host")]
 fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     if !method.starts_with("automation.") {
@@ -2219,9 +1873,6 @@ fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>
     Some(local_job_call(method, params))
 }
 
-/// The same split `folders` and `folder_call` use: one function decides whether
-/// the method belongs here, the other answers it. That keeps `?` usable in the
-/// arms, which a function returning `Option` cannot do.
 #[cfg(feature = "local-host")]
 fn work_search_call(params: &str) -> Result<Value, DispatchError> {
     use crate::work_contracts::{ScopeKind, WorkScope};
@@ -2232,9 +1883,7 @@ fn work_search_call(params: &str) -> Result<Value, DispatchError> {
     let identity = tokenstat_identity::MachineIdentity::load_or_create()
         .map_err(|_| "machine identity is unavailable")?
         .public_key_hex();
-    // This transport authenticates a machine key, not a caller-supplied account.
-    // Return host-local references. A client may adopt them into its current
-    // account scope only after verifying the responding host and session owner.
+
     let owner = Owner {
         scope: WorkScope {
             kind: ScopeKind::Local,
@@ -2319,8 +1968,6 @@ fn handoff_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     }
 }
 
-/// Put the pull request last seen for each conversation's branch beside it.
-/// Read from the host's cache only: a chat list never asks the forge.
 #[cfg(feature = "local-host")]
 fn attach_branch_pulls(rows: &mut Value) {
     let Some(rows) = rows.as_array_mut() else {
@@ -2375,7 +2022,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     {
         store.require_private_chat(id)?;
     }
-    // Refresh directory views, without adding disk/lock work to streaming polls.
+
     if matches!(method, "chat.list" | "chat.recent") {
         store.refresh_index().envelope()?;
     }
@@ -2448,8 +2095,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             p.expected_revision,
         )?)
         .envelope(),
-        // What the host already knows about one message. Reporting only: a
-        // client asks before deciding whether to send again.
+
         "chat.receipt" => {
             let receipt = store.receipt(
                 &p.id.ok_or("chat.receipt needs id")?,
@@ -2615,13 +2261,10 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             p.stable_positions.unwrap_or(false),
         )?)
         .envelope(),
-        // One bounded page of the timeline, newest first, then older pages
-        // by the cursor each answer carries. Older clients retain physical
-        // positions; updated clients opt into stable row identities and
-        // reset-aware tailing.
+
         "chat.eventPage" => {
             let id = p.id.ok_or("chat.eventPage needs id")?;
-            // The newest page is a conversation being opened.
+
             if p.cursor.is_none()
                 && let Ok(chat) = store.get(&id)
             {
@@ -2653,10 +2296,6 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             Ok(store.personas(&p.workspace_id.ok_or("chat.personas needs a workspaceId")?)?)
         }
         "chat.personaSave" => {
-            // Scope is part of the persona itself. `workspaceId` beside it is
-            // only the route to the host that owns the folder. Treating that
-            // route as a fallback scope made a new persona with an explicit
-            // null workspace ("Every folder") local to the current folder.
             let persona = p.persona.ok_or("chat.personaSave needs persona")?;
             serde_json::to_value(store.save_persona(persona)?).envelope()
         }
@@ -2706,9 +2345,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 p.ok.unwrap_or(false),
                 p.detail,
             )?;
-            // A missing credential after a successful record is a turn that
-            // already ended. The result stays recorded, and the note stays
-            // parked for the client to send once the turn is idle.
+
             let note = store.take_steer_for_token(&token).ok().flatten();
             Ok(match note {
                 Some(note) => json!({ "recorded": true, "note": note }),
@@ -2720,8 +2357,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             &p.choice.ok_or("chat.resolveApproval needs choice")?,
         )?)
         .envelope(),
-        // Coded, so a client can tell "this host is older than that method"
-        // from "that method failed" without reading the sentence.
+
         other => Err(DispatchError::new(
             "unknown_method",
             format!("unknown chat method: {other}"),
@@ -2925,8 +2561,6 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 delegate: None,
             };
             if method == "todo.createOnce" {
-                // A retry must carry the same time limit, even after the host
-                // default changes. Clients read queue settings before composing.
                 if p.budget_seconds.is_none() {
                     return Err("A task creation needs its explicit time limit".into());
                 }
@@ -3038,20 +2672,11 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     }
 }
 
-/// Without `local-host` there is nothing here to run.
 #[cfg(not(feature = "local-host"))]
 fn local_jobs(_method: &str, _params: &str) -> Option<Result<Value, DispatchError>> {
     None
 }
 
-/// Anything under the system temp directory is hidden from the workspace list.
-///
-/// Test repositories live there and must never appear in the user's list if a
-/// test process was interrupted mid-cleanup. This used to match two known name
-/// prefixes, which is exactly the wrong shape: it hid the leaks it already knew
-/// about and showed every new one. A third prefix duly appeared and landed in
-/// the interface. The location is the signal, not the name, and nobody keeps a
-/// project they are working in inside a folder the system deletes.
 #[cfg(feature = "local-host")]
 fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
@@ -3066,8 +2691,6 @@ fn workflows(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(workflow_call(method, params))
 }
 
-/// Workflow graphs live on their own store. Design drains a backend for up
-/// to three minutes, so it must not sit on the archive lock.
 #[cfg(feature = "local-host")]
 fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
     match method {
@@ -3173,16 +2796,6 @@ fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
-/// The registered folders, and the terminals that run in them.
-///
-/// A separate function, and tried before the session lock, because all of this
-/// reads git and the filesystem and none of it reads the archive. It used to
-/// sit behind the one daemon-wide mutex, and the cost was exactly what you
-/// would expect: pressing a button to open a terminal waited for whatever scan
-/// or report happened to hold the session.
-///
-/// Returns `None` for a method it does not own, the same shape as
-/// `machine::call` and `remote::call`.
 #[cfg(feature = "local-host")]
 fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
@@ -3225,13 +2838,6 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(folder_call(method, params))
 }
 
-/// Everything a batch of summaries counts, read once.
-///
-/// Hoisted out of `summarize` because none of it is per-folder. Reading it
-/// inside the loop meant a summary of eight folders did eight of each read,
-/// and `Board::list_with` is not a getter: it reconciles delegate statuses
-/// against the run list and writes the board when one moved, so the call that
-/// exists to save work was doing eight times the work it replaced.
 #[cfg(feature = "local-host")]
 struct FolderContents {
     sessions: Vec<tokenstat_pty::SessionInfo>,
@@ -3256,11 +2862,6 @@ impl FolderContents {
     }
 }
 
-/// Count what one folder is holding.
-///
-/// A session is matched by its workspace id, falling back to its working
-/// directory for a pty the host spawned without one. Hidden ptys are daemon
-/// jobs and are not sessions a person opened, so they are not counted as any.
 #[cfg(feature = "local-host")]
 fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> WorkspaceSummaryDto {
     let described = describe(ws);
@@ -3320,34 +2921,16 @@ fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> Work
     }
 }
 
-/// The bodies, split out so they can use `?` on a `Result`.
-///
-/// Each takes the registry lock only long enough to copy the folder it needs.
-/// Nothing here runs a subprocess with a guard in hand.
 #[cfg(feature = "local-host")]
 fn folder_call(method: &str, params: &str) -> Result<Value, String> {
     match method {
-        // The registered folders, and the terminals that run in them. All of
-        // this reads git and the filesystem, never the archive, so none of it
-        // belongs behind the session lock. It used to be, and the cost was
-        // exactly what you would expect: pressing a button to open a terminal
-        // waited for whatever scan or report happened to hold the session.
-        //
-        // Each arm takes the registry lock only long enough to copy the folder
-        // it needs. Nothing below runs a subprocess with a guard in hand.
-        //
-        // Ordinary lists include fresh Git status. The explicit lightweight
-        // list omits it so a cold mobile client can show registered folders
-        // before the status scan finishes.
         "workspace.list" => {
             let params = serde_json::from_str::<Value>(params).ok();
             let quick = params
                 .as_ref()
                 .and_then(|value| value.get("includeGit").and_then(Value::as_bool))
                 == Some(false);
-            // The general folder is created on first ask and listed only for
-            // a client that knows to keep it out of its project lists. A
-            // failure to create it costs the option, never the list.
+
             let include_general = params
                 .as_ref()
                 .and_then(|value| value.get("includeGeneral").and_then(Value::as_bool))
@@ -3372,10 +2955,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 })
                 .cloned()
                 .collect();
-            // Concurrent enough to hide one slow repository, but deliberately
-            // capacity-aware: each description starts several Git processes,
-            // so an older Intel machine needs room for its foreground work
-            // while a newer Mac need not be held to the same fixed ceiling.
+
             let dtos: Vec<WorkspaceDto> = if quick {
                 folders
                     .iter()
@@ -3402,16 +2982,13 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                                 .collect();
                             handles
                                 .into_iter()
-                                // A panic reading one folder must not lose the
-                                // others, and there is nothing useful to say here.
                                 .filter_map(|h| h.join().ok())
                                 .collect::<Vec<_>>()
                         })
                     })
                     .collect()
             };
-            // Read after the status cache, so sharing a folder shows at once
-            // rather than when that folder's Git reading next expires.
+
             let shared = crate::teams::shared_workspace_organizations();
             let mut dtos = dtos;
             for dto in &mut dtos {
@@ -3431,12 +3008,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 crate::workspaces::save(&registry)?;
                 ws
             };
-            // Described after the guard is dropped: this runs git.
+
             invalidate_workspace_status(Some(&ws.id));
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
         }
 
-        // Forgets the entry. Never touches the folder.
         "workspace.remove" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
@@ -3477,8 +3053,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         "workspace.status" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            // Explicit status is a "tell me now" call: never serve a cached
-            // answer for it.
+
             invalidate_workspace_status(Some(&p.id));
             let ws = crate::workspaces::get(&p.id)?;
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
@@ -3539,15 +3114,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 .map_err(|e| e.to_string())
         }
 
-        // Counts for a folder's badges, or every folder's. One call because a
-        // front end drawing six folders' badges was making five list calls per
-        // folder and counting them itself, which is thirty round trips from a
-        // phone for a screen that is mostly numbers, and it put the definition
-        // of "what a folder has in it" in two clients at once.
-        //
-        // Cheap by construction: git comes from the same cached `describe` the
-        // folder list uses, and the other four are in-memory registry reads.
-        // Nothing here touches the archive.
         "workspace.summary" => {
             let p: WorkspaceSummaryParams = serde_json::from_str(params.trim()).unwrap_or_default();
             let folders: Vec<tokenstat_workspace::Workspace> = match p.id {
@@ -3560,14 +3126,10 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(summaries).map_err(|e| e.to_string())
         }
 
-        // Recent commits. Separate from `workspace.status` because status runs
-        // on a file-change timer and history does not change nearly as often,
-        // so joining them would spawn a `git log` every time a file is saved.
         "workspace.log" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            // Enough to scroll, few enough that a repository with a decade of
-            // history does not send its whole life over the bridge.
+
             let limit = p.limit.unwrap_or(100).min(500);
             let ws = crate::workspaces::get(&p.id)?;
             let commits = if ws.exists() {
@@ -3578,9 +3140,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(commits).map_err(|e| e.to_string())
         }
 
-        // One directory of the file tree. Lazy per directory: a monorepo has
-        // hundreds of thousands of files and nobody looks at more than one
-        // level at a time.
         "workspace.tree" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
@@ -3591,8 +3150,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(entries).map_err(|e| e.to_string())
         }
 
-        // One commit in full. Separate from `workspace.log`, which is a list:
-        // reading every commit's diff to draw a list would be absurd.
         "workspace.show" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
@@ -3624,10 +3181,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 .map_err(|e| e.to_string())
         }
 
-        // Everything below changes the repository. These exist because the app
-        // is a place to work, not a reporter: they run when someone presses a
-        // button and are never reachable from a timer or a status path. See
-        // `tokenstat_workspace::gitwrite`.
         "workspace.checkout" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
@@ -3809,19 +3362,10 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 
-        // Terminals. The process is owned here rather than by the front end,
-        // which is what lets an iPad watch a session running on a Mac and what
-        // keeps an automation alive after a window closes.
-        //
-        // This is the arm the session lock hurt most. Spawning a shell is a
-        // fork away, but it used to queue behind every scan and report first,
-        // so opening a terminal took tens of seconds on a busy daemon.
         "pty.spawn" => {
             let p: PtySpawnParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            // A workspace on another machine: spawn there through the peer's
-            // own daemon and hand back the session namespaced to this machine,
-            // so the caller can poll, type and resize it like a local one.
+
             if let Some((peer, workspace)) = split_remote(&p.workspace_id) {
                 let forwarded = json!({
                     "workspaceId": workspace,
@@ -3838,9 +3382,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
-                // Peer-local ids, before we prefix them. The cache is served
-                // as the live list, so a stamp-only invalidate still hid this
-                // session and the app treated it as gone.
+
                 crate::remote_stream::remember_pty_session(peer, &value);
                 renamespace_session(&mut value, peer);
                 return Ok(value);
@@ -3865,9 +3407,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 crate::local_models::check_ready(provider, model, agent == Some("claude_code"))?;
             }
             environment.extend(profile_environment);
-            // The selection's arguments are appended here rather than sent by
-            // the caller, so the two halves of one harness contract are decided
-            // together and a remote spawn gets the peer's own mapping.
+
             let mut args = p.args.clone();
             args.extend(crate::launcher::model_arguments(
                 &p.command,
@@ -3907,22 +3447,6 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
-/// Methods that never touch the session.
-///
-/// The pty manager is process-wide and independent of the archive, so none of
-/// these need the session at all. That is not a detail: a transport keeps the
-/// session behind a lock, and a terminal polls for output continuously. Routing
-/// these through the lock made every keystroke queue behind whatever else was
-/// running, and a `workspace.list` shells out to git three times per folder. A
-/// terminal that stalls for the length of a git status is not a terminal.
-///
-/// `pty.spawn` is deliberately not here: it resolves a workspace id, which only
-/// the session knows. It happens once per session rather than per frame.
-///
-/// `highlight` is here for the same reason as the terminal: it is called on a
-/// keystroke debounce, and it is a pure function of the text the caller already
-/// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
-/// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
     if owner_only_method(method)
         && let Err(e) = crate::request_context::refuse_remote("account and update methods")
@@ -3936,13 +3460,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             let changed = tokenstat_sync::app_info::current().as_ref() != Some(&info);
             tokenstat_sync::app_info::identify(info)
                 .map_err(|e| DispatchError::new("invalid_params", e))?;
-            // A phone's account token reads the account but never syncs, so
-            // the version headers on those reads are not recorded. Its record
-            // carries the app version only from a registration, and the one at
-            // sign-in can run before the app has said which version it is.
-            // Register again once per new version, so the device list shows
-            // the build somebody is on. A desktop host reports through its
-            // account reads instead and needs none of this.
+
             #[cfg(not(feature = "local-host"))]
             if changed && !cfg!(test) {
                 crate::remote::register_if_tunnel_enabled();
@@ -3952,17 +3470,8 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             Ok(json!({"accepted": true}))
         })());
     }
-    // Who is answering, without opening an archive to say it.
-    //
-    // A front end prefers a running daemon, and that daemon outlives the app
-    // that installed it, so an app can end up talking to a helper from an
-    // older release. Every method added since is then "unknown method", which
-    // is true and useless. This is the one call a client can make first to
-    // find out, and it is deliberately cheap: `info` opens the archive.
+
     if method == "protocol" {
-        // Every client asks this first when it connects, which is the closest
-        // thing the host sees to an app starting. Checks agent versions if
-        // the last check is over an hour old.
         #[cfg(feature = "local-host")]
         crate::agent_updates::nudge();
         return Some(Ok(json!({
@@ -3970,10 +3479,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
             "coreVersion": tokenstat_core::VERSION,
         })));
     }
-    // Somebody is looking at a conversation, or has stopped. Sessionless
-    // because it is called on a ten-second heartbeat from every client that
-    // has a chat on screen, and opening an archive to record a boolean would
-    // be the most expensive thing either app does on a timer.
+
     if matches!(method, "app.watching" | "app.stoppedWatching") {
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase", default)]
@@ -3983,9 +3489,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         }
         let p: Watching = serde_json::from_str(params).unwrap_or_default();
         let id = p.conversation_id.unwrap_or_default();
-        // Clients before watcher ids shared one legacy lease. Keeping that
-        // spelling makes the parameter additive; current clients identify
-        // their own lease so one device cannot release another's.
+
         let watcher = p.watcher_id.unwrap_or_else(|| "legacy".into());
         let owner = if crate::request_context::remote_peer().is_none() {
             match crate::account_session::AccountSnapshot::for_request(params) {
@@ -4050,14 +3554,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     if let Some(answer) = crate::teams::call(method, params) {
         return Some(answer);
     }
-    // Saved work on this device. Local-client-only: the refusal above answers
-    // a machine asking over the tunnel, so these never leave the device.
+
     if let Some(answer) = crate::work_cache::call(method, params) {
         return Some(answer.map_err(DispatchError::from));
     }
-    // Identity and the peer list. Sessionless because the Machines screen is
-    // where somebody goes when something is wrong, and an archive that will not
-    // open must not take it away from them.
+
     if let Some(answer) = crate::machine::call(method, params) {
         return Some(answer.map_err(DispatchError::from));
     }
@@ -4072,19 +3573,10 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         return Some(answer.map_err(DispatchError::from));
     }
 
-    // Serving and reaching other machines. None of these read the archive, and
-    // a call being forwarded to an idle machine must not queue behind a scan
-    // running on this one.
     if let Some(answer) = crate::remote::call(method, params) {
         return Some(answer);
     }
 
-    // The tasks board. Its own store behind its own lock, and it never touches
-    // the archive, so it has no business waiting on one. Under the session lock
-    // the board queued behind whatever else held it: a report, a sync, or
-    // another machine asking this one for a report over the tunnel. The menu
-    // bar knew there were six tasks and the list they belonged to never
-    // arrived.
     #[cfg(feature = "local-host")]
     if method.starts_with("todo.") {
         return Some(local_job_call(method, params));
@@ -4108,7 +3600,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
         return Some(chat_call(method, params));
     }
 
-    // Folders and terminals. Same reasoning: none of it reads the archive.
     #[cfg(feature = "local-host")]
     if let Some(answer) = folders(method, params) {
         return Some(answer.map_err(DispatchError::from));
@@ -4155,14 +3646,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
 
     Some(
         (match method {
-            // Where a daemon on this machine would be listening.
-            //
-            // A client needs this before it has a connection, so it is answered by
-            // the in-process transport and is sessionless by necessity. It exists
-            // so no front end reimplements the data directory rules: a client that
-            // computed the path itself would silently look in the wrong place on
-            // the day those rules change, and report "no daemon" rather than a
-            // mismatch.
             "host.socketPath" => crate::server::default_socket_path()
                 .map(|path| json!({"path": path.display().to_string()})),
 
@@ -4181,15 +3664,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                     .map_err(|e| e.to_string())
                 }),
 
-            // The app only asks whether a release exists. Applying an update to an
-            // installed application needs its signed installer and is deliberately
-            // left to the release updater, not the daemon process.
-            //
-            // Always compare both the calling app's marketing version (when
-            // provided) and this hostd's crate version. Developer machines often
-            // run a tip hostd against an older app bundle; a host-only check then
-            // reports up to date and the app never updates. `newer` is true when
-            // either side lags the release.
             "app.updateCheck" => {
                 let p: AppUpdateCheckParams = parse(params).unwrap_or_default();
                 let host = env!("CARGO_PKG_VERSION").to_string();
@@ -4211,13 +3685,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                             "latest": check.latest,
                             "newer": check.newer,
                             "htmlUrl": check.html_url,
-                            // The disk image itself, so the app can offer the download
-                            // rather than the release page it is one click inside.
+
+
                             "dmgUrl": check.app_dmg_url,
-                            // Windows desktop zip. Distinct from the CLI's
-                            // target-triple zip. Unsigned Actions builds skip
-                            // Authenticode in the app, the way a local Mac build
-                            // skips Developer ID.
+
+
                             "winZipUrl": check.app_win_url,
                             "winZipName": check.app_win_name,
                         })
@@ -4236,36 +3708,16 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                     })
             }
 
-            // Fetch the disk image and prove it is the one the release published.
-            //
-            // Stops at a verified file on disk. Mounting it, checking who signed it
-            // and replacing the application are the app's, because those need
-            // Apple's own tools and knowledge of where the running bundle lives,
-            // neither of which a daemon should be guessing at.
             "app.updateDownload" => tokenstat_sync::download_app_image()
                 .map(|path| json!({"path": path.display().to_string()}))
                 .map_err(|e| e.to_string()),
 
-            // Same contract as `app.updateDownload`, for the Windows zip.
             "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
                 .map(|path| json!({"path": path.display().to_string()}))
                 .map_err(|e| e.to_string()),
 
             "sync.scheduleStatus" => sync_schedule_status(),
 
-            // What each vendor says is left of its plan. Not derived from the
-            // archive: these are the vendor's own numbers about a quota, and a
-            // percentage we worked out ourselves would be a guess wearing a
-            // number's clothes.
-            //
-            // Codex reads off disk. Other providers make requests, so automatic
-            // readers share a minute cache and manual refresh bypasses its TTL.
-            //
-            // Sessionless, and that is the important part. Five vendor requests
-            // with timeouts measured in tens of seconds used to run while holding
-            // the session, so one unreachable vendor froze reports, the workspace
-            // list and every other screen for as long as it took to give up. None
-            // of this reads the archive.
             "usage.limits" => {
                 #[derive(Default, Deserialize)]
                 struct Params {
@@ -4273,10 +3725,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 }
                 parse::<Params>(params).map(|p| usage_limits(p.force.unwrap_or(true)))
             }
-            // The Claude live feed: whether Claude Code's status line hands
-            // its limits to tokenstat. Turning it on edits Claude Code's own
-            // settings, so it only happens from an explicit local action and
-            // is undone exactly when turned off.
+
             "usage.claudeLiveFeed" => {
                 #[cfg(feature = "local-host")]
                 {
@@ -4323,16 +3772,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 })
             }
 
-            // Call a device on this account something, from any front end. The
-            // label lives on the account row rather than on the machine, which is
-            // what lets this app name a headless server it will never log into.
-            // A code for a machine that is being set up, minted by the device
-            // doing the setting up.
-            //
-            // Owner-only, like every other account method: a peer must never be
-            // able to make this device mint a credential for a machine it chose.
-            // The code is returned once and never stored, because until it is
-            // redeemed it is the whole credential.
             "account.pairingCode" => match tokenstat_sync::mint_pairing_code(None) {
                 Ok(minted) => Ok(json!({"code": minted.code, "expiresIn": minted.expires_in})),
                 Err(error) => Err(error.to_string()),
@@ -4356,12 +3795,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
                 Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
             }
 
-            // The record is published at login and never retried, so one failed
-            // call there left the machine unknown to the account and every call
-            // that needs a device (the vault, above all) refused from then on. The
-            // vault heals this by itself now; this is the button for a person who
-            // has been told their computer is not on their account and wants to do
-            // something about it.
             "account.registerMachine" => {
                 if let Err(e) = tokenstat_sync::profile::publish_machine_identity(None) {
                     return Some(Err(e.to_string().into()));
@@ -4392,12 +3825,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, DispatchError
     )
 }
 
-/// Terminals, agent launches, and the streams and proxies that carry them.
-///
-/// One `cfg` for the whole family rather than one per arm, and the same
-/// decide-then-answer split `folders` uses so `?` still works in the arms.
-/// None of it exists without `local-host`: a platform with no fork has no
-/// terminal to list, and a client asking for one is asking the wrong machine.
 #[cfg(feature = "local-host")]
 fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("pty.")
@@ -4417,8 +3844,6 @@ fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
 fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
     match method {
         "work.overview" => {
-            // An approved client opts this host into account-bound background
-            // heartbeats. Work labels return only over the encrypted tunnel.
             crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
             Ok(crate::live_work::overview())
         }
@@ -4443,12 +3868,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 add_activity(item, siblings.get(&id).map(Vec::as_slice).unwrap_or(empty));
             }
             if include_remote {
-                // One level deep on purpose: each peer is asked with
-                // includeRemote=false, so the account cannot recurse A→B→A.
-                // The merge is served from cache and refreshed off this
-                // thread: a tunnel redial after a path change must not hold
-                // the local list (the app's patience is 10s, the channel
-                // open is also 10s).
                 items.extend(crate::remote_stream::remote_pty_lists());
             }
             Ok(Value::Array(items))
@@ -4460,13 +3879,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             }
             pty_id(params).and_then(|p| {
                 let manager = tokenstat_pty::manager();
-                // Also a lease refresh, and for one caller it is the only one.
-                // A Mac showing another machine's terminal has its `pty.read`
-                // answered from a locally pushed cache, so those reads never
-                // reach the machine that owns the pty and cannot say anybody is
-                // still watching. Liveness polling does reach it, so without
-                // this that viewer expires every fifteen seconds and the
-                // terminal's width flaps between the two machines.
+
                 if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
                     let _ = manager.touch_viewer(&p.id, viewer);
                 }
@@ -4482,14 +3895,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             })
         }
 
-        // Poll for output. Returns immediately, so the caller sets the pace.
-        // `dropped` is non-zero when the reader fell behind the buffer, and a
-        // terminal should say so rather than pretend the output never existed.
         "pty.read" => {
-            // A remote session reads from a pushed cache when a subscription
-            // is live, so the poll loop is local and the remote hop happened
-            // in the background. Falls back to forwarding when there is no
-            // subscription yet or it ended.
             if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
                 && let Some((peer, session)) = split_remote(&parsed.id)
             {
@@ -4505,11 +3911,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             }
             pty_id(params).and_then(|p| {
                 let manager = tokenstat_pty::manager();
-                // Watching is what keeps a viewer's lease alive, so the size
-                // agreement needs nothing the client has to remember to send.
-                // Before the hold, not after: a held read can park for a
-                // quarter second, and a lease that only refreshed on the way
-                // out would be that much staler for no reason.
+
                 if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
                     let _ = manager.touch_viewer(&p.id, viewer);
                 }
@@ -4520,7 +3922,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                     None => manager.read(&p.id, p.offset).map_err(|e| e.to_string()),
                 };
                 let mut chunk = read_chunk()?;
-                // Wake on new bytes or output EOF instead of polling the buffer.
+
                 if let Some(wait) = p.wait_ms.filter(|w| *w > 0)
                     && chunk.bytes.is_empty()
                 {
@@ -4530,8 +3932,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                         .wait_for_output(&p.id, chunk.next_offset.max(p.offset), false, wait)
                         .map_err(|e| e.to_string())?;
                     chunk = read_chunk()?;
-                    // Older clients use held empty reads to pace polling and
-                    // have no EOF field with which to stop their reader.
+
                     if closed && chunk.bytes.is_empty() {
                         manager
                             .wait_for_output(
@@ -4551,9 +3952,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                     "paused": chunk.paused,
                 });
                 if chunk.bytes.is_empty() {
-                    // Optional idle status avoids a separate info request.
-                    // Process exit and output EOF remain independent: an
-                    // inherited output handle can outlive the direct child.
                     let info = manager.info(&p.id).map_err(|e| e.to_string())?;
                     reply["exitCode"] = json!(info.exit_code);
                     if manager
@@ -4572,15 +3970,12 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         }
 
         "pty.write" => {
-            // Keystrokes to a subscribed remote session ride the session's
-            // channel instead of a request round trip per key.
             if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
                 && let Some((peer, session)) = split_remote(&parsed.id)
                 && let Some(data) = parsed.data
             {
                 let bytes = crate::base64::decode(&data)?;
-                // False means there is no live channel to that session, which
-                // is not a failure: fall through to the request round trip.
+
                 if crate::remote_stream::write_pty_input(peer, session, &bytes)? {
                     return Ok(json!({"written": bytes.len()}));
                 }
@@ -4616,20 +4011,12 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                         .resize(&p.id, rows, cols)
                         .map_err(|e| e.to_string())?,
                 }
-                // What the session actually became, which is not what was asked
-                // for when a smaller viewer is also attached. The caller needs
-                // the real answer: it draws that geometry.
+
                 let info = manager.info(&p.id).map_err(|e| e.to_string())?;
                 Ok(json!({"rows": info.rows, "cols": info.cols}))
             })
         }
 
-        // A front end has stopped showing a session, without killing it.
-        //
-        // Only the size agreement cares. The lease would expire on its own, so
-        // this is not what makes the feature correct, it is what makes it feel
-        // immediate: close a session on the phone and the Mac is back to its
-        // own width before the animation finishes.
         "pty.detach" => {
             if let Some(answer) = route_remote_pty("pty.detach", params) {
                 return answer;
@@ -4670,15 +4057,8 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             })
         }
 
-        // What can be launched in a workspace on this machine. The app answers
-        // this from its own PATH for a local folder; a remote folder asks the
-        // machine that owns it through `remote.call`, so the launcher always
-        // means the machine the session would actually run on.
         "launcher.catalog" => Ok(crate::launcher::catalog()),
 
-        // Profiles: more than one login per agent on this machine. See
-        // `profiles`. Owner only: a peer may not add, rename or remove a
-        // login on someone's machine.
         "profiles.list" => {
             crate::workspace_policy::require_current_access().map_err(|error| error.to_string())?;
             crate::profiles::list()
@@ -4730,14 +4110,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::launcher::check_sign_in_for(&p.id, p.profile.as_deref())
         }
 
-        // Run a catalog profile's official installer on this machine. The id
-        // names a command hardcoded in the catalog, never one supplied by the
-        // client, so over a remote connection this stays "the user clicked
-        // Install on a known tile" rather than "a peer runs anything".
-        // Installed agent versions, and with `check` the latest each vendor
-        // publishes. The check is the only part that leaves the machine. A
-        // client sends it when somebody presses the button, and the host
-        // makes its own on a schedule (see `agent_updates::start_schedule`).
         "launcher.updates" => {
             let check = serde_json::from_str::<Value>(params.trim())
                 .ok()
@@ -4745,7 +4117,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 .unwrap_or(false);
             Ok(crate::agent_updates::list(check))
         }
-        // Same rule as install: an id picks a hardcoded update path.
+
         "launcher.update" => {
             #[derive(Deserialize)]
             struct UpdateParams {
@@ -4773,11 +4145,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             }
         }
 
-        // Start an agent's own sign-in in a terminal on this machine. Id
-        // only, same rule as install: the command and its arguments are both
-        // hardcoded, so a peer picks a row rather than running something.
-        // No workspace, because a machine is signed in to an agent before it
-        // has a project.
         "launcher.signIn" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -4789,8 +4156,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 cols: u16,
                 #[serde(default)]
                 dark: Option<bool>,
-                /// Sign in inside a profile's own folder. Absent for the
-                /// machine's own login.
                 #[serde(default)]
                 profile: Option<String>,
             }
@@ -4808,9 +4173,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::launcher::sign_in(&p.id, p.rows, p.cols, p.dark, p.profile.as_deref())
         }
 
-        // Take a profile off this machine's launcher, or put it back. The
-        // set lives on the host so a phone that asks `launcher.catalog`
-        // sees the same grid as the Mac. Id only, same rule as install.
         "launcher.hide" => {
             #[derive(Deserialize)]
             struct HideParams {
@@ -4834,8 +4196,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::launcher::show(&p.id)
         }
 
-        // Allowlisted settings behind the launcher (i) badge. The form
-        // names the file. Save is the only write. Unknown keys are refused.
         "harness.config.get" => {
             #[derive(Deserialize)]
             struct GetParams {
@@ -4860,18 +4220,8 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::harness_config::set(&p.id, &p.values)
         }
 
-        // Remove a machine from the account directory. The server deletes its
-        // uploaded rows, so this is an explicit action for a machine id that
-        // is stale (a reinstall) or otherwise holding a machine-cap slot.
-        // A byte stream between machines. Runs on the machine that owns the
-        // resource: it reserves a stream and returns a token; the caller then
-        // dials a fresh connection and claims it with `{"stream": token}` as
-        // its first message.
         "stream.open" => stream_open(params),
 
-        // Bind a loopback port here and bridge every accepted connection to a
-        // proxy stream on the peer, so a browser tab can reach a service on
-        // the other machine's own localhost. The listener binds loopback only.
         "proxy.listen" => proxy_listen(params),
         "proxy.unlisten" => proxy_unlisten(params),
 
@@ -4879,8 +4229,6 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
-/// Client builds: no local pty, but a phone can still bridge a loopback port
-/// to a service on a host (Browse port in the mobile workspace UI).
 #[cfg(not(feature = "local-host"))]
 fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
@@ -4928,16 +4276,6 @@ pub(crate) fn refresh_plan_limits() {
     let _ = usage_limits(false);
 }
 
-/// Ask every vendor what is left of its plan.
-///
-/// On a host (Mac and Windows): live vendor reads, optional post to the
-/// account when the opt-in switch is on (P2). On a client (phone): GET the
-/// account store, which is what hosts posted.
-///
-/// One refresh at a time, and that lock is the only thing this serializes
-/// against. The session used to provide the same guarantee by accident, and it
-/// charged every other screen for it. Two screens asking at once should share
-/// the wait, not fan out ten requests.
 fn usage_limits(force: bool) -> Value {
     static REFRESH: crate::limits_refresh::LimitsRefresh =
         crate::limits_refresh::LimitsRefresh::new();
@@ -4968,9 +4306,6 @@ fn usage_limits(force: bool) -> Value {
 }
 
 fn fetch_usage_limits(_force: bool) -> Value {
-    // A tail expression, not a `return`: with `local-host` off this block is
-    // the whole function body, and clippy's client-build pass rejects the
-    // early return that reads naturally when both halves are present.
     #[cfg(not(feature = "local-host"))]
     {
         account_plane_limits()
@@ -5041,8 +4376,7 @@ fn fetch_usage_limits(_force: bool) -> Value {
             }
             out
         });
-        // Use only the agent's profile-aware CLI. A personal live feed,
-        // credential fallback or default-home log cannot answer for this login.
+
         let own = crate::profiles::own_logins();
         for batch in own.chunks(4) {
             std::thread::scope(|scope| {
@@ -5086,37 +4420,24 @@ fn fetch_usage_limits(_force: bool) -> Value {
                 providers.extend(jobs.into_iter().filter_map(|job| job.join().ok().flatten()));
             });
         }
-        // A vendor that could not be read this time is not a vendor whose quota is
-        // unknown. Remember every real reading and hand back the last one, marked
-        // stale and dated, when a refresh comes back with only a reason.
+
         tokenstat_core::limits::cache::store(&providers);
         let providers = tokenstat_core::limits::cache::backfill(providers)
             .into_iter()
             .filter(|p| !skipped(&p.source))
             .collect::<Vec<_>>();
-        // Opt-in P2 post: ride the same refresh the Mac already paid for.
+
         if tokenstat_sync::config::limits_sync_enabled() {
             let _ = tokenstat_sync::post_limits(None, Some(&providers));
         }
-        // Every field here is plain data the vendors just returned, so the only way
-        // this fails is a bug in the DTO, and an empty list says that plainly.
+
         serde_json::to_value(providers).unwrap_or_else(|_| json!([]))
     }
 }
 
-/// Plan limits from the account store (phone / client shape).
-///
-/// How old a posted reading may be before the phone marks it stale.
-///
-/// Wider than the host's refresh interval, so an ordinary hourly pass never
-/// makes its own readings look doubtful, and narrow enough that a Mac that has
-/// been shut since yesterday is not still quoting yesterday's quota as though
-/// it were now.
 #[cfg(not(feature = "local-host"))]
 const READING_GOES_STALE_MS: i64 = 3 * 60 * 60 * 1000;
 
-/// Hosts post; this only reads. Multiple machines can report the same source:
-/// the newest reading wins so Home shows one row per provider.
 #[cfg(not(feature = "local-host"))]
 fn account_plane_limits() -> Value {
     use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
@@ -5132,9 +4453,7 @@ fn account_plane_limits() -> Value {
             .iter()
             .map(|w| UsageWindow {
                 label: w.label.clone(),
-                // Keep the vendor's scope so two windows with the same label
-                // still read apart on the phone: "weekly (general)" beside
-                // "weekly (secondary)", the way the Mac card already does.
+
                 scope: w
                     .scope
                     .as_ref()
@@ -5149,12 +4468,7 @@ fn account_plane_limits() -> Value {
         if windows.is_empty() {
             continue;
         }
-        // Staleness is decided here, from when the reading was taken, not
-        // taken from the row. The account stores what a host posted and hands
-        // it back with `stale: false` forever, so a percentage from last week
-        // arrived on the phone looking like the current one. A quota display
-        // that is confidently wrong about how much is left is worse than one
-        // that admits its age.
+
         let age_ms = jiff::Timestamp::now().as_millisecond() - row.observed_at_ms;
         let stale = row.stale || age_ms > READING_GOES_STALE_MS;
         let reading = ProviderLimits {
@@ -5197,19 +4511,13 @@ fn pty_id(params: &str) -> Result<PtyIdParams, String> {
     serde_json::from_str(params.trim()).map_err(|e| e.to_string())
 }
 
-/// `stream.open`: reserve a byte stream on this machine and hand out the token
-/// the caller claims it with. The pump starts immediately and waits for the
-/// connection, so `proxy` and `pty.subscribe` are ready the moment the token
-/// is sent back over the call channel.
 #[cfg(feature = "local-host")]
 fn stream_open(params: &str) -> Result<Value, String> {
     let p: StreamOpenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let (kind, screen_id) = match p.kind.as_str() {
         "proxy" => {
             let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
-            // The proxy bridges to the far machine's own loopback: the point
-            // is "reach the service on that computer", not "use that computer
-            // as a gateway into its network". Anything else is refused.
+
             if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1" | "[::1]") {
                 return Err("proxy target must be on the far machine's own loopback".into());
             }
@@ -5218,7 +4526,7 @@ fn stream_open(params: &str) -> Result<Value, String> {
         }
         "pty.subscribe" => {
             let session = p.id.ok_or("pty.subscribe needs a session id")?;
-            // The session must exist here; the pump reads it by offset.
+
             tokenstat_pty::manager()
                 .info(&session)
                 .map_err(|e| e.to_string())?;
@@ -5251,10 +4559,6 @@ fn stream_open(params: &str) -> Result<Value, String> {
     Ok(json!({"token": token, "sessionID": screen_id}))
 }
 
-/// `proxy.listen`: bind a loopback port on this machine and bridge every
-/// accepted connection to a proxy stream on the peer. Loopback only, so
-/// nothing on this machine's network is exposed; the caller (a browser tab)
-/// talks to the port as if the service were local.
 #[cfg(feature = "local-host")]
 fn proxy_listen(params: &str) -> Result<Value, String> {
     let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
@@ -5267,11 +4571,6 @@ fn proxy_unlisten(params: &str) -> Result<Value, String> {
     crate::remote_proxy::unlisten(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
-/// A resource id namespaced to another machine: `remote:<peer hex>:<inner>`.
-///
-/// The same prefix the app uses for remote folder ids, so a terminal spawned
-/// in a remote folder and a session listed from a peer read as one namespace
-/// and group under the remote folder in the sidebar.
 #[cfg(feature = "local-host")]
 const REMOTE_PREFIX: &str = "remote:";
 
@@ -5301,9 +4600,6 @@ pub(crate) fn renamespace_session(value: &mut Value, peer: &str) {
     }
 }
 
-/// Forward a pty method whose session id belongs to another machine. Returns
-/// `None` when the id is local or unparseable, so the caller falls through to
-/// the local manager.
 #[cfg(feature = "local-host")]
 fn route_remote_pty(method: &str, params: &str) -> Option<Result<Value, String>> {
     let parsed: PtyIdParams = serde_json::from_str(params.trim()).ok()?;
@@ -5347,8 +4643,6 @@ struct StreamOpenParams {
     capability: Option<String>,
     #[serde(default)]
     control: bool,
-    /// Screen streams only. A name from a fixed set, checked where the session
-    /// is made. Absent means the host decides from the route.
     quality: Option<String>,
 }
 
@@ -5361,12 +4655,6 @@ struct ProxyListenParams {
     port: u16,
 }
 
-/// Colour a buffer.
-///
-/// Answers with `spans: []` and a reason rather than failing when the language
-/// is unknown or the file is too large. Both are ordinary states of an editor,
-/// and an error would put a red banner over a file that opened perfectly well
-/// and simply is not colourable.
 fn highlight(params: &str) -> Result<Value, String> {
     let p: HighlightParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let Some(language) = p.language() else {
@@ -5448,21 +4736,8 @@ mod tests {
         assert_eq!(workspace_status_worker_count(16), 8);
     }
 
-    /// A clock alone is not unique enough: two threads entering within the same
-    /// tick would build the same path and fight over one SQLite file.
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
-    /// The identity directory is chosen by a process-wide environment
-    /// variable, so the tests that point it at their own temp directory must
-    /// not run at the same time: two stores at once would read each other's
-    /// identity and approvals, and the failure would look like a refusal bug
-    /// rather than a harness bug. `tokenstat-remote`'s handshake test chose to
-    /// fold into one function for the same reason; these stay separate and
-    /// take the lock instead. Poisoned by a panicking test, which must not
-    /// take the rest of the suite down with it.
-    ///
-    /// One lock for the whole crate, in `test_identity`, so a policy test and
-    /// a dispatch test cannot each think they have the directory to themselves.
     use crate::test_identity::IDENTITY_LOCK;
 
     #[test]
@@ -5488,11 +4763,6 @@ mod tests {
         assert!(mapped.message.contains("could not save your sign-in"));
     }
 
-    /// A fresh archive per test.
-    ///
-    /// Sessions are no longer a process-wide singleton, so these run in
-    /// parallel again. While they were, every test that touched one had to
-    /// take a lock first.
     fn session() -> Session {
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-host-{}-{}",
@@ -5500,8 +4770,7 @@ mod tests {
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        // `open_local` rather than `open`, so these keep testing an archive
-        // when the crate is built without `local-host`.
+
         Session::open_local(&OpenParams {
             db_path: Some(dir.join("tokenstat.db").display().to_string()),
             timezone: Some("UTC".into()),
@@ -5509,16 +4778,6 @@ mod tests {
         .expect("open temp archive")
     }
 
-    /// Notes and tasks are counted apart.
-    ///
-    /// They live in one store as cards, so the only thing keeping a folder's
-    /// task badge honest is the kind filter. An archived note is not counted
-    /// at all: put away is put away, and a badge nobody can clear is a badge
-    /// nobody reads.
-    ///
-    /// Gated like everything it touches: `summarize`, `FolderContents` and the
-    /// card store are all behind `local-host`, and the client-only build has
-    /// no folders of its own to count.
     #[cfg(feature = "local-host")]
     #[test]
     fn a_folder_counts_notes_apart_from_tasks() {
@@ -5621,14 +4880,6 @@ mod tests {
 
     #[test]
     fn the_terminal_hot_path_never_needs_the_session() {
-        // Both transports keep the session behind a mutex, so anything routed
-        // through it serializes against archive reads and against `git status`
-        // for every registered folder. A terminal polls for output continuously
-        // and cannot wait behind that. If a method moves off this list, typing
-        // in a terminal starts stalling whenever anything else runs, and the
-        // symptom looks nothing like the cause.
-        // Terminals only exist with `local-host`: without the feature there is
-        // no pty manager behind these, so the entries join the list there.
         #[cfg(feature = "local-host")]
         let terminal_methods = [
             "pty.list",
@@ -5643,13 +4894,8 @@ mod tests {
         #[cfg(not(feature = "local-host"))]
         let terminal_methods: [&str; 0] = [];
         for method in terminal_methods.into_iter().chain([
-            // The editor re-highlights on a keystroke debounce, so it is on the
-            // same footing as the terminal. It is also a pure function of the
-            // text the caller sent, so it has nothing to ask the session about.
             "highlight",
             "highlight.syntax",
-            // Asked before a client has a connection to ask over, so it can
-            // never be behind a session.
             "host.socketPath",
             "host.policy",
             "host.provisionStatus",
@@ -5663,18 +4909,6 @@ mod tests {
             assert!(v["ok"].is_boolean(), "{method} lacks ok: {out}");
         }
 
-        // `usage.limits` belongs on that list too, for a stronger reason: it
-        // makes five vendor requests with timeouts in the tens of seconds, and
-        // behind the session it froze every other screen for the length of the
-        // slowest one. It is not exercised here because calling it would make
-        // those requests from the test suite.
-
-        // `pty.spawn` is on the list too, and that is the point of the folder
-        // registry living outside the session. Spawning a shell is a fork away,
-        // but while the workspace lookup needed the session it queued behind
-        // every scan and report first, and opening a terminal took tens of
-        // seconds on a busy daemon. Empty params fail to parse, so this reaches
-        // the envelope without starting a process.
         #[cfg(feature = "local-host")]
         {
             let out = call_sessionless("pty.spawn", "{}")
@@ -5682,9 +4916,6 @@ mod tests {
             let v: Value = serde_json::from_str(&out).expect("pty.spawn returned non-JSON");
             assert!(v["ok"].is_boolean(), "pty.spawn lacks ok: {out}");
 
-            // The folder methods are sessionless for the same reason. Not
-            // called here: `workspace.list` runs git over whatever this machine
-            // actually has registered, which is not a test's business.
             assert!(
                 folders("workspace.list", "{}").is_some(),
                 "workspace.list must not need the session"
@@ -5701,16 +4932,6 @@ mod tests {
             let design: Value = serde_json::from_str(&design).expect("workflow.design JSON");
             assert_eq!(design["ok"], false, "{design}");
 
-            // The tasks board keeps its own store behind its own lock. Under
-            // the session lock it queued behind reports, syncs, and another
-            // machine asking this one for a report, so the menu bar could know
-            // the count while the list never arrived.
-            //
-            // Asked without an id on purpose: this must prove the routing, not
-            // exercise the board. `todo.list` reconciles and auto-archives the
-            // real `todo.json` of whoever runs the suite, and a test that tidies
-            // somebody's finished cards away is a test that costs more than it
-            // proves. This arm answers before it touches the store.
             let tasks = call_sessionless("todo.remove", "{}")
                 .expect("the todo family must be answerable without a session");
             let tasks: Value = serde_json::from_str(&tasks).expect("todo.remove JSON");
@@ -5723,9 +4944,6 @@ mod tests {
             );
         }
 
-        // Anything that reads the archive still does.
-        // Pricing talks to the network and mutates the session's cached book,
-        // so it needs the lock like any other state-changing call.
         for method in ["info", "totals", "pricing.refresh"] {
             assert!(
                 call_sessionless(method, "{}").is_none(),
@@ -5808,9 +5026,8 @@ mod tests {
         let (info, _process) = manager
             .spawn_piped_owned_checked(
                 &tokenstat_pty::Spawn {
-                    // The launcher exits while its descendant retains stdout.
-                    // Use the native shell so cold Python/Xcode startup cannot
-                    // consume the process-exit deadline on a busy macOS runner.
+
+
                     command: "/bin/sh".into(),
                     args: vec![
                         "-c".into(),
@@ -5866,18 +5083,8 @@ mod tests {
         assert_eq!(end["outputEndOffset"], 12);
     }
 
-    /// The whole peer lifecycle over the real store, in one process.
-    ///
-    /// One test rather than six, because the states only mean anything in
-    /// sequence: the claim being pinned is that trust goes up only when
-    /// somebody says so and comes straight back down when they change their
-    /// mind. `TOKENSTAT_IDENTITY_DIR` keeps it out of the developer's own
-    /// peer list, which is a thing a test has no business writing to.
     #[test]
     fn a_peer_is_paired_revoked_and_forgotten() {
-        // The identity directory is process-wide, so this and the other
-        // tests that set TOKENSTAT_IDENTITY_DIR take IDENTITY_LOCK for the
-        // whole test. See the lock's comment.
         let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-identity-{}-{}",
@@ -5898,10 +5105,6 @@ mod tests {
                 .is_some_and(|f| f.contains('-'))
         );
 
-        // Any 32 bytes are a valid X25519 public key, so a fixed stranger key
-        // is the cheapest real key to pin. It must not be this machine's own
-        // key: pairing with yourself is now refused, because it is a loop
-        // nobody can click by accident.
         let stranger = "01".repeat(32);
         let paired: Value = serde_json::from_str(
             &call_sessionless(
@@ -5957,12 +5160,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Pinning your own key is a loop somebody can only hit by accident, and
-    /// every path (typed, pasted, account-supplied) answers the same way.
     #[test]
     fn pairing_with_your_own_key_is_refused() {
-        // See IDENTITY_LOCK: the environment variable is process-wide, so the
-        // identity tests are serialised rather than racing each other's dirs.
         let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-identity-self-{}-{}",
@@ -5999,16 +5198,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A machine can be called something, and the name survives the rename
-    /// round trip without touching the key.
-    ///
-    /// The key is what a peer pinned, so the property worth asserting is not
-    /// that the name changed but that renaming did not make this a different
-    /// machine to anybody who already trusts it.
     #[test]
     fn naming_a_machine_leaves_its_identity_alone() {
-        // See IDENTITY_LOCK: the environment variable is process-wide, so the
-        // identity tests are serialised rather than racing each other's dirs.
         let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-name-{}-{}",
@@ -6099,9 +5290,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The API sends a relative avatar path on purpose, so it never hands out
-    /// a third party URL. A client that treated it as a URL would render a
-    /// broken image with nothing to explain why.
     #[test]
     fn a_relative_avatar_resolves_against_its_host() {
         let raw = json!({"avatar": "/avatar/abc123.webp"});
@@ -6109,7 +5297,7 @@ mod tests {
             avatar_url("https://tokenstat.ai", &raw).as_deref(),
             Some("https://tokenstat.ai/avatar/abc123.webp")
         );
-        // A trailing slash on the host must not produce a double slash.
+
         assert_eq!(
             avatar_url("https://tokenstat.ai/", &raw).as_deref(),
             Some("https://tokenstat.ai/avatar/abc123.webp")
@@ -6165,12 +5353,6 @@ mod tests {
         assert_eq!(result["activeDays"], 1);
     }
 
-    /// An empty archive is a valid answer, not a failure.
-    ///
-    /// Home draws this grid the moment the window opens, before anything has
-    /// been scanned, and the first run of the app is exactly the case where
-    /// there is nothing yet. An error here would put a banner across a brand
-    /// new install.
     #[test]
     fn the_calendar_answers_for_an_empty_archive() {
         let mut s = session();
@@ -6210,7 +5392,7 @@ mod tests {
             profile_id: None,
             id: EventId::derive(&[id]),
             source,
-            ts: Timestamp::from_ms(1_699_920_000_000), // 2023-11-14 UTC
+            ts: Timestamp::from_ms(1_699_920_000_000),
             model: "gpt-4.1".into(),
             session: "s1".into(),
             project: "p".into(),
@@ -6242,17 +5424,15 @@ mod tests {
         assert_eq!(v["ok"], true, "{out}");
         let r = &v["result"];
         assert_eq!(r["date"], "2023-11-14");
-        assert_eq!(r["tokens"].as_u64(), Some(42), "{out}"); // (1+2+3+10) + (1+2+3+20)
+        assert_eq!(r["tokens"].as_u64(), Some(42), "{out}");
         assert_eq!(r["events"].as_u64(), Some(2), "{out}");
-        // Pricing depends on the local price book, which a CI checkout does not
-        // have. The contract this test pins is the shape of the answer (rows,
-        // totals, ordering), not the rate table, so the value stays structural.
+
         assert!(r["valueMicros"].is_number(), "{out}");
         assert!(r["unpricedModels"].is_array(), "{out}");
 
         let rows = r["rows"].as_array().expect("rows");
         assert_eq!(rows.len(), 2, "{out}");
-        // Largest slice first: the Codex row has 26 tokens, the Claude one 16.
+
         assert_eq!(rows[0]["src"], "codex", "{out}");
         assert_eq!(rows[0]["model"], "gpt-4.1", "{out}");
         assert_eq!(rows[0]["tokens"].as_u64(), Some(26), "{out}");
@@ -6264,10 +5444,6 @@ mod tests {
         assert!(q["result"].is_null(), "{quiet}");
     }
 
-    /// The editor's contract, pinned at the transport rather than only in the
-    /// highlight crate: an uncolourable file is a normal answer with a reason,
-    /// not an error, because an error puts a red banner over a file that opened
-    /// perfectly well.
     #[test]
     fn highlighting_answers_for_files_it_cannot_colour() {
         let coloured = call_sessionless(
@@ -6630,7 +5806,7 @@ mod tests {
         let v: Value = serde_json::from_str(&call(&mut s, "totals", "{}")).unwrap();
         assert_eq!(v["ok"], true, "{v}");
         assert_eq!(v["result"]["events"], 0);
-        // Unknown, not zero: an empty archive has no first date to report.
+
         assert!(v["result"]["firstDate"].is_null());
     }
 
@@ -6684,14 +5860,11 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&bad).unwrap()["ok"], false);
     }
 
-    // Without `local-host` these answer "unknown method", so the tests that
-    // exercise them are gated like the summary pair below.
     #[cfg(feature = "local-host")]
     #[test]
     fn workspaces_start_empty_and_survive_a_round_trip() {
         let mut s = session();
-        // A fresh session may inherit the real registry from the data dir, so
-        // this asserts the shape rather than emptiness.
+
         let v: Value = serde_json::from_str(&call(&mut s, "workspace.list", "{}")).unwrap();
         assert_eq!(v["ok"], true, "{v}");
         assert!(v["result"].is_array());
@@ -6753,10 +5926,6 @@ mod tests {
         assert!(v["error"]["message"].as_str().unwrap().contains("nope"));
     }
 
-    // Both of these are about a method that only exists with `local-host`.
-    // A build without the feature has no folders to summarise and no params
-    // type to parse, so the whole pair is gated rather than asserting on an
-    // answer that would be "unknown method" there.
     #[cfg(feature = "local-host")]
     #[test]
     fn a_summary_needs_no_params_and_answers_every_folder() {
@@ -6801,18 +5970,14 @@ mod tests {
 
     #[test]
     fn a_play_subscription_reaches_the_clients_as_one_word() {
-        // The account service writes "google". Every client compares against
-        // "google_play". Without this, a live Play subscriber is told their
-        // plan is not a Play purchase on the screen that offers to manage it.
         assert_eq!(normalize_billing_provider("google"), "google_play");
         assert_eq!(normalize_billing_provider("GOOGLE"), "google_play");
         assert_eq!(normalize_billing_provider(" play "), "google_play");
-        // Idempotent, so a server that switches to the long form needs no
-        // second change here.
+
         assert_eq!(normalize_billing_provider("google_play"), "google_play");
         assert_eq!(normalize_billing_provider("app_store"), "apple");
         assert_eq!(normalize_billing_provider("apple"), "apple");
-        // Anything unfamiliar passes through rather than being guessed at.
+
         assert_eq!(normalize_billing_provider("paddle"), "paddle");
         assert_eq!(normalize_billing_provider("stripe"), "stripe");
     }
@@ -6836,9 +6001,7 @@ mod tests {
     #[test]
     fn account_methods_answer_without_a_network() {
         let mut s = session();
-        // No server is reachable in a test run, so these must fail as an
-        // envelope rather than hang or panic. The point is the contract, not
-        // the verdict: a caller always gets decodable JSON back.
+
         for method in [
             "account.status",
             "account.deviceStart",
@@ -6870,7 +6033,7 @@ mod tests {
                 raw,
             })
         };
-        // An older account service still says whether the page is public.
+
         let old = status(json!({"profile_public": true}));
         assert_eq!(old.profile_public, Some(true));
         assert!(old.profile.is_none());
@@ -6884,7 +6047,7 @@ mod tests {
             wire["profile"],
             json!({"public": false, "indexable": false, "handleChangeDays": 12, "handlePrompted": false})
         );
-        // A server that does not track the offer never triggers it.
+
         assert!(
             status(json!({"profile": {"public": true}}))
                 .profile
@@ -7042,9 +6205,6 @@ mod tests {
         });
     }
 
-    /// A peer that is approved for work in a folder still does not own the
-    /// machine. These either re-point what everyone reads, change what leaves
-    /// this machine, or register a device on the account.
     #[test]
     fn a_remote_peer_cannot_change_the_archive_or_account_settings() {
         crate::request_context::with_remote_peer("phone", || {

@@ -56,8 +56,6 @@ object ChatSeat {
         return L10n.text("common.chat.seat.thinking")
     }
 
-    /// Present while the step runs, past once it has finished.
-    /// An unknown name is returned unchanged, once trimmed.
     fun word(verb: String?, running: Boolean): String {
         return when (trimVerb(verb)) {
             "Read" -> if (running) L10n.text("android.chatseat.reading.463816d0") else L10n.text("android.chatseat.read.9b9a8d05")
@@ -76,25 +74,17 @@ object ChatSeat {
         }
     }
 
-    /// The running word already says what is happening, so a Running chip
-    /// beside it would repeat the same news.
     fun speaks(verb: String?): Boolean {
         val name = trimVerb(verb)
         return word(name, true) != name
     }
 
-    /// The chip on a permission card. Pending is present tense, a decision
-    /// is past tense, and a blank name stays Approval.
     fun approvalWord(verb: String?, pending: Boolean): String {
         val name = trimVerb(verb)
         if (name.isEmpty()) return L10n.text("android.chatseat.approval.147fb813")
         return word(name, pending)
     }
 
-    /// What Always allow will store for the rest of this chat.
-    /// A command prefix is that prefix. A plain tool is its own name.
-    /// A command with no safe prefix is not stored, so the line says so
-    /// instead of naming the tool.
     fun allowAlwaysNote(verb: String?, shellPrefix: String?): String? {
         val prefix = trimVerb(shellPrefix)
         if (prefix.isNotEmpty()) {
@@ -108,7 +98,6 @@ object ChatSeat {
         return L10n.text("common.chat.approval.tool_scope", "${name}")
     }
 
-    /// Same rule as the host: a shell tool is never remembered by its name.
     fun isShell(verb: String?): Boolean {
         val name = trimVerb(verb).lowercase()
         if (name.contains("bash") || name.contains("shell") ||

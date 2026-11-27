@@ -137,9 +137,6 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             repository,
         )) = row
         else {
-            // A row that cannot be read is not a reason to walk away from the
-            // rest silently: surface the first one so a truncated read is
-            // visible where the watermark cannot see it.
             if !row_failed {
                 out.warnings.push(Warning::Unreadable {
                     path: path.to_path_buf(),
@@ -150,7 +147,6 @@ pub fn parse_db(path: &Path) -> ParseOutput {
             continue;
         };
 
-        // A NULL stays unknown; only a negative (corrupt data) clamps to zero.
         let input = input.map(to_u64);
         let output_text = output.map(to_u64);
         let cache_read = cache_read.map(to_u64);
@@ -198,7 +194,6 @@ pub fn parse_db(path: &Path) -> ParseOutput {
                 output,
             },
             extras: Extras {
-                // Folded into `output` above, so it can never exceed it.
                 reasoning_within_output: reasoning.filter(|&r| r > 0),
                 ..Extras::default()
             },
@@ -255,10 +250,6 @@ mod tests {
     use rusqlite::Connection;
 
     fn tempfile_dir() -> PathBuf {
-        // A counter as well as the clock. Tests run in parallel and two of them
-        // read the same nanosecond often enough to matter: the second one then
-        // opened the first one's database and failed on "table sessions already
-        // exists", which looks like a parser bug and is not one.
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-copilot-{}-{}-{}",
@@ -375,7 +366,6 @@ mod tests {
             )
             .unwrap();
         let out = parse_db(&path);
-        // The good row still ingests; the bad one is skipped with a warning.
         assert_eq!(out.events.len(), 1);
         assert_eq!(out.warnings.len(), 1);
     }

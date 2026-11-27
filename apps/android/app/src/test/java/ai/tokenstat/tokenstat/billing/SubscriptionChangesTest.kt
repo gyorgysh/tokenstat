@@ -15,8 +15,6 @@ class SubscriptionChangesTest {
     }
 
     @Test fun switchingBasePlansWithinAProductUsesConsoleTiming() {
-        // Google only permits CHARGE_FULL_PRICE or WITHOUT_PRORATION for
-        // same-product interval changes; the Console chooses that timing.
         for (product in tiers) {
             assertEquals(SubscriptionChange.StoreDefault, subscriptionChange(product, product, tiers))
         }

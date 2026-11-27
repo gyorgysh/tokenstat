@@ -4,9 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Additive device preferences, independent of account and host settings.
-/// Unknown fields and section identifiers survive writes by an older release.
-/// Keep existing keys/types stable and add optional keys for new semantics.</summary>
 internal sealed class SidebarPreferences
 {
     public static readonly string[] DefaultOrder = ["projects", "servers"];
@@ -42,14 +39,12 @@ internal sealed class SidebarPreferences
         }
     }
 
-    /// <summary>Folder tree or one chat list across folders. Same raw values as the Mac.</summary>
     public SidebarProjectsDisplay ProjectsDisplay
     {
         get => SidebarProjectsLayout.ParseDisplay(String("projectsDisplay"));
         set => Save(saved => saved["projectsDisplay"] = SidebarProjectsLayout.Raw(value));
     }
 
-    /// <summary>Manual, name, or recent activity. Same raw values as the Mac.</summary>
     public SidebarProjectsSort ProjectsSort
     {
         get => SidebarProjectsLayout.ParseSort(String("projectsSort"));
@@ -85,8 +80,6 @@ internal sealed class SidebarPreferences
         try
         {
             var saved = JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new();
-            // JsonNode materializes object keys lazily. Reject duplicate keys
-            // here so a corrupt file cannot throw later during navigation.
             _ = saved.Count;
             if (saved["expanded"] is JsonObject rows) _ = rows.Count;
             return saved;
@@ -99,7 +92,6 @@ internal sealed class SidebarPreferences
 
     private void Save(Action<JsonObject> update)
     {
-        // Merge the latest file so other windows and unknown future fields survive.
         var saved = Read();
         update(saved);
         _saved = saved;

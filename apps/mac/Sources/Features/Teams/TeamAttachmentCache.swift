@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Downloaded attachments are a viewing cache, never an archive. Bound both
-/// retained bytes and entry count, and retire files when their rows leave.
 struct TeamAttachmentCache<Value> {
     private struct Entry { let value: Value; let bytes: Int }
     private var entries: [String: Entry] = [:]

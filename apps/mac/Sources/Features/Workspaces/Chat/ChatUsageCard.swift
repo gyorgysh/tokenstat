@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// The usage command shares the composer's readings and the chat's inspection
-/// lease. It never sends a prompt or starts a second inspection poller.
 struct ChatUsageCard: View {
     @Bindable var model: ChatModel
     private var limitsPeer: String? { model.isSharedSource ? nil : model.peer }

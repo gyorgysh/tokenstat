@@ -17,14 +17,6 @@ using Tokenstat.Pages;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>
-/// Live sidebar content under each folder row: session rows, folder chats,
-/// section count badges, and the signed-in footer. Mirrors the Mac sidebar:
-/// session rows show context percent, cost, tokens, and Idle/Working state,
-/// chats show relative ages with Show more and See all entries, and a zero
-/// count draws no badge anywhere. Feeds are the same host methods the Mac
-/// uses: pty.list, chat.list, workspace.summary, and account.status.
-/// </summary>
 internal static class SidebarLive
 {
     private static readonly Dictionary<string, JsonArray> FolderChats = new(StringComparer.Ordinal);
@@ -34,9 +26,7 @@ internal static class SidebarLive
     public const string ChatMorePrefix = "wschatmore:";
     public const string ChatAllPrefix = "wschatall:";
 
-    /// <summary>Chat rows drawn without asking, like the Mac collapsed limit.</summary>
     public const int CollapsedChats = 5;
-    /// <summary>Chat rows drawn when expanded, like the Mac inline limit.</summary>
     public const int InlineChats = 10;
 
     public static bool IsLiveTag(string? tag) =>
@@ -46,22 +36,14 @@ internal static class SidebarLive
             || tag.StartsWith(ChatMorePrefix, StringComparison.Ordinal)
             || tag.StartsWith(ChatAllPrefix, StringComparison.Ordinal));
 
-    /// <summary>
-    /// Split a live row tag into its folder id and leaf id. Both ids may
-    /// carry a remote namespace, so each component is escaped separately.
-    /// </summary>
     public static bool TrySplit(string tag, string prefix, out string folderId, out string leaf) =>
         LiveRoute.TrySplit(tag, prefix, out folderId, out leaf);
 
-    /// <summary>
-    /// Live sessions and every registered folder's chats, including new chats
-    /// without messages. A failed call keeps that folder's last known rows.
-    /// </summary>
     public static async Task<(JsonArray? Sessions, JsonArray? Chats)> FetchFastAsync(IEnumerable<string> workspaceIds)
     {
         JsonArray? sessions = null;
         try { sessions = Format.Items(await AppServices.Host.CallAsync("pty.list")); }
-        catch { /* A missed tick keeps the last session rows. */ }
+        catch { }
         var folders = workspaceIds.Where(id => id.Length > 0).Distinct().ToArray();
         foreach (var gone in FolderChats.Keys.Except(folders).ToArray()) FolderChats.Remove(gone);
         await Task.WhenAll(folders.Select(async folder =>
@@ -83,7 +65,7 @@ internal static class SidebarLive
                 }
                 FolderChats[folder] = mapped;
             }
-            catch { /* Keep this folder's last known chats on a missed poll. */ }
+            catch { }
         }));
         var chats = new JsonArray();
         foreach (var chat in FolderChats.Values.SelectMany(rows => rows).OfType<JsonNode>()
@@ -92,10 +74,6 @@ internal static class SidebarLive
         return (sessions, chats);
     }
 
-    /// <summary>
-    /// The slow poll: per-folder counts and the signed-in account. One call
-    /// each, like the Mac summary read, so badges never cost a call per folder.
-    /// </summary>
     public static async Task<(Dictionary<string, JsonNode>? Summaries, JsonNode? Account)> FetchSlowAsync()
     {
         Dictionary<string, JsonNode>? summaries = null;
@@ -118,7 +96,6 @@ internal static class SidebarLive
         }
         catch
         {
-            // Badges keep their last counts until the next slow tick.
         }
         try
         {
@@ -130,10 +107,6 @@ internal static class SidebarLive
         return (summaries, account);
     }
 
-    /// <summary>
-    /// One compact live session row: title and state, with meters in its hover card. Tag routes to the
-    /// session's terminal through the sidebar selection handler.
-    /// </summary>
     public static NavigationViewItem SessionItem(string folderId, JsonNode item, JsonNode? folder = null)
     {
         var id = Format.Text(item, "id");
@@ -197,12 +170,6 @@ internal static class SidebarLive
         return row;
     }
 
-    /// <summary>
-    /// One recent conversation row: title, backend and age. Tapping opens the
-    /// conversation in its folder chat, like the Mac sidebar row. A
-    /// <paramref name="caption"/> replaces the age: the chat list names the
-    /// folder there, because its day heading already says when.
-    /// </summary>
     public static NavigationViewItem ChatItem(string folderId, JsonNode chat, string? folderName = null, JsonNode? folder = null,
         string? caption = null)
     {
@@ -321,7 +288,6 @@ internal static class SidebarLive
         return row;
     }
 
-    /// <summary>A quiet expander row: Show N more, Show less, See all chats.</summary>
     public static NavigationViewItem ActionItem(string tag, string label)
     {
         var row = new NavigationViewItem
@@ -342,9 +308,6 @@ internal static class SidebarLive
         return row;
     }
 
-    /// <summary>
-    /// Who is signed in: avatar, name and tier badge, with a menu affordance.
-    /// </summary>
     public static UIElement AccountFooter(JsonNode account, Action onOpen)
     {
         var handle = Format.Text(account, "handle");
@@ -411,10 +374,6 @@ internal static class SidebarLive
         return open;
     }
 
-    /// <summary>
-    /// The session title: the harness name for an agent command, else the
-    /// launched basename. Same mapping the Mac rows use.
-    /// </summary>
     public static string SessionTitle(string command)
     {
         var baseName = command;
@@ -431,15 +390,8 @@ internal static class SidebarLive
         return id is null ? baseName : HarnessName(id);
     }
 
-    /// <summary>
-    /// What the session is doing: the host attention flag first, then its
-    /// working/idle verdict. Absent means the sampler has not reached it yet,
-    /// which reads as Starting and never as Idle.
-    /// </summary>
     public static (string Label, Windows.UI.Color Tint) SessionState(JsonNode item)
     {
-        // Retained done/error records describe a turn. An exited process
-        // must not keep a Working/Idle badge from its last report.
         if (Format.Text(item, "alive") == "false")
         {
             if (item["exitCode"] is null)
@@ -448,7 +400,6 @@ internal static class SidebarLive
                 ? (L10n.Text("common.done"), Theme.StateIdle)
                 : (L10n.Text("common.failed"), Theme.Danger);
         }
-        // Keep the compatibility field Working/Idle; completion is additive.
         var programState = Format.Text(item["programStatus"], "state");
         if (programState == "done") return (L10n.Text("common.done"), Theme.StateIdle);
         if (programState == "error") return (L10n.Text("common.failed"), Theme.Danger);
@@ -478,10 +429,6 @@ internal static class SidebarLive
         };
     }
 
-    /// <summary>
-    /// The meter line: context, cost, tokens in fixed places, like the Mac
-    /// row. CPU and RAM stay the fallback before any meter exists.
-    /// </summary>
     public static string? SessionStats(JsonNode? item)
     {
         if (item is null)
@@ -565,7 +512,6 @@ internal static class SidebarLive
         return null;
     }
 
-    /// <summary>A host moment in short relative form, for sidebar rows.</summary>
     public static string RelativeShort(long ms)
     {
         DateTimeOffset moment;
@@ -597,10 +543,6 @@ internal static class SidebarLive
         return moment.LocalDateTime.ToString("d", CultureInfo.CurrentCulture);
     }
 
-    /// <summary>
-    /// The chat row's age, the Mac's CompactAge: "now", "5m", "3h", "4d",
-    /// "6w", "1y". Never a full date, so the title keeps the row's width.
-    /// </summary>
     public static string CompactAge(long ms)
     {
         DateTimeOffset moment;
@@ -618,7 +560,6 @@ internal static class SidebarLive
         };
     }
 
-    /// <summary>Display name for a harness, the same spelling the Mac uses.</summary>
     public static string HarnessName(string id)
     {
         if (id == "opencode2")

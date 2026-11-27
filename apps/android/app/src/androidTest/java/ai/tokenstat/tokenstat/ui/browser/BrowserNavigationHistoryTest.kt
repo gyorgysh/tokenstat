@@ -33,7 +33,7 @@ class BrowserNavigationHistoryTest {
                         socket.accept().use { client ->
                             client.soTimeout = 5_000
                             val reader = client.getInputStream().bufferedReader()
-                            while (!reader.readLine().isNullOrEmpty()) { /* Request headers. */ }
+                            while (!reader.readLine().isNullOrEmpty()) { }
                             val body = "<!doctype html><title>$label</title><body>$label</body>".toByteArray()
                             client.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" +
                                 "Content-Length: ${body.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray() + body)

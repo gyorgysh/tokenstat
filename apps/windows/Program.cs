@@ -47,7 +47,6 @@ internal static class Program
             }
             catch
             {
-                // Logging must not become a second crash.
             }
             try
             {
@@ -79,7 +78,7 @@ internal static class Program
                 File.AppendAllText(path, $"{DateTime.UtcNow:o} pid={Environment.ProcessId} {message}{Environment.NewLine}");
             }
         }
-        catch { /* Preserve the original failure if diagnostics cannot be written. */ }
+        catch { }
     }
 
     private static readonly object StartupLogGate = new();

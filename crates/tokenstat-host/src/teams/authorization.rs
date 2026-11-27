@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{api_error, client};
 use crate::lease_clock::{Deadline, Stamp};
 use crate::{account_session::AccountSnapshot, error::DispatchError};
@@ -77,8 +76,7 @@ impl AuthorizedTeamPrincipal {
         {
             return Err(expired());
         }
-        // Even the physical publisher needs current repository membership,
-        // device consent and the exact signed share scope on every call.
+
         let value = client
             .validate_connection(proof.ticket())
             .map_err(|error| {
@@ -170,8 +168,6 @@ impl AuthorizedTeamPrincipal {
         self.ensure_live_at(Time::now())
     }
     fn ensure_live_at(&self, now: Time) -> Result<(), DispatchError> {
-        // Check signed expiry and both local clocks immediately before
-        // effects, including suspension combined with wall-clock rollback.
         if now.monotonic >= self.deadline
             || now.wall >= self.expires_at
             || self
@@ -190,8 +186,7 @@ impl AuthorizedTeamPrincipal {
         if let Some(client) = &self.client {
             return client.ensure_current().map_err(api_error);
         }
-        // Storage unit fixtures have no account client. Incoming production
-        // principals are created only by online authorization or loopback.
+
         #[cfg(test)]
         return Ok(());
         #[cfg(not(test))]
@@ -199,8 +194,6 @@ impl AuthorizedTeamPrincipal {
     }
     #[cfg(all(test, feature = "local-host"))]
     pub(crate) fn storage_fixture(value: TeamPrincipal) -> Self {
-        // Give storage fixtures time for Git setup and repeated reviews on
-        // slow CI workers. Clock-driven authorization tests cover lease expiry.
         let lifetime = std::time::Duration::from_secs(10 * 60);
         Self {
             value,
@@ -343,8 +336,7 @@ impl Gate {
             .map_err(|_| expired())?;
         let next = verified.claims();
         let prior = self.previous.claims();
-        // Renewal refreshes authority for the same connection; it cannot
-        // select another person, device, repository, chat or capability set.
+
         if next.sub != prior.sub
             || next.device != prior.device
             || next.token != prior.token
@@ -452,8 +444,7 @@ impl Authorization {
             return Err(expired());
         }
         let publisher = capabilities.actor_id.ok_or_else(expired)?;
-        // Keys come from the host's captured account origin, never a URL or
-        // account id supplied by the connecting person or relay.
+
         let keys = client.verification_keys().map_err(api_error)?;
         let ticket = channel.ticket().map_err(|_| expired())?;
         let gate = Gate::new(keys, device, host, publisher, &ticket, Time::now())?;
@@ -468,8 +459,7 @@ impl Authorization {
         let principal = self.gate.authorize(&ticket, Time::now, |verified| {
             self.client.validate_connection(verified).map_err(api_error)
         })?;
-        // A channel or login retired during the authority round trip cannot
-        // publish a late response into another account or connection.
+
         self.channel.ticket().map_err(|_| expired())?;
         self.client.ensure_current().map_err(api_error)?;
         #[cfg(feature = "local-host")]
@@ -539,11 +529,10 @@ mod tests {
             captured.ticket.as_ref().unwrap().ticket().wire_value(),
             ticket.wire_value()
         );
-        // The public signature vector is historical. Only this unit fixture's
-        // local expiry is moved so the retained binding can be exercised.
+
         captured.expires_at = Time::now().wall + 60;
         assert!(captured.run_ticket().is_ok());
-        // A share-scoped Run proof cannot start a new chat.
+
         assert!(captured.new_chat_ticket().is_err());
         for field in 0..9 {
             let mut changed = captured.clone();
@@ -616,8 +605,7 @@ mod tests {
             )
             .is_err()
         );
-        // Model a system waking after signed expiry with its monotonic clock
-        // unchanged. A previously captured writer must not perform effects.
+
         assert!(
             captured
                 .ensure_live_at(Time {
@@ -626,7 +614,7 @@ mod tests {
                 })
                 .is_err()
         );
-        // Moving wall time backward cannot extend the monotonic budget.
+
         assert!(
             captured
                 .ensure_live_at(Time {
@@ -995,9 +983,7 @@ mod tests {
                 |ticket| Ok(principal(ticket)),
             )
             .unwrap();
-        // This dispatch test uses a historical signed fixture. Only its
-        // identity/scope are under test; give the captured fixture a live
-        // local clock without weakening production ticket verification.
+
         authorized.expires_at = Time::now().wall + 60;
         let session = Mutex::new(crate::Session::open_client(None).unwrap());
         let held = session.lock().unwrap();
@@ -1056,8 +1042,7 @@ mod tests {
                 done.send(()).unwrap();
             });
             let completed = result.recv_timeout(Duration::from_secs(3));
-            // Release even on a regression so a failed test cannot deadlock
-            // the suite while the worker is waiting for the personal lock.
+
             drop(held);
             assert!(
                 completed.is_ok(),

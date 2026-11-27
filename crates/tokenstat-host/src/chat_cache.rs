@@ -1,20 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! How much a conversation's next turn has to read, and for which model.
-//!
-//! An agent resends the whole conversation on every request. The provider
-//! keeps a prompt cache so a recent prefix costs little to read again, but the
-//! cache belongs to one model and lives for a few minutes or an hour. After a
-//! long pause, or on a different model, the next message reads everything at
-//! full price. Clients use this record to say so before that happens.
-//!
-//! Only Claude reports enough to know: each request in its stream carries the
-//! model, the tokens it put in front of that model, and which cache lifetime
-//! it wrote. A turn's summed usage cannot stand in for that, because a turn of
-//! many tool calls adds up the same context many times.
 
-// The record is part of every conversation. Reading a stream into it only
-// happens where turns run, which is the local host.
 #![cfg_attr(not(feature = "local-host"), allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
@@ -124,8 +110,6 @@ pub(crate) fn claude_session_in_home(base: &std::path::Path, session: &str) -> O
     session_in_projects(&base.join("projects"), session)
 }
 
-/// Claude Code files a session under a folder named after the working
-/// directory. Looking in every project folder avoids re-deriving that name.
 #[cfg(any(feature = "local-host", test))]
 fn session_in_projects(projects: &std::path::Path, session: &str) -> Option<bool> {
     let entries = std::fs::read_dir(projects).ok()?;

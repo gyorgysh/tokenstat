@@ -31,9 +31,6 @@ internal data class ChatAttachmentInputs(
     val paste: (List<Uri>, () -> Unit) -> Unit,
 )
 
-/** Keep picker, drop permissions and imports in one bounded composition. Besides
- * owning each file selection, this avoids exceeding ART's register verifier in
- * the conversation's much larger UI method. */
 @Composable
 internal fun rememberChatAttachmentInputs(
     model: AppViewModel,
@@ -49,13 +46,11 @@ internal fun rememberChatAttachmentInputs(
     val ownsCurrentOwner by rememberUpdatedState(ownsOwner)
     val reportError by rememberUpdatedState(onError)
     DisposableEffect(lease) { onDispose { lease.retire() } }
-    // A picker returning after A → B → A still belongs to the first visit.
     var pickerLease by remember { mutableStateOf<ChatAttachmentInputLease?>(null) }
     var reading by remember(lease) { mutableStateOf(false) }
     var targeted by remember(lease) { mutableStateOf(false) }
     fun importFiles(input: ChatAttachmentInputLease, uris: List<Uri>, release: () -> Unit = {}) {
         if (uris.isEmpty() || !input.accepts(currentLease) || !ownsCurrentOwner() || reading) { release(); return }
-        // Enter immediately so cancellation always releases native drop access.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             reading = true; reportError(null)
             try {

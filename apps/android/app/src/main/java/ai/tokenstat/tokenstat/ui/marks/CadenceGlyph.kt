@@ -19,10 +19,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/// Whether a weekday dot fires, with Monday as day 0, matching the host
-/// `weekdays` bitset and Apple's `CadenceGlyph.fires`. Weekly prefers the
-/// bitset when it carries days and falls back to the single `weekday`, the
-/// same choice the schedule summary makes, so the ring cannot contradict it.
 fun scheduleFires(kind: String, weekdays: Int, weekday: Int, day: Int): Boolean =
     when (kind.lowercase()) {
         "daily" -> true
@@ -34,10 +30,6 @@ fun scheduleFires(kind: String, weekdays: Int, weekday: Int, day: Int): Boolean 
         else -> false
     }
 
-/// A schedule as a shape rather than a sentence, from `CadenceGlyph.swift`.
-/// Seven dots around a ring, Monday at the top running clockwise, the live
-/// ones filled. A paused job draws in the idle tint: it still has a rhythm,
-/// it just is not keeping it. Once and interval jobs are symbols, not rings.
 @Composable
 fun CadenceGlyph(
     kind: String,

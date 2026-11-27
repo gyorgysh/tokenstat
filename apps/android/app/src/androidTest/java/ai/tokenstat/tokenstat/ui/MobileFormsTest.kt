@@ -45,7 +45,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Drives the production forms with controlled host replies; no repository is mutated. */
 @RunWith(AndroidJUnit4::class)
 class MobileFormsTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()

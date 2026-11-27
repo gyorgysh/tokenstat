@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{AuthorizedTeamPrincipal, scoped_source::Source};
 use crate::{chat::sharing::AskInput, error::DispatchError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-// Open in every build, as part of the Teams preview. Whether a computer takes
-// part is the publisher's choice per project, in `agent_access`, and a new
-// share starts with it off. Unit tests stay closed so no test can start a
-// real agent; the disposable fixture opens it for the end-to-end check.
 pub(super) fn execution_ready() -> bool {
     !cfg!(test) || super::guardian::fixture_enabled()
 }
@@ -75,8 +70,7 @@ pub(super) fn new_chat(
             "Agent runs are not available in shared chats yet.",
         ));
     }
-    // A new chat exists to Ask in, so it follows the same choice. Waiting
-    // for approval is fine here: the first Ask is what gets approved.
+
     if !super::agent_access::allows(principal.value()) {
         return Err(DispatchError::new(
             "team_agent_runs_off",

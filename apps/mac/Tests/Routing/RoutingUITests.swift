@@ -11,8 +11,6 @@ final class RoutingUITests: XCTestCase {
         terminal.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         capture(app, "iphone17-terminal-before-typing")
-        // Tap real software keys: hardware injection can hide the simulated
-        // keyboard and legitimately change the terminal's available height.
         for letter in ["a", "b", "c", "d", "e", "f"] {
             app.keyboards.keys[letter].tap()
         }
@@ -83,7 +81,6 @@ final class RoutingUITests: XCTestCase {
         let settings = app.buttons.matching(identifier: "Settings").allElementsBoundByIndex.last!
         for _ in 0..<5 { if settings.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(settings.isHittable, app.debugDescription)
-        // Tap at the far edge of the header, away from its text and chevron.
         settings.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).tap()
         XCTAssertTrue(app.switches["Use fallbacks when an agent needs sign-in"].exists, app.debugDescription)
         capture(app, "iphone17-routing-expanded")
@@ -122,7 +119,6 @@ final class RoutingUITests: XCTestCase {
         XCTAssertTrue(draft.isHittable, "Limit notice must leave the composer reachable")
         draft.tap()
         draft.typeText("QA draft remains writable")
-        // The keyboard also exposes a Send key. Target the composer action.
         let send = app.buttons.matching(identifier: "paperplane").firstMatch
         expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: send)
         waitForExpectations(timeout: 5)

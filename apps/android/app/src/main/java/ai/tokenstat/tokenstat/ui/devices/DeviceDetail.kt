@@ -98,11 +98,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/// One device: what it is, what it spent, and whether it can be reached.
-/// Port of `ClientDeviceDetailView`, the clean card stack: theme surfaces
-/// throughout, a section mark on every header, and no raw Material card
-/// fills. Hosts only carry spend; phones and tablets never upload usage,
-/// so a $0.00 card there would invent a number.
 @Composable
 fun DeviceDetailScreen(
     model: AppViewModel,
@@ -117,8 +112,6 @@ fun DeviceDetailScreen(
     onPlans: () -> Unit,
     onOpenWork: () -> Unit,
 ) {
-    // A pushed screen with its own back and title. Leaving the app toolbar
-    // above it stacked two headers, same as the folder hub did.
     HideTopBar()
     val colors = LocalTsColors.current
     val isThis = thisId != null && machine.string("id") == thisId
@@ -126,14 +119,10 @@ fun DeviceDetailScreen(
     val peer = machine.string("publicIdentity")
     val online = machine.optBoolean("online")
     val hasKey = !peer.isNullOrEmpty()
-    // Naming a device, in the row where the name is read. Empty is the undo
-    // rather than an error: the machine goes back to naming itself.
     var renaming by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var savingName by remember { mutableStateOf(false) }
     var renameError by remember { mutableStateOf<String?>(null) }
-    // The name this screen just set. `machine` is the copy this screen was
-    // opened with, so without it a rename reads as having done nothing.
     var renamedTo by remember { mutableStateOf<String?>(null) }
     val currentLabel = renamedTo ?: machine.string("label")
     val currentName = DeviceCopy.displayName(currentLabel, machine.string("platform"), isHost)
@@ -215,8 +204,6 @@ fun DeviceDetailScreen(
             SpendCard(usage = usage, loading = usageLoading, failed = usageFailed,
                 accountTotalMicros = accountTotalMicros)
         }
-        // Reachability, live readings and the two ways in, as one header.
-        // This device and keyless machines keep the split cards instead.
         if (!isThis && !peer.isNullOrEmpty() && isHost) {
             HostHeaderCard(
                 model = model,
@@ -256,18 +243,12 @@ fun DeviceDetailScreen(
             onRenameErrorChange = { renameError = it },
             onSaveName = { saveName() },
         )
-        // Which release that computer runs, and the button that moves it. A
-        // server has no application to update and nobody at the keyboard, so
-        // this is the only place it can be done from.
         if (!isThis && !peer.isNullOrEmpty() && isHost && online == true) {
             SoftwareCard(model = model, peer = peer)
         }
         if (!isThis && isHost && !peer.isNullOrEmpty()) {
             FoldersCard(onChoose = { folderFlow = FolderFlow.Choose }, onClone = { folderFlow = FolderFlow.Clone })
         }
-        // The same explanation the workspaces tab carries, with this
-        // machine's key beside it: somebody reading a device page is
-        // asking what a connection to it actually is.
         SecurityCard(
             model = model,
             peerKey = if (!isThis && hasKey) peer else null,
@@ -278,9 +259,6 @@ fun DeviceDetailScreen(
 
 private enum class FolderFlow { None, Choose, Clone }
 
-/// This device's share of spend: the figure, the window it covers, and the
-/// active days, events and account share under it. Missing readings describe
-/// whether the request is pending, unavailable, or returned no events.
 @Composable
 private fun SpendCard(usage: DeviceUsage?, loading: Boolean, failed: Boolean, accountTotalMicros: Long) {
     val colors = LocalTsColors.current
@@ -308,9 +286,6 @@ private fun SpendCard(usage: DeviceUsage?, loading: Boolean, failed: Boolean, ac
                     )
                 }
             }
-            // Top trailing, the way every other figure card carries its
-            // mark. An overlay rather than a row, because the figure
-            // under it must keep the whole width to fit.
             Box(Modifier.align(Alignment.TopEnd)) {
                 FeatureMark(name = "mark_insights", size = 26)
             }
@@ -336,10 +311,6 @@ private fun ReachCard(isThis: Boolean, online: Boolean?, hasKey: Boolean) {
     }
 }
 
-/// What another computer is doing, and the two ways in. Port of
-/// `ClientHostHeader`: the awake dot and the name, the reach sentence, the
-/// live readings while it is awake, and the Open work plus View screen
-/// rows, all on one card.
 @Composable
 private fun HostHeaderCard(
     model: AppViewModel,
@@ -353,10 +324,6 @@ private fun HostHeaderCard(
     onViewScreen: () -> Unit,
 ) {
     val colors = LocalTsColors.current
-    // Whether View screen can open there, as the host itself reports it.
-    // Until it answers, or when it cannot, the account's platform string
-    // guesses, so a Linux server never flashes a row that only ends in an
-    // error. Once the host answers, its answer wins over the guess.
     var showsScreen by remember(peer, platform) { mutableStateOf(!DeviceCopy.isHeadlessPlatform(platform)) }
     LaunchedEffect(peer) {
         val answer = runCatching {
@@ -379,8 +346,6 @@ private fun HostHeaderCard(
                 Text(reach, style = TsType.subheadline, color = colors.textSecondary)
             }
         }
-        // Only for a host that is awake. A sleeping machine has no
-        // readings, and a bar of dashes says less than no bar.
         if (online == true) {
             val (stats, failed, route) = rememberHostStats(model, peer)
             HostStatsPanel(stats = stats, failed = failed, route = route)
@@ -517,9 +482,6 @@ private fun IdentityCard(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(Space.s))
-                // Any device on the account, not only this phone. A Linux
-                // server with nothing but the CLI on it has no other way
-                // to be named.
                 TextLink(
                     label = L10n.text("common.rename"),
                     icon = ActionIcon.Edit,
@@ -537,8 +499,6 @@ private fun IdentityCard(
         machine.string("id")?.let {
             DetailLine(label = L10n.text("android.devicedetail.device_id.4ad41656"), value = it)
         }
-        // Hosts upload an archive, so their sync time is a product fact.
-        // Phones never do: lastSyncAt there is not a fact.
         if (isHost) {
             DetailLine(
                 label = L10n.text("android.devicedetail.last_sync.71967fca"),
@@ -569,10 +529,6 @@ private fun DetailLine(label: String, value: String, modifier: Modifier = Modifi
     }
 }
 
-/// Giving a machine more work after setup. The empty machine is covered
-/// from the workspaces tab; a machine that already has folders had no way
-/// in from here. Both destinations run their own connection and dismiss
-/// themselves, so this screen keeps no loading state for them.
 @Composable
 private fun FoldersCard(onChoose: () -> Unit, onClone: () -> Unit) {
     TsCard {
@@ -592,9 +548,6 @@ private fun FoldersCard(onChoose: () -> Unit, onClone: () -> Unit) {
     }
 }
 
-/// One row inside the folders card: a glyph, a title, a line of why, a
-/// chevron. Port of `DeviceActionRow`: the glyph and the panel under it
-/// are what say this is a button.
 @Composable
 private fun DeviceActionRow(title: String, subtitle: String, icon: ActionIcon, onClick: () -> Unit) {
     val colors = LocalTsColors.current
@@ -645,9 +598,6 @@ private fun ActionSeat(icon: ActionIcon, size: Int = 34) {
     }
 }
 
-/// Title plus plan fill above the device list, port of the `header` in
-/// `ClientDevicesView`: the Devices mark, a trailing capacity chip, the
-/// fill bar, and the remote line when the account cannot remote.
 @Composable
 fun DevicesHeader(machineCount: Int, machineLimit: Int?, canRemote: Boolean) {
     val colors = LocalTsColors.current
@@ -737,9 +687,6 @@ private fun capacityTint(used: Int, limit: Int?): Color {
     }
 }
 
-/// The live readings behind the stats bar: the last answer, whether the
-/// hop failed, and the observed route. Polled every 2.5 seconds while the
-/// caller is composed, like `HostStatsBar`.
 @Composable
 private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObject?, Boolean, String?> {
     var stats by remember(peer) { mutableStateOf<JsonObject?>(null) }
@@ -751,9 +698,6 @@ private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObj
             runCatching { model.hostStats(peer) }
                 .onSuccess { stats = it; failed = false }
                 .onFailure { if (stats == null) failed = true }
-            // Re-read every poll, like the readings: the tunnel is often
-            // still opening on the first pass, and a route read once stays
-            // missing forever.
             route = runCatching { model.peerRoute(peer) }.getOrNull()
                 ?.takeIf { it == "direct" || it == "relay" } ?: route
             delay(2500)
@@ -762,8 +706,6 @@ private fun rememberHostStats(model: AppViewModel, peer: String): Triple<JsonObj
     return Triple(stats, failed, route)
 }
 
-/// Power, CPU and memory after a hop to an awake host. Missing readings
-/// stay off the bar rather than drawing as zero.
 @Composable
 fun HostStatsBar(model: AppViewModel, peer: String) {
     val (stats, failed, route) = rememberHostStats(model, peer)
@@ -791,7 +733,6 @@ private fun HostStatsPanel(stats: JsonObject?, failed: Boolean, route: String?) 
 @Composable
 private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) {
     val colors = LocalTsColors.current
-    // Missing readings stay off the bar rather than drawing as zero.
     val charging = stats?.bool("charging") == true
     val power = HostStatsFormat.powerLabel(
         charging = charging,
@@ -849,9 +790,6 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     StatMeter(fraction = ramUsed.toDouble() / ramTotal)
-                    // "26 / 32 GB" does not fit the column at 16, so the
-                    // figure shrinks toward 11 until it does, the way the
-                    // Apple cell's minimumScaleFactor does.
                     var ramSize by remember(ramUsed, ramTotal) { mutableStateOf(16) }
                     Text(
                         HostStatsFormat.ramLabel(ramUsed, ramTotal),
@@ -876,9 +814,6 @@ private fun HostStatsCells(stats: JsonObject?, failed: Boolean, route: String?) 
     )
 }
 
-/// The 28 by 6 meter beside a CPU or memory figure, port of the capsule in
-/// `HostStatsBar`: accent at 12% under accent at 70%, never narrower than
-/// two points so a sliver of load still reads.
 @Composable
 private fun StatMeter(fraction: Double) {
     val colors = LocalTsColors.current
@@ -898,10 +833,6 @@ private fun StatMeter(fraction: Double) {
     }
 }
 
-/// Which release a machine is on, and the one button that moves it. Port
-/// of `HostUpdateCard`, peer only: a phone is never a host. One check, not
-/// a poll: a published release does not change fast enough to ask about on
-/// a timer.
 @Composable
 private fun SoftwareCard(model: AppViewModel, peer: String) {
     val colors = LocalTsColors.current
@@ -922,12 +853,7 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
         phase = UpdatePhase.Checking
         applied = null
         runCatching { model.prepareHost(peer, L10n.text("android.devicedetail.computer.76ed42d2")) }
-        // A host older than these methods must not be discovered by
-        // showing somebody its `unknown method` error.
         val version = probeVersion() ?: run {
-            // The tunnel session is often still coming up behind the
-            // stats bar's own prepare, which fires in the same frame.
-            // One patient retry beats hiding the card for a race.
             delay(3000)
             probeVersion()
         }
@@ -992,17 +918,11 @@ private fun SoftwareCard(model: AppViewModel, peer: String) {
         val s = state
         if (s != null && phase != UpdatePhase.Installing && phase != UpdatePhase.Checking) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                // `state` is the answer from before an install, so after one
-                // it still names a newer version. Offering Install again
-                // there would be offering work that is already done.
                 if (phase == UpdatePhase.Done) {
                     if (applied?.bool("restartPending") == true && s.bool("canRestart")) {
                         TsAccentButton(label = L10n.text("android.devicedetail.restart.6b983a81"), icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
                     }
                 } else if (s.bool("restartPending")) {
-                    // The only thing left is the restart, and it ends
-                    // whatever that machine is running, so it is never
-                    // automatic here.
                     if (s.bool("canRestart")) {
                         TsAccentButton(label = L10n.text("android.devicedetail.restart.6b983a81"), icon = ActionIcon.Refresh.vector, onClick = { apply(true) })
                     }
@@ -1089,17 +1009,12 @@ private fun UpdateReadyBody(state: JsonObject) {
             }
         }
         if (state.bool("restartPending")) {
-            // Installed but not in use. Saying "up to date" here would name
-            // a version the running process does not have.
             UpdateNote(updatePendingSentence(state), UpdateTone.WAITING)
         } else if (state.bool("newer")) {
             UpdateNote(L10n.text("android.devicedetail.version_0_is_available.874abce6", "${state.string("latest")}"), UpdateTone.AVAILABLE)
         } else {
             UpdateNote(L10n.text("android.devicedetail.up_to_date.50620fd9"), UpdateTone.PLAIN)
         }
-        // Additive, not instead of the line above: an application-managed
-        // helper that is current should still say so, and one that is
-        // behind should say both things.
         if (state.bool("appManaged")) {
             UpdateNote(
                 L10n.text("android.devicedetail.the_tokenstat_application_there_owns_its_h.c214574e"),

@@ -12,10 +12,6 @@ using Windows.System;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Where the agent field reads and writes its choice. A running chat writes
-/// through the host; the start page writes into its unsent draft.
-/// </summary>
 internal sealed record ChatAgentPickerSource(
     Func<JsonNode?> Chat,
     Func<IEnumerable<JsonNode?>> Backends,
@@ -23,32 +19,20 @@ internal sealed record ChatAgentPickerSource(
     Action Repaint,
     Func<bool>? Suppressed = null,
     Func<JsonNode, Task>? SignIn = null,
-    /// <summary>Update this agent with its own updater (protocol 55).</summary>
     Func<JsonNode, Task>? UpdateAgent = null,
     Func<AgentProfiles?>? Profiles = null,
     Func<string>? SelectedProfile = null,
     Func<string?>? ProfileLock = null,
     Func<string, Task>? PickProfile = null,
     string? LimitsWorkspace = null,
-    /// <summary>Read the profiles again after somebody manages them from the menu.</summary>
     Func<Task>? ReloadProfiles = null);
 
-/// <summary>
-/// The composer's agent field, as on the Mac: the harness mark, the model
-/// and effort, opening one panel that asks agent, then model, then effort.
-/// Shared by the chat composer and the start page so they cannot drift.
-/// </summary>
 internal static class ChatAgentPicker
 {
-    /// <summary>
-    /// Whether an agent is on this computer. Missing means the host did not
-    /// say, which is not the same as absent: only an explicit false hides it.
-    /// </summary>
     internal static bool Installed(JsonNode? backend) =>
         backend?["installed"] is not JsonValue flag
         || flag.GetValueKind() != System.Text.Json.JsonValueKind.False;
 
-    /// <summary>A short note on an agent row when it may not run as is.</summary>
     internal static string? Readiness(JsonNode? backend) => Format.Text(backend, "readiness") switch
     {
         "needsSignIn" => L10n.Text("windows.chatpage.sign_in_may_be_needed.c3dde98c"),
@@ -56,11 +40,6 @@ internal static class ChatAgentPicker
         _ => null,
     };
 
-    /// <summary>
-    /// The agent, then a model or an effort only when one was chosen.
-    /// The panel this opens is where the defaults are named.
-    /// </summary>
-    /// <summary>The last limits reading, shared by every open picker.</summary>
     private static long s_limitsAccount = -1;
     private static readonly Dictionary<string, (JsonArray Rows, DateTimeOffset Date)> LimitsByHost = new();
 
@@ -158,12 +137,6 @@ internal static class ChatAgentPicker
             field.Children.Add(dot);
         }
 
-        // Agent, then model, then effort, one question at a time. Picking a
-        // row answers the step and moves on, the last step closes the panel,
-        // and the strip at the top says what each step is set to and goes back
-        // to any of them. The conversation repaints once, when the panel
-        // closes: repainting mid-way would rebuild this button under the open
-        // flyout and close it.
         var flyout = new Flyout();
         var panel = new StackPanel { Spacing = Theme.SpaceS, Width = 360 };
         var header = new Grid { ColumnSpacing = Theme.SpaceS };
@@ -223,8 +196,6 @@ internal static class ChatAgentPicker
             ChatAgentSteps.Effort => L10n.Text("windows.chatpage.search_efforts.f7909b52"),
             _ => L10n.Text("windows.chatpage.search_agents.212fd04a"),
         };
-        // Read fresh every time: picking an agent changes which models and
-        // efforts exist while the panel is still open.
         JsonNode Chat() => source.Chat() ?? new JsonObject();
         JsonNode? CurrentBackend() => Backend(Format.Text(Chat(), "backend"));
         IReadOnlyList<string> Steps()
@@ -413,8 +384,6 @@ internal static class ChatAgentPicker
                 }
                 if (step == ChatAgentSteps.Model && item.Value.Length > 0)
                 {
-                    // Where the model runs, at a glance: the provider's
-                    // cloud, or a server on the machine, with its name.
                     var local = LocalChatModel.Provider(item.Value);
                     var lines = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
                     lines.Children.Add(label);
@@ -431,7 +400,7 @@ internal static class ChatAgentPicker
                     var mark = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
                     mark.Children.Add(new FontIcon
                     {
-                        Glyph = local is null ? "\uE753" : "\uE7F8", // Cloud, Devices
+                        Glyph = local is null ? "\uE753" : "\uE7F8",
                         FontSize = 13,
                         Width = 20,
                         Foreground = local is null ? Theme.Brush(static () => Theme.ControlGlyph) : Theme.Brush(static () => Theme.Accent),
@@ -495,8 +464,6 @@ internal static class ChatAgentPicker
             if (!picking && ChatAgentSteps.Previous(Steps(), step) is string previous) Show(previous);
         };
         search.TextChanged += (_, _) => Render();
-        // Enter takes the marked row on an empty field, so a keyboard walks all
-        // the steps without changing anything, and the first match otherwise.
         search.KeyDown += async (_, e) =>
         {
             if (e.Key != VirtualKey.Enter) return;
@@ -553,7 +520,7 @@ internal static class ChatAgentPicker
                     if (flyoutOpen && step == ChatAgentSteps.Agent) Render();
                 }
             }
-            catch { /* The rows simply carry no quota. */ }
+            catch { }
         }
         flyout.Opened += (_, _) => search.Focus(FocusState.Programmatic);
         flyout.Closed += (_, _) =>

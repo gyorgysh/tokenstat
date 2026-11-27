@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Observe launched processes after a lost response or early stream closure.
 //! Launches verify folder identity without reserving a checkout.
 
@@ -75,8 +74,6 @@ impl Registry {
         }
     }
     fn release_completed(&self, process: &ProcessWitness) {
-        // A child whose stop holds its process mutex conservatively answers
-        // false, so observation does not wait behind that stop.
         if process.completed() {
             self.entries
                 .lock()

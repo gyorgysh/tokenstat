@@ -29,9 +29,6 @@ protocol AutoCommitService: Sendable {
     func runReceipt(operationID: String) async throws -> AutomationRunOutcome?
 }
 
-/// Starts the folder's Auto commit job. Invoking this is the run, not a
-/// settings sheet. Create stays on the legacy host path because Auto commit
-/// is one job per folder, not a new scheduled job.
 @MainActor
 @Observable
 final class AutoCommitSession {
@@ -171,10 +168,6 @@ final class AutoCommitSession {
             } catch {
                 await refresh()
                 if let existing = job, !isRunning {
-                    // A concurrent create or a lost answer may reveal a job
-                    // with older instructions or a different agent. Save the
-                    // current request before running it, just as for a job
-                    // that was visible when Start was pressed.
                     let recovered = AutoCommitJob.job(
                         in: workspaceID,
                         workspaceName: folderName,

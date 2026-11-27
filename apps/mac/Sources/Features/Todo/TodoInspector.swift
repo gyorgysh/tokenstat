@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// Desktop and mobile share the durable editor and explicit checked save.
-/// Selection replaces the presentation; its scoped session keeps the writing.
 struct TodoInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]

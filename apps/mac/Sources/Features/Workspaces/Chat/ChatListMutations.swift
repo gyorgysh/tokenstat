@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-/// A read started before a completed mutation cannot undo it. Reads started
-/// afterwards remain authoritative, including later edits from another device.
 @MainActor
 final class ChatListMutations<Item: Identifiable> where Item.ID == String {
     struct Read { let owner: String; let revision: UInt64; let order: UInt64 }

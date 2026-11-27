@@ -79,8 +79,6 @@ struct ChatInstructionsCard: View {
         .onAppear { draft = chat.systemPrompt }
         .onChange(of: chat.id) { _, _ in draft = chat.systemPrompt }
         .onChange(of: chat.systemPrompt) { previous, next in
-            // Acknowledgements and persona changes must preserve unsaved edits,
-            // including edits made while an earlier Save was in flight.
             if !focused, !saving, draft == previous { draft = next }
         }
     }
@@ -105,20 +103,11 @@ struct ChatInstructionsCard: View {
 
     private var changed: Bool { draft != chat.systemPrompt }
 
-    /// The rule to show, or the state of looking for it. A finished read that
-    /// came back empty is not still loading: say the text is not available
-    /// rather than leave a spinner that never resolves.
     private var addedInstructions: String {
         if let added = model.instructions?.added, !added.isEmpty { return added }
         return model.instructionsLoaded ? L10n.text("apple.chatinstructionscard.not_available_on_this_computer.ffcbd9b9") : L10n.text("apple.chatinstructionscard.loading.ba3bbbe1")
     }
 
-    /// Name the channel for the agent actually selected.
-    ///
-    /// Claiming every backend takes a system prompt would be the same quiet
-    /// overclaim the gate tiers already refuse to make. Two of the seven have a
-    /// flag for this. The rest are told once, ahead of a message, and the
-    /// sentence says so.
     private var channelNote: String {
         let agent = model.backend(for: chat.backend)?.label ?? L10n.text("apple.chatinstructionscard.this_agent.15af7e1b")
         guard let instructions = model.instructions else {

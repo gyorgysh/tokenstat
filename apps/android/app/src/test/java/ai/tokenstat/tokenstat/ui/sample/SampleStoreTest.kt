@@ -5,9 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// The sample is a fixed fixture: one exchange, one changed line, invented
-/// readings, and the disclaimer that says so. If the copy drifts from
-/// `ClientSampleStore`, the two clients tell different stories.
 class SampleStoreTest {
     @Test
     fun conversationEndsInOneEdit() {

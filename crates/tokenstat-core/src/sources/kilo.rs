@@ -62,8 +62,6 @@ pub fn session_births(path: &Path, directory: &str) -> Vec<(i64, String)> {
 mod tests {
     use super::*;
 
-    /// A database shaped like the real one, with the turn quoted in the module
-    /// comment.
     fn temp_db() -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
@@ -91,7 +89,6 @@ mod tests {
             [assistant],
         )
         .unwrap();
-        // A model that refused before it spent anything.
         let empty = r#"{"role":"assistant","modelID":"google/gemini-3-pro-image","cost":0,
             "tokens":{"input":0,"output":0,"reasoning":0,"cache":{"write":0,"read":0}},
             "time":{"created":1787174892600}}"#;
@@ -113,8 +110,6 @@ mod tests {
         assert_eq!(e.project, "demo");
         assert_eq!(e.counters.input_fresh, Some(15493));
         assert_eq!(e.counters.cache_read, Some(2176));
-        // Reasoning is beside output in this vendor's own total, so it is
-        // folded in and the split kept in extras.
         assert_eq!(e.counters.output, Some(28 + 31));
         assert_eq!(e.extras.reasoning_within_output, Some(31));
     }

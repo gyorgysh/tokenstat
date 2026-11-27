@@ -87,8 +87,6 @@ final class SimulatorScreenNSView: NSView, SimulatorFrameSink {
                 MainActor.assumeIsolated { self?.cancelGestures(); self?.session?.connection?.releaseInputs() }
             }
         }
-        // A cached frame may arrive before the view has a window or drawable.
-        // Redraw after mounting even when the guest screen is completely still.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.renderer.redraw()

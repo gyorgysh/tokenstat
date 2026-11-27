@@ -10,8 +10,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-// JSON can escape one text byte to six bytes. The decoded text cap is enforced
-// separately; even the most escaped valid draft fits this on-disk bound.
 const MAX_RECORD_BYTES: u64 = 2 * 1024 * 1024;
 const RECORD: &str = "handoff.json";
 static OPERATIONS: Mutex<()> = Mutex::new(());
@@ -78,7 +76,7 @@ pub(crate) fn transcript_lock(root: &Path) -> Result<Guard, String> {
 
 fn file_lock(directory: &Path, name: &str, mutex: &'static Mutex<()>) -> Result<Guard, String> {
     let process = mutex.lock().map_err(|_| "handoff lock is unavailable")?;
-    // No create_dir_all: a deleted conversation must never be recreated here.
+
     if !fs::symlink_metadata(directory)
         .map_err(|e| e.to_string())?
         .is_dir()
@@ -140,8 +138,7 @@ fn read_locked(directory: &Path) -> Result<Option<Handoff>, String> {
         .revision
         .checked_sub(1)
         .ok_or("saved handoff revision is invalid")?;
-    // Reuse the wire bounds, including authenticated identifier shape. This
-    // validates a record; it does not accept device identity from an RPC body.
+
     let request = PutHandoff {
         request_id: current.request_id.clone(),
         expected_revision,
@@ -241,7 +238,7 @@ mod tests {
         let record = read(directory.path()).unwrap().unwrap();
         assert_eq!(record.revision, 1);
         assert_eq!(record.updated_at_ms, 10);
-        // An unfinished temporary write cannot replace the committed version.
+
         fs::write(
             directory.path().join(".handoff-interrupted.tmp"),
             b"partial",

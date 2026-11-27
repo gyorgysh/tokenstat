@@ -67,7 +67,6 @@ struct TokenstatLiveWorkWidget: Widget {
 #endif
 
 enum LiveWorkStyle {
-    // The middle bar of the existing app logo, used for the activity's keyline.
     static let brand = Color(red: 0x6A / 255, green: 0x3D / 255, blue: 0xFF / 255)
     static func title(_ phase: LiveWorkPhase, stale: Bool) -> String {
         stale && !phase.finished ? "Reconnecting" : phase.title

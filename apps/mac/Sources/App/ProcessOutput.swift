@@ -2,8 +2,6 @@
 #if os(macOS)
 import Foundation
 
-/// Drain both output streams while a tool runs. Waiting for exit or reading
-/// one pipe to EOF first can deadlock when the other pipe fills.
 enum ProcessOutput {
     struct Result {
         let status: Int32
@@ -27,8 +25,6 @@ enum ProcessOutput {
                       errors: String(decoding: readers[1].data, as: UTF8.self))
     }
 
-    // Each reader is written by exactly one worker. concurrentPerform joins
-    // both workers before the caller reads their completed data.
     private final class Reader: @unchecked Sendable {
         let pipe = Pipe()
         private(set) var data = Data()

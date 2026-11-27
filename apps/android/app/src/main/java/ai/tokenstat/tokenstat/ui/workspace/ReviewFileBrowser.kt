@@ -33,12 +33,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/**
- * One file at a time, like the Mac `ReviewFileBrowser`: a file list beside
- * the diff on wide screens, with a width the person can drag, and nothing
- * extra on narrow ones, where [content] shows its own picker. [content] gets
- * `true` when it should show that picker.
- */
 @Composable
 internal fun ReviewFileBrowser(
     paths: List<String>,

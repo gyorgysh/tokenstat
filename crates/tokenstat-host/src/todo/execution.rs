@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Durable task launch claims. A run identity is attached to the reviewed task
-//! before a process can start, so retries can only find or resume that run.
-
 use super::{Board, Card, CardKind, Delegate, creation};
 use crate::automations::{Automation, RunRecord, ScheduleSpec};
 use serde::{Deserialize, Serialize};
@@ -137,8 +134,7 @@ impl Board {
                 receipt.run_id.clone(),
                 receipt.placement == RunPlacement::Foreground,
             );
-            // A simultaneous retry can lose the insertion race. The durable
-            // row proves that the requested run exists, so that is success.
+
             if let Err(error) = result
                 && runs.get_run(&receipt.run_id).is_none()
             {
@@ -149,8 +145,6 @@ impl Board {
         Ok(self.run_outcome(operation_id, &receipt))
     }
 
-    /// Re-arm only a claim whose process was never recorded. A deleted card
-    /// or a card now linked to another run can never resurrect old work.
     fn prepare_claim_retry(&self, receipt: &LaunchReceipt) -> Result<bool, String> {
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(index) = cards.iter().position(|card| card.id == receipt.card_id) else {
@@ -232,9 +226,7 @@ impl Board {
             drop(launches);
             drop(creations);
             drop(cards);
-            // This is an explicit retry of the same immutable operation. The
-            // run store claims its deterministic id before spawning, so two
-            // callers can race here without creating two processes.
+
             return self.execute_claim(operation_id, receipt);
         }
 

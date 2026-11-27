@@ -53,8 +53,6 @@ enum SSHSecretStore {
         return "\(biometric ? "keychain-biometric" : "keychain"):\(id)"
     }
 
-    /// Only an explicit connection path may prompt. Background sync calls
-    /// `load`, which cannot unlock a biometric key.
     static func loadForUse(reference: String) async throws -> String {
         guard requiresBiometrics(reference) else { return try load(reference: reference) }
         try Task.checkCancellation()

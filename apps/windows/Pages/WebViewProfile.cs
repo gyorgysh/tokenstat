@@ -6,17 +6,12 @@
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Where the shared browser profile lives. Kept apart from the WebView
-/// runtime so the install script can name the folder without that stack.
-/// </summary>
 internal static class WebViewProfile
 {
     public static string Folder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "tokenstat",
         "WebView2");
-    // A failed migration keeps the old directory available for recovery.
     internal static bool MoveLegacyFrom(string installation, string? profile = null)
     {
         var legacy = Path.Combine(installation, "Tokenstat.exe.WebView2");

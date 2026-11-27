@@ -6,21 +6,15 @@
 
 import Foundation
 
-/// Static app metadata and outbound links, read once from the bundle so the
-/// About window and anything else that quotes a version share one source
-/// rather than each reaching into the info dictionary with its own fallback.
 enum AppInfo {
-    /// Marketing version, e.g. "0.2.9".
     static var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? L10n.text("common.unknown")
     }
 
-    /// Build number, e.g. "2".
     static var build: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? L10n.text("common.unknown")
     }
 
-    /// "0.2.9 (2)".
     static var versionString: String { "\(version) (\(build))" }
 
     /// Copyright line, taken from the bundle so the app and the generated
@@ -30,9 +24,6 @@ enum AppInfo {
             ?? L10n.text("apple.appinfo.pueev_o_all_rights_reserved.b1734f76")
     }
 
-    /// Tags outbound links to sites we own, so analytics can tell app traffic
-    /// apart from search and social. Left off mailto and GitHub, which have
-    /// nothing to read it.
     static let referrer = "tokenstat_app"
 
     static let website = URL(string: "https://tokenstat.ai/?ref=\(referrer)")!
@@ -43,7 +34,6 @@ enum AppInfo {
     /// reader can check.
     static let repository = URL(string: "https://github.com/gyorgysh/tokenstat")!
 
-    /// Who made it, and how to reach them. Shown in the About window.
     enum Author {
         static let name = L10n.text("apple.appinfo.gyorgy.cdb983c1")
         static let role = L10n.text("apple.appinfo.ai_native_product_engineer.e8e5f442")

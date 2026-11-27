@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Chat references use the same durable, private publication journal as their
-//! checkout. Transcript bytes remain in the canonical conversation archive.
-
 use super::*;
 
 const MAX_SHARES: usize = 10_000;
@@ -80,8 +76,7 @@ impl Store {
         let key = serde_json::json!({"owner":target.owner,"organization":target.organization,
             "repository":target.repository,"checkout":target.checkout,"request":request});
         let digest = Sha256::digest(serde_json::to_vec(&key).map_err(|_| storage())?);
-        // Unrelated requests in the same stripe may return transient Busy.
-        // Never unlink these files: an old holder could still own that inode.
+
         OwnerLease::try_acquire(&self.root.join(format!("new-chat-{:02x}.lock", digest[0])))
             .map_err(|_| storage())?
             .ok_or_else(|| {
@@ -327,7 +322,6 @@ impl Store {
         expected: u64,
     ) -> Result<ChatShare, DispatchError> {
         self.transaction(|index| {
-            // Local cleanup remains possible after withdrawing the parent.
             if !index.checkouts.iter().any(|row| {
                 row.id == target.checkout
                     && row.owner == *target.owner

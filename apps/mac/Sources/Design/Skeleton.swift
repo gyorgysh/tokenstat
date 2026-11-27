@@ -11,25 +11,10 @@ import AppKit
 import UIKit
 #endif
 
-/// Placeholders shaped like the thing that is coming.
-///
-/// Flow for a cold launch:
-/// 1. App splash (logo) while the host starts — see `LaunchState`.
-/// 2. **These** wireframes, with a light pulse so the wait does not feel frozen.
-/// 3. Real content replaces each skeleton with `.smoothIn`.
-///
-/// Never a spinner in an empty pane, and never a blurred wireframe under a
-/// brand mark on the same layer.
 enum Skeleton {
-    /// One grey bar standing in for a line of text or a number.
-    ///
-    /// `width` of nil fills the space, which is what a title or a row wants.
-    /// A soft opacity pulse (when motion is allowed) keeps the layout alive
-    /// without a shimmer that steals attention from the data about to land.
     struct Bar: View {
         var width: CGFloat?
         var height: CGFloat = 12
-        /// Phase offset so neighbouring bars do not pulse in lockstep.
         var phase: Double = 0
 
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -41,11 +26,6 @@ enum Skeleton {
         }
     }
 
-    /// A stack of rows, each a label bar and a value bar, like a list.
-    ///
-    /// Widths vary down the stack so it reads as text rather than as a bar
-    /// chart. Deterministic, not random: a placeholder that reshuffles on every
-    /// redraw is a distraction of its own.
     struct Rows: View {
         var count: Int = 5
         var showsValue = true
@@ -71,7 +51,6 @@ enum Skeleton {
         private static let labelWidths: [CGFloat] = [128, 96, 152, 84, 116, 104]
     }
 
-    /// A card-shaped placeholder: heading, subheading, and some rows.
     struct CardPlaceholder: View {
         var rows: Int = 3
 
@@ -90,7 +69,6 @@ enum Skeleton {
         }
     }
 
-    /// A page of cards still on their way, fading out towards the bottom.
     struct CardStack: View {
         var count: Int = 4
         var rows: Int = 2
@@ -108,10 +86,6 @@ enum Skeleton {
     }
 }
 
-/// Marks a placeholder subtree as non-interactive while data is loading.
-///
-/// Wireframes stay sharp (pulse lives on `Skeleton.Bar`). Real content replaces
-/// them with `.smoothIn`.
 struct Warming: ViewModifier {
     let active: Bool
 
@@ -121,21 +95,17 @@ struct Warming: ViewModifier {
 }
 
 extension View {
-    /// Mark this subtree as a placeholder for data that has not arrived.
     func warming(_ active: Bool) -> some View {
         modifier(Warming(active: active))
     }
 }
 
 extension AnyTransition {
-    /// The arrival of loaded content: a short fade with a small rise.
-    /// Collapses to a plain fade when Reduce Motion is on.
     static func smoothIn(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4))
     }
 }
 
-/// Lines of a diff on their way: two gutters and code of varying length.
 struct DiffSkeleton: View {
     var lines = 14
 
@@ -161,10 +131,8 @@ struct DiffSkeleton: View {
     private static let indents = [0, 1, 1, 2, 2, 1, 0]
 }
 
-/// Rows of a list in a side panel: a mark, a name and a short value.
 struct PanelListSkeleton: View {
     var rows = 12
-    /// A second line under the name, as a commit has.
     var twoLine = false
 
     var body: some View {
@@ -192,7 +160,6 @@ struct PanelListSkeleton: View {
     private static let widths: [CGFloat] = [150, 96, 178, 120, 164, 88]
 }
 
-/// A review on its way: the file list and the diff beside it.
 struct ReviewSkeleton: View {
     var body: some View {
         HStack(spacing: 0) {
@@ -277,7 +244,6 @@ final class SkeletonPulseView: UIView {
         backgroundColor = UIColor(Theme.border)
         layer.cornerRadius = 4
         layer.cornerCurve = .continuous
-        // The system drops layer animations with the app in the background.
         NotificationCenter.default.addObserver(self, selector: #selector(restart),
                                                name: UIApplication.willEnterForegroundNotification, object: nil)
     }
@@ -313,7 +279,6 @@ private enum SkeletonPulseMotion {
         pulse.autoreverses = true
         pulse.repeatCount = .infinity
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        // Offset into the cycle rather than delayed, so a bar is never still.
         pulse.timeOffset = phase
         layer.add(pulse, forKey: "pulse")
     }

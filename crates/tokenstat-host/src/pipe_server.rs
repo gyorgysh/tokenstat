@@ -4,13 +4,6 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
-//! Named-pipe transport for [`crate::dispatch`] on Windows.
-//!
-//! Same framing as the unix socket: one JSON request line, one JSON response
-//! line, ids echoed back. A named pipe is the local door on Windows the way a
-//! unix socket is on macOS. Remote clients are rejected at create time.
-
 #![cfg(windows)]
 
 use std::fs::File;
@@ -89,11 +82,7 @@ fn create_instance(name: &str, first: bool) -> Result<OwnedHandle, String> {
         win32::CreateNamedPipeW(
             wide.as_ptr(),
             open_mode,
-            // Byte mode and blocking wait are the zero defaults.
             PIPE_REJECT_REMOTE_CLIENTS,
-            // One extra instance is the listening handle. Cap at live
-            // connections, not at CreateNamedPipe, so a full set of clients
-            // plus the listener does not take hostd down.
             MAX_CONNECTIONS as u32 + 1,
             PIPE_BUFFER,
             PIPE_BUFFER,
@@ -217,8 +206,7 @@ fn file_from_handle(handle: OwnedHandle) -> File {
 fn refuse_busy(handle: &OwnedHandle) -> std::io::Result<()> {
     use std::mem::ManuallyDrop;
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    // Wrap without taking ownership, duplicate, then drop only the duplicate
-    // so CloseHandle stays with `handle`.
+
     let view = ManuallyDrop::new(unsafe { File::from_raw_handle(handle.as_raw_handle()) });
     let mut out = view.try_clone()?;
     let response = json!({
@@ -243,12 +231,6 @@ fn handle(owned: OwnedHandle, session: &Mutex<Session>) -> Result<(), String> {
     let mut reader = BufReader::new(file);
     let mut buf = Vec::new();
 
-    /// Read and discard the rest of an oversized line without holding it.
-    ///
-    /// The line must be consumed to its newline, or the tail would be framed
-    /// as the next request; and it must not be buffered, or the request cap
-    /// above would mean nothing. So: chunk by chunk, discard, stop at the
-    /// newline.
     fn discard_line(reader: &mut impl BufRead) -> std::io::Result<()> {
         loop {
             let available = reader.fill_buf()?;
@@ -281,9 +263,6 @@ fn handle(owned: OwnedHandle, session: &Mutex<Session>) -> Result<(), String> {
         let oversize = buf.len() > MAX_REQUEST_LINE || !buf.ends_with(b"\n");
         if oversize {
             if !buf.ends_with(b"\n") {
-                // Consume the rest of the line, discarding it chunk by chunk:
-                // a tail left in the stream would be framed as the next
-                // request, and a tail buffered whole would defeat the cap.
                 let _ = discard_line(&mut reader);
             }
             let response = json!({

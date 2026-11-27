@@ -18,13 +18,9 @@ import Foundation
         return WorkCacheKey.encoded(key)
     }
 
-    /// A learned revocation removes the host's copies, including previews.
-    /// Deletion failures do not grant reading permission: canRead remains false.
     static func purge(host: String, scope: WorkReference.Scope) async {
         let wireScope = WorkCache.scope(for: scope)
         await WorkSearchHistory.forgetCached(scope: wireScope)
-        // Drain already-started writes before listing records to remove.
-        // Queued writes prepared before the denial become stale as well.
         _ = try? await WorkCacheMutationQueue.shared.run(scope: wireScope, invalidating: true) { }
         guard let listing = try? await Bridge.cacheList(scope: wireScope) else { return }
         for record in listing.records where record.scope == wireScope {

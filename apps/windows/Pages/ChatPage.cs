@@ -24,14 +24,6 @@ using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Conversations in a folder, over the same host methods the Mac uses.
-/// The list comes first. One field picks agent, model and effort; Setup
-/// holds working style and permissions. Enter sends, Shift+Enter inserts a
-/// newline, Escape stops a running turn. Approvals sit in the transcript.
-/// While the agent asks before each tool, a short note rides the next step
-/// instead of waiting out the turn.
-/// </summary>
 internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 {
     private const int AttachmentCap = 12 * 1024 * 1024;
@@ -57,8 +49,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private ScrollViewer? _scroll;
     private bool _followEnd = true;
     private readonly FlowPanel _attachStrip = new() { Spacing = Theme.SpaceS };
-    // Keep the logical owners so a rebuild can release controls even after
-    // the old composer has been removed from the visual tree.
     private StackPanel _composerWell = new();
     private StackPanel _composerContext = new();
     private Grid _composerRow = new();
@@ -84,13 +74,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private CancellationTokenSource? _poll;
     private string? _openId;
-    /// <summary>
-    /// One conversation to open once the list loads, like the Mac pending
-    /// reveal. A notification tap names a thread this page may not have read
-    /// yet, so the id waits here rather than deciding on an empty list.
-    /// </summary>
     private string? _pendingReveal;
-    /// <summary>Whether the list load finished, so a reveal knows whether to wait for it or re-read it.</summary>
     private bool _listReady;
     private ulong _offset { get => _history.Offset; set => _history.Offset = value; }
     private bool _started;
@@ -128,30 +112,20 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
     private readonly DispatcherTimer _draftSave = new() { Interval = TimeSpan.FromMilliseconds(600) };
     private JsonNode? _openChat;
 
-    /// <summary>
-    /// A turn's changes card asked for the folder's changes. The workspace
-    /// tabs answer it by opening the Changes inspector beside the chat.
-    /// </summary>
     public event Action<string?>? ReviewChangesRequested;
     public event Action<IReadOnlyList<ChangedFile>, string?>? ReviewTurnChangesRequested;
     internal event Action<string, bool>? WorkspaceGitChanged;
     internal string ReviewTitle => Format.Text(_openChat, "title");
 
-    /// <param name="chatId">One conversation to reveal on load, from a deep
-    /// link. The list loads first and the thread opens on top of it, like
-    /// the Mac opening the named conversation in its folder chat.</param>
     public ChatPage(string workspaceId, string? chatId = null)
     {
         _workspaceId = workspaceId;
-        // The command menu has one retained logical owner. Rebuilding a
-        // composer moves this viewer, never the Content between viewers.
         _commandScroll.Content = _commandMenu;
         if (!string.IsNullOrEmpty(chatId))
         {
             _pendingReveal = chatId;
         }
         _draft.PlaceholderText = L10n.Text("windows.chatpage.ask_about_this_folder.33b8b41b");
-        // A pause in the typing, rather than a write for every key.
         _draftSave.Tick += (_, _) => RememberDraft();
         _draft.TextChanged += (_, _) => {
             _draftSave.Stop();
@@ -169,9 +143,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (string.IsNullOrEmpty(next) || next == Format.Text(_openChat, "title")) return;
             await UpdateAsync(new JsonObject { ["title"] = next });
         };
-        // The Mac reading lane: 1040 wide, leading, with the transcript
-        // gutters. A centred lane puts the reader's eye somewhere different
-        // at every window size and leaves two gutters saying nothing.
         _scroll = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL, Theme.SpaceXl, Theme.SpaceL, Theme.SpaceXl),
@@ -181,9 +152,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             Content = _root,
         };
         _scroll.ViewChanged += (_, e) => OnTranscriptViewChanged(settled: !e.IsIntermediate);
-        // Growth is not a scroll: a reply streaming in below the fold, or the
-        // composer taking height from the viewport, moves no offset and raises
-        // no ViewChanged. Pin again once layout has the new size.
         _root.SizeChanged += (_, _) => KeepFollowing();
         _scroll.SizeChanged += (_, _) => KeepFollowing();
         var transcriptHost = new Grid();
@@ -233,9 +201,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 AppServices.AccountChanged += ImagesAccountChanged;
                 RemoteWorkspaces.Changed += ImagesPeerChanged;
             }
-            // A sidebar/deep-link request can begin before this deferred
-            // callback. Let that exact destination finish instead of resetting
-            // its generation, and never replace an explicit new-chat request.
             if (_creatingChat && _creatingChatGeneration == _openGeneration) return;
             if (_openId is string id)
             {
@@ -251,8 +216,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void DetachChat()
     {
-        // Explicit navigation can start before the first deferred attach.
-        // Its loads still need retiring even if subscriptions were not added.
         if (_detached) return;
         _detached = true;
         _attached = false;
@@ -270,9 +233,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _inspectionHost.Children.Clear();
     }
 
-    /// <summary>
-    /// The folder this chat belongs to, like the Mac conversation scope.
-    /// </summary>
     public UIElement? ToolbarScope =>
         Chrome.ScopeChip(string.IsNullOrEmpty(_folderName) ? L10n.Text("windows.chatpage.chat.460b3a7d") : _folderName);
 
@@ -305,11 +265,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void RaiseToolbarChanged() => ToolbarChanged?.Invoke();
 
-    /// <summary>
-    /// The inspector column content: the open conversation's setup and spend,
-    /// like the Mac chat inspector. Selection and polls replace its children,
-    /// so the column stays live without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     private void RenderInspector()
@@ -317,8 +272,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         try { RenderInspectorContent(); }
         catch (Exception error)
         {
-            // Native UI Automation may receive a XAML exception directly
-            // from a Click handler without the app's unhandled event firing.
             Program.LogStartup($"Chat inspector construction failed: {error}");
             throw;
         }
@@ -422,12 +375,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         AddWorkingAccessCards(_inspector, chat);
     }
 
-    /// <summary>
-    /// One chat method against this folder, local or remote. A remote folder
-    /// travels as remote.call with the peer's own folder id, the way the
-    /// desktop Mac routes every chat read and write. Params are copied, never
-    /// mutated, so a retry cannot forward an already rewritten id.
-    /// </summary>
     private Task<JsonNode> CallChatAsync(string method, JsonNode? parameters = null, TimeSpan? patience = null)
     {
         if (!RemoteWorkspaces.TrySplit(_workspaceId, out var peer, out var inner))
@@ -513,8 +460,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var header = ListHeader();
         _root.Children.Add(header);
         TraceComposition("list header mounted");
-        // The archive is a new reading destination; retain drafts, but start
-        // at its header rather than the previous transcript scroll offset.
         _scroll?.ChangeView(null, 0, null, true);
         TraceComposition("list scroll reset");
         var skeleton = Motion.SkeletonCard();
@@ -543,9 +488,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     await OpenAsync(reveal);
                     return;
                 }
-                // The host just answered with the whole list and the named
-                // conversation is not in it, so it was deleted. An explicit
-                // destination must never fall back to a different thread.
                 _root.Children.Add(Chrome.Banner(
                     L10n.Text("windows.chatpage.this_conversation_is_no_longer_available_i.357d50bd"),
                     Theme.Danger, Symbol.Important));
@@ -712,7 +654,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         _draft.Text = text;
         _attachments.AddRange(files.Select(file => new StagedFile("local-" + Guid.NewGuid().ToString("N"), file.Name, file)));
         RememberDraft(); RebuildAttachStrip();
-        accepted(); // The writing now belongs to the new conversation, including refused sends.
+        accepted();
         if (NewChatSetup.ShouldSend(text, files.Count)) await SendAsync();
     }
 
@@ -726,7 +668,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             var generation = _openGeneration;
             var account = AppServices.AccountGeneration;
-            // Choosing a new agent needs its catalog; opening history does not.
             var backends = CallChatAsync("chat.backends");
             var personas = CallChatAsync("chat.personas", new JsonObject { ["workspaceId"] = _workspaceId });
             await Task.WhenAll(backends, personas);
@@ -743,18 +684,11 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 ["workspaceId"] = _workspaceId,
                 ["backend"] = Format.Text(chosen, "id", "claude"),
                 ["title"] = "New chat",
-                // Always Execute, like the Mac. Plan is a choice for one piece
-                // of work, and carried over it left every later chat planning
-                // at somebody who had asked for something to be done.
                 ["mode"] = setup?.Mode ?? "execute",
-                // New chats start in Don't ask. An explicit choice in this
-                // draft still wins; existing chats keep their permissions.
                 ["autonomy"] = Format.Text(chosen, "gateTier") == "bypassOnly"
                     ? "bypass"
                     : setup?.Autonomy ?? "bypass",
             };
-            // The rest of the last setup travels when this agent still
-            // offers it. A model or effort it no longer lists is dropped.
             if (setup is not null)
             {
                 if (setup.Model is not null) request["model"] = setup.Model;
@@ -792,13 +726,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         finally { _creatingChat = false; }
     }
 
-    /// <summary>
-    /// Open one conversation by id, from a notification or a pin. When the
-    /// list already holds it the thread opens at once; otherwise the id
-    /// waits for the list load, like the Mac pending reveal. A second tap
-    /// while the list is up re-reads it rather than waiting on a load that
-    /// already ran.
-    /// </summary>
     public async Task RevealAsync(string chatId)
     {
         if (string.IsNullOrEmpty(chatId)) return;
@@ -845,9 +772,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ResetImagePreviews();
         AbandonSteerDelivery();
         _opening = true;
-        // Remove the previous conversation's controls before changing its id.
-        // A pending open must never let a click send or rename the new chat
-        // using controls still showing the previous chat.
         _composerDock.Child = null;
         _composerDock.Visibility = Visibility.Collapsed;
         _root.Children.Clear();
@@ -872,8 +796,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         ResetTranscriptWindow();
         try
         {
-            // These reads are independent. Do not serialize transcript reveal
-            // behind backend discovery, outbox identity, and approvals.
             var catalog = RefreshCatalogAsync(refreshMenus: _backends.Count == 0);
             var identity = OutboxKeyAsync(id);
             var preview = ChatPreviewCache.Take(_workspaceId, id);
@@ -1005,10 +927,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var models = backend?["models"] as JsonArray;
         if (models is { Count: > 0 })
         {
-            // The list beside the picker is what the host read from the agent
-            // CLI, cached for ten minutes. Add an API key to that CLI and the
-            // provider it unlocks is real everywhere except here until the
-            // cache expires, so the picker carries its own way to ask again.
             var picker = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -1071,11 +989,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return setup;
     }
 
-    /// <summary>
-    /// What a conversation tells its agent before it hears the person. The
-    /// brief belongs to the person and is editable here; the one rule
-    /// tokenstat adds is readable under it rather than described.
-    /// </summary>
     private UIElement InstructionsCard(string systemPrompt, string agent, bool running)
     {
         var chatId = _openId;
@@ -1099,9 +1012,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         edit.IsEnabled = !running; primary.Children.Add(edit);
         var note = Muted(L10n.Text("windows.chatpage.sent_as_an_instruction_never_as_part_of_yo.48abdbf3"));
         stack.Children.Add(note);
-        // The handler is attached after creation so it can name the button
-        // it hides. Declaring the handler inline would use save before it
-        // exists.
         var save = ActionIconGlyph.PrimaryButton(L10n.Text("common.save"), ActionIcon.Save, (_, _) => { });
         save.Click += async (_, _) =>
         {
@@ -1187,8 +1097,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (backend is null) continue;
             var id = Format.Text(backend, "id");
             if (id == "sh" && id != current) continue;
-            // Installed agents only. The current one stays listed so the
-            // picker can still name it.
             if (!Installed(backend) && id != current) continue;
             box.Items.Add(new ComboBoxItem
             {
@@ -1213,9 +1121,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private UIElement PersonaPicker(string current, bool disabled)
     {
-        // A live likeness beside the picker, seeded by the persona id like the
-        // Mac mark. It wanders through its leisure repertoire while the person
-        // reads the setup card.
         var face = new PersonaPastime(
             string.IsNullOrEmpty(current) ? 0 : PersonaSeed.For(current), 40);
         face.VerticalAlignment = VerticalAlignment.Center;
@@ -1340,8 +1245,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         {
             _transcript.Children.Clear();
         }
-        // `raw` is every row, for the seat line, which must see a running
-        // step whether or not it is folded away. `items` is what is drawn.
         var raw = Coalesce(_events);
         var busy = Busy(raw);
         var items = ChatImageGallery.Compose(ChatDetailFold.Fold(raw, ChatDetailPreference.Level, _running, IsGroupOpen));
@@ -1356,8 +1259,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _previousLiveReply = (_openGeneration, latest.Id, latest.Text);
         }
         else _previousLiveReply = null;
-        // Reused count cards resolve their review at click time. A late patch
-        // can change without changing the card's file names or line counts.
         _turnReviews.Clear();
         foreach (var item in items)
             if (item.Kind == ItemKind.Changes && item.Changes is { } files) _turnReviews[item.Id] = files;
@@ -1422,8 +1323,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var workingIdx = prefix + visible;
             var mood = LiveMood(raw);
             var words = mood == PersonaMood.Working ? WorkingWords(raw) : mood.Label();
-            // The words are part of the key, so thinking turning into reading
-            // a file rebuilds the row instead of leaving the old sentence.
             var workingKey = "__working__:" + words;
             if (workingIdx < _transcript.Children.Count)
             {
@@ -1513,12 +1412,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return grid;
     }
 
-    /// <summary>
-    /// The turn still being written: the conversation's own face beside what
-    /// it is doing, like the Mac working indicator. Thinking pastimes rather
-    /// than holding a pose, because one loop held for a minute reads as a
-    /// hang. Soft phrases beside the face rotate while it thinks.
-    /// </summary>
     private FrameworkElement WorkingRow(PersonaMood mood, string words)
     {
         FrameworkElement face = mood == PersonaMood.Thinking
@@ -1607,11 +1500,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         element.Unloaded += (_, _) => stop();
     }
 
-    /// <summary>
-    /// What the working row says it is doing. An approval waiting on the
-    /// person wins over everything, then a running tool or edit, then growing
-    /// prose, like the Mac live mood.
-    /// </summary>
     private PersonaMood LiveMood(List<DisplayItem> items)
     {
         if (HasPendingApproval()) return PersonaMood.Waiting;
@@ -1633,11 +1521,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return PersonaMood.Thinking;
     }
 
-    /// <summary>
-    /// The newest running tool or edit, in the words the seat shows.
-    /// Other running rows are skipped, so a later tool stays visible.
-    /// With none left, the sentence is the same word the mood already uses.
-    /// </summary>
     private static string WorkingWords(List<DisplayItem> items)
     {
         for (var index = items.Count - 1; index >= 0; index--)
@@ -1659,11 +1542,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return false;
     }
 
-    /// <summary>
-    /// The face of the conversation on screen. Its persona's, when it has
-    /// one, so the same character follows a persona between chats. Otherwise
-    /// the chat's own, derived from its id, like the Mac face seed.
-    /// </summary>
     private ulong FaceSeed()
     {
         var personaId = Format.Text(_openChat, "personaId");
@@ -1875,11 +1753,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             && !ReferenceEquals(_usageRenderedTotals, _aggregateUsage)) RenderCommandStats();
     }
 
-    /// <summary>
-    /// The chat's agent is not on this computer. Like the Mac notice: say so
-    /// above the draft, keep the draft, and offer the way out. Send stays off
-    /// until another agent is chosen, rather than failing a turn.
-    /// </summary>
     private UIElement MissingAgentNotice()
     {
         var backendId = Format.Text(_openChat, "backend");
@@ -1992,8 +1865,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         if (OpenBackendMissing()) context.Children.Add(MissingAgentNotice());
         var setupBackend = Backend(Format.Text(_openChat, "backend"));
         if (setupBackend is not null && Installed(setupBackend) && Format.Text(setupBackend, "id") != "sh"
-            // Only a state with a next step. Agents whose login nothing can
-            // read are always "unknown", and a notice on all of them is noise.
             && !SeparateLogin(setupBackend) && Format.Text(setupBackend, "readiness") is "needsSignIn" or "expired") context.Children.Add(AgentSetupNotice(setupBackend));
         _setupScroll.Content = context;
         FitSetupViewport();
@@ -2032,8 +1903,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         row.Children.Add(attachmentTools);
         row.Children.Add(options);
         row.Children.Add(_composerActions);
-        // Keep the same draft, menu and action controls mounted across a
-        // resize. Compact settings get the full width above Attach and Send.
         bool? compact = null;
         void FitControls(double width)
         {
@@ -2065,9 +1934,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private void FitSetupViewport()
     {
-        // Leave room for the draft, wrapped controls and transcript even on a
-        // short window. Bound setup and all notices together rather than
-        // allowing their combined height to push Send outside the page.
         _setupScroll.MaxHeight = Math.Max(0, Math.Min(280, ActualHeight - 280));
     }
 
@@ -2117,9 +1983,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             _setupExpanded = true;
             _statsExpanded["setup/" + L10n.Text("common.chat_agent_behavior")] = true;
             PaintConversation();
-            // This ScrollViewer survives chat reloads. Its old offset can
-            // leave the newly opened agent picker and Done button above the
-            // visible viewport, even though Setup was just tapped.
             DispatcherQueue.TryEnqueue(() => _setupScroll.ChangeView(null, 0, null, true));
         });
         AutomationProperties.SetAutomationId(setup, "chat.setup");
@@ -2140,13 +2003,10 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var profiles = await AgentProfiles.ReadAsync(_workspaceId);
             if (generation != _openGeneration || !IsLoaded) return;
             _agentProfiles = profiles;
-            // Like the other catalog reads: refresh the inspector and the
-            // composer in place. PaintConversation would clear the whole
-            // root, destroying a chat list it did not build.
             RefreshCatalogPresentation();
             CheckSelectedSignIn();
         }
-        catch { /* Older hosts keep the ordinary agent picker. */ }
+        catch { }
     }
 
     private async Task PickChatProfileAsync(string profileId)
@@ -2303,8 +2163,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 {
                     await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
                     if (!OpenChatIs(chat)) return;
-                    // The note stays parked; it rides the next step of the
-                    // message this action is about to send.
                     await SendAsync(sendNext: true);
                     StartPoll();
                 }
@@ -2355,9 +2213,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         finally { _pickingAttachment = false; }
     }
 
-    /// A send is in flight. Set synchronously before the first await so a
-    /// second Enter or Send click cannot slip through `Busy()` mid-flight
-    /// and double-send the turn.
     private bool _sending;
     private bool _queueing;
 
@@ -2370,9 +2225,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             && ChatCommandRules.CanSteer(_draft.Text, _attachments.Count > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
         if (!liveInput && OpenBackendMissing()) return;
         var backend = Backend(Format.Text(_openChat, "backend"));
-        // Only the CLI's own answer stops a send. A stored token past its
-        // expiry is routine (the CLI renews it), and an agent signed in with an
-        // environment key has no login file at all.
         if (!liveInput && LocalChatModel.Provider(Format.Text(_openChat, "model")) is null
             && !SeparateLogin(backend) && Format.Flag(backend, "signInVerified") && Format.Text(backend, "readiness") is "needsSignIn" or "expired")
         {
@@ -2389,9 +2241,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             bool OwnsDraft() => Current() && _draft.Text.Trim() == text;
             if (!await OfferAgentUpdateAsync(backend, OwnsDraft) || !OwnsDraft()) return;
         }
-        // A long pause emptied the prompt cache: this message would make the
-        // agent read the whole conversation again. Files are uploaded into
-        // this chat, so a message carrying them cannot move to a new one.
         if (!liveInput && !sendNext && !Busy() && text != "/compact")
         {
             switch (await AskBeforeColdSendAsync(movable: _attachments.Count == 0))
@@ -2415,8 +2264,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             await UploadPendingAttachmentsAsync(chat, Current);
             if (!Current()) return;
             var attachmentIds = _attachments.Select(file => file.Id).ToArray();
-            // The turn can finish while the files upload. Steer only if it is
-            // still running. Drain sends an ordinary message when it is not.
             liveInput = !sendNext && Busy() && Format.Flag(_openChat, "nativeSteer")
                 && ChatCommandRules.CanSteer(text, attachmentIds.Length > 0, Format.Flag(_openChat, "nativeSteerAttachments"));
             if (text != "/compact" && await TryParkSteerAsync(chat, text, sendNext, attachmentIds)) return;
@@ -2457,8 +2304,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 await CallChatAsync("chat.recover", new JsonObject { ["id"] = chat,
                     ["expectedRevision"] = revision.Value, ["stopActive"] = true });
             else await CallChatAsync("chat.stop", new JsonObject { ["id"] = chat });
-            // Stop leaves a parked note. The refreshed list still shows it,
-            // with Send now, until it is delivered or removed.
             if (!OpenChatIs(chat) || generation != _openGeneration) return;
             PaintConversation();
             StartPoll();
@@ -2497,7 +2342,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var owner = Format.Text(pending, "conversationId");
         if (pending is null || !string.IsNullOrEmpty(Format.Text(pending, "decision"))
             || !string.IsNullOrEmpty(owner) && owner != chat || !_resolvingApprovals.Add(id)) return;
-        // A poll started before this mutation must not restore its old prompts.
         _approvalVersion++;
         long? refreshVersion = null;
         try
@@ -2559,8 +2403,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             var updated = await CallChatAsync("chat.update", patch);
             AppServices.NotifyConversationsChanged();
             if (!OpenChatIs(chat) || generation != _openGeneration) return false;
-            // chat.update returns the saved record, which has no parked note.
-            // Preserve the current note, which may have changed while awaiting.
             _openChat = ChatSteerOverlay.MergeRecord(updated, _openChat);
             _ = RefreshInspectionAsync();
             RefreshFastModeButton();
@@ -2622,11 +2464,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     continue;
                 }
                 var next = AsArray(chunk, "events");
-                // Host calls run on the thread pool via Task.Run; the await
-                // captures the UI SynchronizationContext so the continuation
-                // resumes on the UI thread. Still, guard the UI mutations
-                // explicitly so a future ConfigureAwait(false) or a call from a
-                // non-UI context cannot trigger RPC_E_WRONG_THREAD.
                 var approvalVersion = ++_approvalVersion;
                 var approvals = AsArray(await CallChatAsync(
                     "chat.approvals", new JsonObject { ["id"] = chatId }));
@@ -2681,9 +2518,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
 
     private async Task ReloadBackendsAsync()
     {
-        // Old hosts ignore the unknown `refresh` field and answer from cache
-        // (protocol 6). That silent no-op is acceptable; a failure is not, so
-        // banner it like every other host call from this page.
         try
         {
             var backends = await CallChatAsync(
@@ -2710,7 +2544,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             if (generation == _openGeneration) _chats = _steerOverlay.Apply(AsArray(listed), request, _chats);
             return;
         }
-        // Secondary menus must never hide a successful conversation list.
         _ = RefreshBackendCatalogAsync(generation);
         _ = RefreshAgentProfilesAsync(generation);
         _ = RefreshPersonaCatalogAsync(generation);
@@ -2780,18 +2613,12 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         var selectedBackend = Backend(Format.Text(_openChat, "backend"));
         if (selectedBackend is not null && !SeparateLogin(selectedBackend) && Format.Flag(selectedBackend, "canCheckSignIn") && Format.Text(selectedBackend, "id") is "claude" or "claude_code" or "codex" or "cursor" or "cursor_agent" or "muse")
         {
-            // In the background. The CLI can take seconds to answer, and the
-            // chat, its menus and its personas are ready without it.
             _ = CheckSignInAsync(selectedBackend, _openGeneration);
         }
     }
 
     private readonly ChatSignInChecks _signInChecks = new();
 
-    /// <summary>
-    /// Ask the agent's own CLI whether it is signed in, once per open backend,
-    /// and repaint only when the answer changes what the chat shows.
-    /// </summary>
     private async Task CheckSignInAsync(JsonNode backend, int generation)
     {
         try
@@ -2800,7 +2627,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                 id => CallChatAsync("launcher.checkSignIn", new JsonObject { ["id"] = id }),
                 () => _openGeneration, Backend)) PaintConversation();
         }
-        catch { /* Older hosts retain their file-based, three-valued answer. */ }
+        catch { }
     }
 
     private JsonNode? FindChat(string id)
@@ -2830,11 +2657,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return null;
     }
 
-    /// <summary>
-    /// The agent a new chat starts with, like the Mac: the last one used if it
-    /// is still installed, then Codex, then the first installed agent. The
-    /// shell is never a default.
-    /// </summary>
     private JsonNode? DefaultBackend(string? remembered)
     {
         var available = _backends
@@ -2846,10 +2668,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             ?? _backends.FirstOrDefault(backend => backend is not null && Format.Text(backend, "id") != "sh");
     }
 
-    /// <summary>
-    /// Whether an agent is on this computer. Missing means the host did not
-    /// say, which is not the same as absent: only an explicit false hides it.
-    /// </summary>
     private static bool Installed(JsonNode? backend) =>
         backend?["installed"] is not JsonValue flag
         || flag.GetValueKind() != System.Text.Json.JsonValueKind.False;
@@ -2859,12 +2677,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         && backend?[list] is JsonArray values
         && values.Any(item => item?.ToString() == value);
 
-    /// <summary>
-    /// The persona a new chat should start with, or null to take the
-    /// workspace default. "No persona" travels as an empty id. A persona from
-    /// another folder is not available here, so an unknown id falls back to
-    /// this folder's own default.
-    /// </summary>
     private string? RememberedPersona(ChatLaunchChoice? saved)
     {
         if (saved?.PersonaId is not string remembered) return null;
@@ -2979,9 +2791,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
             }
             if (kind is "answer" or "answerWithdrawn")
             {
-                // Lands on its question's card. One whose question is on an
-                // older page waits for that page. A withdrawn answer never
-                // reached the agent, so the card opens again.
                 if (questions.TryGetValue(Format.Text(row, "questionId"), out var at) && items[at].Question is { } asked)
                 {
                     var card = items[at];
@@ -3098,8 +2907,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     FlushThinking();
                     var edit = new DisplayItem
                     {
-                        // A single Codex call can report several files. The
-                        // event sequence keeps each row's identity distinct.
                         Id = "edit-" + Format.Text(row, "seq", items.Count.ToString()),
                         Kind = ItemKind.Edit,
                         Path = Format.Text(ev, "path", L10n.Text("windows.chatpage.file.50009ce1")),
@@ -3107,8 +2914,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                         Removed = Format.Long(ev, "removed"),
                         Patch = Format.Text(ev, "patch"),
                     };
-                    // An edit announced as a tool call becomes that row, as on
-                    // the Mac, rather than a second row for one change.
                     if (tools.TryResolve(attachmentTurn + "/" + Format.Text(row, "backend", Format.Text(_openChat, "backend")), Format.Text(ev, "callId"), out var announced)
                         && items[announced.Index] is { Kind: ItemKind.Tool, Verb: "Edit" or "NotebookEdit" } call
                         && (call.Target == edit.Path || string.IsNullOrEmpty(call.Target)))
@@ -3183,9 +2988,6 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         return items.Where(item => !supersededPlanIds.Contains(item.Id)).ToList();
     }
 
-    // History rows are append-only until the page array is replaced. Busy
-    // checks happen on every composer/key/follow update, so retain this small
-    // result rather than projecting the entire transcript for each control.
     private JsonArray? _busyEvents;
     private int _busyEventCount;
     private string? _busyBackend;

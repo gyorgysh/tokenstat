@@ -4,12 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Thin kernel32 bindings for the Windows host daemon.
-//!
-//! Kept in one module so named pipes, file locks, battery detection and the
-//! sleep assertion do not each grow their own copy of the same FFI. No extra
-//! crate: the Mac keep-awake path already talks to the system this way.
 
 #![cfg(windows)]
 
@@ -31,9 +26,7 @@ pub(crate) const ERROR_PIPE_CONNECTED: Dword = 535;
 pub(crate) const ERROR_PIPE_BUSY: Dword = 231;
 pub(crate) const LOCKFILE_FAIL_IMMEDIATELY: Dword = 0x0000_0001;
 pub(crate) const LOCKFILE_EXCLUSIVE_LOCK: Dword = 0x0000_0002;
-// Keep-awake and battery detection are compiled out of unit tests so a
-// `cargo test` cannot pin the machine awake. The FFI still has to exist
-// in that build, hence the allow.
+
 #[cfg_attr(test, allow(dead_code))]
 pub(crate) const POWER_REQUEST_CONTEXT_VERSION: Dword = 0;
 #[cfg_attr(test, allow(dead_code))]
@@ -195,8 +188,7 @@ pub(crate) fn file_identity(file: &std::fs::File) -> Option<(u64, [u8; 16])> {
         volume_serial_number: 0,
         file_id: [0; 16],
     };
-    // SAFETY: FileIdInfo is the FILE_ID_INFO C layout for class FileIdInfo
-    // (18), and the buffer size and live file handle match that call.
+
     let ok = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle(),
@@ -287,7 +279,6 @@ pub(crate) unsafe fn handle_to_owned(handle: Handle) -> Option<OwnedHandle> {
     if handle.is_null() || handle == INVALID_HANDLE_VALUE {
         None
     } else {
-        // SAFETY: caller transfers a kernel handle that CloseHandle owns.
         Some(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
 }

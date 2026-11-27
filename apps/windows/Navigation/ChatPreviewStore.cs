@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Navigation;
 
-/// <summary>Small, ephemeral cache; never persisted and invalidated on account changes.</summary>
 internal sealed class ChatPreviewStore(Func<DateTime>? clock = null)
 {
     private sealed record Entry(JsonNode Chunk, DateTime Expires);

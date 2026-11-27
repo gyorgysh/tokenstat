@@ -85,8 +85,6 @@ pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
         );
         let dup = r.duplicate_ratio();
         if dup > 0.01 {
-            // Worth surfacing: it is the single biggest source of wrong numbers
-            // in tools that key on the wrong field.
             println!(
                 "  {DIM}{:.1}% were duplicates, collapsed by request id{DIM:#}",
                 dup * 100.0
@@ -126,9 +124,6 @@ pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
                 String::new()
             }
         );
-        // Not a number this tool will invent. Claude Code keeps activity for
-        // longer than it keeps token counts, so these days are provably worked
-        // and their usage is stated nowhere on this machine.
         println!(
             "  {DIM}Claude Code recorded work, no token counts survive. Totals are a floor.{DIM:#}"
         );
@@ -202,9 +197,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
     println!("  {BOLD}Archive{BOLD:#}");
     println!("  {DIM}path{DIM:#}     {}", db_path.display());
     println!("  {DIM}events{DIM:#}   {}", ui::exact(totals.events));
-    // Worth a line even when it is working, because the reason it exists is a
-    // mistake nobody expects to make: a rescan of a machine whose logs have
-    // been pruned reads a smaller world than the archive already holds.
     let copies = tokenstat_core::backup::list(db_path, tokenstat_core::backup::KEEP);
     if copies.is_empty() {
         println!("  {DIM}backups{DIM:#}  none yet, the next scan takes one");
@@ -226,8 +218,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
         );
     }
     if let (Some(a), Some(b)) = (&totals.first_date, &totals.last_date) {
-        // Days a vendor recorded work for count as worked here too, or doctor
-        // contradicts every other screen about the same archive.
         let unmeasured = store
             .days_active_without_usage("claude_code")
             .unwrap_or_default();
@@ -292,21 +282,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
             ui::exact(rec.archive_sessions)
         );
 
-        // Per model, because the aggregate hides which column is short and the
-        // two columns do not mean the same thing.
-        //
-        // Output is comparable: the vendor's lifetime figure and ours count the
-        // same generated tokens, so a shortfall there is history the
-        // transcripts no longer hold. Cache read is not. Measured on one real
-        // install, output stood complete against the vendor's own lifetime
-        // total at a moment when cache read was at a third of it, which a
-        // missing week cannot produce. Whatever the vendor counts as a cache
-        // read, it is not what a transcript records.
-        //
-        // So the table states both and claims neither. Do not turn the cache
-        // column into missing usage: on that install it would have doubled the
-        // reported lifetime spend. A model the archive is ahead on is the
-        // vendor lagging or naming a model differently, and is not a gap.
         if let Ok(models) = store.vendor_models("claude_code") {
             let mine = store
                 .model_totals_for_sources("claude_code")
@@ -334,8 +309,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
                     "cache said"
                 );
                 for (model, ao, vo, ac, vc) in rows.iter().take(8) {
-                    // pad_right measures display columns, so a CJK model id no
-                    // longer shifts the numbers right of it.
                     println!(
                         "  {}{:>10}{:>10}{:>12}{:>12}",
                         ui::pad_right(&sanitize_label(model), 28),
@@ -381,8 +354,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
             );
             println!("  {DIM}regularly from now on stops the gap from growing.{DIM:#}");
         } else if rec.ahead() > 0 {
-            // Normal and healthy: transcripts are current, the rollup is
-            // recomputed periodically and lags behind.
             println!();
             let g = good();
             println!(
@@ -481,8 +452,6 @@ pub fn statusline(
     let (day, month) = store.statusline_snapshot(&today_s, &month_s)?;
 
     let prices = PriceTable::load_with_catalog();
-    // Sum list-rate value per model so a multi-model day is not priced as
-    // Sonnet-5. Still an approximation of value, never a charge.
     let value = |since: &str, until: &str| -> String {
         let q = Query {
             since: Some(since.to_string()),
@@ -525,8 +494,6 @@ pub fn statusline(
                     .max(0)
                     / 1000;
                 if age as u64 > limit {
-                    // Kick a background scan so the next prompt is fresher.
-                    // Never wait here: the statusline must stay archive-only.
                     spawn_background_scan(db_path, tz_name);
                     "*".into()
                 } else {
@@ -549,15 +516,10 @@ pub fn statusline(
         .replace("{month_value}", &value(&month_s, &today_s))
         .replace("{stale}", &stale);
 
-    // Plain stdout, not anstream: a prompt supplies its own colour and a
-    // stray reset sequence would bleed into the shell.
     println!("{line}");
     Ok(())
 }
 
-/// Start `tokenstat scan` in the background if no other refresh holds the lock.
-///
-/// Failures are silent: a statusline must never print errors or block.
 fn spawn_background_scan(db_path: &Path, tz_name: Option<&str>) {
     let Ok(dirs) = tokenstat_paths::data_dir().ok_or(()) else {
         return;
@@ -565,8 +527,6 @@ fn spawn_background_scan(db_path: &Path, tz_name: Option<&str>) {
     let lock_path = dirs.join("scan.lock");
     let _ = std::fs::create_dir_all(&dirs);
 
-    // Try to create the lock exclusively. If it already exists and is fresh,
-    // another refresh is in flight or finished recently.
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -577,7 +537,6 @@ fn spawn_background_scan(db_path: &Path, tz_name: Option<&str>) {
             drop(f);
         }
         Err(_) => {
-            // Stale lock older than 10 minutes: steal it. Fresher: skip.
             if let Ok(meta) = std::fs::metadata(&lock_path)
                 && let Ok(modified) = meta.modified()
                 && modified

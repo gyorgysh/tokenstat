@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// The host returns its own local scope. Only a verified response from the
-/// expected machine may be adopted into the currently owned client session.
-/// No account identifier is supplied as authority to the remote host.
 enum WorkSearchLive {
     enum Invalid: Error { case response }
 

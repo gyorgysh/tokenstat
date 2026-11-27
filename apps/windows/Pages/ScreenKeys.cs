@@ -3,7 +3,6 @@ namespace Tokenstat.Pages;
 
 internal static class ScreenKeys
 {
-    // The screen input protocol uses macOS physical key codes on every client.
     public static int? MacCode(int key) => key switch
     {
         0x41 => 0, 0x53 => 1, 0x44 => 2, 0x46 => 3, 0x48 => 4, 0x47 => 5, 0x5a => 6,

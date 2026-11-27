@@ -15,13 +15,11 @@ import SwiftTerm
 /// modal ownership, and consumes an event only when it forwards it.
 @MainActor
 enum TerminalWheelForwarder {
-    /// Wheel up and wheel down in xterm's Cb encoding.
     private static let wheelUp = 64
     private static let wheelDown = 65
 
     private static var monitor: Any?
 
-    /// Install the monitor. Safe to call more than once.
     static func install() {
         guard monitor == nil else { return }
         // AppKit delivers local monitors on the main thread, which is where
@@ -62,9 +60,6 @@ enum TerminalWheelForwarder {
               let terminal = view.terminalInputStateSnapshot()
         else { return event }
 
-        // Only when a program is both full screen and listening. In the normal
-        // buffer the scrollback is the right answer and the user wants it, so
-        // the event goes on to SwiftTerm untouched.
         guard terminal.mouseMode != .off,
               terminal.isAlternateBuffer
         else { return event }
@@ -74,10 +69,7 @@ enum TerminalWheelForwarder {
             event: event
         )
         let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
-        // One wheel event covers several lines. Clamped, because a trackpad
-        // flick reports a delta that would send a hundred events at once.
         let lines = Int(min(5, max(1, abs(event.deltaY).rounded())))
-        // Keep the established SGR wire format for host-backed agent CLIs.
         if let session = (view as? TerminalDropView)?.session {
             for _ in 0 ..< lines {
                 session.sendBytes(

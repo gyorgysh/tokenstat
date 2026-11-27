@@ -8,10 +8,7 @@ import Foundation
 
 #if !os(macOS)
 
-/// Helpers for the phone machine plane: every call goes to a peer over the
-/// tunnel. Local `pty.*` and `workspace.*` do not exist without `local-host`.
 
-/// Copy for a tunnel that is mid-reconnect, not gone.
 enum ClientTunnelCopy {
     static func isAbsent(_ message: String) -> Bool {
         let lower = message.lowercased()
@@ -35,11 +32,9 @@ enum ClientTunnelCopy {
     }
 }
 
-/// `todo.remove`'s answer. `Bridge`'s own is private to that file.
 private struct TodoRemoved: Codable, Sendable { let removed: Bool }
 
 enum ClientRemote {
-    /// Split a folder id from `Bridge.remoteWorkspaces` (`remote:<peer>:<id>`).
     static func parts(of folder: WorkspaceFolder) -> (peer: String, workspace: String)? {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "remote" else { return nil }
@@ -54,7 +49,6 @@ enum ClientRemote {
         parts(of: folder)?.workspace
     }
 
-    // MARK: - Pty on a peer
 
     static func ptySpawn(
         peer: String,
@@ -78,8 +72,6 @@ enum ClientRemote {
             "dark": dark,
         ]
         if let profileID { params["profileId"] = profileID }
-        // The host adds the arguments and environment for the selection, so
-        // a phone gets the machine's own mapping for each tool.
         if let modelProvider, let modelID {
             params["modelProvider"] = modelProvider
             params["modelId"] = modelID
@@ -87,10 +79,6 @@ enum ClientRemote {
         return try await Bridge.onPeer(peer, "pty.spawn", params, as: PtySessionInfo.self)
     }
 
-    /// Start an agent's own sign-in in a terminal on the machine that runs it.
-    ///
-    /// The id is all that travels. The command and its arguments live in the
-    /// host's hardcoded table, so this cannot become a way to run something.
     static func launcherSignIn(
         peer: String,
         id: String,
@@ -143,12 +131,6 @@ enum ClientRemote {
         )
     }
 
-    /// Say what this phone can show, and get back what the session became.
-    ///
-    /// The Mac that owns the session is usually watching it too, so the answer
-    /// is the smaller of the two geometries. Sending the ask rather than a
-    /// command is what stops the Mac being left narrow after the phone closes.
-    /// See `TerminalViewer`.
     @discardableResult
     static func ptyResize(
         peer: String,
@@ -164,7 +146,6 @@ enum ClientRemote {
         )
     }
 
-    /// Stop showing a session without stopping the process on the Mac.
     static func ptyDetach(peer: String, id: String) async throws {
         struct Ack: Codable, Sendable { let detached: Bool }
         _ = try await Bridge.onPeer(
@@ -189,9 +170,6 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "launcher.catalog", as: [RemoteLaunchProfile].self)
     }
 
-    /// Run a profile's official installer on the machine that owns this
-    /// workspace. The peer's daemon runs its own hardcoded command for the
-    /// id, never a string from here.
     static func launcherInstall(peer: String, id: String) async throws -> LauncherInstallResult {
         try await Bridge.onPeer(
             peer,
@@ -212,7 +190,6 @@ enum ClientRemote {
         _ = try await Bridge.onPeer(peer, "launcher.show", ["id": id], as: Result.self)
     }
 
-    // MARK: - Files on a peer
 
     static func tree(peer: String, workspace: String, path: String) async throws -> [TreeEntry] {
         try await Bridge.onPeer(
@@ -232,16 +209,10 @@ enum ClientRemote {
         )
     }
 
-    /// Re-read one folder's git state on the machine that owns it.
-    ///
-    /// The peer answers with its own local id, which is not the id this side
-    /// uses for a remote folder, so only the parts that go stale are taken and
-    /// the caller keeps the identity it already had.
     static func status(peer: String, workspace: String) async throws -> WorkspaceFolder {
         try await Bridge.onPeer(peer, "workspace.status", ["id": workspace], as: WorkspaceFolder.self)
     }
 
-    /// One file's changes against HEAD, on the machine that owns the folder.
     static func diff(peer: String, workspace: String, path: String) async throws -> FileDiff {
         try await Bridge.onPeer(
             peer,
@@ -251,9 +222,6 @@ enum ClientRemote {
         )
     }
 
-    /// Recent commits, newest first. Empty when the folder is not a
-    /// repository, and when its first commit has not happened yet. The
-    /// caller distinguishes those with `status`.
     static func log(peer: String, workspace: String, limit: Int = 100) async throws -> [Commit] {
         try await Bridge.onPeer(
             peer,
@@ -263,8 +231,6 @@ enum ClientRemote {
         )
     }
 
-    /// One commit in full, including the patches. Separate from `log`,
-    /// which is only the list.
     static func showCommit(peer: String, workspace: String, commit: String) async throws -> CommitDetail {
         try await Bridge.onPeer(
             peer,
@@ -274,47 +240,26 @@ enum ClientRemote {
         )
     }
 
-    /// The folders registered on another machine, with that machine's own ids.
-    ///
-    /// `Bridge.remoteWorkspaces` needs a paired `Peer` and re-prefixes every
-    /// id for the folder screens. Search wants the plain host-local id a
-    /// `WorkReference` carries, and wants to ask without pairing first.
     static func folderList(peer: String) async throws -> [WorkspaceFolder] {
         try await Bridge.onPeer(peer, "workspace.list", ["includeGeneral": true], as: [WorkspaceFolder].self)
             .map(\.presented)
     }
 
-    /// Every badge on the folder screen, in one call instead of five lists.
     static func summaries(peer: String) async throws -> [WorkspaceSummary] {
         try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)
     }
 
-    /// The newest conversations on this host, across its folders.
     static func recentChats(peer: String, limit: Int = 50) async throws -> [ChatRecentConversation] {
         let chats = try await Bridge.recentChats(peer: peer, limit: limit)
         var seen = Set<String>()
         return chats.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
     }
 
-    // MARK: - A folder's work, on the machine that owns it
 
-    /// The peer's whole board, list and all. Filtering to one folder happens
-    /// on this side: the host answers the same `todo.list` it answers locally,
-    /// so the phone cannot see a card the Mac would not.
     static func todoCards(peer: String) async throws -> [TodoCard] {
         try await Bridge.onPeer(peer, "todo.list", ["includeArchived": true], as: [TodoCard].self)
     }
 
-    /// Add a card or a note to the peer's board.
-    ///
-    /// The same `todo.create` the Mac calls. A note carries a folder like a
-    /// task does: unfiled is a choice made in the sheet, never a side effect
-    /// of writing it somewhere.
-    /// The Mac's default time limit for a delegated run, in seconds.
-    ///
-    /// Zero means *no limit* on the host, so sending zero from here would have
-    /// made every card captured on a phone able to run an agent forever. Three
-    /// hours is what the Mac's form starts on.
     static let defaultTaskBudgetSeconds: UInt64 = 180 * 60
 
     static func todoCreate(
@@ -334,8 +279,6 @@ enum ClientRemote {
                 "column": "backlog",
                 "backend": "",
                 "workspaceId": workspaceID,
-                // A note is never delegated, so its budget is moot; a task
-                // gets the same limit it would have been given on the Mac.
                 "budgetSeconds": kind == .note ? 0 : defaultTaskBudgetSeconds,
             ],
             as: TodoCard.self
@@ -351,18 +294,12 @@ enum ClientRemote {
         )
     }
 
-    /// Save a note's title and body in one host update.
     static func todoRetitle(peer: String, id: String, title: String, notes: String? = nil) async throws -> TodoCard {
         var parameters: [String: Any] = ["id": id, "title": title]
         if let notes { parameters["notes"] = notes }
         return try await Bridge.onPeer(peer, "todo.update", parameters, as: TodoCard.self)
     }
 
-    /// Turn a note into a card on this folder's board.
-    ///
-    /// The same update the Mac makes: the note's text becomes the prompt and
-    /// the card lands in the backlog. One card changes kind rather than a new
-    /// one appearing beside a note that then has to be cleaned up.
     static func todoConvertToTask(
         peer: String,
         id: String,
@@ -517,7 +454,6 @@ enum ClientRemote {
         )
     }
 
-    // MARK: - Chat on a peer
 
     static func chatBackends(peer: String) async throws -> [ChatBackend] {
         try await Bridge.chatBackends(peer: peer)
@@ -607,7 +543,6 @@ enum ClientRemote {
         try await Bridge.saveChatPersona(persona, workspaceID: workspaceID, peer: peer)
     }
 
-    /// Nil when the workspace chose to have no default at all.
     static func setDefaultChatPersona(
         peer: String,
         workspaceID: String,
@@ -730,13 +665,6 @@ enum ClientRemote {
 }
 
 
-/// How long this device waits for another computer to answer a request.
-///
-/// The host drops an unanswered request after fifteen minutes
-/// (`PENDING_TTL` in `screen_policy`), so a watch that outlived that would be
-/// polling for an answer to a question nobody can see any more. Kept in step
-/// with it deliberately: two different windows would mean a card that says it
-/// is waiting for something that is already gone.
 enum ClientAccessWatch {
     static let interval: Duration = .seconds(5)
     static let attempts = 180

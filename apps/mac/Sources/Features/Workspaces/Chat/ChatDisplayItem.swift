@@ -12,10 +12,6 @@ struct ChatToolState: Equatable, Sendable {
     var detail: String?
     var startedAtMs: Int64
     var endedAtMs: Int64?
-    /// Display lines, split once at construction. `snippet` used to split
-    /// the whole detail on every read, and a row reads it half a dozen
-    /// times per draw: Codex shell outputs reach megabytes, so one live
-    /// row cost several full multi-megabyte splits per poll.
     var snippet: [String]
 
     var duration: String? {
@@ -26,18 +22,8 @@ struct ChatToolState: Equatable, Sendable {
         verb == "Edit" || verb == "NotebookEdit"
     }
 
-    /// Display lines for one detail string, split once. See `snippet`.
     static func makeSnippet(verb: String, detail: String?) -> [String] {
         guard let detail, !detail.isEmpty else { return [] }
-        // An edit's red/green lines must reach the row unprefixed: a blanket
-        // "| " is what made every Tool row read as grey output and broke the
-        // Show edit label. This covers both the old/new rendering ("- old")
-        // and unified patches ("-hello", "@@" hunks stay grey). Other verbs
-        // keep the output marker on every line, so a shell trace like
-        // "+ set -x" never poses as a diff.
-        // Codex often exposes a unified patch through a command_execution
-        // item. Treat Diff like a native edit so +/- lines remain visible and
-        // receive the same semantic coloring as Edit/NotebookEdit cards.
         let diffVerbs = ["Edit", "NotebookEdit", "Diff"]
         let isDiff = diffVerbs.contains(verb)
         var out: [String] = []
@@ -50,9 +36,6 @@ struct ChatToolState: Equatable, Sendable {
                 out.append("| \(shown)")
             }
         }
-        // Large tool logs are mostly omitted. Scan their contiguous bytes
-        // without advancing a Swift String index for every byte; create
-        // String indices only for the lines the row will actually display.
         if let lineCount = detail.utf8.withContiguousStorageIfAvailable({ bytes -> Int in
             guard let base = bytes.baseAddress else { return 1 }
             var start = 0, search = 0, count = 1
@@ -80,9 +63,6 @@ struct ChatToolState: Equatable, Sendable {
             }
             return out
         }
-        // Count the omitted lines without materializing them. LF is the
-        // existing Character separator; CRLF is one different Character.
-        // ASCII newline boundaries are also valid String slice boundaries.
         var start = detail.startIndex
         var index = detail.utf8.startIndex
         var previous: UInt8 = 0
@@ -105,8 +85,6 @@ struct ChatToolState: Equatable, Sendable {
         return out
     }
 
-    /// A unified or old/new diff body line. File headers ("--- a/…",
-    /// "+++ b/…") are not changes and stay grey.
     static func isDiffLine(_ line: String) -> Bool {
         guard let first = line.first else { return false }
         guard first == "+" || first == "-" else { return false }
@@ -128,8 +106,6 @@ struct ChatToolState: Equatable, Sendable {
     ///
     /// The full text stays in `detail`, so copy still yields everything.
     static func clip<S: StringProtocol>(_ line: S) -> String {
-        // A hostile grapheme may contain thousands of combining marks.
-        // Bound scalars before the usual display-column clipping.
         let scalars = line.unicodeScalars.prefix(Self.snippetColumnCap * 4 + 1)
         let bounded = String(String.UnicodeScalarView(scalars.prefix(Self.snippetColumnCap * 4)))
         let prefix = bounded.prefix(Self.snippetColumnCap + 1)
@@ -137,26 +113,15 @@ struct ChatToolState: Equatable, Sendable {
         return String(prefix.prefix(Self.snippetColumnCap)) + "…"
     }
 
-    /// A 500-line stdout must not become 500 rows. The full text stays in
-    /// `detail` for copy; the row only ever draws this many.
     private static let snippetLineCap = 60
-    /// And how much of one line is drawn.
-    ///
-    /// Roughly four wrapped lines of the row's monospace face in a full-width
-    /// reading lane, so ordinary output, long shell commands and minified
-    /// source all still read as themselves. What it stops is the single line
-    /// that is really a document.
     private static let snippetColumnCap = 600
 }
 
-/// A file the agent changed. One card, not a tool row plus a second copy.
 struct ChatEditState: Equatable, Sendable {
     var path: String
     var added: UInt32
     var removed: UInt32
     var patch: String
-    /// 1-based count of this path since the last user message. 2 means this
-    /// file was already edited earlier in the same turn.
     var revision: Int
     var running: Bool
     var failed: Bool
@@ -172,8 +137,6 @@ struct ChatEditState: Equatable, Sendable {
         return name.isEmpty ? path : name
     }
 
-    /// Last two folders of the parent path, enough to tell two same-named
-    /// files apart without drawing the whole absolute path as the title.
     var location: String {
         let folder = (path as NSString).deletingLastPathComponent
         let last = (folder as NSString).lastPathComponent
@@ -183,7 +146,6 @@ struct ChatEditState: Equatable, Sendable {
         return "\(grand)/\(last)"
     }
 
-    /// Nil on the first change of a file in a turn. Later ones name themselves.
     var changeLabel: String? {
         guard revision >= 2 else { return nil }
         return L10n.text("apple.chatmodel.0_change.d4ef778c", "\(ChatClock.ordinal(revision))")
@@ -244,37 +206,19 @@ enum ChatClock {
     }
 }
 
-/// A message waiting for the current turn to finish.
-/// Equatable so a transcript can skip the rows that did not move. A chat
-/// redraws whenever anything about it changes, and without this every visible
-/// row rebuilds itself because one of them grew by a word.
 struct ChatDisplayItem: Identifiable, Equatable, Sendable {
     var isSteer: Bool = false
-    /// Settable only here, by `carrying(id:)`.
     private(set) var id: String
     let kind: Kind
-    /// Inclusive end of a coalesced text/thinking block in the loaded archive.
-    /// Lets a mark from a partial page resolve after earlier deltas arrive.
     var lastSequence: UInt64? = nil
-    /// Where that block actually starts in the loaded archive. Usually what
-    /// its id says, but not after `ChatRowContinuity` kept an id across a
-    /// page that brought the block's earlier deltas.
     var firstSequence: UInt64? = nil
     var groupID: String? = nil
-    /// How a step under an open Compact line is drawn. Nil everywhere else.
     var plainStep: PlainStep? = nil
-    /// Presentation-only galleries. Raw attachment rows remain searchable.
     var imageAttachments: [ChatAttachment] = []
-    /// Original attachment row anchors represented by this gallery.
     var imageRowIDs: [String] = []
-    /// Backend provenance for explicit image/tool correlation.
     var sourceBackend: String? = nil
-    /// One piece of a long reply drawn as several rows. See `ChatReplySplit`.
     var part: ChatReplyPart? = nil
 
-    /// A Compact line already says what its step was, so a lone step drops
-    /// its card and shows only what it produced. Several steps under one
-    /// line, a run of reads, keep a plain line each so each names its file.
     enum PlainStep: Equatable, Sendable {
         case detail
         case line
@@ -284,8 +228,6 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
         case user(String)
         case assistant(String, backend: String?)
         case turnSeparator(String)
-        /// A conversation changing hands, with the summary the incoming agent
-        /// was given so the person can read exactly what it was told.
         case handoff(to: String, brief: String)
         case thinking(String)
         case tool(ChatToolState)
@@ -294,38 +236,23 @@ struct ChatDisplayItem: Identifiable, Equatable, Sendable {
         case approval(ChatApproval)
         case usage(input: UInt64, output: UInt64, cost: Double?)
         case failed(String)
-        /// Steps folded into one line by the chat's detail level. The steps
-        /// themselves follow as their own rows when the group is open.
         case group(ChatStepGroup)
-        /// A question the agent asked, with the answer once there is one.
         case question(ChatQuestion)
-        /// The files a finished turn edited. Added by the fold, after the
-        /// turn's last row, at every detail level.
         case changes(ChatTurnChanges)
-        /// The agent's plan as last reported. A newer report replaces the
-        /// older row, so the checklist sits where the latest update arrived.
         case plan([ChatPlanStep])
     }
 }
 
-/// One line of a reported plan: its words and where it stands.
 struct ChatPlanStep: Equatable, Sendable {
     var text: String
     var status: String
 }
 
-/// What one turn changed, file by file, from its edit rows.
-///
-/// Counts are summed over the turn's edits to a file, so a file edited
-/// twice shows both. That is what the agent did, which is what this card
-/// is about. The working tree's own totals live in the Changes panel.
 struct ChatTurnChanges: Equatable, Sendable {
     struct File: Equatable, Sendable, Identifiable {
         let path: String
         var added: UInt64
         var removed: UInt64
-        /// The recorded edits survive commits and later turns. Empty entries
-        /// mean that the agent reported an edit without its patch.
         var patches: [String] = []
         var id: String { path }
 
@@ -343,13 +270,6 @@ struct ChatTurnChanges: Equatable, Sendable {
 }
 
 extension ChatDisplayItem {
-    /// A low estimate of the row's height in points, for `TranscriptSlice.split`.
-    ///
-    /// The smallest each kind measured on a long chat of every kind of row:
-    /// a one-line step 24, a usage line 14, a turn's changes 78, a plan 125
-    /// (about 20 a step past its title), a picture 128. One guess for every
-    /// row that is not text undercounted plans and pictures several times
-    /// over, so the newest rows measured exactly did not cover the screen.
     var tailHeightFloor: Double {
         func prose(_ text: String) -> Double {
             var lines = 0
@@ -374,13 +294,6 @@ extension ChatDisplayItem {
         }
     }
 
-    /// What the recent-message cache budgets a row at: the strings it holds,
-    /// nested tool output and patches included, plus a fixed cost per row.
-    ///
-    /// `String(reflecting:)` arrived at a similar number by printing the
-    /// whole row, nested types and all. That ran on the main thread for up to
-    /// 150 rows every time a chat was left, and again for every preview a
-    /// folder warmed, and was most of what leaving a long chat cost.
     var estimatedBytes: Int {
         let base = 96 + id.utf8.count
         switch kind {
@@ -391,14 +304,11 @@ extension ChatDisplayItem {
         case let .handoff(to, brief):
             return base + to.utf8.count + brief.utf8.count
         case let .tool(tool):
-            // The snippet is the detail split into lines, so the detail
-            // already counts it.
             return base + tool.callId.utf8.count + tool.verb.utf8.count + tool.target.utf8.count
                 + (tool.detail?.utf8.count ?? 0) + tool.snippet.count * 16
         case let .edit(edit):
             return base + edit.path.utf8.count + edit.patch.utf8.count
         case .attachment:
-            // Metadata only. Downloaded bytes are never held here.
             return base + 256
         case .approval:
             return base + 512
@@ -421,7 +331,6 @@ extension ChatDisplayItem {
 }
 
 extension ChatDisplayItem {
-    /// The same row under the identity it already had on screen.
     func carrying(id: String) -> ChatDisplayItem {
         var row = self
         row.id = id
@@ -449,9 +358,6 @@ final class ChatFoldContinuity: @unchecked Sendable {
     private var next: [String: String] = [:]
     private var claimed: Set<String> = []
 
-    /// The id for a group or gallery with these members. `kind` keeps the two
-    /// apart: a gallery's member is a raw row, a group's member may be a
-    /// gallery.
     func id(_ kind: String, members: [String], fresh: String) -> String {
         var chosen = fresh
         for member in members {
@@ -468,7 +374,6 @@ final class ChatFoldContinuity: @unchecked Sendable {
         return chosen
     }
 
-    /// One fold is complete. What it named is what the next one starts from.
     func finish() {
         previous = next
         next = [:]
@@ -483,15 +388,11 @@ final class ChatFoldContinuity: @unchecked Sendable {
 }
 
 
-/// Where a row sits inside a long reply that is drawn as several rows.
 struct ChatReplyPart: Equatable, Sendable {
     var index: Int
     var isFirst: Bool
     var isLast: Bool
-    /// Paragraph spacing above this piece: the cut fell between blocks. A cut
-    /// between two list items has none, so the list reads as one.
     var gapBefore: Bool
-    /// The whole reply, for copying it.
     var reply: String
 }
 
@@ -513,11 +414,7 @@ struct ChatReplyPart: Equatable, Sendable {
 /// grows while it streams, or that gains its beginning when an earlier page
 /// lands, keeps its other pieces and their ids.
 enum ChatReplySplit {
-    /// Weighted lines below which a reply stays one row.
     static let minimumLines = 90
-    /// About one cut every N headings, paragraph starts, or list items.
-    /// Pieces stay under a couple of screens without building a new row
-    /// for every few lines scrolled.
     static let headingPeriod: UInt64 = 3
     static let paragraphPeriod: UInt64 = 8
     static let listPeriod: UInt64 = 40
@@ -528,7 +425,6 @@ enum ChatReplySplit {
         var gapBefore: Bool
     }
 
-    /// The rows to draw: every long assistant reply replaced by its pieces.
     static func split(_ items: [ChatDisplayItem], cache: Cache? = nil) -> [ChatDisplayItem] {
         var out: [ChatDisplayItem] = []
         out.reserveCapacity(items.count)
@@ -549,15 +445,9 @@ enum ChatReplySplit {
         return out
     }
 
-    /// The pieces of one reply as rows, or nil when it stays one row.
     static func rows(for item: ChatDisplayItem, text: String, backend: String?) -> [ChatDisplayItem]? {
         let pieces = pieces(text)
         guard pieces.count > 1 else { return nil }
-        // A piece is named by the cut that ends it: the next piece's first
-        // line. Text that arrives at a reply's start (an earlier page) grows
-        // its first piece without moving that cut, and text that streams in
-        // at its end grows the last, named "end". Either way the names of
-        // the pieces already on screen hold.
         var seen: [String: Int] = [:]
         return pieces.enumerated().map { index, piece in
             var key = index + 1 < pieces.count ? digest(pieces[index + 1].firstLine) : "end"
@@ -581,8 +471,6 @@ enum ChatReplySplit {
         }
     }
 
-    /// The row id a reply's original id now lives at: itself, or its first
-    /// piece. Search results and reading marks name the reply.
     static func rowID(for id: String, in rows: [ChatDisplayItem]) -> String? {
         if rows.contains(where: { $0.id == id }) { return id }
         let prefix = id + "~"
@@ -601,9 +489,6 @@ enum ChatReplySplit {
             let trimmed = line.drop(while: { $0 == " " })
             let fence = trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
             defer { if fence { inFence.toggle() } }
-            // No minimum length: whether a line is a cut must depend on the
-            // line alone, or text arriving at the reply's start would move
-            // the cuts after it and rename the pieces on screen.
             guard index > 0, !inFence, !fence, !trimmed.isEmpty else { continue }
             let previous = lines[index - 1]
             let previousTrimmed = previous.drop(while: { $0 == " " })
@@ -652,7 +537,6 @@ enum ChatReplySplit {
         return rest.dropFirst().first == " "
     }
 
-    /// FNV-1a, stable across launches, so a piece keeps its id.
     private static func hash(_ text: Substring) -> UInt64 {
         var value: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in text.utf8 {
@@ -666,8 +550,6 @@ enum ChatReplySplit {
         String(hash(text[...]) % 2_176_782_336, radix: 36)
     }
 
-    /// The last split of each reply, so a settled reply is not scanned again
-    /// on every poll. Keyed by row id and checked against the text.
     final class Cache {
         private var entries: [String: (count: Int, tail: Substring, rows: [ChatDisplayItem]?)] = [:]
 
@@ -675,7 +557,6 @@ enum ChatReplySplit {
             guard let entry = entries[item.id], entry.count == text.utf8.count,
                   entry.tail == text.suffix(48) else { return nil }
             guard var rows = entry.rows else { return .some(nil) }
-            // Fields other than the text can change under a settled reply.
             for index in rows.indices {
                 rows[index].isSteer = item.isSteer
                 rows[index].lastSequence = item.lastSequence

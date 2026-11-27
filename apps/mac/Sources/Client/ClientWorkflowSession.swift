@@ -8,13 +8,6 @@
 import Foundation
 import Observation
 
-/// Graphs and runs for one folder on a peer, plus the writes a phone or
-/// iPad is allowed to make.
-///
-/// This object lists, creates, updates, removes, runs, stops, continues a
-/// gate, flips a schedule, and tails a step. Graph construction lives in
-/// the shared editor. The views decide how that looks. They do not talk
-/// to the host themselves.
 @MainActor
 @Observable
 final class ClientWorkflowSession {
@@ -27,8 +20,6 @@ final class ClientWorkflowSession {
     private(set) var graphs: [WorkflowGraph] = []
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var loaded = false
-    /// IANA name of the connected computer's scheduler. Empty until queue
-    /// answers, and never this device's zone.
     private(set) var schedulerTimezone: String = ""
     var errorMessage: String?
     private var inputs = ClientWorkflowInputs()
@@ -51,8 +42,6 @@ final class ClientWorkflowSession {
     private var loadGeneration = 0
     private var isVisible = false
     private var visibility = 0
-    /// Set when this session is a detail page for one graph. A missing id
-    /// then stays missing instead of becoming some other graph.
     private let pinnedGraphID: String?
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String, graphID: String? = nil, service: any ClientJobService = ClientRemoteJobService()) {
@@ -65,8 +54,6 @@ final class ClientWorkflowSession {
         self.selectedGraphID = graphID
     }
 
-    /// When the caller asked for a specific graph, do not fall back to another
-    /// one. The detail screen has to show empty, not a neighbour.
     var selectedGraph: WorkflowGraph? {
         if let selectedGraphID {
             return graphs.first { $0.id == selectedGraphID }
@@ -176,7 +163,6 @@ final class ClientWorkflowSession {
 
     func run() async {
         guard !working, let graph = selectedGraph else { return }
-        // The host would refuse an invalid graph. Say so before starting.
         if let issue = graph.stepsIssue {
             errorMessage = L10n.text("apple.clientworkflowsession.0_fix_it_in_the_editor_before_running.4e7debe8", "\(issue)")
             return
@@ -246,11 +232,7 @@ final class ClientWorkflowSession {
         guard !working else { return }
         working = true
         defer { working = false }
-        // The host replaces the whole graph. Re-read first so a stale
-        // phone copy cannot wipe a Mac edit.
         await load()
-        // A failed re-read leaves the last copy on screen. Sending that
-        // as workflow.update would wipe a newer Mac edit.
         guard errorMessage == nil, var graph = selectedGraph, graph.schedule.repeats else { return }
         graph.enabled.toggle()
         do {
@@ -337,7 +319,6 @@ final class ClientWorkflowSession {
             runs = latest.filter { $0.workspaceID == workspaceID }
             syncWatching()
         } catch {
-            // The next tick tries again.
         }
     }
 
@@ -383,7 +364,6 @@ final class ClientWorkflowSession {
             }
             transcriptOffset = chunk.nextOffset
         } catch {
-            // A just-finished step may still be writing. The next tick retries.
         }
     }
 }

@@ -23,17 +23,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/// Two-way vault sync, port of the sync half of `SSHLibraryModel.swift`.
-///
-/// Pull the vault's records, apply what is newer, push what it has never
-/// seen, so both sides end up saying the same thing. Without this a second
-/// device unlocks into empty lists: the records only exist in the vault.
 
 enum class VaultVerdict { TAKE_REMOTE, PUSH_LOCAL, SAME }
 
-/// Newer wins. A record this device does not have is always taken, and a
-/// record written before stamps existed reads as 0, which loses to anything
-/// stamped and ties with anything else that never was.
 fun vaultVerdict(remoteMs: Long, localMs: Long?): VaultVerdict {
     if (localMs == null) return VaultVerdict.TAKE_REMOTE
     if (remoteMs > localMs) return VaultVerdict.TAKE_REMOTE
@@ -48,7 +40,6 @@ private fun JsonObject.optLong(key: String): Long? = this[key]?.jsonPrimitive?.l
 
 private fun JsonObject.optBool(key: String): Boolean? = this[key]?.jsonPrimitive?.booleanOrNull
 
-/// A vault record's envelope, or null for tombstones and undecodable rows.
 fun vaultEnvelopeOf(record: JsonObject): JsonObject? = try {
     val text = record.optStr("plaintext") ?: return null
     Json.parseToJsonElement(text) as? JsonObject
@@ -56,9 +47,6 @@ fun vaultEnvelopeOf(record: JsonObject): JsonObject? = try {
     null
 }
 
-/// Folder records first, each after its own parent, then the rest in arrival
-/// order. A folder whose parent is missing entirely still goes out at the
-/// end: the host rejects it and says so, which beats dropping it silently.
 fun orderVaultRecords(records: List<JsonObject>, localFolderIds: Set<String>): List<JsonObject> {
     val folders = mutableListOf<Pair<JsonObject, JsonObject>>()
     val rest = mutableListOf<JsonObject>()
@@ -80,8 +68,6 @@ fun orderVaultRecords(records: List<JsonObject>, localFolderIds: Set<String>): L
             sorted.add(record)
             folder.optStr("id")?.let { placed.add(it) }
         }
-        // Even malformed folders must leave this pass. A missing id cannot
-        // unlock children, but must not keep the ordering loop alive forever.
         remaining.removeAll(ready.toSet())
     }
     sorted.addAll(remaining.map { it.first })
@@ -106,12 +92,6 @@ private class VaultSyncAccess(model: AppViewModel, isCurrentOwner: () -> Boolean
 }
 
 object SshVaultSync {
-    /// Both directions, in the one order that converges: the pull answers
-    /// with what the vault holds, and everything here that is not in that
-    /// answer is pushed. `asked` separates a sync somebody pressed from the
-    /// one every arrival at the screen runs: a vault that cannot be read is
-    /// worth a sentence when the answer to a button press would otherwise be
-    /// nothing at all.
     suspend fun sync(
         model: AppViewModel,
         context: Context,
@@ -135,8 +115,6 @@ object SshVaultSync {
             if (e is CancellationException) throw e
             return VaultSyncResult(false, null, if (asked) e.message else null)
         }
-        // Every id the vault holds, decodable or not: pushing over an
-        // unreadable record would replace what a newer client wrote.
         val known = records.mapNotNull { it.optStr("id") }.toSet()
         var changed = false
         var error: String? = null
@@ -203,9 +181,6 @@ object SshVaultSync {
                 error = e.message
             }
         }
-        // Everything here the vault has never heard of goes in. Folders
-        // before the hosts that name them: a client reading this back
-        // rejects a host whose folder it has not seen.
         for (folder in folders) {
             val id = folder.optStr("id") ?: continue
             if (!known.contains("folder:$id")) {
@@ -234,16 +209,11 @@ object SshVaultSync {
         return VaultSyncResult(changed, error, vaultError)
     }
 
-    /// Write a record that arrived from the vault, keeping the timestamp it
-    /// came with so the next verdict compares revisions, not arrivals.
     private suspend fun applySave(access: VaultSyncAccess, method: String, record: JsonObject) {
         val stamped = JsonObject(record + ("keepUpdatedMs" to JsonPrimitive(true)))
         access.core(method, stamped)
     }
 
-    /// A key is the one record where an equal stamp still means work: the
-    /// row can be here while the private half is not, which is what a
-    /// freshly enrolled device looks like.
     private suspend fun applyKey(
         access: VaultSyncAccess,
         context: Context,
@@ -283,9 +253,6 @@ object SshVaultSync {
         return true
     }
 
-    /// Copy one local key into the vault for the other devices. A key with
-    /// no private half on this device is skipped, not pushed as a row
-    /// nothing can connect with.
     private suspend fun pushMissingKey(
         access: VaultSyncAccess,
         context: Context,
@@ -308,10 +275,6 @@ object SshVaultSync {
         return mirror(access, tier, "key:$id", "key", synced)
     }
 
-    /// Copy a record into the encrypted vault for the other devices.
-    /// Returns the failure to report, if any: every caller has already
-    /// written the record locally by the time this runs, so a failure here
-    /// must not turn a save that worked into one that looks like it did not.
     private suspend fun mirror(access: VaultSyncAccess, tier: String, id: String, kind: String, payload: JsonObject): String? {
         val plaintext = buildJsonObject { put("kind", kind); put(kind, payload) }.toString()
         return try {

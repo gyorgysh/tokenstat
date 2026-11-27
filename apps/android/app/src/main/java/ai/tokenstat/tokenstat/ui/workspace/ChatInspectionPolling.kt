@@ -8,7 +8,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 
-/** One visible inspection lease; the caller restarts it after navigation or resume. */
 internal suspend fun pollChatInspection(
     read: suspend () -> JsonObject?,
     onRead: (JsonObject?) -> Unit,

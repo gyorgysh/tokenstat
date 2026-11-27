@@ -35,8 +35,6 @@ fn send(socket: &Path, request: &Value, read_answer: bool) -> Option<Value> {
     Some(serde_json::from_str(&line).unwrap())
 }
 
-/// Two real socket clients and the production host/PTY path. The executable
-/// called claude here is a private shell fixture, never an installed agent.
 #[test]
 fn lost_socket_response_and_concurrent_retries_launch_once() {
     let root = tempfile::tempdir().unwrap();
@@ -47,7 +45,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
     let executable = bin.join("claude");
     std::fs::write(&executable, b"#!/bin/sh\nprintf 'launched\\n' >> .receipt-launches\nprintf '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"fixture done\",\"is_error\":false}\\n'\n").unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-    // One test in this executable, before dispatch or PTY worker creation.
+
     unsafe {
         std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
         std::env::set_var("TOKENSTAT_IDENTITY_DIR", root.path().join("identity"));
@@ -68,8 +66,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
         .unwrap()
         .as_millis() as i64;
     let request = json!({"id":1,"method":"chat.send","params":{"id":chat["id"],"text":"One synthetic turn","clientMessageId":"lost-reply","clientMessageCreatedAtMs":now,"expectedRevision":chat["sendRevision"]}});
-    // Close the first client without consuming its response. The request may
-    // race the retries, but only one of them may accept the message.
+
     send(&socket, &request, false);
     let replies = std::thread::scope(|scope| {
         let first = scope.spawn(|| send(&socket, &request, true).unwrap());
@@ -128,7 +125,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
         success("chat.list", json!({"workspaceId":workspace["id"]}))[0]["sendRevision"],
         1
     );
-    // An unseen expired id and a client missing the age contract never launch.
+
     let mut expired = request["params"].clone();
     expired["clientMessageId"] = json!("expired");
     expired["clientMessageCreatedAtMs"] = json!(now - tokenstat_host::chat_receipts::RETENTION_MS);
@@ -146,9 +143,7 @@ fn lost_socket_response_and_concurrent_retries_launch_once() {
         call("chat.send", no_revision)["error"]["code"],
         "send_upgrade_required"
     );
-    // Force a deterministic storage failure after spawn: the existing turn
-    // makes a handover brief necessary, but its destination is a directory.
-    // The live fixture must still be drained and must never run again on retry.
+
     let chat_root = data.join("chat").join(chat["id"].as_str().unwrap());
     std::fs::create_dir(chat_root.join("brain.md")).unwrap();
     let uncertain = json!({"id":chat["id"],"text":"Keep this unresolved turn","clientMessageId":"post-spawn-failure","clientMessageCreatedAtMs":now,"expectedRevision":current["sendRevision"]});

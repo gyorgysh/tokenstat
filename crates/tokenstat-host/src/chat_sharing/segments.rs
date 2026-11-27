@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Canonical agent batches live in content-addressed payloads. `chain.ndjson`
-//! stores one hash-linked reference per batch. The journal seals that chain.
-//! A reader opens only the payloads a page needs.
-
 use super::super::{invalid, paused, read_private};
 use super::{Journal, Scope, agent::AgentRecord, digest, lower_hex};
 use crate::work_transcript_identity::{UsageTotals, sequence};
@@ -556,8 +551,7 @@ fn select_refs(
                 refs[index].seq,
             )?);
         }
-        // A page may select many rows from one sealed payload. Clone only the
-        // chosen event, rather than its entire (up to 512 KiB) segment per row.
+
         cache[index]
             .as_ref()
             .and_then(|events| events.get(row))

@@ -18,11 +18,6 @@ using ShapesPath = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// Which picture an empty screen draws. One per surface, because "nothing
-/// here" is a different sentence in a folder with no tasks and a folder with
-/// no shells. Mirrors the Apple EmptyArtKind and the Android EmptyArtKind.
-/// </summary>
 internal enum EmptyArtKind
 {
     Sessions,
@@ -35,25 +30,11 @@ internal enum EmptyArtKind
     Projects,
     Waiting,
     Vault,
-    /// <summary>No machine linked yet. The Apple noMachine scene: a rack
-    /// waiting rather than an empty tray.</summary>
     Devices,
-    /// <summary>Saved servers reached with a key. The Apple workspaceAccess
-    /// scene: a folder with the key swinging in.</summary>
     WorkspaceAccess,
-    /// <summary>Insights with nothing on the account yet. Bars rising, the
-    /// last one still a dashed slot.</summary>
     FirstBars,
 }
 
-/// <summary>
-/// What a screen shows before it has anything to show. The Apple EmptyState
-/// rule: the headline names what is missing, the line under it says what the
-/// thing is for, and the button is the one action that ends the empty state.
-/// The picture is drawn from the same art family as the other clients: brand
-/// stroke at one weight with round joins, on a 128 by 84 canvas. These are
-/// the resting frames the Apple loops land on.
-/// </summary>
 internal static class EmptyState
 {
     public static StackPanel FirstProject(UIElement action, bool compact = false)
@@ -82,9 +63,6 @@ internal static class EmptyState
         };
         var art = EmptyArt(kind);
         art.HorizontalAlignment = HorizontalAlignment.Center;
-        // The Mac ClientEmptyState holds the art two points off the title, so
-        // the picture and the headline read as one block rather than as two
-        // rows that happen to be adjacent.
         art.Margin = new Thickness(0, 0, 0, 2);
         stack.Children.Add(art);
         var headline = Fonts.Text(title, EmptyHeadline, Microsoft.UI.Text.FontWeights.SemiBold);
@@ -116,13 +94,6 @@ internal static class EmptyState
         return stack;
     }
 
-    /// <summary>
-    /// The same Free-year note the public profile puts under the heatmap. Not
-    /// a wall: the year is already on screen. This says why the older squares
-    /// are muted and offers the page that unlocks them. Copy from the Apple
-    /// HistoryLockBanner.
-    /// </summary>
-    /// <param name="days">How many recent days stay exact. Free is 30.</param>
     public static Border HistoryLockBanner(int days = 30)
     {
         var text = new TextBlock
@@ -176,11 +147,6 @@ internal static class EmptyState
         };
     }
 
-    /// <summary>
-    /// The picture over an empty state. Line drawings from ClientEmptyArt,
-    /// through the Android port, at the Apple stroke weight of 1.7 with round
-    /// joins, so the pictures read as one hand.
-    /// </summary>
     public static Canvas EmptyArt(EmptyArtKind kind)
     {
         var canvas = new Canvas { Width = 128, Height = 84 };
@@ -279,8 +245,6 @@ internal static class EmptyState
             }
             case EmptyArtKind.Devices:
             {
-                // The Apple ServerScene rack in its ready state: three units
-                // and the light on the top one lit.
                 for (int unit = 0; unit < 3; unit++)
                 {
                     double top = 19.5 + unit * 16;
@@ -298,8 +262,6 @@ internal static class EmptyState
             }
             case EmptyArtKind.WorkspaceAccess:
             {
-                // The Apple WorkspaceAccessScene resting frame: a folder with
-                // its tab, and the key home.
                 canvas.Children.Add(RoundRect(13, 21, 74, 54, 10, quiet));
                 canvas.Children.Add(RoundRect(15, 12, 26, 10, 3, quiet));
                 canvas.Children.Add(Ring(88, 52, 6, lead));
@@ -310,8 +272,6 @@ internal static class EmptyState
             }
             case EmptyArtKind.FirstBars:
             {
-                // The Apple FirstBarsScene resting frame: bars rising, the
-                // last one still a dashed slot, over a baseline.
                 var bar1 = new Rectangle
                 {
                     Width = 16, Height = 20, RadiusX = 3, RadiusY = 3,
@@ -362,19 +322,12 @@ internal static class EmptyState
         return canvas;
     }
 
-    /// <summary>The empty-state headline both empty-state builders share.</summary>
     public const double EmptyHeadline = 28;
 
-    /// <summary>The sentence under it, capped at <see cref="EmptyBodyWidth"/>.</summary>
     public const double EmptyBody = 14;
 
-    /// <summary>
-    /// Wide enough to read, narrow enough that the eye does not have to travel
-    /// back across a full-screen window to find the line. From the Mac rail.
-    /// </summary>
     public const double EmptyBodyWidth = 420;
 
-    /// <summary>The mark over an icon empty state, from the one vocabulary.</summary>
     public const double EmptyMark = 32;
 
     private const double InkWidth = 1.7;
@@ -437,7 +390,6 @@ internal static class EmptyState
         };
     }
 
-    /// <summary>A line of text that is not there yet. The Apple Ghost.</summary>
     private static Rectangle GhostLine(double x, double y, double width, Color color)
     {
         var ghost = new Rectangle

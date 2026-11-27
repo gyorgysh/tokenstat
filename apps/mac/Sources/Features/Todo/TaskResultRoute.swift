@@ -2,7 +2,6 @@
 
 import Foundation
 
-/// Review surfaces that belong to a task result's folder, not to a chat.
 enum TaskResultWorkspaceSurface: String, CaseIterable, Identifiable, Hashable, Sendable {
     case changes
     case history
@@ -24,7 +23,6 @@ enum TaskResultWorkspaceSurface: String, CaseIterable, Identifiable, Hashable, S
     }
 }
 
-/// Where View run should land so the exact run stays selected.
 enum TaskResultRunPlacement: Equatable, Sendable {
     case folderAutomations(workspaceID: String)
     case allAutomations
@@ -51,7 +49,6 @@ enum TaskResultReviewAvailability: Equatable, Sendable {
     }
 }
 
-/// One task result: the exact run, and whether its folder can be reviewed.
 struct TaskResultRoute: Equatable, Sendable {
     var runID: String
     var workspaceID: String

@@ -6,31 +6,12 @@
 
 import SwiftUI
 
-/// A picker that opens a panel you can type into, for lists a menu cannot
-/// carry.
-///
-/// A menu is the right control for four efforts. It is the wrong one for the
-/// forty-odd model ids an agent CLI now lists, where the only way to reach
-/// `meta/muse-spark-1.3` is to read every line above it, and where a list that
-/// changed a minute ago has nowhere to say so. The panel adds the two things
-/// the menu has no room for: a filter, and a way to ask the host to look
-/// again.
-///
-/// The shell is the branch picker's, because that pattern is already the one
-/// people here have learned: a popover on the Mac, a sheet with detents on the
-/// phone, one label closure supplying whatever opens it.
 
-/// One option in a searchable picker.
-///
-/// `detail` is a second line, and `section` a heading. Both are optional and
-/// the plain case, one flat list of labels, needs neither.
 struct PickerChoice<Value: Hashable>: Identifiable {
     var value: Value
     var label: String
     var detail: String?
     var section: String
-    /// Overrides the list's typeface for this row. A product name such as an
-    /// agent reads as a name, not as an identifier, beside model ids that do.
     var monospaced: Bool?
 
     init(value: Value, label: String, detail: String? = nil, section: String = "",
@@ -44,11 +25,6 @@ struct PickerChoice<Value: Hashable>: Identifiable {
 
     var id: Value { value }
 
-    /// Every word of the query has to appear somewhere in the row.
-    ///
-    /// Word by word rather than as one substring, so "meta 1.3" finds
-    /// `meta/muse-spark-1.3` without anybody having to remember where the
-    /// slashes and dashes fall in an id they did not choose.
     func matches(_ query: String) -> Bool {
         let words = query.split(whereSeparator: \.isWhitespace)
         guard !words.isEmpty else { return true }
@@ -57,11 +33,6 @@ struct PickerChoice<Value: Hashable>: Identifiable {
     }
 }
 
-/// The panel shell: a popover on the Mac, a sheet on the phone.
-///
-/// Generic over both the control that opens it and what it shows, so a picker
-/// with sections of its own (agent, model and effort together) uses the same
-/// surface as a single flat list.
 struct PickerPanel<Label: View, Content: View>: View {
     var title: String
     @Binding var isPresented: Bool
@@ -94,8 +65,6 @@ extension View {
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         #if os(macOS)
-        // The composer summary grows as model and effort are selected. A
-        // fixed anchor the width of this panel keeps its leading edge still.
         popover(isPresented: isPresented,
                 attachmentAnchor: anchorsToLeadingEdge
                     ? .rect(.rect(CGRect(x: 0, y: 0, width: 320, height: 1)))
@@ -130,14 +99,10 @@ extension View {
     }
 }
 
-/// The filter field. Shared so every panel's search looks like the branch
-/// picker's rather than like whatever each screen invented.
 struct PickerSearchField: View {
     var prompt: String
     @Binding var query: String
     var onSubmit: () -> Void = {}
-    /// Lets a stepped panel put the caret back in the field when it moves to
-    /// the next step, so the next thing typed searches that step.
     var focus: FocusState<Bool>.Binding?
 
     var body: some View {
@@ -175,11 +140,6 @@ struct PickerSearchField: View {
     }
 }
 
-/// One selectable row: the mark, an optional icon, the label, and whatever
-/// the caller hangs off the end of it.
-///
-/// At least 44 points tall on every platform. A Mac can have a touch screen,
-/// and a finger needs the same target there that it needs on the phone.
 struct PickerOptionRow<Trailing: View>: View {
     var label: String
     var detail: String?
@@ -243,7 +203,6 @@ extension PickerOptionRow where Trailing == EmptyView {
     }
 }
 
-/// Row background. Selection and press, nothing else: the row is the label.
 struct PickerRowButtonStyle: ButtonStyle {
     var isSelected: Bool
 
@@ -258,13 +217,6 @@ struct PickerRowButtonStyle: ButtonStyle {
     }
 }
 
-/// A section heading inside a panel, with what that section is currently set
-/// to on the right of it.
-///
-/// The value is the part that earns its keep. A panel holding agent, model and
-/// effort reads as one long list of names unless each group says what it is and
-/// what it is set to, and the person who opened it came to change one of the
-/// three.
 struct PickerSectionHeading: View {
     var title: String
     var value: String?
@@ -290,44 +242,18 @@ struct PickerSectionHeading: View {
     }
 }
 
-/// Search field, filtered rows, and an optional way to reload the list.
-///
-/// The reload is not decoration. A model list is the agent CLI's answer as of
-/// the last time the host asked it, cached for ten minutes so the picker does
-/// not shell out to four CLIs on every keystroke. Add an API key to one of
-/// them and the new provider is real everywhere except here, with nothing on
-/// screen admitting it and no way to hurry it along. That is what this button
-/// is for, and it is why it says when the list was read.
 struct PickerOptionList<Value: Hashable>: View {
     var choices: [PickerChoice<Value>]
-    /// Which rows carry the mark. A closure rather than one value because a
-    /// panel can hold more than one choice at a time: agent, model and effort
-    /// are three selections in one list.
     var isSelected: (Value) -> Bool
     var prompt: String
     var emptyMessage: String
     var monospaced: Bool = true
-    /// A line above the search field naming what the panel is for. The phone
-    /// gets this from the sheet's navigation title instead.
     var caption: String?
-    /// A control at the end of the caption line, such as which login the
-    /// agents in the list run as. Shown on the phone too, with the caption,
-    /// because it is a setting rather than a title.
     var captionAccessory: AnyView? = nil
-    /// A full-width control above the tabs, such as which profile the agents
-    /// sign in with. Sized for a finger, unlike the caption line.
     var header: AnyView? = nil
     var refresh: (() async -> Void)?
     var sectionValue: ((String) -> String?)?
-    /// Tabs for a picker that holds several independent settings, one per
-    /// section, each showing what it is set to. The agent/model/effort picker
-    /// uses these so the model and effort lists are visible before anybody
-    /// scrolls past the agents. Two or more turn them on.
     var sectionTabs: [String] = []
-    /// Walk the tabs in order: picking a row moves on to the next tab, and
-    /// picking in the last one calls `finish`. Search covers only the current
-    /// step, because a step is one question. The tabs stay clickable, so any
-    /// earlier answer is one click away.
     var stepped = false
     var stepPrompt: ((String) -> String)?
     var finish: (() -> Void)?
@@ -340,11 +266,8 @@ struct PickerOptionList<Value: Hashable>: View {
 
     @State private var query = ""
     @State private var refreshing = false
-    /// The tab somebody chose. Empty means the first one.
     @State private var selectedSection = ""
     @State private var hoveredSection: String?
-    /// Which way the list slides on a step change: forward from the trailing
-    /// edge, back from the leading one.
     @State private var movingForward = true
     @State private var choosing = false
     @FocusState private var searchFocused: Bool
@@ -396,9 +319,6 @@ struct PickerOptionList<Value: Hashable>: View {
             }
             .padding(Theme.Space.s)
             .onChange(of: sectionTabs) { _, tabs in
-                // The chosen tab persists across choice changes. One that no
-                // longer exists, Effort after switching to an agent without
-                // it, falls back to the first tab.
                 if !selectedSection.isEmpty, !tabs.contains(selectedSection) {
                     selectedSection = ""
                 }
@@ -491,7 +411,6 @@ struct PickerOptionList<Value: Hashable>: View {
         .accessibilityValue(section)
     }
 
-    /// Moves to a tab, sliding the list the way the steps run.
     private func show(_ section: String) {
         let from = sectionTabs.firstIndex(of: activeSection) ?? 0
         let to = sectionTabs.firstIndex(of: section) ?? 0
@@ -503,8 +422,6 @@ struct PickerOptionList<Value: Hashable>: View {
         focusSearch()
     }
 
-    /// The caret follows the step on a Mac. On the phone it would raise the
-    /// keyboard over a list of four efforts, so there the field waits for a tap.
     private func focusSearch() {
         #if os(macOS)
         guard stepped else { return }
@@ -512,9 +429,6 @@ struct PickerOptionList<Value: Hashable>: View {
         #endif
     }
 
-    /// Picking answers the current step and asks the next one. Picking the
-    /// row that is already marked counts too: it is how somebody says "that
-    /// one is fine" and moves on.
     private func choose(_ choice: PickerChoice<Value>) {
         guard !choosing else { return }
         guard stepped, let stepPick else {
@@ -573,14 +487,6 @@ struct PickerOptionList<Value: Hashable>: View {
         .help(L10n.text("apple.searchablepicker.ask_this_computer_to_read_the_agent_s_mode.a3d03fd8"))
     }
 
-    /// One tab per setting, each with its current value under its name.
-    ///
-    /// This was a row of small "All / Agent / Model / Effort" pills, and people
-    /// did not see them: they read as decoration, so the agent list looked like
-    /// the whole panel and the models below it went unfound. A tab that says
-    /// "Model, opus" is both the summary and the way in, so the three settings
-    /// are visible at a glance. Typing searches every tab at once, and no tab
-    /// is marked while it does, because the list is no longer one of them.
     private var sectionFilter: some View {
         HStack(spacing: stepped ? 0 : 3) {
             ForEach(Array(sectionTabs.enumerated()), id: \.element) { index, section in
@@ -677,8 +583,6 @@ struct PickerOptionList<Value: Hashable>: View {
 
     private var tabbed: Bool { sectionTabs.count > 1 }
 
-    /// The section the list shows, or empty for all of them: when there are no
-    /// tabs, and while a search is running across every tab.
     private var activeSection: String {
         guard tabbed, stepped || query.isEmpty else { return "" }
         return sectionTabs.contains(selectedSection) ? selectedSection : sectionTabs[0]
@@ -690,8 +594,6 @@ struct PickerOptionList<Value: Hashable>: View {
         }
     }
 
-    /// Sections in first-seen order. A dictionary would sort them by name and
-    /// put Effort above Agent.
     private var sections: [(String, [PickerChoice<Value>])] {
         var order: [String] = []
         var grouped: [String: [PickerChoice<Value>]] = [:]
@@ -705,15 +607,8 @@ struct PickerOptionList<Value: Hashable>: View {
         return order.map { ($0, grouped[$0] ?? []) }
     }
 
-    /// Return in the filter field takes the first match, which is what a
-    /// person typing three letters of a model id is asking for. Prefer a
-    /// match in the currently filtered section, then an exact label match,
-    /// so typing a model id that substring-matches an Agent row does not
-    /// select the Agent.
     private func submit() {
         guard !filtered.isEmpty else { return }
-        // Return on an empty field keeps the marked row and moves on, so a
-        // keyboard can walk all three steps without changing anything.
         if stepped, query.trimmingCharacters(in: .whitespaces).isEmpty {
             if let current = filtered.first(where: { isSelected($0.value) }) ?? filtered.first {
                 choose(current)
@@ -728,8 +623,6 @@ struct PickerOptionList<Value: Hashable>: View {
             choose(first)
             return
         }
-        // No section filter: prefer a non-Agent section for Enter, since the
-        // combined panel's Agent rows otherwise shadow model ids like "codex".
         let sectionsInOrder = sections
         if sectionsInOrder.count > 1,
            let nonAgent = sectionsInOrder.first(where: { !$0.0.lowercased().contains("agent") }),

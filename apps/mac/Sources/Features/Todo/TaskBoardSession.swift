@@ -33,8 +33,6 @@ final class TaskBoardSession {
 
     var visible: [TodoCard] { filter.cards(from: cards) }
 
-    /// Multiple mounted boards can hear the same save. A newer explicit load
-    /// already covers it; otherwise replace any read started before the save.
     func refreshAfterChange() {
         let observed = generation
         Task { [weak self] in

@@ -3,7 +3,6 @@ package ai.tokenstat.tokenstat.ui.logic
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-/** Selection-preserving editing actions; note contents remain portable Markdown. */
 internal enum class NoteFormat(val label: String, val prefix: String, val suffix: String = "", val placeholder: String, val lines: Boolean = false) {
     Heading(L10n.text("android.noteformatting.heading.b34f17f0"), "## ", placeholder = L10n.text("android.noteformatting.heading.b34f17f0"), lines = true),
     Bold(L10n.text("android.noteformatting.bold.94fee62e"), "**", "**", "text"),
@@ -20,7 +19,6 @@ internal enum class NoteFormat(val label: String, val prefix: String, val suffix
         var end = maxOf(anchor, caret).coerceIn(start, text.length)
         if (lines) {
             start = text.lastIndexOf('\n', start - 1).let { if (start == 0) 0 else it + 1 }
-            // A selection ending at the next line's start excludes that line.
             if (end > start && text[end - 1] == '\n') end--
             else end = text.indexOf('\n', end).let { if (it < 0) text.length else it }
         }

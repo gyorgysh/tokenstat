@@ -7,12 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// Every retained run for one workflow. Compact layouts push this. Split
-/// layouts present it as a sheet so the transcript stays on the page.
-///
-/// The host returns the retained list in one read. The client windows it:
-/// live first, then newest, twenty at a time. Times use the host scheduler
-/// zone. Transcripts stay bounded at the run view.
 struct ClientWorkflowHistoryView: View {
     @Bindable var session: ClientWorkflowSession
     let graphID: String

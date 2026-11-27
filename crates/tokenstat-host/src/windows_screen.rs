@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-//! Per-session Windows capture. Runs inside hostd, including Always-On mode.
-//! Permission and encryption remain owned by screen_runtime and remote_stream.
-
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::time::{Duration, Instant};
@@ -48,7 +45,6 @@ unsafe extern "C" {
 struct Capture(*mut c_void);
 impl Drop for Capture {
     fn drop(&mut self) {
-        // SAFETY: the native handle is owned by this value and never moved to another thread.
         unsafe { ts_screen_destroy(self.0) };
     }
 }
@@ -62,7 +58,7 @@ impl Capture {
             _ => (1920, 30, 4_000_000),
         };
         let mut error = 0;
-        // SAFETY: all output pointers refer to initialized, writable values.
+
         let handle =
             unsafe { ts_screen_create(display, width, fps, bitrate, i32::from(test), &mut error) };
         if handle.is_null() {
@@ -77,8 +73,7 @@ impl Capture {
     fn next(&mut self, force: bool, sequence: u64) -> Result<Option<Frame>, String> {
         let (mut bytes, mut len, mut width, mut height, mut key, mut stamp) =
             (std::ptr::null(), 0, 0, 0, 0, 0);
-        // SAFETY: this live handle stays on its creation thread. The returned buffer
-        // belongs to it until next(), and is copied before any subsequent native call.
+
         let result = unsafe {
             ts_screen_next(
                 self.0,
@@ -107,7 +102,7 @@ impl Capture {
         {
             return Err("Windows encoder returned an invalid frame".into());
         }
-        // SAFETY: the native encoder owns at least len bytes, checked above and copied now.
+
         let payload = unsafe { std::slice::from_raw_parts(bytes, len as usize) }.to_vec();
         Ok(Some(Frame {
             kind: FrameKind::Video,
@@ -123,7 +118,7 @@ impl Capture {
 
 fn inventory() -> Vec<Display> {
     let mut items = vec![Display::default(); 32];
-    // SAFETY: the native function writes no more than the supplied capacity.
+
     let count = unsafe { ts_screen_displays(items.as_mut_ptr(), items.len() as u32) };
     items.truncate((count as usize).min(items.len()));
     items
@@ -223,7 +218,7 @@ fn run(id: &str) -> Result<(), String> {
             let relay = session["route"].as_str() != Some("direct");
             let key = format!("{selected}:{quality}:{relay}");
             if settings != key {
-                drop(capture.take()); // Drop the old COM/GDI resources on this thread first.
+                drop(capture.take());
                 capture = Some(Capture::new(selected as u32, quality, relay, false)?);
                 interval = Duration::from_millis(match quality {
                     "dataSaver" => 100,
@@ -316,7 +311,6 @@ impl Drop for InputState {
 }
 impl InputState {
     fn key(&mut self, key: u16, down: bool) {
-        // SAFETY: SendInput consumes a by-value key code; no borrowed storage crosses FFI.
         if unsafe { ts_screen_key(key, i32::from(down), 0) } != 0 {
             if down {
                 self.keys.insert(key);
@@ -335,7 +329,7 @@ impl InputState {
             (2, false) => 64,
             _ => return,
         };
-        // SAFETY: SendInput consumes these scalar values synchronously.
+
         if unsafe { ts_screen_mouse(0, 0, flags, 0) } != 0 {
             if down {
                 self.buttons.insert(button);
@@ -356,7 +350,6 @@ impl InputState {
     }
     fn apply(&mut self, event: Input, display: Display, all: &[Display]) {
         if let Some(flags) = event.flags {
-            // The shared wire uses CGEvent flags, not Windows modifier bits.
             for (mask, key) in [
                 (1 << 17, 0x10),
                 (1 << 18, 0x11),
@@ -387,7 +380,7 @@ impl InputState {
                     ((px - left as f64) * 65535.0 / f64::from((right - left - 1).max(1))) as i32;
                 let ny =
                     ((py - top as f64) * 65535.0 / f64::from((bottom - top - 1).max(1))) as i32;
-                // SAFETY: absolute pointer coordinates have been clamped to the desktop.
+
                 unsafe {
                     ts_screen_mouse(nx, ny, 0x8000 | 0x4000 | 1, 0);
                 }
@@ -410,7 +403,6 @@ impl InputState {
             "text" => {
                 if let Some(text) = event.text.filter(|text| text.len() <= 4096) {
                     for code in text.encode_utf16() {
-                        // SAFETY: individual UTF-16 code units are copied into SendInput immediately.
                         unsafe {
                             ts_screen_key(code, 1, 1);
                             ts_screen_key(code, 0, 1);
@@ -437,7 +429,6 @@ impl InputState {
     }
 }
 
-// Physical macOS key codes are the existing cross-platform screen wire contract.
 fn windows_key(key: u16) -> Option<u16> {
     Some(match key {
         0 => 0x41,
@@ -557,10 +548,6 @@ mod tests {
         }
         let mut produced = 0;
         for _ in 0..30 {
-            // Media Foundation can buffer an input without producing output.
-            // Match run(): only emitted frames advance the transport sequence,
-            // otherwise the viewer correctly treats the fixture as packet loss
-            // and discards its keyframe before the decoder can open.
             if let Some(frame) = encoder.next(produced == 0, produced as u64 + 1).unwrap() {
                 if produced == 0 {
                     assert!(frame.independent);

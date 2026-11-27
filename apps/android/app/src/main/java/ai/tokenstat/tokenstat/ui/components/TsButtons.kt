@@ -46,8 +46,6 @@ import ai.tokenstat.tokenstat.ui.theme.TsMotion
 
 private val buttonShape = RoundedCornerShape(8.dp)
 
-/// Soft accent capsule for a primary action in content, ported from
-/// `AccentButtonStyle`. Toolbar items stay system-styled.
 @Composable
 fun TsAccentButton(
     label: String,
@@ -73,10 +71,6 @@ fun TsAccentButton(
     )
 }
 
-/// The prominent action: solid accent fill with white content, the port of
-/// SwiftUI `.borderedProminent` tinted with the accent. Used sparingly, where
-/// the Apple clients use it: the host Connect button, and the sign-in door,
-/// which is the only thing on its screen.
 @Composable
 fun TsProminentButton(
     label: String,
@@ -102,9 +96,6 @@ fun TsProminentButton(
     )
 }
 
-/// The secondary action: the same capsule family, but neutral — panel fill,
-/// hairline border, primary text. For revoke, forget and every action that is
-/// a real operation but not the one being offered.
 @Composable
 fun TsSecondaryButton(
     label: String,
@@ -130,12 +121,6 @@ fun TsSecondaryButton(
     )
 }
 
-/// An action that ends something: sign out, delete, revoke.
-///
-/// The Apple sheet draws these in the danger colour on a danger-tinted fill,
-/// and that is the whole point of them: Sign out and Delete on website read
-/// as ordinary secondary buttons otherwise, sitting in a row of ordinary
-/// secondary buttons.
 @Composable
 fun TsDangerButton(
     label: String,
@@ -177,8 +162,6 @@ private fun TsCapsuleButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    // Full-size actions meet the 48dp touch minimum, the port of the
-    // client's `.controlSize(.large)` footer. Small row buttons stay dense.
     Box(
         modifier
             .clip(buttonShape)
@@ -201,9 +184,6 @@ private fun TsCapsuleButton(
     }
 }
 
-/// A capsule selector in the app's own language: equal segments inside a
-/// bordered panel, the selected one filled with the accent's soft tint and
-/// accent text. Deliberately not the system's segmented control.
 @Composable
 fun <T> SegmentedCapsulePicker(
     options: List<Triple<T, String, ImageVector?>>,
@@ -247,8 +227,6 @@ fun <T> SegmentedCapsulePicker(
     }
 }
 
-/// A short-lived confirmation that does not push the content column down.
-/// Slides in from the trailing edge with opacity (Apple: snappy 0.25).
 @Composable
 fun TransientToast(
     message: String?,
@@ -256,7 +234,6 @@ fun TransientToast(
     modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-    /// Warning tint for something that did not work, success otherwise.
     warning: Boolean = false,
 ) {
     val colors = LocalTsColors.current

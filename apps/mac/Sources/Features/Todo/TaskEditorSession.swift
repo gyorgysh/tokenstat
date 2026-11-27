@@ -19,13 +19,10 @@ struct TaskRunSubmission: Codable, Equatable, Sendable {
         case cardID = "cardId"
         case revision
         case placement
-        /// Drafts written before the rename used the property spelling.
         case operationIDLegacy = "operationID"
         case cardIDLegacy = "cardID"
     }
 
-    /// Reads either key spelling and writes the new one, so an in-flight run
-    /// survives an update that lands between launch and receipt.
     init(operationID: String, cardID: String, revision: UInt64, placement: TaskRunPlacement) {
         self.operationID = operationID
         self.cardID = cardID
@@ -62,7 +59,6 @@ struct TaskRunSubmission: Codable, Equatable, Sendable {
     }
 }
 
-/// Enough to reopen the same host terminal after the editor is dismissed.
 struct TaskLiveTerminal: Codable, Equatable, Sendable {
     var runID: String
     var ptyID: String
@@ -70,7 +66,6 @@ struct TaskLiveTerminal: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case runID = "runId"
         case ptyID = "ptyId"
-        /// Drafts written before the rename used the property spelling.
         case runIDLegacy = "runID"
         case ptyIDLegacy = "ptyID"
     }
@@ -113,7 +108,6 @@ struct SavedTaskDraft: Codable, Equatable, Sendable {
     var liveTerminal: TaskLiveTerminal? = nil
 }
 
-/// One owner per account, computer and task. A folder move keeps this identity.
 @MainActor @Observable
 final class TaskEditorSession {
     let target: TaskEditorTarget
@@ -154,8 +148,6 @@ final class TaskEditorSession {
 
     var dirty: Bool { !fields.matches(saved.baseline) }
     var canSave: Bool { loaded && !working && !conflict && !missing && saved.baseline.revision != nil && otherDraft == nil && saved.pending == nil && fields.validation == nil && dirty }
-    /// Why this saved card cannot start. Nil means the host-side launch checks
-    /// that we can see from here are satisfied. Save still happens first.
     var runReadiness: String? {
         guard loaded else { return nil }
         let card = saved.baseline
@@ -258,8 +250,6 @@ final class TaskEditorSession {
                     errorMessage = nil
                     _ = await persist()
                 } else {
-                    // A timed-out edit may still arrive. Retrying the same base
-                    // revision is safe: only one checked edit can win.
                     saved.pending = nil
                     conflict = current.revision != saved.baseline.revision
                     errorMessage = conflict ? nil : L10n.text("apple.taskeditorsession.the_task_has_not_changed_your_draft_is_rea.c2632d0f")
@@ -315,8 +305,6 @@ final class TaskEditorSession {
         return await submitRun(submission)
     }
 
-    /// A retry repeats the same durable operation. It can never create a
-    /// second run, even if the first answer was lost after the host accepted it.
     func retryRun() async -> TaskRunOutcome? {
         guard !working, let submission = saved.pendingRun else { return nil }
         return await submitRun(submission)
@@ -340,8 +328,6 @@ final class TaskEditorSession {
         }
     }
 
-    /// Receipt reads never launch work. They are safe during reopen and
-    /// reconnect, while a resend remains an explicit person-owned action.
     func reconcileRun() async {
         guard !working, let submission = saved.pendingRun else { return }
         do {
@@ -417,8 +403,6 @@ final class TaskEditorSession {
         return await attachTerminal(ptyID: ptyID)
     }
 
-    /// Reopen the same host terminal for a live foreground run, including after
-    /// the editor was dismissed. A background run has no terminal.
     func attachedTerminal() async -> PtySessionInfo? {
         guard let delegate = saved.baseline.delegate, delegate.isRunning else { return nil }
         if let outcome = lastRun, outcome.runID == delegate.runId {
@@ -444,8 +428,6 @@ final class TaskEditorSession {
 
     func resolveDiskConflict(keepMine: Bool) async {
         guard !working, let otherDraft else { return }
-        // An unresolved submission belongs to the saved draft and must be
-        // recovered before either window can replace it.
         guard !keepMine || otherDraft.value.pending == nil else { return }
         diskRevision = otherDraft.revision
         self.otherDraft = nil
@@ -456,7 +438,6 @@ final class TaskEditorSession {
 
     func flush() async { writeTask?.cancel(); _ = await persist() }
 
-    /// Keep the terminal identity only while the same foreground run is live.
     private func matchingLiveTerminal(_ card: TodoCard) -> TaskLiveTerminal? {
         guard let live = saved.liveTerminal,
               let delegate = card.delegate,

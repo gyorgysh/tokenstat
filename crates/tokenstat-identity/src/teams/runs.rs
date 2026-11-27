@@ -92,8 +92,6 @@ impl TrustedTeamKeys {
         binding: &TeamRunBinding<'_>,
         now: u64,
     ) -> Result<VerifiedTeamRunLease, TeamTicketError> {
-        // Rotation may introduce a new signer during an accepted run. Only
-        // this condition permits a bounded key refresh from the pinned origin.
         let parts: Vec<_> = lease.0.split('.').collect();
         if parts.len() == 4
             && parts[0] == RUN_LEASE_PREFIX

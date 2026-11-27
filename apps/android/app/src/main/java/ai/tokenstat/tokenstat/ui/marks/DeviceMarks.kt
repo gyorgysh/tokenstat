@@ -31,10 +31,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
-/// The distro brand a device row wears, ported from `distroBrandID` in
-/// `SSHHostPlatform.swift`. Short names match on token boundaries, so `arch`
-/// inside another word does not claim Arch Linux. Zero means no mark: the
-/// caller draws the platform glyph instead.
 fun distroBrandId(label: String?, platform: String?): String? {
     val branded = platform?.takeIf { it.isNotBlank() } ?: label ?: return null
     val name = branded.lowercase()
@@ -78,12 +74,6 @@ fun distroBrandRes(label: String?, platform: String?): Int = when (distroBrandId
     else -> 0
 }
 
-/// Which machine a row is, at a glance. An exact port of
-/// `ClientDeviceIcon.symbol`: the kind comes from the name and the platform
-/// together, a tablet or phone name wins over the kind, servers stay racks,
-/// and a machine that says nothing is drawn as a desktop rather than guessed
-/// at. Distro brands never appear here; they belong to SSH host rows, which
-/// read the OS the host itself reported.
 fun deviceGlyphVector(name: String?, platform: String?, isHost: Boolean): ImageVector {
     val lower = listOfNotNull(name?.trim(), platform?.trim())
         .filter { it.isNotEmpty() }
@@ -113,9 +103,6 @@ fun deviceGlyphVector(name: String?, platform: String?, isHost: Boolean): ImageV
     return Icons.Default.Computer
 }
 
-/// The device in the row: always the platform glyph, in the caller's tint.
-/// A list of identical grey rectangles is a list nobody reads, and the glyph
-/// is what tells a laptop from a rack at a glance.
 @Composable
 fun DeviceGlyph(
     name: String?,
@@ -134,11 +121,6 @@ fun DeviceGlyph(
     )
 }
 
-/// The lit dot before a device name. The device in your hand is awake
-/// whatever the directory last recorded: the app asking is running on it.
-/// Three states and three appearances, like `AwakeDot` in
-/// `ClientDevicesView.swift`: a server that never reported presence is a
-/// hollow ring, not a dot, because "no answer" and "asleep" differ.
 @Composable
 fun AwakeDot(online: Boolean?, modifier: Modifier = Modifier) {
     val colors = LocalTsColors.current
@@ -164,11 +146,6 @@ fun AwakeDot(online: Boolean?, modifier: Modifier = Modifier) {
 
 private fun JsonObject.optString(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
-/// This device first, then awake machines by spend, then everyone else by how
-/// recently they were last active. An exact port of the `sorted` comparator in
-/// `ClientDevicesView.swift`. Clients never rank on spend (they do not upload
-/// usage), so value only separates hosts, and unknown usage sorts below any
-/// real figure so a $0 phone does not float above a busy laptop.
 fun sortMachines(
     machines: List<JsonObject>,
     thisId: String?,
@@ -227,8 +204,6 @@ private val legacyServerDateFormat = java.time.format.DateTimeFormatter
     .ofPattern("uuuu-MM-dd HH:mm:ss", Locale.US)
     .withResolverStyle(java.time.format.ResolverStyle.STRICT)
 
-/// "3 minutes ago", for a timestamp whose exact minute nobody reads. Nil when
-/// the string does not parse, so the caller decides what absence looks like.
 fun formatRelativeDate(raw: String?): String? {
     val date = parseServerDate(raw) ?: return null
     val seconds = ((Date().time - date.time) / 1000).coerceAtLeast(0)
@@ -251,8 +226,6 @@ fun formatRelativeDate(raw: String?): String? {
     }
 }
 
-/// "4 Aug 2026, 18:41". The raw string when nothing parses: a screen showing
-/// an ISO string beats one showing the wrong day.
 fun formatServerDate(raw: String?): String? {
     if (raw.isNullOrBlank()) return null
     val date = parseServerDate(raw) ?: return raw

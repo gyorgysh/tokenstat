@@ -4,15 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Host-owned workflow graphs: persist, validate, and run a DAG of steps.
-//!
-//! A workflow is not an automation. An automation is one scheduled job. A
-//! workflow is a graph that may *include* one as a node. The Mac canvas is a
-//! view of this IR. MCP and the runner see the same JSON.
-//!
-//! A timer still must not call `gitwrite`. Commit, push and tag are an agent
-//! prompt, an existing automation, or a Command the person pressed Run on.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,12 +18,8 @@ use serde_json::{Value, json};
 use crate::automations::{self, DEFAULT_BUDGET_SECONDS, ScheduleSpec};
 
 const RUNS_KEPT: usize = 100;
-/// Prompt and HTTP body expansion cap, same order as automation transcripts.
 const OUTPUT_CAP: usize = 64 * 1024;
-/// Raw pty bytes kept for the lossy fallback. A node that never produces a
-/// parseable piece cannot drive this store out of memory.
 const RAW_TAIL_CAP: usize = 4 * 1024 * 1024;
-/// Longest run or node id accepted as a path component.
 const MAX_PATH_ID: usize = 128;
 const MAX_NODES: usize = 64;
 const MAX_EDGES: usize = 128;
@@ -507,9 +495,7 @@ impl Store {
         if !valid_path_token(run_id) {
             return Err("invalid run id".into());
         }
-        // Run ids are minted by the host and always strict tokens. Node ids
-        // come from saved graphs, including ones written before validation
-        // required tokens, so legacy ids are encoded rather than rejected.
+
         if node_id.is_empty() || node_id.len() > MAX_PATH_ID * 4 || node_id.contains('\0') {
             return Err("invalid node id".into());
         }
@@ -521,8 +507,6 @@ impl Store {
         Ok(path)
     }
 
-    /// Canonical containment for a step-transcript path. A path that does not
-    /// exist yet is safe because the ids are already plain tokens.
     fn path_within_runs_dir(&self, path: &Path) -> bool {
         let Ok(root) = self.runs_dir.canonicalize() else {
             return true;
@@ -564,16 +548,10 @@ impl Store {
     }
 
     fn upsert_run(&self, run: WorkflowRun) -> Result<(), String> {
-        // Transcript directories to delete once the lock is released. Doing
-        // filesystem work under the runs mutex would block every get/upsert on
-        // the eviction of a run nobody asked about.
         let mut orphan_dirs: Vec<std::path::PathBuf> = Vec::new();
         {
             let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
-                // The same run is re-persisted as it progresses. A different
-                // run arriving under the same id (a generation collision) must
-                // not silently replace the one already recorded.
                 if existing.started_at_ms != run.started_at_ms {
                     return Err(format!("a workflow run with id {} already exists", run.id));
                 }
@@ -584,8 +562,6 @@ impl Store {
                     let evicted: Vec<WorkflowRun> = runs.drain(RUNS_KEPT..).collect();
                     let kept: HashSet<String> = runs.iter().map(|r| r.id.clone()).collect();
                     for old in &evicted {
-                        // A record that never finished, or an id another record
-                        // still uses, keeps its transcript directory.
                         if !matches!(old.status.as_str(), "running" | "waiting")
                             && !kept.contains(&old.id)
                             && valid_path_token(&old.id)
@@ -813,9 +789,7 @@ impl Store {
                     NodeOutcome::Gate => {
                         run.status = "waiting".into();
                         let _ = self.upsert_run(run);
-                        // A gate is the one state that cannot resolve itself.
-                        // Worth waking a phone for, where a finished run is
-                        // only worth telling.
+
                         tokenstat_sync::push::notify_in_background(
                             tokenstat_sync::push::Reason::RunNeedsInput,
                         );
@@ -833,9 +807,7 @@ impl Store {
         run.current_node_id = None;
         self.kill_live(run);
         let _ = self.upsert_run(run.clone());
-        // A phone with the app closed has no other way to learn this. The Mac
-        // sees it for itself and notifies locally. "stopped" is somebody at
-        // the keyboard, so it stays quiet.
+
         if status != "stopped" {
             tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::for_exit(
                 status, None,
@@ -1035,8 +1007,7 @@ impl Store {
             .prompt_override
             .as_deref()
             .map(|over| expand(over, &run.input, workspace_path, outputs));
-        // Stamped with the workflow run, so the step does not announce itself
-        // as a job somebody scheduled. See `RunRecord::parent_run_id`.
+
         let started =
             automations::shared().start_now(id, override_prompt.as_deref(), Some(&run.id))?;
         let deadline = run_deadline(run);
@@ -1045,8 +1016,7 @@ impl Store {
                 let _ = automations::shared().kill_run(&started.id);
                 return Err("stopped".into());
             }
-            // The node must not outlive the workflow's own budget just
-            // because the automation's budget is longer.
+
             if deadline.is_some_and(|d| Instant::now() >= d) {
                 let _ = automations::shared().kill_run(&started.id);
                 return Err("the run budget is spent".into());
@@ -1188,8 +1158,7 @@ pub fn design(
         ..Node::default()
     };
     let design_reader = format!("workflow-design:{}", scratch.id);
-    // A design call spawns an agent like any other run, so it takes the same
-    // queue slot and fails with the same words when the queue is full.
+
     if !automations::shared().try_take_slot() {
         return Err("the run queue is full".into());
     }
@@ -1274,10 +1243,7 @@ pub fn validate(workflow: &Workflow) -> Result<(), String> {
         if node.id.trim().is_empty() {
             return Err("every node needs an id".into());
         }
-        // Node ids become transcript path components under the runs dir, so a
-        // new graph may only use the same plain tokens a generated id does.
-        // Graphs saved before that rule keep working: `step_path` encodes
-        // their ids, which keeps them inside the runs dir whatever they hold.
+
         if !valid_path_token(&node.id) {
             if node.id.len() > MAX_PATH_ID * 4 || node.id.contains('\0') {
                 return Err(format!("node id {} is not usable", node.id));
@@ -1373,7 +1339,6 @@ fn validate_node(node: &Node) -> Result<(), String> {
     }
 }
 
-/// Cycles are allowed only when every cycle passes through a loop node.
 fn has_illegal_cycle(workflow: &Workflow) -> bool {
     let loops: HashSet<&str> = workflow
         .nodes
@@ -1487,9 +1452,6 @@ fn restore_waiting_gate(run: &mut WorkflowRun, gate_id: &str) {
     }
 }
 
-/// Edges from a skipped predecessor do not count. Edges from the same
-/// predecessor are OR'd so Then and Else can share a join. Distinct
-/// predecessors stay AND-joined.
 fn incoming_ready(workflow: &Workflow, run: &WorkflowRun, edges: &[&Edge]) -> bool {
     match classify_incoming(workflow, run, edges) {
         Incoming::Ready => true,
@@ -1927,13 +1889,6 @@ fn align_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
-/// Filesystem stem for a node transcript.
-///
-/// New graphs save strict tokens, which stay readable as-is. Older graphs may
-/// carry ids with dots, slashes, spaces or colons; percent-encoding those
-/// bytes keeps every id working while keeping the file inside the run
-/// directory. Strict ids take the fast path so existing transcripts keep
-/// their names.
 fn step_file_stem(node_id: &str) -> String {
     if valid_path_token(node_id) {
         return node_id.to_string();
@@ -1949,8 +1904,6 @@ fn step_file_stem(node_id: &str) -> String {
     out
 }
 
-/// Non-empty, bounded, `[A-Za-z0-9_-]`. Ids that reach the filesystem are
-/// generated by the host, but node ids come from a client-saved graph.
 fn valid_path_token(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_PATH_ID
@@ -1967,8 +1920,6 @@ fn cap_output(text: &str) -> String {
     }
 }
 
-/// Seconds left on the run budget. `0` means no limit when `budget_seconds`
-/// is 0, and "already spent" otherwise.
 fn remaining_budget(run: &WorkflowRun) -> u64 {
     if run.budget_seconds == 0 {
         return 0;
@@ -2107,8 +2058,6 @@ fn fail_run(run: &mut WorkflowRun, message: &str) {
     });
 }
 
-/// Process-wide counter that keeps two runs started in the same millisecond
-/// from sharing an id, which is also their transcript directory name.
 static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn mint_run_id() -> String {
@@ -2127,7 +2076,7 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    // A unique suffix keeps two savers from interleaving into one temporary.
+
     static SAVE_SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = path.with_extension(format!(
         "json.tmp.{}.{}",
@@ -2138,12 +2087,9 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-// MARK: - Process and HTTP
-
 struct DrainPty<'a> {
     run: &'a mut WorkflowRun,
     argv: &'a [String],
-    /// What points the agent at a local model, when the node picked one.
     environment: Vec<(String, String)>,
     cwd: &'a str,
     budget_seconds: u64,
@@ -2276,9 +2222,6 @@ fn drain_pty(
     let exit = info.as_ref().and_then(|i| i.exit_code);
     let alive = info.as_ref().map(|i| i.alive).unwrap_or(false);
     if matched {
-        // wait:output delivered what the node wanted. Kill the process and
-        // drop the pty now; nothing may outlive the node, least of all into a
-        // Gate, which waits without a deadline.
         run.live_pty_ids.retain(|id| id != &pty_id);
         let _ = manager.kill(&pty_id);
         let _ = manager.close(&pty_id);

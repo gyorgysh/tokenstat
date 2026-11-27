@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Opening callers share one replacement window. Cancelling a view waiter
-/// cannot discard the page another waiter still needs.
 @MainActor final class ChatOpeningRead<Owner: Equatable> {
     private final class Flight {
         let owner: Owner
@@ -30,8 +28,6 @@ import Foundation
     }
 }
 
-/// A bounded read lane. A refresh arriving during an older read retires its
-/// publication and requests one fresh pass, without parallel transport work.
 @MainActor final class ChatPollLane<Owner: Equatable> {
     private final class Flight {
         let owner: Owner
@@ -74,8 +70,6 @@ import Foundation
     }
 }
 
-/// One polling loop per retained reader. View lifetimes hold exact leases;
-/// predecessor cancellation cannot stop a successor using the same reader.
 @MainActor final class ChatPollWatcher<Owner: Equatable> {
     private struct Loop {
         let owner: Owner
@@ -127,7 +121,6 @@ import Foundation
     }
 }
 
-/// Monotonic-clock policy; no timer or network work is hidden in this value.
 struct ChatPollCadence {
     private var quietReads = 0
     private var failures = 0

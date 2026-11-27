@@ -2,9 +2,6 @@
 import Foundation
 import Darwin
 
-/// Durable sign-out intent contains only cache ownership, never keys, query
-/// text or draft data. Unfinished cleanup is retried after a verified account
-/// answer, including after an app restart.
 @MainActor final class WorkCacheCleanupJournal {
     static let shared = WorkCacheCleanupJournal()
     private struct Entry: Codable, Equatable {
@@ -21,8 +18,6 @@ import Darwin
     }
     init(file: URL? = nil) { self.file = file ?? Self.defaultFile }
 
-    /// A pending cleanup cannot be made readable again through a saved page
-    /// or recreate a key while a deletion is waiting on local transport I/O.
     nonisolated static func blocks(_ scope: String, file: URL? = nil) -> Bool {
         let file = file ?? defaultFile
         guard FileManager.default.fileExists(atPath: file.path) else { return false }
@@ -51,20 +46,16 @@ import Darwin
         for entry in journal.entries {
             guard stillValid() else { return }
             guard !active.contains(entry.scope) else { continue }
-            // A fresh answer still identifies the original signed-in account:
-            // an unconfirmed sign-out did not establish a cleanup boundary.
             if entry.scope == verifiedScope && !entry.confirmed {
                 try? remove(entry)
                 continue
             }
             active.insert(entry.scope)
-            // Keep reads blocked until background key deletion finishes.
-            // Failure retains the journal so cleanup can retry.
             guard await deleteKey(entry.scope) else { active.remove(entry.scope); continue }
             do {
                 try await clear(entry.scope)
                 try remove(entry)
-            } catch { /* The durable entry makes the next recovery retry. */ }
+            } catch { }
             active.remove(entry.scope)
         }
     }

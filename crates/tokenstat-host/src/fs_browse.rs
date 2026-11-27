@@ -1,27 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Picking a folder on a machine that has no file panel.
-//!
-//! `NSOpenPanel` cannot run on a phone and does not exist on a server, so the
-//! machine answers the question instead: what is in this directory, which of
-//! them are repositories, and which are already registered.
-//!
-//! Two rules hold it in. **No contents**: names, kinds and a few stat fields,
-//! never a byte of a file. And **roots**: the home directory and the parent of
-//! every registered folder are what may be browsed, and a path outside them is
-//! refused here rather than hidden by the client. A client cannot be the
-//! enforcement, because the client is the thing on the other side of the
-//! tunnel.
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-/// Entries returned for one directory before the answer says so and stops.
-///
-/// A home directory with a node_modules tree in it can hold hundreds of
-/// thousands of names, and a picker cannot draw them anyway.
 const MAX_ENTRIES: usize = 2000;
 
 #[derive(Deserialize)]
@@ -43,11 +27,6 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
     })
 }
 
-/// Where browsing may start, and everything it may reach.
-///
-/// The home directory, because that is where somebody's work lives, and the
-/// parent of every registered folder, because a folder that is already trusted
-/// enough to open is one whose neighbours are worth offering.
 fn roots() -> Vec<(PathBuf, String, &'static str)> {
     let mut roots = Vec::new();
     if let Some(home) = home() {
@@ -55,7 +34,6 @@ fn roots() -> Vec<(PathBuf, String, &'static str)> {
     }
     let is_general = crate::general_folder::matcher();
     for folder in crate::workspaces::read().workspaces.iter() {
-        // Its parent is the app's own data directory, not a place to browse.
         if is_general(folder) {
             continue;
         }
@@ -82,10 +60,6 @@ fn home() -> Option<PathBuf> {
     Some(home.canonicalize().unwrap_or(home))
 }
 
-/// The real path, and whether it is inside something browsable.
-///
-/// Canonicalized first, so a symlink out of a root is checked where it lands
-/// rather than where it is written. `..` is resolved by the same call.
 fn resolve(path: &Path, roots: &[(PathBuf, String, &'static str)]) -> Result<PathBuf, String> {
     let real = path
         .canonicalize()
@@ -109,10 +83,6 @@ pub(crate) fn resolve_root(path: &Path) -> Result<PathBuf, String> {
     resolve(path, &roots()).map(plain)
 }
 
-/// A canonical path in the form a person and every tool would write it.
-///
-/// The spelling lives in the registry, because that is what stores the
-/// project and what a later registration has to match.
 fn plain(path: PathBuf) -> PathBuf {
     tokenstat_workspace::registry::plain_path(&path)
 }
@@ -128,11 +98,6 @@ fn browse(params: &str) -> Result<Value, String> {
     browse_in(p.path.as_deref(), &roots(), &registered)
 }
 
-/// The listing itself, with what may be browsed passed in.
-///
-/// Separate from [`browse`] so the containment rule can be tested against a
-/// tree a test owns, rather than against whatever is in the home directory of
-/// the machine running the suite.
 fn browse_in(
     path: Option<&str>,
     roots: &[(PathBuf, String, &'static str)],
@@ -153,9 +118,6 @@ fn browse_in(
     let reader = std::fs::read_dir(&start)
         .map_err(|error| format!("Could not read {}: {error}", start.display()))?;
     for entry in reader {
-        // One unreadable entry is skipped rather than failing the listing: a
-        // directory somebody cannot stat is exactly the kind of thing a home
-        // directory has one of.
         let Ok(entry) = entry else { continue };
         if entries.len() >= MAX_ENTRIES {
             truncated = true;
@@ -194,8 +156,7 @@ fn browse_in(
                 .map(|since| since.as_millis() as u64),
         }));
     }
-    // Folders first, then by name without case getting in the way. The picker
-    // shows what it is given, so the order is decided once, here.
+
     entries.sort_by(|left, right| {
         let folder = |value: &Value| value["kind"].as_str() == Some("directory");
         folder(right).cmp(&folder(left)).then_with(|| {
@@ -207,8 +168,6 @@ fn browse_in(
         })
     });
 
-    // A parent only exists when it is still somewhere this machine offers, so
-    // "up" stops at a root instead of walking out of it and then being refused.
     let parent = start
         .parent()
         .and_then(|parent| resolve(parent, roots).ok());
@@ -224,10 +183,6 @@ fn browse_in(
     }))
 }
 
-/// One directory, inside a root, so a clone has somewhere to land.
-///
-/// In `gitwrite`'s spirit: it exists because a person pressed a button. It
-/// creates one level, never a tree, and never removes anything.
 fn mkdir(params: &str) -> Result<Value, String> {
     let p: MkdirParams = serde_json::from_str(params.trim()).map_err(|error| error.to_string())?;
     let path = PathBuf::from(&p.path);
@@ -244,9 +199,7 @@ fn mkdir(params: &str) -> Result<Value, String> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .ok_or("A new folder needs a name.")?;
-    // The name only, never a path: a caller must not be able to write two
-    // levels up by asking for one folder called `../..`. Same gate as a clone
-    // target, so odd names cannot arrive through this door either.
+
     tokenstat_workspace::gitwrite::validate_clone_name(&name)?;
     let target = parent.join(&name);
     std::fs::create_dir(&target)
@@ -300,12 +253,12 @@ mod tests {
         assert_eq!(resolve(&inside, &roots).unwrap(), inside);
         assert_eq!(resolve(&root, &roots).unwrap(), root);
         assert!(resolve(&outside, &roots).is_err());
-        // `..` is resolved before the check, not after it.
+
         assert!(resolve(&inside.join("../.."), &roots).is_err());
         let escape = root.join("escape");
         std::os::unix::fs::symlink(&outside, &escape).unwrap();
         assert!(resolve(&escape, &roots).is_err());
-        // A path that is not there at all is not an error about permission.
+
         let missing = resolve(&root.join("absent"), &roots).unwrap_err();
         assert!(missing.contains("no "), "{missing}");
 

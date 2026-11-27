@@ -6,10 +6,6 @@
 
 import SwiftUI
 
-/// The selected device: this machine, a peer, or an account machine.
-///
-/// Pairing stays a sheet. The list is names and presence. Actions that change
-/// a connection live here so the overview does not become a form.
 struct MachinesInspector: View {
     @Bindable var model: MachinesModel
     var onClose: () -> Void
@@ -217,8 +213,6 @@ struct MachinesInspector: View {
         autoConnectToggle(peer: peer, machine: machine)
     }
 
-    /// Whether the sweep dials this peer on its own. Off stops the dialling
-    /// and leaves a live connection alone; only Disconnect drops it.
     private func autoConnectToggle(peer: Peer, machine: Machine? = nil) -> some View {
         HStack(spacing: 6) {
             Text(L10n.text("apple.machinesinspector.auto_connect.45b6d201"))

@@ -1,23 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Whether a teammate's Ask may start an agent on this computer.
-//!
-//! The account server decides who is eligible: every contributor, or only
-//! the devices the publisher picked. This decides whether this computer
-//! takes part at all, per shared checkout, and it belongs to the person who
-//! shares it. A run spends their agent login and works in their folder, so
-//! a new share starts with agent runs off until they choose otherwise.
-//!
-//! - Off: an Ask is refused and the chat hides Ask.
-//! - Ask: each request waits until the publisher allows or denies it here.
-//! - On: eligible teammates run without asking.
-//!
-//! The publisher's own Ask from another device is never held: it is them.
-//!
-//! Settings live in their own file rather than in the publication index, so
-//! an older host that meets them after a downgrade only ignores this file
-//! and never rejects the index it shares with every other Teams feature.
-
 use crate::error::DispatchError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -44,7 +25,6 @@ pub(super) enum Access {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Entry {
     access: Access,
-    /// People this publisher chose "always allow" for while asking.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     allowed_people: BTreeSet<String>,
 }
@@ -57,14 +37,10 @@ struct File {
 }
 
 const FILE_MAX_BYTES: u64 = 256 * 1024;
-/// How long an unanswered or answered request is kept. Long enough to step
-/// away from the computer for a moment, short enough that an old approval
-/// cannot start a run nobody remembers allowing.
 const REQUEST_LIFETIME_MS: i64 = 15 * 60 * 1000;
 const MAX_PENDING: usize = 64;
 const MAX_PENDING_PER_PERSON: usize = 3;
 
-/// What the publisher decided about one held request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum Decision {
@@ -82,8 +58,6 @@ struct Request {
     person: String,
     person_name: String,
     message: String,
-    /// The whole request as it was held. An approval covers exactly this,
-    /// so the same message id cannot carry different text once allowed.
     digest: String,
     preview: String,
     created_at_ms: i64,
@@ -167,8 +141,6 @@ fn admit_with(
                     return Err(changed_request());
                 }
                 return match held[index].decision {
-                    // Kept rather than consumed: a retry of a run that has
-                    // already started must reach its receipt, not a new prompt.
                     Some(Decision::Once | Decision::Always) => Ok(()),
                     Some(Decision::Deny) => {
                         held.remove(index);
@@ -177,9 +149,7 @@ fn admit_with(
                     None => Err(pending()),
                 };
             }
-            // One person cannot bury the prompt under new requests, and the
-            // whole queue has a ceiling as well. Either way the teammate is
-            // told to wait rather than having more requests held.
+
             let waiting = held.iter().filter(|request| request.decision.is_none());
             let theirs = waiting
                 .clone()
@@ -209,7 +179,6 @@ fn admit_with(
     }
 }
 
-/// Records the publisher's answer to one held request, and says whose it was.
 fn decide(id: &str, decision: Decision) -> Result<(String, String), DispatchError> {
     let mut held = requests();
     let request = held
@@ -225,8 +194,6 @@ fn decide(id: &str, decision: Decision) -> Result<(String, String), DispatchErro
     Ok((request.checkout.clone(), request.person.clone()))
 }
 
-/// What the prompt shows. Long requests are cut with an ellipsis so the
-/// sharer can see that more was asked than the prompt holds.
 fn preview(text: &str) -> String {
     const LIMIT: usize = 600;
     let text = text.trim();
@@ -317,7 +284,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         if params.len() > 16 * 1024 {
             return Err(invalid());
         }
-        // The app's Team client adds its account receipt to every call.
+
         let mut body: Value = serde_json::from_str(params).map_err(|_| invalid())?;
         if let Some(object) = body.as_object_mut() {
             object.remove("_accountScope");
@@ -342,8 +309,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
                 let file = update(&root()?, |file| {
                     let entry = file.checkouts.entry(checkout.clone()).or_default();
                     entry.access = access;
-                    // Choosing again starts the list of standing approvals
-                    // again, so "Off" then "Ask" never revives old ones.
+
                     if access != Access::Ask {
                         entry.allowed_people.clear();
                     }
@@ -488,7 +454,7 @@ fn update(root: &Path, change: impl FnOnce(&mut File)) -> Result<File, DispatchE
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     };
-    // Reload under the lease so independent changes keep one another.
+
     let mut file = load_at(root)?;
     change(&mut file);
     let bytes = serde_json::to_vec(&file).map_err(|_| storage())?;
@@ -614,7 +580,7 @@ mod tests {
             code(admit_with(&ask, &teammate, "m1", "fix it", "fix it")),
             "ok"
         );
-        // Allowing once covers that request only.
+
         assert_eq!(
             code(admit_with(&ask, &teammate, "m2", "again", "again")),
             "team_agent_approval_pending"
@@ -649,7 +615,7 @@ mod tests {
             )),
             "invalid_ask"
         );
-        // The swapped request also cost the approval it tried to borrow.
+
         assert_eq!(
             code(admit_with(
                 &ask,
@@ -711,7 +677,7 @@ mod tests {
             code(admit_with(&ask, &teammate, "m1", "rm -rf", "rm -rf")),
             "team_agent_request_denied"
         );
-        // A new attempt asks again rather than inheriting the refusal.
+
         assert_eq!(
             code(admit_with(&ask, &teammate, "m1", "rm -rf", "rm -rf")),
             "team_agent_approval_pending"

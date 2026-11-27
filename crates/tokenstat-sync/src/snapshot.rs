@@ -58,10 +58,7 @@ pub fn api_url(path: &str) -> anyhow::Result<String> {
 pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::Result<Fetched> {
     let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
-        // A conditional GET is a freshness check; it must not hang on a dead
-        // network for the whole request timeout.
         .connect_timeout(std::time::Duration::from_secs(10))
-        // A captive portal 302 would otherwise be stored as a price book.
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
@@ -81,8 +78,6 @@ pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::R
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    // Pricing / catalog snapshots are a few hundred KB. A hostile body must not
-    // allocate without limit into hostd during the hourly refresh.
     const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
     let bytes = read_capped(resp, MAX_SNAPSHOT_BYTES)?;
     if bytes.len() > MAX_SNAPSHOT_BYTES {

@@ -50,152 +50,57 @@ enum Theme {
     private static let nestedSelectionColor = PaletteColor(\.selection, 0xE8E7F0, 0x26213D)
 
     static var accent: Color { accentColor.color }
-    /// The website's violet, fixed. For the brand itself (the wordmark), which
-    /// stays the same product whichever palette the person picked.
     static let brandAccent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
-    /// Whether the logo draws in the brand's own colours.
-    ///
-    /// Only on the Default palette. Beside an orange or teal interface the
-    /// violet mark reads as a sticker from another app, and recolouring it to
-    /// the theme makes it someone else's logo. So a chosen theme gets the
-    /// monochrome lockup the widgets already use: the same three bars on one
-    /// baseline, which is what makes the mark recognisable, in the text colour.
     static var showsBrandColours: Bool { AppAppearance.shared.paletteID == "default" }
     static var secondary: Color { secondaryColor.color }
     static var background: Color { backgroundColor.color }
     static var sidebar: Color { sidebarColor.color }
-    /// A card on OLED is a step off black, not black inside a drawn frame.
-    /// A ring of grey around every card on a black screen read as cheap,
-    /// and a raised surface is how depth works where there is no light.
     static var panel: Color {
         AppAppearance.shared.mode == .oled ? oledPanel : panelColor.color
     }
     private static let oledPanel = hex(0x0C0C0F)
-    /// A separator between sections that sit on the pane rather than in
-    /// cards. Fainter than `border`, which has to hold a shape on its own.
     static var hairline: Color {
         AppAppearance.shared.mode == .oled ? Color.white.opacity(0.07) : border.opacity(0.7)
     }
 
-    /// Behind a tab strip.
-    ///
-    /// A step darker than the pane under it, so the strip reads as chrome
-    /// rather than as the first row of the content. Only a step: in light mode
-    /// this was a solid grey, which put a third tone between the toolbar above
-    /// and the content below and made the strip look like a band stuck across
-    /// the window. Dark mode can take the contrast, light mode cannot.
     static var tabStrip: Color { tabStripColor.color }
-    /// The floor under the new chat page on iPhone and iPad.
-    ///
-    /// That page is presented full screen over nothing, so a material there
-    /// frosts a blank rather than anything worth seeing, and it came out pale
-    /// beside the rest of the app. A step under `background` instead: the
-    /// light, the folds and the prism are drawn on an opaque floor, the lit
-    /// card floats off it, and the page reads as this app's. The Mac keeps
-    /// its window glass, which has a desktop behind it.
     static var chatStartGround: Color {
         AppAppearance.shared.mode == .oled ? .black : chatStartGroundColor
     }
     private static let chatStartGroundColor = Color.adaptive(light: hex(0xF2F1F7), dark: hex(0x050409))
-    /// Faint on OLED: the raised panel already carries the shape there.
     static var border: Color {
         AppAppearance.shared.mode == .oled ? Color.white.opacity(0.06) : borderColor.color
     }
-    /// The edge of the content sheet against the glass chrome. A touch of
-    /// light on dark and a touch of shade on light, so the sheet reads as a
-    /// layer rather than a hole cut in the chrome.
     static let contentRim = Color.adaptive(light: Color.black.opacity(0.09), dark: Color.white.opacity(0.085))
     static var rowHighlight: Color { accentSoft }
-    /// The quiet circular seat behind a small chrome glyph, such as a close
-    /// button.
-    ///
-    /// Explicitly adaptive rather than `Color.primary` at low opacity: the
-    /// hierarchical primary resolves against whatever material sits behind
-    /// it, and on a floating panel at a scaled resolution that read as a
-    /// wrong tint. An explicit light/dark pair cannot drift.
     static let controlSeat = Color.adaptive(
         light: Color.black.opacity(0.06),
         dark: Color.white.opacity(0.09)
     )
-    /// A small chrome glyph, such as a close button's xmark.
-    ///
-    /// Explicitly adaptive rather than `.secondary` or `Color.primary`: the
-    /// hierarchical styles resolve through whatever sits behind the glyph,
-    /// and on a dark tab strip at a scaled resolution the xmark came out the
-    /// wrong colour. A plain adaptive pair cannot pick up its background.
     static let controlGlyph = Color.adaptive(light: hex(0x6B6876), dark: hex(0xA8A5B5))
 
     static let controlGlyphHover = Color.adaptive(light: hex(0x2A2831), dark: hex(0xE9E7F0))
-    /// The row that is actually selected.
-    ///
-    /// Tinted with the accent rather than being a lighter grey. With a hover
-    /// highlight and a selection highlight both in grey, the two were the same
-    /// thing at a glance and you could not tell which workspace you were in.
     static var rowSelected: Color { accent.opacity(0.18) }
-    /// A selected row nested inside a selected one, such as the session showing
-    /// inside the open workspace.
-    ///
-    /// Neutral, not tinted. It was the accent at half strength, which put two
-    /// purple blocks one above the other and made the pair read as two
-    /// competing selections rather than as "this folder, and this terminal
-    /// within it". The folder carries the colour, this one just lifts off the
-    /// background.
     static var rowSelectedNested: Color { nestedSelectionColor.color }
 
-    /// The accent at card strength, for a fill that has to read as tinted
-    /// rather than as coloured.
     static var accentSoft: Color { selectionColor.color }
 
-    // Semantic colours. Before these existed, a live session was `.green` and
-    // an unsaved file was `.orange`, written at the call site, so the app had
-    // no single answer to what "good" looks like.
-    //
-    // Success is the accent, deliberately: a green "good" sat outside the
-    // purple design everywhere it appeared (toasts, status pills, live dots),
-    // so the app's own active colour is what "good" means now. Warning and
-    // danger stay distinct, because amber and red carry meaning the accent
-    // does not.
     static var success: Color { accent }
     static let warning = Color(red: 0xE0 / 255, green: 0xA9 / 255, blue: 0x3B / 255)
     static let danger = Color(red: 0xD6 / 255, green: 0x45 / 255, blue: 0x3F / 255)
 
-    /// A session that is doing something right now.
-    ///
-    /// The accent, so "something is happening" is the app's own colour rather
-    /// than a traffic light. Named separately from `success` because a run
-    /// that is working has not succeeded at anything yet, and the two will
-    /// want to diverge the first time a state screen shows both.
     static var stateWorking: Color { accent }
-    /// A session that is alive and quiet. Grey, and quiet in the layout too:
-    /// most rows are idle most of the time, so this must not draw the eye.
     static let stateIdle = Color.adaptive(light: hex(0x9A97A6), dark: hex(0x6E6A80))
 
-    /// Lines added, and lines removed.
-    ///
-    /// Green and red because a diff is the one place those two colours are
-    /// not a traffic light: they are what every tool that shows a diff uses,
-    /// and a purple `+128` beside a purple `−41` says nothing. Muted against
-    /// the plain `.green` and `.red`, which are loud enough to pull the eye
-    /// off the name of the workspace they belong to.
     static let diffAdded = Color.adaptive(light: hex(0x2E8B57), dark: hex(0x5FBF8B))
     static let diffRemoved = Color.adaptive(light: hex(0xC2453F), dark: hex(0xE8827C))
 
-    /// A pull request's state, in the colours every forge uses for it. Like
-    /// the diff pair, these are read by colour alone, so they do not follow
-    /// the palette.
     static let pullOpen = Color.adaptive(light: hex(0x1A7F37), dark: hex(0x3FB950))
     static let pullMerged = Color.adaptive(light: hex(0x8250DF), dark: hex(0xA371F7))
     static let pullClosed = Color.adaptive(light: hex(0xCF222E), dark: hex(0xF85149))
 
-    /// Five steps of activity, idle first.
-    ///
-    /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as
-    /// "nothing here", while the upper levels run violet into fuchsia.
     static var heat: [Color] {
         if AppAppearance.shared.paletteID != "default" || AppAppearance.shared.mode == .oled {
-            // Step 0 is the border tone, never a surface: on black a black
-            // cell would vanish and a quiet day would read as a hole. The
-            // upper steps run accent into secondary, like the default ramp.
             return [border, accent.opacity(0.38), accent.opacity(0.7), accent, secondary]
         }
         return defaultHeat
@@ -209,11 +114,6 @@ enum Theme {
         Color.adaptive(light: hex(0xC026D3), dark: hex(0xE879F9)),
     ]
 
-    /// Colour for a syntax kind.
-    ///
-    /// The whole palette in one place, and the only place the app decides what
-    /// a keyword looks like. `tokenstat-highlight` sends kinds and never
-    /// colours, which is what lets this switch on appearance for free.
     static func syntax(_ kind: SyntaxKind) -> Color {
         switch kind {
         case .keyword:
@@ -234,24 +134,11 @@ enum Theme {
             return Color.adaptive(light: hex(0x1F5F8F), dark: hex(0x9CC5E0))
         case .markup:
             return Color.adaptive(light: hex(0x1F6F5C), dark: hex(0x8FD6BE))
-        // Variables, operators and punctuation stay the text colour. Colouring
-        // every token is how a file ends up unreadable: what stands out is what
-        // is coloured, so most of it must not be.
         case .variable, .operator, .punctuation, .unknown:
             return .primary
         }
     }
 
-    /// A drop shadow, weighted for the appearance it lands on.
-    ///
-    /// The same black at the same opacity is not the same shadow twice. On a
-    /// dark window it barely reads and mostly gives an edge some depth; on a
-    /// near-white one it is a grey smudge under every button and popover, and
-    /// enough of them turn a flat, quiet layout into something that looks
-    /// embossed. Light mode gets a little under half the weight, which is
-    /// where the separation survives and the smudge does not.
-    ///
-    /// Pass the dark-mode opacity, which is the one these were tuned at.
     static func shadow(_ opacity: Double) -> Color {
         Color.adaptive(
             light: Color.black.opacity(opacity * 0.35),
@@ -267,8 +154,6 @@ enum Theme {
         )
     }
 
-    /// Spacing scale. Four points, so layouts stay on a rhythm instead of
-    /// accumulating one-off paddings.
     enum Space {
         static let xs: CGFloat = 4
         static let s: CGFloat = 8
@@ -277,29 +162,13 @@ enum Theme {
         static let xl: CGFloat = 32
     }
 
-    /// Button metrics.
-    ///
-    /// Padding alone does not make two buttons the same size: a button with a
-    /// glyph is taller than one without, and a dense variant beside a regular
-    /// one is short by the difference in vertical padding. Both of those were
-    /// visible in the SSH library, where three sizes shared one row. Height is
-    /// set, not derived, and paired actions share a minimum width so Cancel and
-    /// Save are the same shape.
     enum Control {
         static let height: CGFloat = 30
         static let heightSmall: CGFloat = 24
-        /// A control that has to be easy to hit, such as Jump to latest
-        /// over a moving transcript. The same 44pt target serves touch
-        /// on both phone and desktop.
         static let heightComfortable: CGFloat = 44
-        /// A sidebar row. Comfortable to hit with a finger on a touch screen
-        /// without turning the sidebar into a phone list.
         static let sidebarRow: CGFloat = 36
-        /// An icon button in the sidebar or a section heading. Never smaller
-        /// than the platform's minimum target, however small its glyph.
         static let sidebarIcon: CGFloat = 28
         static let pairedWidth: CGFloat = 88
-        /// Row height for a list a person scans rather than reads.
         #if os(macOS)
         static let rowHeight: CGFloat = 32
         #else
@@ -307,50 +176,17 @@ enum Theme {
         #endif
     }
 
-    /// Anatomy of an app-owned task sheet.
-    ///
-    /// In-window chrome stays on `chromeBarMetrics()`, the 40pt metric for
-    /// adjacent bars. A modal is a different object: a two-line heading, a
-    /// close seat that must not crowd the window curve, and a footer that
-    /// holds 30pt buttons with air above and below. Callers that need these
-    /// numbers live in `ThemedSheet`.
     enum Modal {
-        /// Minimum height of the header. A 40pt chrome bar cannot hold a
-        /// title, a subtitle and a close control without clipping into the
-        /// rounded top.
         static let headerMinHeight: CGFloat = 72
         static let iconSeat: CGFloat = 36
         static let footerHeight: CGFloat = 64
         static let bodyPadding: CGFloat = 32
     }
 
-    /// Corner radius for cards and panels.
-    ///
-    /// Matched to the window's own corner rather than picked. A card sitting a
-    /// few points inside a rounded window with a tighter radius reads as two
-    /// unrelated shapes, and the eye catches the mismatch even where the two
-    /// corners are nowhere near each other.
     static let cardRadius: CGFloat = 14
 
-    /// Padding inside a card.
-    ///
-    /// One step below the old `Space.l`. On a screen that is mostly cards, 20
-    /// points of inset on every one of them spends more of the window on
-    /// margins than on content.
     static let cardPadding: CGFloat = 16
 
-    // MARK: - Type
-    //
-    // Every font in the app comes from here, and the two families come from
-    // `AppFonts`. The point sizes below are exactly what the system's own text
-    // styles give on each platform, so adopting a typeface changed the shape
-    // of the words and nothing about the size or position of anything. A Mac
-    // is not a phone at 17 points, and the migration would have been a
-    // relayout of every screen rather than a change of face.
-    //
-    // `scripts/check-fonts.sh` keeps it that way: a bare `.font(.caption)` or
-    // `.system(size:)` in the app's own views is rejected, the way a bare
-    // `Color.blue` is.
 
     /// The interface face at a given size, with Dynamic Type.
     ///
@@ -364,10 +200,6 @@ enum Theme {
         relativeTo style: Font.TextStyle = .body
     ) -> Font {
         guard AppFonts.registered else {
-            // The face failed to load. Fall back to the system style rather
-            // than to a frozen size: the point sizes here are the styles' own
-            // defaults anyway, and text frozen at a fixed size is exactly
-            // the unreadability `relativeTo` exists to prevent.
             return .system(style, weight: weight)
         }
         return .custom(AppFonts.interface, size: size, relativeTo: style).weight(weight)
@@ -426,18 +258,10 @@ enum Theme {
         fitted(size, weight: weight, mono: false)
     }
 
-    /// Numbers that sit in columns must not jitter as they update, so anything
-    /// numeric uses tabular figures.
-    ///
-    /// The interface face, not the terminal one. Manrope's tabular figures
-    /// already hold a column still, which is the whole requirement, and a stat
-    /// tile is a headline rather than a readout.
     static func numeric(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         fitted(size, weight: weight, mono: false).monospacedDigit()
     }
 
-    /// Identifiers read character by character: model ids, machine ids, paths.
-    /// Monospaced so strings that look alike do not read alike.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         fitted(size, weight: weight, mono: true)
     }
@@ -446,11 +270,6 @@ enum Theme {
         fitted(12, weight: .semibold, mono: false)
     }
 
-    // The system's text styles, in the app's face and at the system's sizes.
-    //
-    // A Mac's body text is 13 points and a phone's is 17, and the rest of each
-    // ladder follows from that. Both are spelled out rather than derived,
-    // because the two ladders are not one ladder times a constant.
     #if os(macOS)
     static var largeTitle: Font { font(26, weight: .regular, relativeTo: .largeTitle) }
     static var title: Font { font(22, weight: .regular, relativeTo: .title) }
@@ -463,7 +282,6 @@ enum Theme {
     static var footnote: Font { font(10, weight: .regular, relativeTo: .footnote) }
     static var caption: Font { font(10, weight: .regular, relativeTo: .caption) }
     static var caption2: Font { font(10, weight: .regular, relativeTo: .caption2) }
-    /// Conversation prose follows the Mac's normal reading size.
     static var chatBody: Font { body }
     static var chatCode: Font { monoText(12, relativeTo: .body) }
     #else
@@ -485,15 +303,9 @@ enum Theme {
     static var chatCode: Font { monoText(12, relativeTo: .body) }
     #endif
 
-    /// Chat headings use the same compact scale on desktop and mobile.
     static var chatHeading: Font { font(17, weight: .semibold, relativeTo: .body) }
     static var chatSubheading: Font { font(15, weight: .semibold, relativeTo: .body) }
 
-    /// Material for the window's edges: the sidebar and the inspector.
-    ///
-    /// Not for the content column, and never behind the terminal. A terminal
-    /// showing the desktop through it is unreadable, and it is the one surface
-    /// in the app where every pixel is someone's output.
     static let sidebarMaterial: Material = .bar
 }
 
@@ -518,9 +330,6 @@ extension Color {
     }
 }
 
-/// A titled panel. Used for every block in the content column so they share one
-/// corner radius and one border treatment.
-/// Compact, consistently sized facts for activity and library screens.
 struct ActivitySummaryTile: View {
     let title: String
     let value: Int
@@ -545,20 +354,8 @@ struct ActivitySummaryTile: View {
 struct Card<Content: View>: View {
     var title: String
     var subtitle: String?
-    /// Brand mark or other leading tile, same place the website and the
-    /// phone put a vendor mark: left of the title, not in the trailing
-    /// accessory.
     var leading: AnyView?
     var accessory: AnyView?
-    /// Take all the height offered rather than only what the content needs.
-    ///
-    /// Off by default, because a card in a scrolling column should end where
-    /// its content ends. On for a card sharing a row with others: the row is
-    /// already sized to the tallest card, and a card that does not fill it
-    /// leaves its border stopping short while its neighbour's carries on, which
-    /// is what "the panels do not match" looks like. Filling has to happen
-    /// *inside* the card, before the background is drawn, which is why this is
-    /// a parameter here and not a `.frame` at the call site.
     var fillsHeight = false
     @ViewBuilder var content: Content
 
@@ -578,10 +375,6 @@ struct Card<Content: View>: View {
         self.content = content()
     }
 
-    /// Same card, with a product FeatureMark in the header leading slot.
-    ///
-    /// The website puts a mint chip next to every titled block. Cards that
-    /// omit it look like a different product, so this is the usual call.
     init(
         title: String,
         subtitle: String? = nil,
@@ -601,8 +394,6 @@ struct Card<Content: View>: View {
         )
     }
 
-    /// Header only. A content `EmptyView` still occupies a VStack slot and
-    /// leaves a gap under the title, so header-only cards use this instead.
     init(
         title: String,
         subtitle: String? = nil,
@@ -646,9 +437,6 @@ struct Card<Content: View>: View {
             if Content.self != EmptyView.self {
                 content
             }
-            // Content sits at the top of a filled card, rather than being
-            // spread down it. A quota bar belongs under its heading whatever
-            // the neighbour's card happens to be doing.
             if fillsHeight {
                 Spacer(minLength: 0)
             }
@@ -670,14 +458,9 @@ struct Card<Content: View>: View {
 struct Stat: View {
     var label: String
     var value: String
-    /// Shown next to the value in a dimmer colour, for units or qualifiers.
     var note: String?
     var tint: Color = .primary
     var size: CGFloat = 22
-    /// Take an equal share of the row. Off for a group that should stay
-    /// together: three expanding stats in a full-screen window end up a third
-    /// of a metre apart, and figures that far from each other stop being
-    /// comparable, which is the only reason to put them in a row.
     var expands: Bool = true
 
     var body: some View {
@@ -689,9 +472,6 @@ struct Stat: View {
                 Text(value)
                     .font(Theme.numeric(size, weight: .medium))
                     .foregroundStyle(tint)
-                    // A wrapped headline figure is unreadable, and a `+` or `~`
-                    // qualifier landing alone on the next line looks like a
-                    // rendering fault rather than a caveat.
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 if let note {
@@ -699,9 +479,6 @@ struct Stat: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        // The note is a qualifier, not the data. When the pair
-                        // is squeezed it gives way first, shrinking before it
-                        // ever truncates, instead of pushing the value around.
                         .layoutPriority(-1)
                         .minimumScaleFactor(0.8)
                 }
@@ -711,7 +488,6 @@ struct Stat: View {
     }
 }
 
-/// Uppercase group label with an optional count, as in the sidebar.
 struct SectionLabel: View {
     var text: String
     var count: Int?
@@ -731,12 +507,6 @@ struct SectionLabel: View {
     }
 }
 
-/// Names the folder a scoped screen is showing.
-///
-/// Accent-soft rather than grey. It is not chrome, it is the answer to "whose
-/// cards are these", and the same accent already marks the folder in the
-/// sidebar, so the two read as the same fact stated twice rather than as two
-/// facts.
 struct ScopeChip: View {
     let label: String
     var symbol: String = "folder.fill"
@@ -760,22 +530,11 @@ struct ScopeChip: View {
     }
 }
 
-/// Sidebar / inspector marks for the shared detail chrome bar.
-///
-/// Injected by `RootView` so every destination gets the same leading controls
-/// without each screen re-wiring ⌘B / ⌥⌘B.
 struct DetailChromeToggles {
     var leftSidebar: AnyView
     var rightInspector: AnyView?
     var search: AnyView? = nil
-    /// The tabs of the place the screen belongs to: a project's name, branch
-    /// and sections, the SSH library's sections, Automations and Workflows.
-    /// Drawn in place of the screen's own scope chip and accessory, which
-    /// said less, less usefully.
     var sectionTabs: AnyView? = nil
-    /// The place's name, for a screen with no tabs and no scope of its own to
-    /// put in the bar. Without it the bar over Tasks or Notes was a row of
-    /// empty chrome.
     var title: String? = nil
     var usesTitlebar = false
 }
@@ -811,19 +570,9 @@ extension EnvironmentValues {
 /// the same chrome shape and the window titlebar stays traffic lights only.
 struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
     @Environment(\.detailChromeToggles) private var toggles
-    /// Extra leading items after the shared toggles (back, etc.).
     @ViewBuilder var leading: () -> Leading
-    /// Something that belongs to the folder rather than to the screen, drawn
-    /// immediately after its name. A branch is the example: it says which
-    /// version of that folder is on screen, so it reads as part of the folder
-    /// and not as one more control at the far end of the bar.
     @ViewBuilder var accessory: () -> Accessory
     @ViewBuilder var trailing: () -> Trailing
-    /// Which folder this screen is showing, when it is showing one.
-    ///
-    /// Lives on the bar rather than on each screen so every scoped screen says
-    /// so in the same place and the same way. With the sidebar collapsed it is
-    /// the only thing on screen that names the folder.
     var scope: ScopeChip?
 
     init(
@@ -839,16 +588,8 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
     }
 
     var body: some View {
-        // Nested HStacks: a multi-child `@ViewBuilder` is a TupleView that
-        // stacks vertically if dropped in raw. Leading/trailing must stay one
-        // horizontal group each.
         HStack(spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.xs) {
-                // Back first. A back control is the one thing on a screen that
-                // leaves it, and the top left corner is where a hand goes for
-                // that without reading anything. The sidebar toggle is chrome
-                // and can move over by one; on the screens with nothing to go
-                // back from it is still the first control in the row.
                 leading()
                 toggles?.leftSidebar
                 if let tabs = toggles?.sectionTabs {
@@ -878,9 +619,6 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
             HStack(spacing: Theme.Space.xs) {
                 trailing()
                 toggles?.search
-                // Last, so it is the control nearest the edge it opens, and so
-                // a destination's own actions keep their order regardless of
-                // whether that destination has an inspector at all.
                 if let right = toggles?.rightInspector {
                     right
                 }
@@ -897,8 +635,6 @@ struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
         #endif
     }
 
-    /// Tall enough for a 30pt circular mark with a little breathing room, and
-    /// for a compact segmented period picker on Insights.
     static var height: CGFloat { DetailChromeBarHeight }
 }
 
@@ -910,7 +646,6 @@ let DetailChromeBarHeight: CGFloat = 52
 let DetailChromeBottomSpacing: CGFloat = 3
 #endif
 
-/// Shared height and optical baseline for adjacent headers.
 private struct ChromeBarMetrics: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -921,14 +656,12 @@ private struct ChromeBarMetrics: ViewModifier {
 }
 
 extension View {
-    /// Apply the fixed height and baseline correction shared by app chrome.
     func chromeBarMetrics() -> some View {
         modifier(ChromeBarMetrics())
     }
 }
 
 extension View {
-    /// Gives standalone panes a canvas. The joined desktop shell supplies its own.
     @ViewBuilder func desktopPaneBackground(_ color: Color = Theme.background) -> some View {
         #if os(macOS)
         modifier(DesktopPaneBackground(color: color))
@@ -938,12 +671,6 @@ extension View {
     }
 }
 
-/// A hairline drawn from tokenstat's palette, never the platform material.
-///
-/// `Divider` resolves through the surrounding system surface, which is why a
-/// sheet or a dark panel could grow an unrelated grey line. Rules in ordinary
-/// content are horizontal by default; the few split panes say `.vertical` so
-/// their axis remains deliberate and readable in source.
 struct ThemeRule: View {
     enum Axis {
         case horizontal
@@ -965,17 +692,9 @@ struct ThemeRule: View {
     }
 }
 
-/// A flat tab strip, in place of the reference layout's row of agent tabs.
-///
-/// Not a segmented `Picker`: those are capsule shaped and centred, and this has
-/// to sit flush with the top of the pane and read as part of the chrome.
 struct TabStrip<Tab: Hashable>: View {
-    /// An empty `symbol` draws the label alone, for a strip narrow enough that
-    /// icons would push the labels into truncation.
     var tabs: [(tab: Tab, label: String, symbol: String)]
     @Binding var selection: Tab
-    /// When false, only the tab row is drawn (no full-width fill or bottom
-    /// rule). The parent chrome row owns those (Insights: tabs + actions).
     var showsChrome: Bool = true
 
     var body: some View {
@@ -995,37 +714,12 @@ struct TabStrip<Tab: Hashable>: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                     }
-                    // The accent, not just a heavier weight. On a dark strip a
-                    // selected tab drawn as a slightly different dark panel is
-                    // the same colour as everything around it, and which tab
-                    // was selected became a guess.
-                    // Explicit chrome colour, not `.secondary`. Hierarchical
-                    // styles resolve through the window (and through any
-                    // material still sitting behind the strip), so inactive
-                    // tabs went grey-unfocused on the inspector even when the
-                    // window was key.
                     .foregroundStyle(active ? Theme.accent : Theme.controlGlyph)
                     .padding(.horizontal, Theme.Space.xs)
-                    // Every tab takes an equal share of the strip's width.
                     .frame(maxWidth: .infinity)
-                    // An explicit height, not `maxHeight: .infinity`. The strip
-                    // sits directly under the window's toolbar, and an
-                    // unbounded height let the active tab's fill and its top
-                    // rule expand up through the toolbar's safe area, so the
-                    // marker was drawn a toolbar's height above the tab it
-                    // belonged to.
                     .frame(height: TabStrip.height)
                     .background(active ? Theme.accentSoft : .clear)
                     .overlay(alignment: .top) {
-                        // The active tab is marked along its top edge rather
-                        // than underlined, so the strip reads as tabs attached
-                        // to the pane below instead of as a toolbar.
-                        //
-                        // A capsule inset from the tab's edges, not a rule
-                        // spanning it. The strip's first tab sits under the
-                        // window's rounded corner, and a hard-cornered line
-                        // running into that curve reads as a rendering fault
-                        // rather than as a marker.
                         Capsule()
                             .fill(active ? Theme.accent : .clear)
                             .frame(height: 2.5)
@@ -1048,16 +742,9 @@ struct TabStrip<Tab: Hashable>: View {
         }
     }
 
-    /// A generic type cannot hold a static stored property, so this is a
-    /// computed one.
     static var height: CGFloat { 28 }
 }
 
-/// The account tier, as a small uppercase pill.
-///
-/// One component so the badge is the same object wherever it appears. Uppercase
-/// and tracked out, because a tier is a label and not a word in a sentence:
-/// "Pro" beside a name reads as part of the name, "PRO" reads as a badge.
 struct TierBadge: View {
     var tier: String
     var size: CGFloat = 10
@@ -1103,7 +790,6 @@ struct BusySpinner: View {
     }
 }
 
-/// A consistent close control for feedback that does not cancel its action.
 struct NoticeDismissButton: View {
     var action: () -> Void
 
@@ -1147,13 +833,7 @@ struct Banner: View {
 
     var text: String
     var severity: Severity = .warning
-    /// Overrides the severity's own symbol where a more specific one says more.
     var symbol: String?
-    /// Somebody else's exact words, under the sentence that says what
-    /// happened. Git's output is the case this exists for: it names the file,
-    /// the hook or the remote, and rewording loses that, but on its own it is
-    /// plumbing rather than an answer. Shown quieter and monospaced, because
-    /// it is a quotation and not the message.
     var detail: String?
     var onDismiss: (() -> Void)?
 
@@ -1186,17 +866,6 @@ struct Banner: View {
     }
 }
 
-/// What a screen shows before it has anything to show.
-///
-/// One component for the whole app, for the reason `Banner` is one component:
-/// an empty Automations screen and an empty Insights screen are the same
-/// situation and should not look like two different products.
-///
-/// The rule it encodes is that an empty screen explains itself. "No runs yet"
-/// tells somebody what they can already see. The headline names what is
-/// missing, the line under it says what the thing is *for*, and the button is
-/// the one action that ends the empty state, so nobody has to go looking for
-/// where to start.
 struct EmptyState<Action: View>: View {
     var symbol: String
     var title: String
@@ -1235,17 +904,12 @@ struct EmptyState<Action: View>: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                // Wide enough to read, narrow enough that the eye does not have
-                // to travel back across a full-screen window to find the line.
                 .frame(maxWidth: 420)
             action
                 .padding(.top, Theme.Space.xs)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Space.xl)
-        // The message is capped at 420 points and nothing else held it off the
-        // edges, so on a phone narrower than that cap the sentence ran into
-        // both bezels with no margin at all.
         .padding(.horizontal, Theme.Space.l)
     }
 }
@@ -1258,10 +922,6 @@ enum FieldSaveState: Equatable {
     case failed
 }
 
-/// Unsaved / Saving / Saved next to Save and Cancel.
-///
-/// Implicit blur-save hid failures. A card that looks finished after a
-/// keystroke, then reverts later, is worse than a button that says it wrote.
 struct FieldSaveBar: View {
     var state: FieldSaveState
     var saveTitle: String = L10n.text("common.save")
@@ -1312,14 +972,9 @@ struct FieldSaveBar: View {
     }
 }
 
-/// A short-lived confirmation that does not push the content column down.
 struct TransientToast: View {
     @Binding var message: String?
     var severity: Banner.Severity = .success
-    /// Optional way to the thing the message is about.
-    ///
-    /// A toast that says where something landed has to be able to take you
-    /// there, or it is a notification that the app knows something you do not.
     var actionLabel: String?
     var action: (() -> Void)?
     var onDismiss: (() -> Void)?
@@ -1362,10 +1017,6 @@ struct TransientToast: View {
     }
 }
 
-/// Explains a surface that is planned but not built, without pretending to be
-/// one. Showing invented workspaces here would make the app a demo rather than
-/// a tool, and would be impossible to tell apart from a bug once real data
-/// exists.
 struct NotBuiltYet: View {
     var title: String
     var symbol: String
@@ -1412,7 +1063,6 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
-/// Hover and press feedback with a stationary hit area.
 struct ControlFeedbackStyle: ButtonStyle {
     var highlights = true
     var diameter: CGFloat?
@@ -1453,15 +1103,6 @@ struct ControlFeedbackStyle: ButtonStyle {
     }
 }
 
-/// Icon mark for the content bar.
-///
-/// Sidebar toggle, refresh, scan and fetch all share this seat so neighbouring
-/// marks use the same size rather than mixing a custom view with the system's
-/// bordered toolbar style.
-///
-/// Quiet at rest: a glyph and nothing around it, a soft seat under the pointer.
-/// Every mark used to sit in its own bordered circle, and a bar of eight of
-/// them read as a row of buttons asking to be pressed rather than as chrome.
 struct ToolbarIconButton: View {
     #if os(macOS)
     static let diameter: CGFloat = 32
@@ -1473,7 +1114,6 @@ struct ToolbarIconButton: View {
     var help: String = ""
     var isAccent: Bool = false
     var isBusy: Bool = false
-    /// Optional accent dot on a corner (closed-panel cue).
     var showsBadge: Bool = false
     var badgeAlignment: Alignment = .topLeading
     var isEnabled: Bool = true
@@ -1497,8 +1137,6 @@ struct ToolbarIconButton: View {
                 }
                 .frame(width: min(Self.diameter - 4, 30), height: min(Self.diameter - 4, 30))
                 .background {
-                    // The hover seat grows out of the glyph rather than
-                    // fading in as a flat square.
                     ZStack {
                         if isAccent {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1538,12 +1176,6 @@ struct ToolbarIconButton: View {
     }
 }
 
-/// A "more" menu in the content bar, the same size and quiet seat as the
-/// marks beside it.
-///
-/// For actions that belong to the screen but are not reached for every
-/// minute. A bar that shows every action at once has no room left for the
-/// thing it is a bar of.
 struct ToolbarMenuButton<Content: View>: View {
     var systemImage: String = "ellipsis"
     var help: String = L10n.text("apple.theme.more.d47d7cb0")
@@ -1593,13 +1225,9 @@ struct SidebarToggleButton: View {
     let edge: Edge
     let isOpen: Bool
     let action: () -> Void
-    /// Full help string, including the shortcut (e.g. "Hide Sidebar (⌘B)").
     var help: String = ""
 
     var body: some View {
-        // Plain in both states. An accent wash on every open panel and a dot
-        // on every closed one put two signals on a control whose glyph
-        // already shows the panel, and the dot read as a notification.
         ToolbarIconButton(
             systemImage: edge == .leading ? "sidebar.left" : "sidebar.right",
             help: help,
@@ -1679,11 +1307,6 @@ extension InspectorChromeBar where Accessory == EmptyView {
     }
 }
 
-/// Closes the right pane, from inside the right pane.
-///
-/// The toolbar has a toggle, but a toolbar button on the far side of the window
-/// is not where anyone looks to dismiss a panel: they look at the panel. Both
-/// inspectors carry one so the two panes behave the same way.
 struct InspectorCloseButton: View {
     let action: () -> Void
     /// Tooltip and VoiceOver label. Defaults to the inspector copy; a sheet
@@ -1699,10 +1322,6 @@ struct InspectorCloseButton: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(isHovering ? Theme.controlGlyphHover : Theme.controlGlyph)
                 .frame(width: 22, height: 22)
-                // A bare grey glyph floats on the dark sidebar material and
-                // reads as a smudge. A quiet circular seat makes it a control
-                // on any background, and the hover fills it like the tab close
-                // buttons already do.
                 .background(
                     Circle().fill(isHovering ? Theme.rowHighlight : Theme.controlSeat)
                 )
@@ -1712,8 +1331,6 @@ struct InspectorCloseButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        // Keep the close target reliable inside a ScrollView and a floating
-        // inspector, where a bare glyph can otherwise lose its hit region.
         .frame(width: 30, height: 30)
         .contentShape(Rectangle())
         .zIndex(10)
@@ -1723,13 +1340,6 @@ struct InspectorCloseButton: View {
     }
 }
 
-/// A capsule selector in the app's own language: equal segments inside a
-/// bordered panel, the selected one filled with the accent's soft tint and
-/// accent text, hover in the same grey the sidebar rows use.
-///
-/// Deliberately not the system's liquid glass styles: at this size the glass
-/// capsules squeezed their labels and the segments sat almost touching, so
-/// this is drawn from `Theme` instead.
 struct SegmentedCapsulePicker<Option: Hashable>: View {
     var options: [(value: Option, label: String, symbol: String)]
     @Binding var selection: Option
@@ -1755,7 +1365,6 @@ struct SegmentedCapsulePicker<Option: Hashable>: View {
     }
 }
 
-/// Glyph then title, a fixed gap, slightly smaller than the label.
 struct ActionLabelStyle: LabelStyle {
     var small = false
 
@@ -1768,13 +1377,9 @@ struct ActionLabelStyle: LabelStyle {
     }
 }
 
-/// Soft accent capsule for a primary action in content. Toolbar items stay
-/// system-styled.
 struct AccentButtonStyle: ButtonStyle {
     var small = false
-    /// Finger-friendly. Jump to latest over a transcript, not a row chip.
     var comfortable = false
-    /// Stadium ends. Follow sits as a chip on the transcript, not a slab.
     var capsule = false
     @Environment(\.isEnabled) private var isEnabled
 
@@ -1809,12 +1414,6 @@ struct AccentButtonStyle: ButtonStyle {
     }
 }
 
-/// The action somebody may regret: delete, drop, revoke, forget.
-///
-/// A real style rather than `.borderless` plus a hand-set `foregroundStyle`,
-/// which is how the SSH library ended up with three button sizes in one row and
-/// a delete that read as a link. Same shape as the other two, danger colour,
-/// so the eye sorts a row of actions by colour and not by guessing.
 struct DestructiveButtonStyle: ButtonStyle {
     var small = false
     var comfortable = false
@@ -1840,12 +1439,6 @@ struct DestructiveButtonStyle: ButtonStyle {
     }
 }
 
-/// The secondary action: the same capsule family as `AccentButtonStyle`, but
-/// neutral — panel fill, hairline border, primary text. For revoke, forget and
-/// every action that is a real operation but not the one being offered.
-/// A system-bordered button next to an accent capsule reads as a different
-/// design language on the same row, which is exactly how the Machines screen
-/// looked with default Revoke/Forget buttons beside accent Approve/Connect.
 struct SecondaryButtonStyle: ButtonStyle {
     var small = false
     var comfortable = false
@@ -1887,25 +1480,17 @@ struct SecondaryButtonStyle: ButtonStyle {
 struct ThemedFieldStyle: TextFieldStyle {
     var small = false
     var multiline = false
-    /// The face for the text. See `ThemedFieldBox.font`: chaining `.font`
-    /// after the style does not reach the text.
     var font: Font?
 
-    // The protocol's requirement is underscored. Nothing to be done about it.
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration.themedFieldBox(small: small, multiline: multiline, font: font)
     }
 }
 
 extension TextFieldStyle where Self == ThemedFieldStyle {
-    /// `TextField("Name", text: $name).textFieldStyle(.themed)`
     static var themed: ThemedFieldStyle { ThemedFieldStyle() }
     static var themedSmall: ThemedFieldStyle { ThemedFieldStyle(small: true) }
-    /// For `TextField(..., axis: .vertical)`. The plain themed box pins a
-    /// field to one row's height, which is right for a name and wrong for a
-    /// paragraph: a field asked to hold three to eight lines still showed one.
     static var themedMultiline: ThemedFieldStyle { ThemedFieldStyle(multiline: true) }
-    /// For a code or a fingerprint, where the character shapes matter.
     static func themedMono(_ size: CGFloat) -> ThemedFieldStyle {
         ThemedFieldStyle(font: Theme.mono(size))
     }
@@ -1926,22 +1511,8 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
 struct ThemedFieldBox: ViewModifier {
     var small = false
     var multiline = false
-    /// The face for the text, where the default is wrong.
-    ///
-    /// A recovery code is the case this exists for. The box used to set its
-    /// own font unconditionally, and a font set inside a style sits closer to
-    /// the text than one the caller chains on afterwards, so every field that
-    /// asked for `Theme.mono` silently got the proportional default back. The
-    /// three that did are the vault's code fields, where O against 0 and I
-    /// against 1 is the entire reason the host normalises those characters.
     var font: Font?
 
-    /// The face when the caller has not named one.
-    ///
-    /// A fixed point size does not grow with Larger Text, and a fixed height
-    /// could not hold it if it did. The Mac has one text size and wants the
-    /// row heights the rest of its chrome uses; the phone has a setting people
-    /// rely on, so it takes a scaling style and a floor rather than a ceiling.
     private var defaultFont: Font {
         #if os(macOS)
         Font.system(size: small ? 12 : 13)
@@ -1957,9 +1528,6 @@ struct ThemedFieldBox: ViewModifier {
             .padding(.horizontal, Theme.Space.s)
         return Group {
             #if os(macOS)
-            // A fixed height is what gives a row of single-line fields the
-            // same rhythm as the buttons beside them. A field that grows needs
-            // a floor instead, or it holds one line whatever it was asked for.
             if multiline {
                 field
                     .padding(.vertical, small ? 5 : 7)
@@ -1987,11 +1555,6 @@ struct ThemedFieldBox: ViewModifier {
 }
 
 extension View {
-    /// `SecureField("Password", text: $password).themedFieldBox()`
-    ///
-    /// Pass `font` for a field whose face matters, such as a recovery code.
-    /// Chaining `.font` after this does not work: the box sets the font
-    /// nearer the text than the caller can.
     func themedFieldBox(
         small: Bool = false,
         multiline: Bool = false,
@@ -2001,19 +1564,10 @@ extension View {
     }
 }
 
-/// A multi-line editor on the app's own surface.
-///
-/// `TextEditor` paints the platform text view's background and ignores
-/// everything around it. Drawing a `Theme.border` on top of that, which is
-/// what the snippet editor did, themes the outline of a grey slab and leaves
-/// the slab. Hiding the scroll content background is what actually lets a
-/// colour through.
 struct ThemedEditor: View {
     @Binding var text: String
-    /// Monospaced by default: everything this is used for is a command.
     var font: Font = Theme.mono(12)
     var minHeight: CGFloat = 88
-    /// Past this it scrolls inside itself rather than asking for more room.
     var maxHeight: CGFloat = 320
 
     @FocusState private var focused: Bool
@@ -2025,10 +1579,6 @@ struct ThemedEditor: View {
             .scrollContentBackground(.hidden)
             .padding(.horizontal, Theme.Space.xs)
             .padding(.vertical, Theme.Space.xs)
-            // A floor and a ceiling. A `TextEditor` asked for its content's
-            // height grows with whatever is typed into it, and a caller that
-            // hands it an unbounded maximum is handing that growth straight to
-            // whatever is holding it.
             .frame(minHeight: minHeight, maxHeight: maxHeight)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
             .overlay(
@@ -2051,9 +1601,6 @@ struct ThemedEditor: View {
 struct BrandCheckboxStyle: ToggleStyle {
     var iconOnly = false
     @Environment(\.isEnabled) private var isEnabled
-    /// Same treatment as `ThemedFieldBox.defaultFont`: the Mac has one text
-    /// size and fixed rows, the phone takes a style that grows with Larger
-    /// Text.
     static var labelFont: Font {
         #if os(macOS)
         Font.system(size: 13)
@@ -2062,9 +1609,6 @@ struct BrandCheckboxStyle: ToggleStyle {
         #endif
     }
 
-    /// A finger needs 44 points. The box is 18, and inside a scrolling
-    /// transcript a tap that lands a little above it started a scroll
-    /// instead, which read as a checkbox that would not check.
     static func minimumHeight(iconOnly: Bool) -> CGFloat? {
         #if os(macOS)
         iconOnly ? 44 : nil
@@ -2124,26 +1668,13 @@ private struct BrandCheckboxBox: View {
 }
 
 extension ToggleStyle where Self == BrandCheckboxStyle {
-    /// `Toggle("Run on connect", isOn: $flag).toggleStyle(.brandCheckbox)`
     static var brandCheckbox: BrandCheckboxStyle { BrandCheckboxStyle() }
 }
 
-/// A row of mutually exclusive tabs, in the app's colours.
-///
-/// `.pickerStyle(.segmented)` is the platform's own control: a grey track with
-/// a grey pill sliding along it, which on a dark themed screen is the one
-/// piece of chrome wearing somebody else's palette. It carried the SSH
-/// library's Hosts/Keys/Snippets, the client's insight breakdowns and the iPad
-/// layout choice, so three of the most-looked-at rows in the phone app were
-/// grey on purple.
-///
-/// The selected tab slides rather than cuts, because a segmented control that
-/// teleports reads as two separate controls blinking.
 struct SegmentedTabs<Value: Hashable>: View {
     let options: [Value]
     @Binding var selection: Value
     let title: (Value) -> String
-    /// Phone editors use the comfortable row so each tab is a 44-point target.
     var comfortable = false
 
     @Namespace private var slide
@@ -2157,8 +1688,6 @@ struct SegmentedTabs<Value: Hashable>: View {
                     withAnimation(.snappy(duration: 0.22)) { selection = option }
                 } label: {
                     Text(title(option))
-                        // Same split as `ThemedFieldBox.defaultFont`: fixed on
-                        // the Mac, growing with Larger Text on the phone.
                         #if os(macOS)
                         .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                         #else
@@ -2180,9 +1709,6 @@ struct SegmentedTabs<Value: Hashable>: View {
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
-        // The tabs are the elements, not the row. Without this a label on the
-        // container can stand in for theirs and a screen reader announces one
-        // control where there are three to choose between.
         .accessibilityElement(children: .contain)
         .padding(2)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
@@ -2193,17 +1719,11 @@ struct SegmentedTabs<Value: Hashable>: View {
 }
 
 extension SegmentedTabs where Value: RawRepresentable, Value.RawValue == String {
-    /// The common case: an enum whose raw value is already the label.
     init(options: [Value], selection: Binding<Value>, comfortable: Bool = false) {
         self.init(options: options, selection: selection, title: { L10n.enumLabel($0) }, comfortable: comfortable)
     }
 }
 
-/// A two-state chip in the same capsule family as the action buttons.
-///
-/// A system switch next to `AccentButtonStyle` is a different language on the
-/// same row. This is the on/off control for a single flag, so the row stays
-/// in Theme.
 struct BrandToggleChip: View {
     var title: String
     @Binding var isOn: Bool
@@ -2223,11 +1743,6 @@ struct BrandToggleChip: View {
     }
 }
 
-/// One option in a mutually exclusive set, same capsule as `BrandToggleChip`.
-///
-/// Tapping a selected chip does not deselect it. Empty is a valid state, and
-/// it comes from a value that matches none of the options, not from tapping
-/// again.
 struct ChoiceChip: View {
     var title: String
     var isSelected: Bool
@@ -2247,11 +1762,6 @@ struct ChoiceChip: View {
     }
 }
 
-/// Minutes as a choice, with the field kept for anything else.
-///
-/// A gauge on a linear scale crowds three of its four ticks into the first
-/// fifth of the bar, and nobody can move it. These chips are the values a
-/// person actually picks. A custom number in the field selects none of them.
 struct TimeLimitChips: View {
     @Binding var minutesText: String
     @Binding var noLimit: Bool
@@ -2282,10 +1792,6 @@ struct TimeLimitChips: View {
     }
 }
 
-/// How many jobs may run at once, same chips as the time limit.
-///
-/// 0 is a real host value: no cap. The chip says that in words so nobody has
-/// to know the sentinel. A custom number in the field selects none of them.
 struct ConcurrentChips: View {
     @Binding var countText: String
     var onChange: () -> Void = {}
@@ -2358,26 +1864,11 @@ private struct SegmentButton: View {
     }
 }
 
-/// A form field whose control is a menu in the app's own language: caption
-/// above, a bordered panel below with the selected value and a chevron, the
-/// same shapes the capsules and search box use.
-///
-/// Replaces the system grey pop-up menus so every selector in a form reads as
-/// the same control family.
 struct AppMenuPicker<Option: Hashable>: View {
-    /// Caption above the control. Empty hides it, for a row that already
-    /// names the pickers (Auto commit next to Agent / Model).
     var title: String = ""
     var options: [(value: Option, label: String)]
     @Binding var selection: Option
     var refresh: (() async -> Void)?
-    /// Above this many options the control opens a searchable panel instead
-    /// of a menu.
-    ///
-    /// A menu is the better control for a short list: it is one press, it
-    /// needs no filter, and the platform draws it. It stops being the better
-    /// control somewhere around a screenful, which is where reading every
-    /// line to find one starts costing more than typing three letters.
     var searchThreshold: Int = 10
 
     @State private var isPresented = false
@@ -2448,7 +1939,6 @@ struct AppMenuPicker<Option: Hashable>: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// The control itself. A menu and a panel open from the same field.
     private var field: some View {
         HStack(spacing: 6) {
             Text(selectedLabel)
@@ -2493,27 +1983,12 @@ struct WidthReader<Content: View>: View {
 
     var body: some View {
         content(width)
-            // Stretched *before* it is measured, so what is read is the width
-            // on offer rather than the width the content happens to want.
-            //
-            // Without this the reader measures its own child, and a child that
-            // sizes to its content feeds its width back in as the width to lay
-            // out for. In a scrolling list that is a loop with a lever on it:
-            // a lazy row arriving with a wide table or a long code line grows
-            // the content, which moves the measurement, which rewrites the
-            // state, which rebuilds the entire subtree, on the frame the row
-            // appeared. It can also sit either side of a breakpoint and
-            // oscillate. Measuring the offer is stable because the offer does
-            // not depend on the answer.
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(key: WidthKey.self, value: proxy.size.width)
                 }
             )
-            // Quantised, and only written when it actually moved. A live drag
-            // otherwise delivers a new sub-pixel width every frame and reshapes
-            // the whole card grid for a change nobody can see.
             .onPreferenceChange(WidthKey.self) { measured in
                 // A zero is not a width, it is a view that has not been laid
                 // out yet, and a lazy stack recycling its rows can produce one
@@ -2535,9 +2010,6 @@ private struct WidthKey: PreferenceKey {
     }
 }
 
-/// Width at which a screen has room for two cards side by side.
-///
-/// One number, so the breakpoints across the app cannot drift apart.
 extension CGFloat {
     /// Folds the display the window opens on into the fixed breakpoints.
     ///
@@ -2549,49 +2021,19 @@ extension CGFloat {
     /// runs past the edge. This factor shrinks those numbers with the screen,
     /// so the same window fits a 1080p panel and a compact laptop.
 
-    /// 950 rather than 1000 so the 1260-wide default window still gets the
-    /// two-across layout: with the sidebar at its ideal width the detail keeps
-    /// ~1030 points, and asking for 1000 put the overview one step further
-    /// down than it needed to be.
     static var twoColumnWidth: CGFloat { DisplayFit.box(950) }
 
-    /// Width at which three cards sit side by side in the Overview.
-    ///
-    /// The third card must not vanish below this; the overview reflows it
-    /// underneath instead (see `InsightsView`).
     static var threeAcrossWidth: CGFloat { DisplayFit.box(1200) }
 
-    /// Width at which a list row has room for its secondary detail.
-    ///
-    /// Below this a row keeps its name, its state and its buttons, and drops
-    /// the things beside them: the folder it lives in, when it last ran, the
-    /// history strip. Those are worth a glance on a wide window and worth
-    /// nothing at all when they squeeze the name of the thing down to an
-    /// ellipsis.
     static var rowDetailWidth: CGFloat { DisplayFit.box(720) }
 
-    /// How wide a self-contained panel wants to be in a flowing grid.
-    ///
-    /// A quota panel is a title and a few bars, so it needs about this much to
-    /// avoid wrapping its header and no more. The grid fits as many of these as
-    /// the window allows, which is why the count of columns follows the window
-    /// rather than a hard breakpoint.
     static var panelWidth: CGFloat { DisplayFit.box(330) }
 }
 
-/// The display the window opens on, in points.
 enum DisplayFit {
     #if os(macOS)
-    /// The screen the fit was last computed for, if any.
     private static var tracked: NSScreen?
     #else
-    /// The size of the screen the client's window is on.
-    ///
-    /// Observed, so a view that read the fit before the first report draws
-    /// again once it lands, and again when an iPhone Duo moves the window to
-    /// the other display. One value for every window, as `UIScreen.main`
-    /// was: windows on one screen agree on it rather than overwriting each
-    /// other with their own sizes.
     @Observable
     fileprivate final class TrackedScreen {
         var size: CGSize?
@@ -2600,22 +2042,11 @@ enum DisplayFit {
     fileprivate static let trackedScreen = TrackedScreen()
     #endif
 
-    /// The size the fixed layout was tuned against, in points.
     private static let referenceWidth: CGFloat = 1440
     private static let referenceHeight: CGFloat = 900
 
-    /// The smallest the factor goes.
-    ///
-    /// Small enough that a 1024×640 scaled display (about 720 visible points
-    /// wide) still fits the minimum content plus the inspector, and large
-    /// enough that the layout never collapses into a phone UI.
     private static let floor: CGFloat = 0.6
 
-    /// Recompute the fit for a screen.
-    ///
-    /// Called when the window is created and again when it moves to another
-    /// display or the display's resolution changes. `nil` (no screen yet)
-    /// leaves the last known fit alone rather than snapping the layout.
     #if os(macOS)
     @MainActor
     static func update(screen: NSScreen?) {
@@ -2640,16 +2071,12 @@ enum DisplayFit {
         ) { _ in cachedFactor = nil }
     }
     #else
-    /// Record the screen the window is on. Read from the window's scene by
-    /// `ScreenSizeReporter`, not from `UIScreen.main`, which is deprecated and
-    /// names the wrong display on an iPhone Duo once it opens.
     static func update(screenSize: CGSize) {
         guard trackedScreen.size != screenSize else { return }
         trackedScreen.size = screenSize
     }
     #endif
 
-    /// Current screen size in points.
     #if os(macOS)
     private static var screenSize: CGSize {
         tracked?.visibleFrame.size ?? NSScreen.main?.visibleFrame.size ?? CGSize(
@@ -2658,19 +2085,11 @@ enum DisplayFit {
         )
     }
     #else
-    /// Zero until the root view reports, which lands on the floor, the fit
-    /// every phone-sized screen gets anyway. Views that read it then draw
-    /// again when the report arrives, because the value is observed.
     private static var screenSize: CGSize {
         trackedScreen.size ?? .zero
     }
     #endif
 
-    /// 1 on a full-size display, smaller on one that presents fewer points.
-    ///
-    /// Both dimensions count: a 16:9 panel scaled to 1280×720 gives the width
-    /// of a desktop and the height of a laptop, and a layout sized to the
-    /// width alone overflows the window's height.
     static var factor: CGFloat {
         #if os(macOS)
         if let cachedFactor { return cachedFactor }
@@ -2690,31 +2109,16 @@ enum DisplayFit {
         return min(max(min(byWidth, byHeight), floor), 1)
     }
 
-    /// The smallest the *text* factor goes.
-    ///
-    /// Layout can shrink to 0.6 so the window always fits, but text that
-    /// shrinks as far becomes unreadable. Fonts stop at this floor while the
-    /// chrome around them keeps compressing, which is the difference between a
-    /// small but legible window and a squashed one.
     private static let textFloor: CGFloat = 0.85
 
     static func scale(_ value: CGFloat) -> CGFloat {
         value * factor
     }
 
-    /// Scale a fixed width that has to hold text.
-    ///
-    /// Fonts stop shrinking at `textFloor`, so a container that keeps shrinking
-    /// past it is guaranteed to clip. Chrome with no text in it can still use
-    /// `scale`.
     static func box(_ value: CGFloat) -> CGFloat {
         value * max(factor, textFloor)
     }
 
-    /// Design points → points for text.
-    ///
-    /// Use for every fixed font size in UI chrome. Terminal and editor glyphs
-    /// stay at 1:1. They are content, not chrome.
     static func dp(_ points: CGFloat) -> CGFloat {
         points * max(factor, textFloor)
     }

@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// A single flat list gives the lazy layout one item per visible diff line.
-/// File/hunk indices also disambiguate repeated hunk headers and line numbers.
 struct DiffDocumentRow: Identifiable, Sendable {
-    /// Keep a minified source line from becoming one enormous wrapped lazy item.
     static let wrappedLineCharacterLimit = 256
     let id: String
     let content: Content
-    /// A bounded piece of the same source line, rather than a new source line.
     var continuation = false
     enum Content: Sendable {
         case file(String)
@@ -79,9 +75,6 @@ struct DiffDocumentRow: Identifiable, Sendable {
                         if chunkSize == .max || line.text.isEmpty {
                             rows.append(Self(id: lineKey, content: .line(line)))
                         } else {
-                            // A grapheme can itself contain megabytes of
-                            // combining marks. Scalar boundaries keep layout
-                            // bounded while preserving every Unicode scalar.
                             let scalars = line.text.unicodeScalars
                             var start = scalars.startIndex
                             var part = 0
@@ -105,9 +98,6 @@ struct DiffDocumentRow: Identifiable, Sendable {
         return rows
     }
 
-    /// Preserve ordinary graphemes at a wrap boundary, using at most one
-    /// bounded lookahead. A pathological grapheme is split on scalar
-    /// boundaries so it cannot turn into a multi-megabyte layout item.
     private static func end(of text: String, from start: String.Index, limit: Int) -> String.Index {
         let scalars = text.unicodeScalars
         let end = scalars.index(start, offsetBy: limit, limitedBy: scalars.endIndex) ?? scalars.endIndex

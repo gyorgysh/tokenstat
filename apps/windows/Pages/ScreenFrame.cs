@@ -6,7 +6,6 @@
 
 namespace Tokenstat.Pages;
 
-/// <summary>Version-one TSCR video envelope with an unchanged Annex-B H.264 payload.</summary>
 internal sealed class ScreenFrame
 {
     public ulong Sequence { get; }
@@ -70,10 +69,6 @@ internal sealed class ScreenFrame
         return new ScreenFrame(sequence, System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(bytes.AsSpan(16, 8)), width, height, keyframe, payload);
     }
 
-    /// <summary>
-    /// Stills from older hosts arrive as plain JPEG, with or without the
-    /// envelope around them.
-    /// </summary>
     public static bool LooksLikeJpeg(byte[] bytes) =>
         bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
 

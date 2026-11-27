@@ -73,9 +73,6 @@ pub fn fetch_into(
         .ok_or_else(|| anyhow::anyhow!("the Cursor sign-in names no account"))?;
     let now_ms = jiff::Timestamp::now().as_millisecond();
     let end_ms = (now_ms.div_euclid(HOUR_MS) + 1) * HOUR_MS;
-    // Start the hourly range on a UTC day boundary, so no day is split
-    // between the two granularities. Six whole days plus today stays inside
-    // the hourly limit.
     let recent_start = (now_ms.div_euclid(DAY_MS) - (HOURLY_DAYS - 1)) * DAY_MS;
 
     let recent_path = cache_path(Vendor::Cursor, &format!("{account}-hourly-recent.json"))?;
@@ -95,11 +92,6 @@ pub fn fetch_into(
         Some(points) => points,
         None => {
             from_cache = false;
-            // Best effort: a history that stopped early is still worth
-            // keeping, and an empty one is retried on the next fetch.
-            // A transient failure in the older range must not discard a
-            // successful recent reading. Leave the failed history uncached
-            // so the next fetch retries it.
             let points = walk_history(&cookie, recent_start).unwrap_or_default();
             if !points.is_empty() {
                 store_cache(&history_path, &points)?;
@@ -108,8 +100,6 @@ pub fn fetch_into(
         }
     };
 
-    // The ranges meet on a day boundary. Should a point appear in both, the
-    // hourly reading is the fresher one and wins.
     let mut merged: BTreeMap<(i64, String, String), Point> = BTreeMap::new();
     for point in history.into_iter().chain(recent) {
         merged.insert(
@@ -294,15 +284,12 @@ fn vendor_hour(point: Point) -> Option<VendorHour> {
         }
     };
     let (source, project, model) = match point.product.as_str() {
-        // `grok-bot` is how the same Cursor usage is labelled before the
-        // account's move finished. The request list usually has those days.
         "cursor" => (SourceId::Cursor, "cursor", named("cursor-unknown")),
         "grok-bot" => (SourceId::Cursor, "cursor", named("grok-bot")),
         "grok-build" => (SourceId::Grok, "grok", named("grok-build")),
         "grok-api" => (SourceId::Grok, "grok", named("grok-api")),
         _ => return None,
     };
-    // Included usage is plan usage. Anything charged beyond it is metered.
     let billing = if point.included.saturating_mul(2) >= point.tokens {
         BillingMode::Plan
     } else {
@@ -396,7 +383,6 @@ mod tests {
 
     #[test]
     fn the_cookie_names_the_account_the_app_token_signs_in() {
-        // header.{"sub":"grok|user_01ABC"}.signature
         let token = "e30.eyJzdWIiOiJncm9rfHVzZXJfMDFBQkMifQ.sig";
         assert_eq!(
             session_cookie(token).unwrap(),

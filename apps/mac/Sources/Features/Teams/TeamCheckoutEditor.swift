@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import SwiftUI
 
-/// Publishing is a local-owner action. The directory can list other people's
-/// computers without borrowing their credentials or a personal connection.
 struct TeamCheckoutEditor: View {
     @Bindable var store: TeamStore
     let context: TeamMutationContext

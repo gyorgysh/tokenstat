@@ -72,8 +72,6 @@ final class GitPushSession {
         defer { working = false }
         draft.submitted = GitPushSubmission(operationID: UUID().uuidString, review: review)
         guard await persist() else {
-            // No network submission occurred. Reload the other window's
-            // operation so it can be checked rather than overwritten.
             draft.submitted = nil
             loaded = false
             await load()

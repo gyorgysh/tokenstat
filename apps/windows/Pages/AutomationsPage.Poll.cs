@@ -53,10 +53,9 @@ internal sealed partial class AutomationsPage
                 .ToDictionary(job => Format.Text(job, "id"), job => (JsonObject)job.DeepClone());
             if (_scopeWorkspaceId is null || !RemoteWorkspaces.IsRemote(_scopeWorkspaceId)) RunNotifications.Shared.SettleAutomations(runs);
             RenderList();
-            // A status update must not replace an editor under the person's caret.
             if (_showingRuns || !_detailDirty && !_creating) { SnapshotDraft(); RenderDetail(); }
         }
-        catch { /* Quiet polling retains the last confirmed table and editor. */ }
+        catch { }
         finally { _tableReading = false; }
     }
 }

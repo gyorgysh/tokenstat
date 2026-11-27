@@ -9,9 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the agent readiness rules ported from `Models.swift`: unknown is a
-/// real answer, and tapping Sign in needs a willing agent, a handoff, and a
-/// host that speaks it.
 class SetupAgentTest {
     @Test
     fun readinessSummariesMatchApple() {
@@ -32,8 +29,6 @@ class SetupAgentTest {
 
     @Test
     fun unknownStatesDecodeAsUnknown() {
-        // Missing on a host before protocol 9, or a value from the future:
-        // "not checked", never "signed out".
         assertEquals(AgentReadiness.UNKNOWN, AgentReadiness.parse(null))
         assertEquals(AgentReadiness.UNKNOWN, AgentReadiness.parse(""))
         assertEquals(AgentReadiness.UNKNOWN, AgentReadiness.parse("quantum"))
@@ -61,8 +56,6 @@ class SetupAgentTest {
         val willing = SetupAgent("a", "A", installed = true, AgentReadiness.NEEDS_SIGN_IN, signInSupported = true)
         assertTrue(willing.canSignIn(9L))
         assertTrue(willing.canSignIn(null))
-        // A host too old to have been asked fails closed, with the update
-        // banner beside it rather than a button that cannot work.
         assertFalse(willing.canSignIn(8L))
         assertFalse(willing.copy(readiness = AgentReadiness.SIGNED_IN).canSignIn(9L))
         assertFalse(willing.copy(readiness = AgentReadiness.UNKNOWN).canSignIn(9L))

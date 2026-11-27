@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 import Foundation
 
-/// Preserve terminal byte order across asynchronous bridge requests.
 @MainActor
 final class SSHInputQueue {
     private var tail: Task<Bool, Never>?

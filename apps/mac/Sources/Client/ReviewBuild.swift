@@ -30,8 +30,6 @@ enum ReviewBuild {
         (defaults.object(forKey: LoginLogoUnlock.preference) as? Bool) ?? testFlight
     }
 
-    /// Counts only taps made on this login presentation. The one persisted
-    /// preference changes the web sign-in flag; it grants no local access.
     struct LoginLogoUnlock {
         fileprivate static let preference = "client.developerDemoLoginEnabled"
         private let defaults: UserDefaults
@@ -43,7 +41,6 @@ enum ReviewBuild {
             self.defaults = defaults
         }
 
-        /// Nil until the tenth tap; then the newly persisted on/off state.
         mutating func tap() -> Bool? {
             taps += 1
             guard taps == 10 else { return nil }
@@ -56,9 +53,6 @@ enum ReviewBuild {
 
     static let isTestFlight: Bool = {
         #if targetEnvironment(simulator)
-        // A simulator has no receipt, and a developer running one is not a
-        // reviewer. Debug builds get the door so the flow can be worked on;
-        // a release build in a simulator does not.
         #if DEBUG
         return true
         #else

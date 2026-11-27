@@ -7,9 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/// Pins the push payload shape: a fixed reason plus a machine id, never free
-/// text. Mirrors `tokenstat-sync::push::Reason` wire names and the Apple
-/// client's `NotificationOpen.parse` routing.
 class PushPayloadTest {
 
     @Test
@@ -37,9 +34,6 @@ class PushPayloadTest {
 
     @Test
     fun freeTextTitleAndBodyAreNeverRead() {
-        // A server-composed title or body must not leak into the banner: the
-        // copy is composed from the reason, so these keys change nothing, and
-        // a payload with only them parses to nothing.
         assertNull(PushPayload.parse(mapOf("title" to "Hi", "body" to "tap here", "route" to "x")))
         val delivery = PushPayload.parse(
             mapOf("reason" to "run.finished", "title" to "Hi", "body" to "tap here"),

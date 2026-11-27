@@ -2,7 +2,6 @@
 import Foundation
 import CoreGraphics
 
-/// Both viewer sizes fit inside the owning window, including on small displays.
 enum ChatImageViewerGeometry {
     static func fit(image: CGSize, viewport: CGSize) -> CGSize {
         guard image.width > 0, image.height > 0, viewport.width > 0, viewport.height > 0,

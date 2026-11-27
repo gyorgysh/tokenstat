@@ -75,12 +75,6 @@ import java.util.Locale
 import kotlin.math.pow
 import kotlinx.coroutines.delay
 
-/// Dictation into the chat composer. Port of ChatDictation.swift.
-///
-/// Android's recognizer hears one stretch of speech and stops at the next
-/// pause, so a session starts it again after every result until the person
-/// presses Done or Cancel. The on-device recognizer is used when the
-/// language has a model on the phone, and the system's own one otherwise.
 class ChatDictation(context: Context) {
     enum class Phase { Idle, Starting, Listening, Finishing }
 
@@ -95,21 +89,17 @@ class ChatDictation(context: Context) {
     var phase by mutableStateOf(Phase.Idle)
         private set
     var problem by mutableStateOf<Problem?>(null)
-    /// A language tag the person picked, or null to follow the phone's languages.
     var chosenLocale by mutableStateOf(prefs.getString(LOCALE_KEY, null))
         private set
-    /// Recent loudness, oldest first, each between 0 and 1.
     var levels by mutableStateOf(List(LEVEL_COUNT) { 0f })
         private set
     var startedAt by mutableStateOf<Long?>(null)
         private set
-    /// Languages the recognizer says it supports, beyond the phone's own.
     var otherLanguages by mutableStateOf<List<String>>(emptyList())
         private set
 
     val isActive: Boolean get() = phase != Phase.Idle
 
-    /// The language dictation will listen for.
     val locale: String get() = resolve(chosenLocale)
 
     private var recognizer: SpeechRecognizer? = null
@@ -118,12 +108,8 @@ class ChatDictation(context: Context) {
     private var transcript = ChatDictationTranscript()
     private var read: () -> String = { "" }
     private var write: (String) -> Unit = {}
-    /// Bumped by every start and stop, so a late result from a finished
-    /// session cannot write into the draft.
     private var generation = 0
 
-    /// Switching language mid-sentence keeps what was said and listens on in
-    /// the new one.
     fun choose(tag: String?) {
         chosenLocale = tag
         prefs.edit().apply { if (tag == null) remove(LOCALE_KEY) else putString(LOCALE_KEY, tag) }.apply()
@@ -155,8 +141,6 @@ class ChatDictation(context: Context) {
         begin(mine, deviceModel)
     }
 
-    /// Stop listening and keep the words. Waits briefly for the recognizer
-    /// to settle the last of them.
     fun finish() {
         val current = recognizer
         if (phase != Phase.Listening || current == null) return stop()
@@ -166,19 +150,16 @@ class ChatDictation(context: Context) {
         main.postDelayed({ if (generation == mine) stop() }, 2_000)
     }
 
-    /// Stop at once. The words already in the draft stay there.
     fun stop() {
         generation += 1
         tearDown()
     }
 
-    /// Stop and put the draft back the way it was before dictation started.
     fun cancel() {
         text?.let { if (read() == it.expected) write(it.original) }
         stop()
     }
 
-    /// Ask the recognizer which languages it knows, for the language menu.
     fun loadLanguages() {
         if (otherLanguages.isNotEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) return
@@ -219,8 +200,6 @@ class ChatDictation(context: Context) {
         }
     }
 
-    /// The recognizer stopped after a pause. Start it again on the same
-    /// session, unless the person has finished.
     private fun again(mine: Int) {
         if (generation != mine) return
         if (phase == Phase.Finishing) return stop()
@@ -266,14 +245,11 @@ class ChatDictation(context: Context) {
         override fun onError(error: Int) {
             if (generation != mine) return
             when (error) {
-                // Silence, or nothing it could make out. Keep listening.
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> again(mine)
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
                     fail(mine, Problem(L10n.text("android.chatdictation.microphone_denied"), Fix.AppPermissions))
                 SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
                     if (onDevice && SpeechRecognizer.isRecognitionAvailable(context)) {
-                        // No model for this language on the phone. The
-                        // system recognizer may have it online.
                         begin(mine, deviceModel = false)
                     } else {
                         fail(mine, Problem(L10n.text("android.chatdictation.language_unsupported", name(locale))))
@@ -281,8 +257,6 @@ class ChatDictation(context: Context) {
                 SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
                 SpeechRecognizer.ERROR_SERVER, SpeechRecognizer.ERROR_SERVER_DISCONNECTED ->
                     fail(mine, Problem(L10n.text("android.chatdictation.unavailable"), Fix.VoiceInput))
-                // After Done, stopping can end in a client error. That is the
-                // end the person asked for, not a failure.
                 SpeechRecognizer.ERROR_CLIENT -> if (phase == Phase.Finishing) stop() else again(mine)
                 else -> fail(mine, Problem(L10n.text("android.chatdictation.could_not_start", "$error")))
             }
@@ -335,7 +309,6 @@ class ChatDictation(context: Context) {
         const val LEVEL_COUNT = 160
         private const val LOCALE_KEY = "dictationLocale"
 
-        /// The phone's own languages, in the order the person put them.
         fun preferredChoices(): List<String> {
             val list = LocaleList.getDefault()
             return (0 until list.size()).map { list[it].toLanguageTag() }.distinct()
@@ -345,7 +318,6 @@ class ChatDictation(context: Context) {
 
         fun name(tag: String): String = Locale.forLanguageTag(tag).getDisplayName(Locale.getDefault()).ifEmpty { tag }
 
-        /// Two letters for the chip: EN, HU.
         fun code(tag: String): String = Locale.forLanguageTag(tag).language.ifEmpty { tag }.uppercase()
 
         fun openSettings(context: Context, fix: Fix) {
@@ -362,9 +334,6 @@ class ChatDictation(context: Context) {
     }
 }
 
-/// One dictation per composer. It stops when the composer leaves the screen
-/// or starts sending, and its problems show as a dialog that outlives the
-/// control that raised them. Port of `ChatDictationLifetime`.
 @Composable
 internal fun rememberChatDictation(blocked: Boolean): ChatDictation {
     val context = LocalContext.current
@@ -392,17 +361,12 @@ internal fun rememberChatDictation(blocked: Boolean): ChatDictation {
     return dictation
 }
 
-/// The mic beside the field. A press starts listening, asking for the
-/// microphone first if it has not been granted. A long press picks the
-/// language. Port of `ChatDictationButton`.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ChatDictationButton(dictation: ChatDictation, read: () -> String, write: (String) -> Unit, enabled: Boolean) {
     val colors = LocalTsColors.current
     val context = LocalContext.current
     var choosing by remember { mutableStateOf(false) }
-    // A refusal goes through start too, so the explanation and the way to
-    // Settings come from one place.
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         dictation.start(read, write)
     }
@@ -433,8 +397,6 @@ internal fun ChatDictationButton(dictation: ChatDictation, read: () -> String, w
     }
 }
 
-/// What replaces the composer's controls while dictation runs: the language,
-/// a live waveform, the time, and Cancel and Done. Port of `ChatDictationBar`.
 @Composable
 internal fun ChatDictationBar(dictation: ChatDictation) {
     val colors = LocalTsColors.current

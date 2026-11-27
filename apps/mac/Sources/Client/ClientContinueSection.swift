@@ -9,8 +9,6 @@ extension Account {
     }
 }
 
-/// Home reads device history and the account only. No destination is mounted
-/// until a row is opened; an asleep host cannot delay this section.
 struct ClientContinueSection: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -81,8 +79,6 @@ struct ClientContinueSection: View {
         }
     }
 
-    /// What a pin files this row under. Terminal sessions end, so they are
-    /// not pinnable: keeping a link to a dead shell is worse than no pin.
     private func reference(for place: ClientRecentPlaces.Place) -> WorkReference? {
         guard let scope = account.account?.pinnedWorkScope,
               let workspaceID = place.id.workspaceID, !workspaceID.isEmpty
@@ -175,9 +171,6 @@ extension ClientRecentPlaces.Place {
     }
 }
 
-/// Shared by the phone's pushed workspace and the iPad's section destination.
-/// Recording on appearance also covers device-detail links, which do not go
-/// through the sidebar's navigation model.
 private struct RememberWorkspace: ViewModifier {
     @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase

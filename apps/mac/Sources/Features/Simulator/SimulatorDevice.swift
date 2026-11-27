@@ -66,13 +66,11 @@ struct SimulatorBootTracker {
     }
 }
 
-/// A repeated link is a new request even when it names the same device.
 struct SimulatorAttachmentIntent: Equatable {
     let id = UUID()
     let deviceID: String
 }
 
-/// Attach links carry a concrete device identity; they never execute a command.
 struct SimulatorAttachRequest: Equatable {
     let deviceID: String
     let workspaceID: String?
@@ -104,7 +102,6 @@ enum SimulatorGeometry {
         default: point
         }
     }
-    /// All input uses top-left device coordinates. Letterboxing never sends touches.
     static func normalized(point: CGPoint, bounds: CGSize, pixels: CGSize) -> CGPoint? {
         guard bounds.width > 0, bounds.height > 0, pixels.width > 0, pixels.height > 0 else { return nil }
         let scale = min(bounds.width / pixels.width, bounds.height / pixels.height)

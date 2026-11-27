@@ -9,7 +9,6 @@ import java.io.InputStream
 
 internal class InputLimitExceeded : IOException(L10n.text("android.boundedinput.input_exceeds_the_allowed_size.7e6c0697"))
 
-/** Check the limit while reading, including providers that do not report a size. */
 internal fun InputStream.readBounded(limit: Int): ByteArray {
     require(limit >= 0)
     val output = ByteArrayOutputStream(minOf(limit, 8192))

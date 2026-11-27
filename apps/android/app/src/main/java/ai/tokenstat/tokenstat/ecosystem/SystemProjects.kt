@@ -33,7 +33,6 @@ data class SystemProject(val id: String, val owner: String, val hostId: String, 
         .appendQueryParameter("owner", owner).build()
 }
 
-/** Local metadata only. Serial publication prevents stale indexing from surviving logout. */
 object SystemProjects {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -157,7 +156,6 @@ object SystemProjects {
                     if (Build.VERSION.SDK_INT >= 30) manager.removeLongLivedShortcuts(stale.map { it.id })
                     manager.removeDynamicShortcuts(stale.map { it.id })
                     manager.enableShortcuts(snapshot.map { "project.${it.id}" })
-                    // Manifest shortcuts share the launcher's per-activity limit.
                     val limit = (manager.maxShortcutCountPerActivity - manager.manifestShortcuts.size).coerceAtLeast(0)
                     val targets = snapshot.take(limit).mapIndexed { rank, project -> shortcut(app, project, rank) }
                     fun same(left: ShortcutInfo, right: ShortcutInfo) = left.id == right.id && left.rank == right.rank
@@ -168,7 +166,6 @@ object SystemProjects {
                     val changed = targets.size != dynamic.size || targets.any { target -> dynamic.none { same(it, target) } }
                     val updates = snapshot.mapIndexed { rank, project -> shortcut(app, project, rank) }
                         .filter { target -> known.any { it.id == target.id && !same(it, target) } }
-                    // A throttled replacement must leave existing valid shortcuts intact. Cleanup above is not throttled.
                     if (!manager.isRateLimitingActive) {
                         if (changed) manager.setDynamicShortcuts(targets)
                         if (updates.isNotEmpty()) manager.updateShortcuts(updates)
@@ -178,7 +175,6 @@ object SystemProjects {
             }
         }
     }
-    /** Await best-effort removal before logout returns; restricted devices never block sign-out. */
     suspend fun flush() { withTimeoutOrNull(5_000) { publication?.join() } }
 
     private suspend fun index(context: Context, snapshot: List<SystemProject>, observed: Long) {
@@ -202,7 +198,6 @@ object SystemProjects {
                     .setTtlMillis(24 * 60 * 60 * 1000L)
                     .setPropertyString("name", it.name).setPropertyString("host", it.hostName).setPropertyString("url", it.uri.toString()).build()
             }).build()).await()
-            // Account changes may happen while IPC is suspended. Remove any late publication before releasing the serial writer.
             if (observed != generation) active.removeAsync("", SearchSpec.Builder().build()).await()
             active.requestFlushAsync().await()
         } catch (cancelled: CancellationException) { throw cancelled }

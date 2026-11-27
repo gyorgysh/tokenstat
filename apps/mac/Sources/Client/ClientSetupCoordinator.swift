@@ -3,7 +3,6 @@
 import Foundation
 import Observation
 
-/// Owns checkpoints and task lifetime independently of the navigation stack.
 @MainActor
 @Observable
 final class ClientSetupCoordinator {
@@ -19,8 +18,6 @@ final class ClientSetupCoordinator {
 
     init(store: ClientSetupStore = ClientSetupStore()) { self.store = store }
 
-    /// Preparation can outlive the view or be superseded by an account event.
-    /// Only its current result may load saved progress or publish a failure.
     func beginPreparation() -> UUID {
         clearAccount()
         let id = UUID()
@@ -62,11 +59,8 @@ final class ClientSetupCoordinator {
         savedDraft = draft
     }
 
-    /// Forget local progress only. Never stop or remove a remote installation.
     func discard() throws {
         cancel()
-        // An empty scope is shared and never written (see checkpoint), so
-        // there is nothing of this account's to remove.
         if let scope, !scope.account.isEmpty { try store.remove(scope: scope) }
         savedDraft = nil
         failure = nil
@@ -99,8 +93,6 @@ final class ClientSetupCoordinator {
                 try await operation()
             } catch {
                 guard let self, !Task.isCancelled, self.generation == id else { return }
-                // A cancelled step is not a failure and has nothing to say.
-                // It still falls through, so the screen stops saying "working".
                 if !(error is CancellationError) {
                     self.failure = ClientSetupFailure.from(error)
                 }

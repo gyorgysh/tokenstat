@@ -17,12 +17,10 @@ use crate::watermark;
 
 struct FileOutcome {
     parsed: Parsed,
-    /// False when the file was skipped because nothing had changed.
     read: bool,
     mark: Option<(String, watermark::Watermark)>,
 }
 
-/// Parser output, in the shape the pipeline needs regardless of source.
 #[derive(Default)]
 struct Parsed {
     events: Vec<crate::model::UsageEvent>,
@@ -223,17 +221,10 @@ fn scan_unlocked(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanRepor
         .unwrap_or(2);
     match rayon::ThreadPoolBuilder::new().num_threads(workers).build() {
         Ok(pool) => pool.install(|| scan_inner(store, tz)),
-        // The global Rayon pool remains a correct fallback if creating a small
-        // per-scan pool ever fails under extreme resource pressure.
         Err(_) => scan_inner(store, tz),
     }
 }
 
-/// The share of logical CPUs a scan may use.
-///
-/// The operating system's availability already accounts for an affinity or
-/// container limit. Holding back a quarter gives rendering, SQLite and the
-/// active agent headroom without imposing an artificial ceiling on newer Macs.
 fn scan_worker_count(logical_cpus: usize) -> usize {
     let reserve = logical_cpus.saturating_add(3) / 4;
     logical_cpus.saturating_sub(reserve).max(1)
@@ -250,17 +241,12 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         return Ok(report);
     };
 
-    // One-shot, and here rather than in `Store::open` because open must not
-    // write: a statusline would wait behind the lock.
     store.relabel_legacy_recovery()?;
 
     let marks = store.watermarks()?;
     let mut all_events = Vec::new();
     let mut codex_replacements = Vec::new();
     let mut marks_to_store = Vec::new();
-    // A recovery pass is applied after the ordinary inserts, in its own
-    // transaction, so the old derived rows are only dropped once their
-    // replacements can be written. See `replace_recovered`.
     let mut pending_recovery: Option<(Vec<crate::model::UsageEvent>, String)> = None;
 
     if let Some(projects) = claude_code::discover(&home) {
@@ -276,7 +262,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
 
-        // Recover history the transcripts no longer hold.
         if let Some(stats_path) = claude_stats::path_for(&projects) {
             let stats_key = stats_path.to_string_lossy().into_owned();
             let stats_prev = marks.get(&stats_key);
@@ -288,21 +273,7 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            // How the numbers in this file are read, not what is in it.
-            //
-            // The recovered rows are derived, so a fix to the derivation makes
-            // every row already in the archive wrong, and the watermark cannot
-            // see that: the file has not changed, only our reading of it. A
-            // version stamped in the archive is what lets a corrected build
-            // rebuild rows an older one got wrong, instead of leaving them
-            // until Claude Code happens to touch the file again.
-            //
-            // Bump this whenever `claude_stats::backfill_events` changes what
-            // it would produce from the same input.
             const RECOVERY_LOGIC_VERSION: &str = "3";
-            // Ours and the vendor's, together. Either moving makes the stored
-            // rows stale: a fix here changes what the same input produces, and
-            // a bump there changes what the input means.
             let vendor_version = std::fs::read_to_string(&stats_path)
                 .ok()
                 .and_then(|c| claude_stats::daily_tokens_version(&c));
@@ -317,12 +288,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             let stats_unchanged = watermark::classify(stats_prev, stats_size, stats_mtime)
                 == watermark::Change::Unchanged
                 && !recovery_stale;
-            // Keep our own copy of the vendor's window, whether or not the
-            // recovery below has anything to do. The vendor's window slides and
-            // ours never shrinks, so history stops being as short as whatever
-            // Claude Code still happens to publish. Runs on every scan, not
-            // only when the recovery is stale, because the point is to catch a
-            // day before it falls off the far end.
             if let Ok(contents) = std::fs::read_to_string(&stats_path) {
                 let now = jiff::Timestamp::now().to_string();
                 let mut seen: Vec<crate::store::VendorDay> = Vec::new();
@@ -352,8 +317,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                 && let Ok(contents) = std::fs::read_to_string(&stats_path)
                 && let Some(stats) = claude_stats::parse(&contents)
             {
-                // From our copy, not the file: a day the vendor has
-                // since dropped is still recoverable from here.
                 let daily = vendor_daily_tokens(store)?;
                 let have = store.archive_by_date_model()?;
                 let recovered = claude_stats::backfill_events(&stats, &daily, &have, tz);
@@ -365,10 +328,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                     .collect::<std::collections::HashSet<_>>()
                     .len() as u64;
                 report.events_recovered = events.len() as u64;
-                // Applied below, after the ordinary inserts, and only
-                // then stamped: a pass that fails or produces nothing
-                // must not delete rows a later scan would never
-                // rebuild.
                 pending_recovery = Some((events, stamp));
                 let (head_sig, sig_len) = watermark::head_signature(contents.as_bytes());
                 marks_to_store.push((
@@ -385,8 +344,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         }
     }
 
-    // A profile owns its own native transcripts. Its roll-up cache is
-    // deliberately not merged with the machine's day/model recovery window.
     for (profile, home) in tokenstat_paths::agent_profile_homes("claude_code") {
         let projects = home.join("projects");
         let files = claude_code::shards(&projects);
@@ -438,8 +395,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         })
         .collect();
     if !files.is_empty() {
-        // Version the watermark so existing logs are repaired once, including
-        // sessions that have stopped growing. Failed reads remain retryable.
         let codex_marks = marks
             .iter()
             .filter_map(|(key, mark)| {
@@ -467,7 +422,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
                 .iter()
                 .any(|w| matches!(w, Warning::MalformedLine { .. }))
             {
-                // A partial write is not a complete replacement of history.
                 outcome.parsed.events.clear();
                 outcome.mark = None;
                 continue;
@@ -726,8 +680,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         absorb(&mut report, &mut all_events, &mut marks_to_store, outcomes);
     }
 
-    // Antigravity IDE: JSONL written by tokenstat-sync when the language server
-    // is reachable. Soft-empty when the IDE has never been synced.
     if let Some(cache) = antigravity_cache::discover() {
         let files = antigravity_cache::shards(&cache);
         report.files_found += files.len() as u64;
@@ -742,8 +694,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
         absorb(&mut report, &mut all_events, &mut marks_to_store, outcomes);
     }
 
-    // OpenClaw: trajectory turns preferred; session rollups only when a session
-    // has no turn-level usage (otherwise the same tokens would count twice).
     let mut openclaw_turn_sessions = std::collections::HashSet::new();
     if let Some(agents) = openclaw::discover(&home) {
         let trajectories = openclaw::trajectory_shards(&agents);
@@ -800,8 +750,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
             .collect();
         report.files_found += 1;
         let mut outcome = read_db_shard(&db, &zed_marks, |p| zed::parse_db(p).into());
-        // A cumulative-only thread may later expose individual requests, and
-        // its derived remainder can shrink. Max-upserts would retain both.
         if outcome.parsed.warnings.is_empty() {
             zed_replacements.append(&mut outcome.parsed.events);
             if let Some((key, _)) = &mut outcome.mark {
@@ -839,10 +787,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
     for chunk in all_events.chunks(INSERT_CHUNK) {
         inserted += store.insert_events(chunk, tz)?;
     }
-    // The derived recovery lands here, after every ordinary row is in and in
-    // one transaction with the deletion of the rows it replaces. Stamping the
-    // logic version is the last step, so a failure leaves the old rows and an
-    // unstamped archive rather than a hole no later scan would rebuild.
     if let Some((events, stamp)) = pending_recovery {
         inserted += store.replace_recovered(&events, tz)?;
         store.set_meta("claude_rollup_logic", &stamp)?;
@@ -854,9 +798,6 @@ fn scan_inner(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, 
 
     store.set_meta("last_scan_ms", &now_ms().to_string())?;
 
-    // After the writes, so today's copy holds everything this scan found. The
-    // archive is not reconstructible from a machine whose logs have since been
-    // pruned, and the way it gets lost is a rescan, not a disk.
     report.backup = store.backup_daily(now_ms());
     report.elapsed_ms = started.elapsed().as_millis();
     Ok(report)
@@ -919,8 +860,6 @@ fn read_shard(
         }
     };
 
-    // Confirm append vs rewrite using only the previously signed head, not the
-    // whole multi-hundred-MB file.
     let change = match (provisional, previous) {
         (watermark::Change::Appended { from_byte }, Some(w)) => {
             let mut head = vec![0u8; w.sig_len as usize];
@@ -1016,9 +955,6 @@ fn read_shard(
     }
 }
 
-/// Watermark a whole-document text file (JSON object/array, or JSONL that
-/// needs early context). Any change re-parses the full contents; append-tail
-/// parsing would leave an invalid fragment or drop session headers.
 fn read_document_shard(
     path: &std::path::Path,
     marks: &std::collections::HashMap<String, watermark::Watermark>,
@@ -1080,30 +1016,6 @@ fn read_document_shard(
     }
 }
 
-/// How big a SQLite store is and when it last changed, **sidecars included**.
-///
-/// A database in WAL mode does not move its own file when it is written to: the
-/// turn lands in `<name>-wal` and the file this watermark is named after keeps
-/// its size and its mtime until a checkpoint, which can be hours later or, for
-/// a tool that holds the database open, not until it exits.
-///
-/// Watermarking the main file alone therefore reads a source once and then
-/// calls it unchanged for the rest of the day. The live meter already hit this
-/// and fixed it (`session_meter::store_mtime`, where an OpenCode 2 session
-/// reported `0% ctx · $0.00 · 0k` for its whole life); the archive scan had the
-/// same hole for every SQLite source. That one is a cache and can afford to be
-/// over-eager. This one is the watermark itself, so it cannot.
-///
-/// **`-wal` only, never `-shm`.** The write-ahead log moves when somebody
-/// writes, which is the thing this needs to notice. The shared-memory index
-/// moves when somebody *reads*, including when this scan opens the database to
-/// parse it, so folding it in made every scan invalidate the mark it had just
-/// stored: 52 databases on this machine, some of them megabytes, re-parsed on
-/// every run forever, with the watermark doing nothing at all.
-///
-/// The size is summed for the same reason it is taken at all: a checkpoint
-/// moves bytes out of the log and into the database, and a mark that watched
-/// only one of the two would call that no change.
 fn store_stat(path: &std::path::Path) -> Option<(u64, i64)> {
     let ms = |t: std::time::SystemTime| {
         t.duration_since(std::time::UNIX_EPOCH)
@@ -1125,7 +1037,6 @@ fn store_stat(path: &std::path::Path) -> Option<(u64, i64)> {
     Some((size, mtime_ms))
 }
 
-/// Watermark a binary/SQLite file and re-parse it wholesale when it changes.
 fn read_db_shard(
     path: &std::path::Path,
     marks: &std::collections::HashMap<String, watermark::Watermark>,
@@ -1142,7 +1053,6 @@ fn read_db_shard(
         return FileOutcome::skipped();
     }
 
-    // Confirm with a head signature so a same-size rewrite is still caught.
     let head = match std::fs::File::open(path).and_then(|mut f| {
         use std::io::Read;
         let mut buf = vec![0u8; 4096.min(size as usize)];
@@ -1240,10 +1150,6 @@ fn now_ms() -> i64 {
 
 type DailyModelTokens = (String, std::collections::BTreeMap<String, u64>);
 
-/// The per-day model tokens the archive has ever seen, newest reading winning.
-///
-/// The recovery reads this rather than the vendor's file so a day that has
-/// fallen out of the vendor's window is still recoverable from our own copy.
 fn vendor_daily_tokens(store: &Store) -> Result<Vec<DailyModelTokens>, CoreError> {
     let mut by_day: std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>> =
         std::collections::BTreeMap::new();
@@ -1341,12 +1247,6 @@ mod tests {
         assert_eq!(scan_worker_count(16), 12);
     }
 
-    /// A WAL-only write has to be visible to the watermark.
-    ///
-    /// This is the whole reason `store_stat` exists. Writing to a database in
-    /// WAL mode leaves the database file untouched, so a watermark taken from
-    /// it alone says "unchanged" and the scan skips a source that has hours of
-    /// new usage sitting in the sidecar.
     #[test]
     fn a_write_that_only_reaches_the_wal_still_counts_as_a_change() {
         let dir = std::env::temp_dir().join(format!("tokenstat-walmark-{}", std::process::id()));
@@ -1370,8 +1270,6 @@ mod tests {
             "nothing has been written, so nothing to do"
         );
 
-        // The database file is deliberately left alone, which is what a real
-        // WAL write does.
         let before = std::fs::metadata(&db).unwrap().len();
         std::fs::write(dir.join("state.db-wal"), b"first and second").unwrap();
         assert_eq!(std::fs::metadata(&db).unwrap().len(), before);
@@ -1386,11 +1284,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Reading a database must not change its own watermark.
-    ///
-    /// SQLite touches the shared-memory index when a reader takes a lock, so a
-    /// mark that included `-shm` was invalidated by the very scan that wrote
-    /// it and every database was re-parsed on every run.
     #[test]
     fn reading_a_store_does_not_move_its_mark() {
         let dir = std::env::temp_dir().join(format!("tokenstat-shmmark-{}", std::process::id()));
@@ -1401,7 +1294,6 @@ mod tests {
         std::fs::write(dir.join("state.db-wal"), b"log").unwrap();
         let before = store_stat(&db).unwrap();
 
-        // What a reader does: the index moves, the log does not.
         std::fs::write(dir.join("state.db-shm"), b"a reader took a lock").unwrap();
 
         assert_eq!(

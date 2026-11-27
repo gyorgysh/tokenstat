@@ -17,7 +17,6 @@ internal data class ChatImageRows(
     val toolImages: Map<String, List<ChatDisplayItem.Attachment>>,
 )
 
-/** Only explicit, exact tool provenance moves an image beside a step. */
 internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayItem>): ChatImageRows {
     val imageRows = folded.mapNotNull { (it as? ChatDisplayItem.Attachment)?.takeIf { image -> image.isImage() } }
     if (imageRows.isEmpty()) return ChatImageRows(folded, emptyMap())
@@ -72,7 +71,6 @@ internal fun chatImageRows(folded: List<ChatDisplayItem>, raw: List<ChatDisplayI
     return ChatImageRows(rows, linked)
 }
 
-/** Decode at display resolution, preserving the original file for Open/Save. */
 internal fun chatImageDecodeSize(width: Int, height: Int, maxEdge: Int): Pair<Int, Int> {
     require(width > 0 && height > 0 && maxEdge > 0)
     val scale = minOf(1.0, maxEdge.toDouble() / maxOf(width, height))
@@ -89,7 +87,6 @@ internal data class ChatImageRowGeometry(
     val gap: Float,
 )
 
-/** Justified rows in dp. Thumbnail dimensions never depend on these results. */
 internal fun chatImageGalleryGeometry(aspects: List<Double?>, availableWidth: Float): List<ChatImageRowGeometry> {
     if (aspects.isEmpty() || !availableWidth.isFinite() || availableWidth <= 0) return emptyList()
     val width = availableWidth.coerceAtMost(640f)
@@ -103,8 +100,6 @@ internal fun chatImageGalleryGeometry(aspects: List<Double?>, availableWidth: Fl
         val widths = DoubleArray(indexes.size)
         val remaining = indexes.indices.toMutableSet()
         var freeWidth = room.toDouble()
-        // Freeze narrow cells at a usable touch width, then distribute the
-        // rest proportionally. Normal 3-up phone rows still fit in one row.
         while (remaining.isNotEmpty()) {
             val total = remaining.sumOf { ratios[indexes[it]] }
             val small = remaining.filter { freeWidth * ratios[indexes[it]] / total < minimum }

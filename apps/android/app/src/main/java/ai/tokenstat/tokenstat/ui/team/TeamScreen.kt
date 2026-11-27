@@ -68,14 +68,11 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.put
 import java.util.UUID
 
-/// Every Team call carries the signed-in account's receipt. The host drops a
-/// call when that login is no longer the one it was made for.
 internal class TeamCalls(account: JsonObject?, private val bridge: suspend (String, JsonObject) -> JsonElement = { method, params -> CoreClient.call(method, params) }) {
     private val owner = WatchingOwner.from(account)
     val origin = owner?.scope?.str("origin")
     private val accountPerson = account?.str("accountId")?.takeIf { it.isNotBlank() }
     var person: String? = accountPerson; private set
-    /** The account server can remove a project nobody shares any more. */
     var canArchiveRepositories = false; private set
     fun verify(capabilities: JsonObject) {
         canArchiveRepositories = (capabilities["features"] as? JsonArray)?.any { (it as? JsonPrimitive)?.contentOrNull == "repository-archive-v1" } == true
@@ -129,12 +126,8 @@ private sealed interface Phase {
     data object Ready : Phase
 }
 
-/// The Team tab on Android: the member's side of Teams. Publishing a project
-/// and choosing how its work lands happen on the computer that owns it.
 @Composable
 fun TeamScreen(account: JsonObject?, onBack: () -> Unit = {}, request: suspend (String, JsonObject) -> JsonElement = { method, fields -> CoreClient.call(method, fields) }) {
-    // The account object is refreshed often. Only a different login or
-    // session starts the screen over.
     val owner = WatchingOwner.from(account)
     val identity = owner?.let { it.scope.toString() + "|" + it.receipt }
     val calls = remember(identity, request) { TeamCalls(account, request) }
@@ -429,7 +422,6 @@ internal fun RepositoryCard(calls: TeamCalls, orgId: String, repo: JsonObject, o
     var newTitles by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var newBackends by remember(repoId) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var pickingBackend by remember(repoId) { mutableStateOf<String?>(null) }
-    // Keep the original title/backend identity when a reply is lost.
     var newRequests by remember(repoId) { mutableStateOf<Map<String, Triple<String, String, String>>>(emptyMap()) }
 
     suspend fun loadCatalog(checkout: String, more: Boolean = false) {
@@ -625,7 +617,6 @@ private fun LaneRow(lane: JsonObject, all: List<JsonObject>, busy: Boolean, onLa
     }
 }
 
-/// One shared chat: its history as text, a comment box, and Ask with Stop.
 @Composable
 internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: TeamCommentDraftStore, askStorage: TeamAskRecoveryStore? = null, onBack: () -> Unit) {
     val colors = LocalTsColors.current
@@ -705,8 +696,6 @@ internal fun TeamChatReader(calls: TeamCalls, chat: ChatTarget, draftStorage: Te
 
     LaunchedEffect(calls, chat) {
         load()
-        // New comments and agent output appear while the chat is open.
-        // Paused while someone is typing, and while an Ask is watched below.
         while (true) {
             delay(10_000)
             if (askModel?.busy != true && askModel?.fence == null && !loadedEarlier && commentModel?.text.isNullOrBlank() && askModel?.text.isNullOrBlank()) load()

@@ -71,8 +71,6 @@ internal sealed partial class ChatPage
     }
     private static string ActivityStatus(string status, bool live)
     {
-        // Host normalises to camelCase, but an older or remote writer may send
-        // the snake_case status the plan JSON uses.
         var key = status == "in_progress" ? "inProgress" : status;
         var text = ActivityText("status_" + key);
         return live ? text : ActivityText("last_reported", text);
@@ -123,8 +121,6 @@ internal sealed partial class ChatPage
     private async Task ShowActivityAsync(string section)
     {
         if (_commandDialog is not null || _commandDialogOpening || _imageDialog is not null || _openId is null) return;
-        // Claim the dialog before discovery yields. A second tap or composer
-        // command must not race this fetch into a second native modal window.
         _commandDialogOpening = true;
         try
         {

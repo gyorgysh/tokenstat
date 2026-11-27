@@ -63,16 +63,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/// New and Edit workflow with the phone step list. Port of
-/// `WorkflowEditorView` plus `WorkflowStepListView` and
-/// `WorkflowStepDetailView`.
-///
-/// Steps read top to bottom with explicit Then/Else/Body connections (the
-/// canvas is the Mac presentation). Saves are `workflow.edit` with the
-/// baseline revision on protocol 22+ hosts; a failed save is never
-/// retried blindly but re-read and compared first. Creation mints one
-/// `wf-` id and the check reads it back, so a lost reply can never mint
-/// a second workflow. Unknown host fields ride along untouched.
 @Composable
 fun WorkflowEditorDialog(
     model: AppViewModel,
@@ -112,7 +102,6 @@ fun WorkflowEditorDialog(
     }
 }
 
-/// The workflow editor as a full page on the app background.
 @Composable
 fun WorkflowEditorScreen(
     model: AppViewModel,
@@ -225,8 +214,6 @@ fun WorkflowEditorScreen(
         onSaved()
     }
 
-    /// A failed save is never retried blindly: the host may have applied
-    /// it while the reply was lost. Re-read and compare instead.
     suspend fun recoverSave(submitted: WorkflowGraph, base: WorkflowGraph, message: String) {
         val fresh = try { readCurrent(base.id) } catch (e: CancellationException) {
             throw e
@@ -372,8 +359,6 @@ fun WorkflowEditorScreen(
                 if (designModel.isNotEmpty()) put("model", designModel)
                 if (designEffort.isNotEmpty()) put("effort", designEffort)
             })
-            // Side-effect-free: design saves nothing and runs nothing, so a
-            // lost response is safely retried with the same prompt.
             val result = WorkflowDesignResult.parse(element as JsonObject)
             fields = fields.applyDesign(result.workflow.layoutIfNeeded())
             designTranscript = result.transcript.ifBlank { null }

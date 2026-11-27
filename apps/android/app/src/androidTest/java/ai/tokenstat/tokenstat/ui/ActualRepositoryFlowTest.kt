@@ -21,7 +21,6 @@ import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 
-/** Real activity and navigation, with an isolated in-memory account and connection. */
 @RunWith(AndroidJUnit4::class)
 class ActualRepositoryFlowTest {
     @get:Rule(order = 0) val notifications = TestRule { base, _ ->

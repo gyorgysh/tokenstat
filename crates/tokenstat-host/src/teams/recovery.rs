@@ -1,15 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
-//! Release a shared chat whose Team run lost its guardian.
-//!
-//! Before the agent is born, the guardian writes down the process group it
-//! is born into and this boot of the computer. A crash leaves the chat and
-//! its checkout fenced. The publisher can release them on this computer
-//! once tokenstat proves no process of that run is left: the computer has
-//! restarted since, or the process group no longer exists. A process id that
-//! was reused reads as alive and keeps the fence, never the other way round.
-//! Nothing here signals a process.
-
 use crate::{chat_receipts::team_runs::Fence, error::DispatchError, team_process};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -27,7 +16,6 @@ struct Record {
     chat: String,
     boot: Option<String>,
     group: u32,
-    /// The owner's start time where the platform needs one (Windows).
     #[serde(default)]
     born: u64,
 }
@@ -157,8 +145,7 @@ pub(super) fn call(method: &str, params: &str) -> Option<Result<Value, DispatchE
         let gone = record
             .as_ref()
             .is_some_and(|record| proven_gone(record, team_process::boot_identity().as_deref()));
-        // Without a record the agent was never born, which the journal
-        // confirms: only a Reserved run can be closed without proof.
+
         let state = chats
             .recover_orphaned_run(&input.workspace_id, &input.id, &fence, gone, || {
                 tokenstat_workspace::writer::clear_orphaned_run(fence.incarnation()).map_err(|_| {
@@ -228,7 +215,7 @@ mod tests {
             .unwrap();
         let pid = child.id();
         child.wait().unwrap();
-        // Its id may be reused by now; then it reads as alive, which is safe.
+
         if team_process::run_owner_gone(pid, 0) {
             assert!(proven_gone(&record(Some("1.0"), pid), Some("1.0")));
         }

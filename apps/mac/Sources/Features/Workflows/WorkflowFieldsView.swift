@@ -2,14 +2,11 @@
 
 import SwiftUI
 
-/// Which half of the editor is on screen. Phone uses one at a time. iPad
-/// shows both.
 enum WorkflowFieldsSection: Hashable {
     case graph
     case settings
 }
 
-/// Creation and editing use the same graph preview and settings vocabulary.
 struct WorkflowFieldsView: View {
     @Bindable var session: WorkflowEditorSession
     let wide: Bool
@@ -19,7 +16,6 @@ struct WorkflowFieldsView: View {
     var nextCaption: String? = nil
     var section: WorkflowFieldsSection? = nil
     @Binding var stepPath: [String]
-    /// iPad selects a step into the inspector. Phone pushes a detail.
     var selectsInPlace = false
     @State private var choosingStarter = false
 
@@ -104,8 +100,6 @@ struct WorkflowFieldsView: View {
         }
     }
 
-    /// Draft the steps from a prompt. The host saves nothing and runs
-    /// nothing: the result is an editable draft like an example.
     @ViewBuilder
     private var describe: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -239,8 +233,6 @@ struct WorkflowFieldsView: View {
     }
 }
 
-/// Blank or an example pipeline. Selected card uses the accent stroke, never
-/// a system checkbox.
 struct WorkflowStarterPicker: View {
     let recipes: [WorkflowRecipe]
     let selectedID: String

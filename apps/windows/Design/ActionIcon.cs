@@ -11,10 +11,6 @@ using FluentSymbol = Microsoft.UI.Xaml.Controls.Symbol;
 
 namespace Tokenstat.Design;
 
-/// <summary>
-/// One glyph per action. Case names match the Mac ActionIcon and
-/// shared/web/actionIcons.js. WinUI maps them onto Segoe Fluent Symbols.
-/// </summary>
 internal enum ActionIcon
 {
     Save, Claim, Create, Upload, Copy, Download,
@@ -39,11 +35,6 @@ internal static class ActionIconGlyph
     /// </summary>
     private static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
-    /// <summary>
-    /// A FontIcon for one Segoe code unit. All codes are in the BMP, so one
-    /// char each. Written as hex rather than escapes so the code stays
-    /// greppable and no invisible character can hide in the source.
-    /// </summary>
     private static FontIcon Glyph(int code) => new() { Glyph = char.ToString((char)code), FontFamily = IconFont };
 
     private static SymbolIcon Sigil(FluentSymbol symbol) => new() { Symbol = symbol };
@@ -60,51 +51,43 @@ internal static class ActionIconGlyph
         return new PathIcon { Data = frame };
     }
 
-    /// <summary>
-    /// The de-collided mark for an action. Where the Mac draws two different
-    /// pictures, this returns two different glyphs: a SymbolIcon where the old
-    /// Symbol was already unique and correct, otherwise a FontIcon with the
-    /// Segoe code in the comment. Every content button picks from here.
-    /// </summary>
     public static IconElement Icon(this ActionIcon icon) => icon switch
     {
-        // Certified actions. The Mac draws a seal, Windows a filled circle
-        // check, one step stronger than the outline Commit and Allow carry.
-        ActionIcon.Claim or ActionIcon.Approve => Glyph(0xEC61), // CompletedSolid
-        ActionIcon.Commit or ActionIcon.Allow => Glyph(0xE930), // Completed
+        ActionIcon.Claim or ActionIcon.Approve => Glyph(0xEC61),
+        ActionIcon.Commit or ActionIcon.Allow => Glyph(0xE930),
         ActionIcon.Save or ActionIcon.CurrentPlan or ActionIcon.Done => Sigil(FluentSymbol.Accept),
         ActionIcon.Create => Sigil(FluentSymbol.Add),
         ActionIcon.Upload => Sigil(FluentSymbol.Upload),
         ActionIcon.Copy => Sigil(FluentSymbol.Copy),
         ActionIcon.Download => Sigil(FluentSymbol.Download),
         ActionIcon.SignIn or ActionIcon.Account or ActionIcon.Profile => Sigil(FluentSymbol.Contact),
-        ActionIcon.SignOut => Glyph(0xE7E8), // PowerButton
+        ActionIcon.SignOut => Glyph(0xE7E8),
         ActionIcon.Settings => Sigil(FluentSymbol.Setting),
         ActionIcon.Security => Sigil(FluentSymbol.Permissions),
         ActionIcon.Edit => Sigil(FluentSymbol.Edit),
         ActionIcon.Plans => Sigil(FluentSymbol.Favorite),
         ActionIcon.Billing => Sigil(FluentSymbol.Shop),
-        ActionIcon.AppStore => Glyph(0xE71D), // AllApps
+        ActionIcon.AppStore => Glyph(0xE71D),
         ActionIcon.PlayStore => Sigil(FluentSymbol.Video),
-        ActionIcon.AutoRenew => Glyph(0xE8EE), // RepeatAll
-        ActionIcon.Latest or ActionIcon.Downgrade => Glyph(0xE74B), // Down
+        ActionIcon.AutoRenew => Glyph(0xE8EE),
+        ActionIcon.Latest or ActionIcon.Downgrade => Glyph(0xE74B),
         ActionIcon.CancelPlan or ActionIcon.Dismiss => Sigil(FluentSymbol.Cancel),
         ActionIcon.Token or ActionIcon.Pair => Sigil(FluentSymbol.Link),
         ActionIcon.Preview or ActionIcon.Visibility => Sigil(FluentSymbol.View),
         ActionIcon.Theme => Sigil(FluentSymbol.Highlight),
-        ActionIcon.Layout => Glyph(0xECA5), // Tiles
+        ActionIcon.Layout => Glyph(0xECA5),
         ActionIcon.Sidebar => Pane(true),
-        ActionIcon.Connect => Glyph(0xE701), // Wifi
-        ActionIcon.Disconnect or ActionIcon.Deny => Glyph(0xE894), // Clear
+        ActionIcon.Connect => Glyph(0xE701),
+        ActionIcon.Disconnect or ActionIcon.Deny => Glyph(0xE894),
         ActionIcon.Refresh => Sigil(FluentSymbol.Refresh),
-        ActionIcon.Revoke => Glyph(0xE738), // Remove
+        ActionIcon.Revoke => Glyph(0xE738),
         ActionIcon.Device => Sigil(FluentSymbol.CellPhone),
-        ActionIcon.Computer => Glyph(0xE770), // Monitor
+        ActionIcon.Computer => Glyph(0xE770),
         ActionIcon.Run => Sigil(FluentSymbol.Play),
         ActionIcon.Stop => Sigil(FluentSymbol.Stop),
-        ActionIcon.History => Glyph(0xE81C), // History
+        ActionIcon.History => Glyph(0xE81C),
         ActionIcon.Scheduled => Sigil(FluentSymbol.Clock),
-        ActionIcon.Move => Glyph(0xE8AD), // Go
+        ActionIcon.Move => Glyph(0xE8AD),
         ActionIcon.Archive => Sigil(FluentSymbol.Save),
         ActionIcon.Restore => Sigil(FluentSymbol.Undo),
         ActionIcon.Pin => Sigil(FluentSymbol.Pin),
@@ -113,42 +96,37 @@ internal static class ActionIconGlyph
         ActionIcon.Collapse => Pane(false),
         ActionIcon.Merge => Sigil(FluentSymbol.Switch),
         ActionIcon.Comment => Sigil(FluentSymbol.Message),
-        ActionIcon.Reopen => Glyph(0xE7A6), // Redo
-        ActionIcon.Checkout => Glyph(0xE8B5), // Import
+        ActionIcon.Reopen => Glyph(0xE7A6),
+        ActionIcon.Checkout => Glyph(0xE8B5),
         ActionIcon.Filter => Sigil(FluentSymbol.Filter),
-        ActionIcon.EnterFullScreen => Glyph(0xE740), // FullScreen
-        ActionIcon.ExitFullScreen => Glyph(0xE73F), // BackToWindow
+        ActionIcon.EnterFullScreen => Glyph(0xE740),
+        ActionIcon.ExitFullScreen => Glyph(0xE73F),
         ActionIcon.Delete => Sigil(FluentSymbol.Delete),
-        ActionIcon.External => Glyph(0xE8A7), // OpenInNewWindow
+        ActionIcon.External => Glyph(0xE8A7),
         ActionIcon.Next => Sigil(FluentSymbol.Forward),
         ActionIcon.Back => Sigil(FluentSymbol.Back),
         ActionIcon.More => Sigil(FluentSymbol.More),
         ActionIcon.Search => Sigil(FluentSymbol.Find),
-        ActionIcon.SearchAll => Glyph(0xE773), // SearchAndApps
+        ActionIcon.SearchAll => Glyph(0xE773),
         ActionIcon.Reveal => Sigil(FluentSymbol.Folder),
         ActionIcon.Docs => Sigil(FluentSymbol.Library),
-        ActionIcon.Source => Glyph(0xE943), // Code
+        ActionIcon.Source => Glyph(0xE943),
         ActionIcon.Home => Sigil(FluentSymbol.Home),
         ActionIcon.Help => Sigil(FluentSymbol.Help),
         ActionIcon.Send => Sigil(FluentSymbol.Send),
         ActionIcon.Attach => Sigil(FluentSymbol.Attach),
-        ActionIcon.Dictate => Glyph(0xE720), // Microphone
-        ActionIcon.FastMode => Glyph(0xE945), // LightningBolt
-        ActionIcon.Persona => Glyph(0xE779), // ContactInfo
+        ActionIcon.Dictate => Glyph(0xE720),
+        ActionIcon.FastMode => Glyph(0xE945),
+        ActionIcon.Persona => Glyph(0xE779),
         ActionIcon.Plan => Sigil(FluentSymbol.Document),
-        ActionIcon.Apply => Glyph(0xE9D5), // CheckList
-        ActionIcon.Calculate => Glyph(0xE8EF), // Calculator
-        ActionIcon.Compare => Glyph(0xE89A), // TwoPage
-        ActionIcon.Benchmarks => Glyph(0xE9D2), // AreaChart
-        ActionIcon.HideKeyboard => Glyph(0xE92F), // KeyboardDismiss
+        ActionIcon.Apply => Glyph(0xE9D5),
+        ActionIcon.Calculate => Glyph(0xE8EF),
+        ActionIcon.Compare => Glyph(0xE89A),
+        ActionIcon.Benchmarks => Glyph(0xE9D2),
+        ActionIcon.HideKeyboard => Glyph(0xE92F),
         _ => Sigil(FluentSymbol.Placeholder),
     };
 
-    /// <summary>
-    /// The legacy Symbol mapping, kept stable for the existing direct users
-    /// (nav marks, row glyphs). Buttons use Icon(), which breaks the
-    /// collisions this keeps. Do not add new users.
-    /// </summary>
     public static Symbol Symbol(this ActionIcon icon) => icon switch
     {
         ActionIcon.Save or ActionIcon.CurrentPlan or ActionIcon.Done or ActionIcon.Commit or ActionIcon.Apply
@@ -228,11 +206,10 @@ internal static class ActionIconGlyph
     };
 
     /// <summary>
-    /// The action's mark drawn at <paramref name="size"/> pixels. Glyphs are
-    /// set at that font size rather than shrunk from their 20px default inside
-    /// a Viewbox, which is a scale transform and rasterizes soft. A Symbol's
-    /// value is its Segoe code point, so a SymbolIcon becomes the same glyph.
-    /// Path marks are geometry and still scale cleanly in a Viewbox.
+    /// Glyphs are set at font size rather than shrunk from their 20px default
+    /// inside a Viewbox, which is a scale transform and rasterizes soft. A
+    /// Symbol's value is its Segoe code point, so a SymbolIcon becomes the
+    /// same glyph.
     /// </summary>
     public static FrameworkElement Mark(this ActionIcon icon, double size)
     {
@@ -284,11 +261,6 @@ internal static class ActionIconGlyph
         return btn;
     }
 
-    /// <summary>
-    /// A "…" button that opens a menu of a row's less common actions, so a
-    /// row shows one way in rather than a button for everything it can do.
-    /// Same shape as the Mac's ToolbarMenuButton.
-    /// </summary>
     public static Button MoreButton(string help, MenuFlyout menu)
     {
         var button = Buttons.ToolbarIcon(ActionIcon.More, help, (_, _) => { });

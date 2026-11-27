@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace Tokenstat.Pages;
 
-/// <summary>Protect confirmed note changes from chat lists already in flight.</summary>
 internal sealed class ChatSteerOverlay
 {
     private sealed record Change(string Note, long Before);
@@ -59,8 +58,6 @@ internal sealed class ChatSteerOverlay
             if (string.IsNullOrEmpty(id)) continue;
             present.Add(id);
             if (!_changes.TryGetValue(id, out var change)) continue;
-            // A read started after the host acknowledged the mutation may
-            // already show that a tool consumed the note. Trust that answer.
             if (request > change.Before)
             {
                 _changes.Remove(id);

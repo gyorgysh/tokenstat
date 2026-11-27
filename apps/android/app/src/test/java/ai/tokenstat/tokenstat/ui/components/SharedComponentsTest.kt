@@ -13,8 +13,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/// Pins the shared-component logic to the answers the Apple client's Swift
-/// originals produce, so both platforms cannot drift apart silently.
 class SharedComponentsTest {
 
     @Test
@@ -113,8 +111,6 @@ class SharedComponentsTest {
 
     @Test
     fun avatarInitialsMatchApple() {
-        // The first letters of the first two words, uppercased, like the
-        // Apple `Avatar.initials`: one word gives one letter, blank gives nil.
         assertEquals("GY", avatarInitials("Gyorgy Yosh"))
         assertEquals("😀A", avatarInitials("😀 Alice"))
         assertEquals("𐐀J", avatarInitials("𐐨 Jane"))

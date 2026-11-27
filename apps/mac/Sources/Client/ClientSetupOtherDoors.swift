@@ -11,13 +11,6 @@ import UIKit
 
 #if !os(macOS)
 
-/// Door one: the computer somebody already works on.
-///
-/// The phone cannot do any of the three steps, so this screen's job is to be
-/// **checkable** rather than instructive. It watches the account, and each
-/// step ticks itself off as it happens. The one genuinely useful thing a phone
-/// can do here is put the address in front of the person, so the share sheet
-/// is the action rather than a link that opens a page the phone cannot use.
 struct ClientSetupMacDoor: View {
     @Environment(AccountModel.self) private var account
     @Environment(\.dismiss) private var dismiss
@@ -44,9 +37,6 @@ struct ClientSetupMacDoor: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 GettingStartedRail(steps: steps)
-                // No link button beside the share sheet: the address leaves
-                // the phone through "Send it to my computer", and a second
-                // copy of it was dead weight on the screen.
                 if arrived != nil {
                     Text(
                         L10n.text("apple.clientsetupotherdoors.one_step_is_left_and_it_happens_on_the_com.6a5d8111")
@@ -98,11 +88,6 @@ struct ClientSetupMacDoor: View {
         ]
     }
 
-    /// Recognize a desktop already on the account as well as one just added.
-    ///
-    /// Ends when one arrives or when the screen goes away. Nothing is written
-    /// and nothing is installed: this is a screen watching, which is the only
-    /// thing a phone can honestly do for this door.
     private func watch() async {
         let deadline = Date().addingTimeInterval(600)
         while arrived == nil, Date() < deadline, !Task.isCancelled {
@@ -117,15 +102,6 @@ struct ClientSetupMacDoor: View {
     }
 }
 
-/// Door three: a machine somebody already rents.
-///
-/// Reading an inventory, and nothing else. **Creating a machine is out of
-/// scope**: a write-scoped provider token on a phone can spend somebody's
-/// money, and that is a different trust conversation from a read-only list.
-/// So this says "pick one you have" and means it.
-///
-/// Once the servers are imported they are ordinary saved hosts, and door two
-/// takes over from its first step with the address already known.
 struct ClientSetupCloudDoor: View {
     @Bindable var model: ClientSetupModel
     @Bindable var library: SSHLibraryModel
@@ -137,9 +113,6 @@ struct ClientSetupCloudDoor: View {
         var id: String { rawValue }
     }
 
-    /// AWS inventory import needs the desktop app, so the phone offers
-    /// DigitalOcean alone. The selector stays with one option, ready for
-    /// the next provider, instead of vanishing and reappearing.
     #if os(macOS)
     private var providers: [Provider] { Provider.allCases }
     #else
@@ -172,17 +145,11 @@ struct ClientSetupCloudDoor: View {
                 }
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-                // First, because somebody with no server at all cannot use
-                // anything below this and would otherwise read a form asking
-                // for an account token they have no reason to have.
                 needOne
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    // The platform segmented control is a grey track with a
-                    // grey pill, which is the one piece of chrome on this
-                    // screen wearing somebody else's palette.
                     SegmentedTabs(options: providers, selection: $provider)
                         .disabled(working)
                     if provider == .digitalOcean {
@@ -265,12 +232,6 @@ struct ClientSetupCloudDoor: View {
 
     }
 
-    /// The way out for somebody who has none yet.
-    ///
-    /// It lives here rather than as a door of its own: "I have a cloud server"
-    /// and "I need a cloud server" are the same question asked by people one
-    /// step apart, and splitting them across the first screen made somebody
-    /// choose between two doors that both said cloud.
     private var needOne: some View {
         NavigationLink(value: SetupStep.needServer) {
             HStack(alignment: .top, spacing: Theme.Space.m) {
@@ -323,16 +284,12 @@ struct ClientSetupCloudDoor: View {
                     username: username
                 )
             guard isCurrent() else { return }
-            // Import already writes the local SSH library. Refresh those rows
-            // without issuing a second save for every imported server.
             await library.reload()
             guard isCurrent() else { return }
             guard !result.hosts.isEmpty else {
                 throw BridgeError.core(code: "no_servers",
                     message: L10n.text("apple.clientsetupotherdoors.no_servers_were_found_check_the_account_to.e590f2d6"))
             }
-            // The token was a credential and its job is done. It is never
-            // written to the archive and is not eligible for sync.
             token = ""
             imported = result.imported
         } catch {
@@ -342,7 +299,6 @@ struct ClientSetupCloudDoor: View {
     }
 }
 
-/// The system share sheet, for the one thing a phone can do about a computer.
 struct ClientShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::*;
 
 fn principal(role: &str, comment: bool, person: &str, device: char) -> AuthorizedTeamPrincipal {

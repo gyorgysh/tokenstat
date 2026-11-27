@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// A focused phone composer and a spacious review beside writing on iPad/Mac.
-/// Both presentations operate on the same frozen selection and saved draft.
 struct GitCommitComposer: View {
     @Bindable var session: GitCommitSession
     let folderName: String

@@ -7,9 +7,6 @@
 #if !os(macOS)
 import SwiftUI
 
-/// The host file moved while the draft was dirty. Saving stays off until
-/// the person chooses a copy: reload adopts the host and clears the draft,
-/// keeping writes the draft through explicitly.
 struct EditorConflictCard: View {
     let document: EditorDocument
     let hostContent: String

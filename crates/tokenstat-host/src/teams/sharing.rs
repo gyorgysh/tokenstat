@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 use super::{
     api_error,
     publications::{Checkout, Folder, Owner, Phase, Store},
@@ -284,15 +283,9 @@ fn target(
 fn local_dto(row: &Checkout) -> Value {
     json!({"id":row.id,"organizationId":row.organization_id,"repositoryId":row.repository_id,"workspaceId":row.workspace_id,"phase":row.phase,"revision":row.revision,"accountCleanupPending":row.phase == Phase::Withdrawn && !row.cloud_withdrawn})
 }
-/// Whether the account server says a publication no longer exists. Only an
-/// explicit `not_found` counts: an outage or a refused request proves nothing,
-/// and a folder must never look private while teammates can still reach it.
 fn stopped_elsewhere<T>(reply: &Result<T, TeamError>) -> bool {
     matches!(reply, Err(TeamError::Rejected { status: 404, code, .. }) if code == "not_found")
 }
-/// How often one publication is asked about, at most. The list is read on
-/// every refresh while Teams is open, and one request per shared folder on
-/// each of those would be a steady load for a change that is rare.
 const SETTLE_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 fn due_for_settle_check(id: &str) -> bool {
     use std::{collections::HashMap, sync::Mutex, time::Instant};
@@ -309,11 +302,6 @@ fn due_for_settle_check(id: &str) -> bool {
     checked.insert(id.to_string(), now);
     true
 }
-/// Sharing can end without this computer: the publisher stops it from
-/// another device or a maintainer removes the checkout. The local row then
-/// still reads as shared, so the folder keeps its badge and keeps serving
-/// teammates who can no longer find it. Retire it here, the same way a
-/// local stop would, and leave the repository, its chats and history alone.
 fn settle_stopped_elsewhere(
     owner: &AccountSnapshot,
     client: &TeamClient,
@@ -334,8 +322,7 @@ fn settle_stopped_elsewhere(
                 store.confirm_cloud_withdrawal(binding, &row.id)?;
                 settled = true;
             }
-            // A row that moved since the read was changed by a local action,
-            // which wins over this cleanup.
+
             Err(error) if error.code == "publication_changed" => {}
             Err(error) => return Err(error),
         }
@@ -478,8 +465,7 @@ pub(super) fn perform(
         }
         Request::Withdraw(input) => {
             let binding = local_binding(owner, client)?;
-            // Stop local reads first. An unknown cloud outcome remains a
-            // withdrawn local publication and can be retried safely.
+
             let retired = store.withdraw(&binding, &input.checkout, input.expected_revision)?;
             update_remote_reach(owner, &store, &binding)?;
             if retired.cloud_withdrawn {

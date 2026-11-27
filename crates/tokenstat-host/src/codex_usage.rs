@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Codex plan limits, asked of Codex itself.
-//!
-//! Codex writes its limits into a session log only while it runs a turn, so
-//! somebody who has not used Codex since a window reset sees a stale reading.
-//! Codex's app server answers `account/rateLimits/read` from the account
-//! instead: current numbers, no turn, nothing billed, and through Codex's own
-//! sign-in. The logs stay as the fallback for a Codex without that request
-//! and for an API-key login, which has no plan windows to report.
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -16,11 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokenstat_core::limits::ProviderLimits;
 
-/// A cold Codex start plus one request on a slow network.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(20);
-/// Same pacing as the Claude read: an automatic pass reuses an answer this
-/// long, an explicit refresh shares a very young one, and a failure leaves
-/// Codex alone for a minute.
 const REUSE_AUTOMATIC: Duration = Duration::from_secs(120);
 const REUSE_FORCED: Duration = Duration::from_secs(15);
 const FAILURE_PAUSE: Duration = Duration::from_secs(60);
@@ -38,8 +26,6 @@ pub(crate) fn read(force: bool) -> ProviderLimits {
     tokenstat_core::limits::codex_limits_with_homes(&chat_codex_homes())
 }
 
-/// The per-chat Codex homes the host created. Codex writes those chats'
-/// logs there rather than under `~/.codex`.
 fn chat_codex_homes() -> Vec<std::path::PathBuf> {
     let Some(root) = tokenstat_paths::data_dir().map(|dir| dir.join("chat")) else {
         return Vec::new();
@@ -61,8 +47,6 @@ struct Pace {
     reading: Option<ProviderLimits>,
 }
 
-/// `None` when Codex is not installed or gave no reading, so the caller
-/// falls back to the logs.
 fn read_through_codex(force: bool) -> Option<ProviderLimits> {
     static LAST: Mutex<Option<Pace>> = Mutex::new(None);
     let mut last = LAST
@@ -148,6 +132,6 @@ fn ask(program: &str, environment: &[(String, String)]) -> Option<Value> {
     drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
-    // An older Codex answers with an error for an unknown method.
+
     answer.and_then(|value| value.get("result").cloned())
 }

@@ -15,14 +15,6 @@ using Windows.System;
 
 namespace Tokenstat.Pages;
 
-/// <summary>
-/// Tabbed in-app browser over the proxy.* lifecycle. Each tab owns one
-/// loopback page: opening through proxy.listen gives a tab whose close calls
-/// proxy.unlisten, and a tab opened on a plain port closes without a call.
-/// Matches the Mac browser: an address bar for committed navigations only, an
-/// address bar for local previews and external sites, and an empty state
-/// until an address is entered.
-/// </summary>
 internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
 {
     private readonly string? _peer;
@@ -79,15 +71,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             _pendingTabs.Clear();
             RenderInspector();
         };
-        // Keep tabs alive while switching workspace sections. Release native
-        // WebViews and listeners when the window closes, or a tab is closed.
         _ownerWindow = App.CurrentWindow;
         if (_ownerWindow is not null) _ownerWindow.Closed += WindowClosed;
     }
 
     private void WindowClosed(object sender, WindowEventArgs args) => Release();
 
-    /// <summary>Closing a tool releases its pages and bridge leases. Hiding retains them.</summary>
     internal void Release()
     {
         if (_released) return;
@@ -107,18 +96,10 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         }
     }
 
-    /// <summary>
-    /// The inspector column content: the open tabs and the current address.
-    /// Tab switches and navigations repaint it, so the column stays live
-    /// without the shell asking again.
-    /// </summary>
     public UIElement? Inspector => _inspector;
 
     public event Action? ToolbarChanged { add { } remove { } }
 
-    /// <summary>
-    /// The tab strip names its own pages; the scope says this is the browser.
-    /// </summary>
     public UIElement? ToolbarScope => Chrome.ScopeChip(L10n.Text("common.browser"), Symbol.Globe);
 
     public IList<UIElement> ToolbarActions()
@@ -244,11 +225,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         RenderInspector();
     }
 
-    /// <summary>
-    /// One open page. The address field holds what the user is typing, never
-    /// what the page is: a half-typed URL must not start loading, or the
-    /// first keystroke throws a DNS error.
-    /// </summary>
     private sealed class BrowserTab
     {
         private readonly Grid _view = new();
@@ -560,15 +536,8 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             if (targets.Count == 0) _recentMenu.Items.Add(new MenuFlyoutItem { Text = L10n.Text("windows.browserpage.no_recent_previews.79233708"), IsEnabled = false });
         }
 
-        /// <summary>
-        /// Commit a typed address. Local dev servers are plain HTTP; anything
-        /// else defaults to HTTPS so a mistyped or remote site is never sent
-        /// in the clear. Remote loopback addresses keep their original port
-        /// in the address bar while the WebView uses a local bridge.
-        /// </summary>
         private async Task CommitAsync(string raw)
         {
-            // Capture before the semaphore: a queued click belongs to its original account.
             _navigationEpoch.Advance();
             var navigation = _navigationEpoch.Revision;
             var operation = BrowserProjectMemory.AccountEpoch.Capture(() => _closed || navigation != _navigationEpoch.Revision);
@@ -655,7 +624,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             if (!operation.IsCurrent) return null;
             if (_routes.Active is { } existing && existing.Generation == operation.Revision
                 && existing.Host.Equals(host, StringComparison.OrdinalIgnoreCase) && existing.Port == port) return existing;
-            // Retire before listen, so even sixteen open tabs can each change their target.
             await RetireBridgeAsync();
             var local = await operation.AcquireAsync(
                 () => BrowserBridges.AcquireAsync(_peer, host, port, operation.Revision),
@@ -707,8 +675,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
         private void InstallResourceFilter()
         {
             if (_resourceFilterInstalled || _peer.Length == 0 || _web.CoreWebView2 is not { } core) return;
-            // Include frames and workers. Shared worker requests are raised on every
-            // WebView in an environment, so they use the pool's live listener set.
             core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All, CoreWebView2WebResourceRequestSourceKinds.All);
             core.FrameNavigationStarting += (_, args) =>
             {
@@ -729,18 +695,13 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     : _documentGeneration == operation.Revision ? _routes.Request(uri, args.Request.Method, topLevel, operation.Revision)
                     : BrowserRouteState.RequestAction.Block;
                 if (action == BrowserRouteState.RequestAction.Pass) return;
-                // Refuse before rewriting too, so a failed WebView API call cannot
-                // send the original localhost request to this computer.
                 args.Response = core.Environment.CreateWebResourceResponse(null, 403, "Remote preview address unavailable", "Content-Length: 0\r\n");
                 if (action == BrowserRouteState.RequestAction.Rewrite && _routes.Active is { } active)
                 {
-                    // Preserve the request method and body, including forms and subresources.
                     try { args.Request.Uri = BrowserRouteState.Through(active, uri); args.Response = null; }
                     catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }
                     return;
                 }
-                // Default to refusal before awaiting anything. An unmapped remote localhost
-                // request must never fall through to a service on this Windows computer.
                 if (action != BrowserRouteState.RequestAction.Reopen) return;
                 var deferral = args.GetDeferral();
                 await _navigationGate.WaitAsync();
@@ -751,15 +712,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     if (historical is null) return;
                     var lease = await SwitchBridgeAsync(historical.Host, historical.Port, operation);
                     if (lease is null || !operation.IsCurrent) return;
-                    // A document redirect gives the page its new proxy origin, so its
-                    // relative requests follow the live listener after Back/Forward.
                     args.Response = core.Environment.CreateWebResourceResponse(null, 302, "Preview listener refreshed",
                         "Location: " + BrowserRouteState.Through(lease, uri) + "\r\nContent-Length: 0\r\n");
                 }
                 catch (Exception ex) { if (operation.IsCurrent) Banner(FriendlyError.Display(ex.Message)); }
                 finally { _navigationGate.Release(); deferral.Complete(); }
             };
-            // A failed or unsupported runtime setup must keep Retry fail closed.
             _resourceFilterInstalled = true;
         }
 
@@ -771,7 +729,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 if (_closed) return;
                 if (_documentGeneration < changedGeneration)
                 {
-                    // Stop before waiting for an in-flight Open to release the navigation gate.
                     try { _web.CoreWebView2?.Stop(); _web.CoreWebView2?.Navigate("about:blank"); } catch { }
                     _loadedUrl = "";
                     _address.Text = "";
@@ -785,7 +742,7 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                     if (_routes.Active is { } active && active.Generation < changedGeneration) await RetireBridgeAsync();
                     _routes.ForgetBefore(changedGeneration);
                 }
-                catch { /* Account invalidation also retires listeners in the shared pool. */ }
+                catch { }
                 finally { _navigationGate.Release(); }
             });
         }
@@ -840,15 +797,12 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
             }
             await _navigationGate.WaitAsync();
             try { await RetireBridgeAsync(); _routes.Reset(); }
-            catch { /* Closing a tab must not throw. */ }
+            catch { }
             finally { _navigationGate.Release(); }
             if (_unlisten && _initialOperation.Revision == BrowserProjectMemory.AccountEpoch.Revision)
             {
                 try
                 {
-                    // The host keys bridges by peer, host and port, so the
-                    // peer travels back or the bridge leaks. Local tabs never
-                    // unlisten: their ports were opened directly.
                     var parameters = new JsonObject
                     {
                         ["host"] = _host,
@@ -862,7 +816,6 @@ internal sealed class BrowserPage : Page, IInspectorContent, IToolbarItems
                 }
                 catch
                 {
-                    // Leaving the page must not throw.
                 }
             }
         }

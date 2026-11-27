@@ -53,7 +53,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-/// Text shared on purpose, with the host's names for any files. Never a send.
 internal data class HandoffDraft(val text: String, val attachmentIds: List<String> = emptyList())
 
 internal suspend fun readSharedHandoffFiles(
@@ -81,11 +80,8 @@ internal suspend fun readSharedHandoffFiles(
     }
 }
 
-/// A row and how far down it the reader was, in basis points.
 internal data class HandoffAnchor(val eventId: String, val fraction: Int, val followsLatest: Boolean)
 
-/// What one device left for the others, kept by the conversation's computer.
-/// Port of the Apple `WorkHandoff`.
 internal data class WorkHandoff(
     val revision: Long,
     val requestId: String,
@@ -155,15 +151,10 @@ internal fun parseHandoff(value: JsonElement?): WorkHandoff? {
 
 private val STABLE_EVENT = Regex("^(?:(?:user|text|think|handoff|turn|usage|failed|tool|edit)-)?s(\\d+)$")
 
-/// The host's own name for a row, or null for a row named by its place in the
-/// page that was loaded. Only the first kind means the same row elsewhere. A
-/// folded header stands for its first member.
 internal fun stableEvent(rowId: String): String? = rowId.removePrefix("g:").takeIf { STABLE_EVENT.matches(it) }
 
 private fun sequence(rowId: String): Long? = STABLE_EVENT.find(rowId.removePrefix("g:"))?.groupValues?.get(1)?.toLongOrNull()
 
-/// Where the reader is, for another device. At the end there is no place to
-/// keep, only that the end is where they were.
 internal fun shareAnchor(visible: List<RowSpan>, rows: List<String>, atEnd: Boolean): HandoffAnchor? {
     if (atEnd) return rows.lastOrNull { stableEvent(it) != null }?.let { HandoffAnchor(stableEvent(it)!!, 0, true) }
     val row = visible.firstOrNull { it.key is String && it.key in rows && stableEvent(it.key) != null && it.offset + it.size > 0 }
@@ -172,9 +163,6 @@ internal fun shareAnchor(visible: List<RowSpan>, rows: List<String>, atEnd: Bool
     return HandoffAnchor(stableEvent(row.key as String)!!, within, false)
 }
 
-/// The row to show for a shared place. Another page size or level of detail
-/// can join a reply or fold a step, so without an exact match it is the last
-/// row that starts at or before it. Null when the place is not loaded yet.
 internal fun anchorRow(eventId: String, rows: List<String>): Int? {
     rows.indexOf(eventId).takeIf { it >= 0 }?.let { return it }
     rows.indexOf("g:$eventId").takeIf { it >= 0 }?.let { return it }
@@ -184,8 +172,6 @@ internal fun anchorRow(eventId: String, rows: List<String>): Int? {
 
 private enum class HandoffPhase { Loading, Ready, Sharing, Shared, Conflict, Failed }
 
-/// Offered at the top of a conversation another device shared. A doorway to
-/// the sheet, never a change to the draft or the scroll on its own.
 @Composable
 internal fun WorkHandoffOffer(record: WorkHandoff, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val colors = LocalTsColors.current
@@ -206,8 +192,6 @@ internal fun WorkHandoffOffer(record: WorkHandoff, onOpen: () -> Unit, onDismiss
     }
 }
 
-/// Port of the Apple `WorkHandoffSheet`: share this place, or pick up what
-/// another device shared. Reading a record never touches the composer.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun WorkHandoffSheet(
@@ -228,7 +212,6 @@ internal fun WorkHandoffSheet(
     val scope = rememberCoroutineScope()
     var phase by remember { mutableStateOf(HandoffPhase.Loading) }
     var shared by remember { mutableStateOf<WorkHandoff?>(null) }
-    // Fixed once a share starts, so typing cannot change an uncertain one.
     var pending by remember { mutableStateOf<HandoffRequest?>(null) }
     var loaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -262,8 +245,6 @@ internal fun WorkHandoffSheet(
                 pending = null
                 phase = HandoffPhase.Shared
             } else {
-                // Another device shared in between. Both versions stay until
-                // the person picks one.
                 shared = parseHandoff(answer?.get("current"))
                 phase = HandoffPhase.Conflict
             }

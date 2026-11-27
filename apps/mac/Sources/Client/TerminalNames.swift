@@ -2,8 +2,6 @@
 import Foundation
 import Observation
 
-/// Presentation labels are local to an account and the terminal's owning host.
-/// Renaming a shell never writes commands into its input or changes its OSC title.
 @MainActor @Observable
 final class SidebarTerminalNames {
     static let shared = SidebarTerminalNames()

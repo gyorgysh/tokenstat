@@ -66,7 +66,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 
-/** A gallery owns its downloads; previews never borrow a foreground transfer. */
 @Composable
 internal fun ChatImageGallery(
     images: List<ChatDisplayItem.Attachment>, model: AppViewModel, peer: String, chatId: String,
@@ -111,8 +110,6 @@ internal fun ChatImageGallery(
         if (automatic && (image.size == null || image.size !in 1..CHAT_IMAGE_PREVIEW_BYTES)) return null
         loading[image.attachmentId] = true
         try {
-            // Route changes are checked again by the transfer's consent gate.
-            // Automatic previews never grant allowance to a relay fallback.
             if (automatic && !chatImageAutomaticPreviewAllowed(image.size, model.peerRoute(peer))) return null
             val file = downloadChatFile(File(context.cacheDir, "chat-downloads"), chatId, image.attachmentId, owner!!.key,
                 call = { method, params -> check(ownsFiles()); model.workspaceSection(peer, method, params) },
@@ -136,8 +133,6 @@ internal fun ChatImageGallery(
     }
     LaunchedEffect(owner, images.take(4).map { it.attachmentId to it.size }, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            // The route is read inside load, so a relay that later becomes
-            // direct has to be asked again. Too-large files stay out.
             var waitMs = 1_000L
             while (true) {
                 val pending = images.take(4).filter { image ->
@@ -193,9 +188,6 @@ internal fun ChatImageGallery(
             }
         }
     } else {
-        // Each bounded thumbnail is decoded once off the UI thread. Its
-        // dimensions can refine the default aspect once, without a measure /
-        // decode feedback loop or synchronous metadata reads during layout.
         val bitmaps = visible.map { image -> key(image.attachmentId) { imageBitmap(files[image.attachmentId], CHAT_IMAGE_GALLERY_EDGE) } }
         val aspects = bitmaps.map { bitmap -> bitmap?.let { it.width.toDouble() / it.height } }
         BoxWithConstraints(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {

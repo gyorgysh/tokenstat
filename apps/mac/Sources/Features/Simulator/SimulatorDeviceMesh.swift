@@ -3,8 +3,6 @@
 import simd
 import CoreGraphics
 
-/// Procedural, solid hardware families with a separate live display.
-/// Dimensions are illustrative proportions, rather than exact CAD measurements.
 struct SimulatorDeviceMesh {
     struct Vertex {
         var position: SIMD4<Float>
@@ -18,7 +16,6 @@ struct SimulatorDeviceMesh {
     let depth: Float
 
     private(set) var rearCameraCenters: [SIMD3<Float>] = []
-    /// Include lenses, buttons and the hinge in the fit at every orbit angle.
     var boundingRadius: Float { vertices.reduce(0) { max($0, simd_length(SIMD3($1.position.x, $1.position.y, $1.position.z))) } }
 
     init(aspect: Float, hardware: SimulatorHardware, innerDisplay: Bool = false) {
@@ -27,8 +24,6 @@ struct SimulatorDeviceMesh {
         width = ratio > 1 ? 2.2 : 2.2 * ratio
         let openDuo = hardware == .iPhoneDuo && innerDisplay
         depth = openDuo ? 0.07 : hardware.depth
-        // Duo's inner panel has a landscape physical orientation, even when
-        // its framebuffer arrives in portrait. Rotate hardware with its UVs.
         let transpose = openDuo && ratio < 1
         let w = transpose ? height : width, h = transpose ? width : height
         let radius = min(w, h) * (hardware.isTablet ? 0.045 : (hardware == .iPhoneDuo ? 0.065 : 0.105))
@@ -37,7 +32,6 @@ struct SimulatorDeviceMesh {
         let coating = SIMD4<Float>(0.28, 0.33, 0.41, 0.24)
         let glass = SIMD4<Float>(0.016, 0.022, 0.032, 0.55)
         if hardware == .iPhoneDuo && !openDuo {
-            // Two enclosures, a real gap and a separate hinge, not a thick slab.
             for side: Float in [-1, 1] {
                 box(w, h, depth / 2 - 0.006, radius: radius, bevel: 0.008,
                     center: [0, 0, side * (depth / 4 + 0.003)], color: metal)
@@ -50,8 +44,6 @@ struct SimulatorDeviceMesh {
         let screenHeight = hardware.hasHomeButton ? h - 0.40 : h - bezel * 2
         face(w - bezel * 2, screenHeight, radius: hardware.hasHomeButton ? 0.008 : max(0.012, radius - bezel),
              z: depth / 2 + 0.007, color: [1, 1, 1, 0], screen: true)
-        // System cutouts already exist in the live framebuffer. Add only the
-        // physical home button and earpiece outside legacy displays.
         if hardware.hasHomeButton {
             cylinder(radius: 0.058, length: 0.006, center: [0, -h / 2 + 0.097, depth / 2 + 0.005], color: metal)
             cylinder(radius: 0.047, length: 0.008, center: [0, -h / 2 + 0.097, depth / 2 + 0.007], color: glass)
@@ -77,7 +69,6 @@ struct SimulatorDeviceMesh {
             let hingeX: Float = openDuo ? 0 : -w / 2
             box(0.035, h - 0.08, depth - 0.012, radius: 0.014, center: [hingeX, 0, 0], color: metal)
             if openDuo {
-                // The other enclosure carries the inactive outer display.
                 box(w / 2 - 0.05, h - 0.06, 0.009, radius: radius * 0.8,
                     center: [-w / 4, 0, -depth / 2 - 0.015], color: glass)
                 box(0.012, h - 0.08, 0.012, radius: 0.004, center: [0, 0, -depth / 2 - 0.014], color: glass)
@@ -87,7 +78,6 @@ struct SimulatorDeviceMesh {
                 }
             }
         }
-        // Connector, speaker openings and antenna breaks remain solid geometry.
         box(0.14, 0.008, depth * 0.32, radius: 0.003, center: [0, -h / 2 - 0.001, 0], color: glass)
         for side: Float in [-1, 1] {
             for hole in 0..<4 {
@@ -120,7 +110,6 @@ struct SimulatorDeviceMesh {
     private mutating func addCameras(width w: Float, height h: Float, hardware: SimulatorHardware, openDuo: Bool,
                                      metal: SIMD4<Float>, coating: SIMD4<Float>, glass: SIMD4<Float>) {
         let back = -depth / 2 - 0.012
-        // Positive X is the left side when viewed from behind the device.
         var center = SIMD2<Float>(w / 2 - 0.25, h / 2 - 0.28)
         var lenses: [SIMD2<Float>] = []
         var lensRadius: Float = 0.087
@@ -248,8 +237,6 @@ struct SimulatorDeviceMesh {
     }
 }
 
-/// Unit quaternions allow continuous rotation past the poles without a pitch
-/// clamp, Euler-angle jumps or a front/back surface swap.
 struct SimulatorOrbit {
     var rotation = simd_quatf(angle: -0.22, axis: [1, 0, 0]) * simd_quatf(angle: -0.32, axis: [0, 1, 0])
     mutating func rotate(from: SIMD3<Float>, to: SIMD3<Float>) -> simd_quatf {

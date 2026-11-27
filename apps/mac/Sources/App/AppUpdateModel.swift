@@ -5,31 +5,17 @@
 import Foundation
 import Observation
 
-/// Finding a new version, fetching it, and putting it in place.
-///
-/// The whole thing happens without being asked, and then stops. Downloading and
-/// verifying is work nobody wants to watch, so it runs quietly. Restarting is
-/// not: an application that relaunches itself under somebody who is halfway
-/// through a sentence has taken a decision that was not its to take. So the
-/// last step is a button, and the sidebar carries it until it is pressed.
 @MainActor
 @Observable
 final class AppUpdateModel {
-    /// What a manual check says when there is nothing newer. Shared with the
-    /// sidebar so the card can own the "up to date" state instead of a caption.
     static let upToDateMessage = L10n.text("apple.appupdatemodel.you_are_on_the_latest_version.eeced728")
 
-    /// Real update milestones, shown by the sidebar activity card.
     enum Stage: Equatable {
         case idle
         case checking
-        /// Fetching the disk image and checking its checksum.
         case downloading
-        /// Verifying the application and putting it in place.
         case installing
-        /// In place. Restarting is all that is left.
         case readyToRelaunch
-        /// It could not be installed, so the download page is the fallback.
         case failed(String)
     }
 
@@ -45,7 +31,6 @@ final class AppUpdateModel {
 
     var isRateLimited: Bool { retryAfter.map { $0 > Date() } ?? false }
 
-    /// Hide this notice without skipping a release or removing the cooldown.
     func dismissFailure() {
         failureDismissed = true
         checkNotice = nil
@@ -60,8 +45,6 @@ final class AppUpdateModel {
     var htmlURL: String { release?.htmlURL ?? "" }
     var downloadURL: URL? { release?.downloadURL }
 
-    /// The sidebar's card. Present only when there is something for a person to
-    /// do, which is either restart or go and fetch it by hand.
     var isReady: Bool { stage == .readyToRelaunch }
 
     var failure: String? {
@@ -73,23 +56,10 @@ final class AppUpdateModel {
 
     private var noticeGeneration = 0
 
-    /// What a hand-triggered check found, for a moment.
-    ///
-    /// The check on launch is deliberately silent: nobody asked for it, and
-    /// "you are up to date" unprompted is noise. A check somebody pressed is
-    /// the opposite. Pressing a button and getting nothing back reads as a
-    /// broken button, so this says what happened and then goes away.
     private(set) var checkNotice: String?
 
-    /// True while a failed update is being tried again, so the card can say so
-    /// instead of vanishing under the quiet automatic check.
     private(set) var isRetrying = false
 
-    /// Check because a person asked.
-    ///
-    /// Separate from `checkAndInstall` only in that it will run again after a
-    /// previous check came back with nothing. That guard exists so the launch
-    /// check happens once; a person pressing the item means now.
     func checkNow() async {
         guard !isChecking, !isReady else { return }
         failureDismissed = false
@@ -99,9 +69,6 @@ final class AppUpdateModel {
         checkNotice = nil
         let before = release?.latest
         stage = .idle
-        // Pressing the item is the person asking again. Forget the skipped
-        // version, so the release they asked about can come back; the quiet
-        // launch and reconnection checks keep honouring it.
         UserDefaults.standard.removeObject(forKey: Self.skippedKey)
         await checkAndInstall()
 
@@ -119,11 +86,6 @@ final class AppUpdateModel {
         if generation == noticeGeneration { checkNotice = nil }
     }
 
-    /// Check, and install what is found.
-    ///
-    /// Failure is quiet in the sense that it never interrupts, but it is not
-    /// swallowed: the card offers the manual download instead, so an update
-    /// that cannot be automated still reaches the user.
     func checkAndInstall() async {
         guard stage == .idle || failure != nil else { return }
         guard !isRateLimited else { return }
@@ -139,14 +101,11 @@ final class AppUpdateModel {
                 return
             }
             release = found
-            // Compare the skip against the fresh release, so skipping one
-            // version still lets automatic checks discover later versions.
             guard isAvailable, !isSkipped else {
                 stage = .idle
                 return
             }
         } catch {
-            // A failed request cannot truthfully report "up to date".
             stage = .failed(error.localizedDescription)
             return
         }
@@ -157,8 +116,6 @@ final class AppUpdateModel {
             let downloaded = try await Bridge.appUpdateDownload()
             stage = .installing
             let runningVersion = self.runningVersion
-            // Off the main actor: mounting an image and copying a bundle would
-            // otherwise freeze the window for the whole of it.
             try await Task.detached(priority: .utility) {
                 try AppInstaller.install(imagePath: downloaded.path, runningVersion: runningVersion)
             }.value
@@ -167,16 +124,10 @@ final class AppUpdateModel {
             stage = .failed(error.localizedDescription)
         }
         #else
-        // Nothing to install into on iOS. The card offers the release page.
         stage = .failed(L10n.text("apple.appupdatemodel.updates_on_this_platform_come_from_the_app.95715312"))
         #endif
     }
 
-    /// Try the automatic path again after a failure.
-    ///
-    /// The launch check is deliberately silent, but a Retry press is the
-    /// opposite: the card shows progress and the button cannot be pressed
-    /// twice. Failure keeps the card with both actions on it.
     func retry() async {
         guard failure != nil, !isChecking, !isRetrying, !isRateLimited else { return }
         isRetrying = true
@@ -191,11 +142,6 @@ final class AppUpdateModel {
         #endif
     }
 
-    /// A release the user said they did not want to hear about again.
-    ///
-    /// Per version rather than a blanket "stop checking": somebody skipping
-    /// 0.2.0 has not asked to be kept off 0.3.0, and an updater that treats
-    /// those as the same thing is one people turn off entirely.
     private static let skippedKey = "AppUpdate.skippedVersion"
 
     var isSkipped: Bool {
@@ -210,7 +156,6 @@ final class AppUpdateModel {
     }
 }
 
-/// Marketing versions use numeric components. Unknown formats never authorize an update.
 enum AppUpdateVersion {
     static func compare(_ lhs: String, _ rhs: String) -> ComparisonResult? {
         func components(_ version: String) -> [UInt64]? {

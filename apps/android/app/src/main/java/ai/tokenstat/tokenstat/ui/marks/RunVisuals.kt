@@ -25,10 +25,6 @@ import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.TsColors
 import java.util.Locale
 
-/// What a run's status looks like, in one place. Port of `RunVisuals.swift`:
-/// the Apple client's Automations and Workflows screens each carried their own
-/// copy of this switch, which is how one status ended up two colours. Both
-/// entry points now call through here, and so does this one.
 object RunOutcome {
     fun tint(status: String, colors: TsColors): Color = when (status) {
         "running", "queued" -> colors.stateWorking
@@ -41,16 +37,10 @@ object RunOutcome {
     }
 }
 
-/// One past run on the strip. Oldest first; the strip trims the front.
 data class RunTick(val id: String, val status: String, val label: String)
 
-/// Slots always drawn, so the strip reads as a track that is filling up.
-/// Two amber ticks on their own are a pause glyph; empty slots behind them
-/// give the filled ones something to be part of.
 const val RUN_HISTORY_SLOTS = 8
 
-/// The ticks actually shown: the newest `limit` at most. A bad limit shows an
-/// empty strip rather than crashing, like the Apple client's `max(0, limit)`.
 fun visibleRunTicks(ticks: List<RunTick>, limit: Int = RUN_HISTORY_SLOTS): List<RunTick> {
     val cap = maxOf(0, limit)
     return if (ticks.size > cap) ticks.takeLast(cap) else ticks
@@ -63,8 +53,6 @@ fun runStripSummary(shown: List<RunTick>): String {
     return L10n.text("android.runvisuals.last_0_runs_1_failed.486a96be", "${shown.size}", "${failed}")
 }
 
-/// The last handful of outcomes as ticks, newest on the right. A job whose
-/// last three runs failed should look wrong from across the room.
 @Composable
 fun RunHistoryStrip(
     ticks: List<RunTick>,
@@ -103,9 +91,6 @@ fun RunHistoryStrip(
     }
 }
 
-/// How long a run took, relative to the longest one beside it. Deliberately
-/// relative rather than absolute: the question a list of runs answers is
-/// "which of these was the long one", not "how many seconds".
 fun durationFraction(seconds: Double, longest: Double): Double {
     if (longest <= 0 || seconds <= 0) return 0.0
     return minOf(1.0, maxOf(0.06, seconds / longest))

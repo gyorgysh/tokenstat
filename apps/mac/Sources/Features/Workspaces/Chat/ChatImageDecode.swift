@@ -4,8 +4,6 @@ import ImageIO
 import CryptoKit
 import Darwin
 
-/// Attachment cache paths are reused after a purge/retry. Include the actual
-/// file and nanosecond change time, including edits that restore the old mtime.
 struct ChatImageFileIdentity: Hashable {
     let url: URL
     let device: UInt64
@@ -33,9 +31,6 @@ struct ChatImageFileIdentity: Hashable {
     }
 }
 
-/// One off-main decode serves gallery cells and the viewer. The actor also
-/// serializes overlapping requests, so a returning lazy row reuses pixels
-/// instead of compressing a thumbnail to PNG and immediately decoding it again.
 actor ChatImageDecodeCache {
     static let shared = ChatImageDecodeCache(observeMemoryPressure: true)
 
@@ -46,7 +41,6 @@ actor ChatImageDecodeCache {
     #endif
 
     private enum Content: Hashable {
-        // Fixed-size content identity; cache keys never retain original bytes.
         case data(Data)
         case file(ChatImageFileIdentity)
     }
@@ -95,8 +89,6 @@ actor ChatImageDecodeCache {
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,
             kCGImageSourceShouldCacheImmediately: true,
         ] as CFDictionary) else { return nil }
-        // A writer may atomically replace the path while ImageIO opens it.
-        // Do not associate those pixels with the preceding file's identity.
         if case let .file(before) = content, ChatImageFileIdentity(before.url) != before { return nil }
         let (cost, overflow) = image.bytesPerRow.multipliedReportingOverflow(by: image.height)
         if !overflow, cost > 0, cost <= byteLimit, countLimit > 0 {

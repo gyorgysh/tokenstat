@@ -9,8 +9,6 @@ struct ChatReadKey: Hashable, Sendable {
     let patience: TimeInterval
 }
 
-/// Shares only simultaneous reads. Completed values are never cached, and
-/// mutations invalidate both predecessor results and their sharing slots.
 actor ChatReadFlights {
     static let reads: Set<String> = ["chat.list", "chat.recent", "chat.events", "chat.eventPage",
                                      "chat.approvals", "chat.instructions", "chat.inspection", "chat.personas"]
@@ -38,14 +36,10 @@ actor ChatReadFlights {
                 token = UUID(); task = Task { try await operation() }
                 entries[typed] = Entry(token: token, task: task)
             }
-            // Cancellation belongs to the waiter, not the shared producer.
-            // Validate both result branches before using either one.
             let result = await task.result
             if entries[typed]?.token == token { entries.removeValue(forKey: typed) }
             guard !Task.isCancelled else { throw CancellationError() }
             guard revisions[domain, default: 0] == revision else {
-                // A normal mutation must not look like a transport failure
-                // to a live reader or trigger its whole-history fallback.
                 continue
             }
             return try result.get()
@@ -56,7 +50,5 @@ actor ChatReadFlights {
         let domain = Domain(owner: owner, peer: peer)
         revisions[domain, default: 0] &+= 1
         entries = entries.filter { $0.key.request.owner != owner || $0.key.request.peer != peer }
-        // Do not cancel a dispatched read: other transport users may own it.
-        // Its captured revision prevents a late answer being used here.
     }
 }

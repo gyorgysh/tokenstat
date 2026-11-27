@@ -22,19 +22,10 @@ import ScreenCaptureKit
 @MainActor
 @Observable
 final class ScreenAccess {
-    /// Screen Recording. Preflight rather than a capture attempt: it answers
-    /// without starting anything and without prompting.
     private(set) var screenRecording = false
     /// Accessibility, which is what synthesised clicks and keystrokes need.
     private(set) var accessibility = false
 
-    /// Set once a grant was made while this process was running.
-    ///
-    /// `CGPreflightScreenCaptureAccess()` answers from a value cached for the
-    /// life of the process, so a grant made in System Settings while the app
-    /// is open keeps reading false however often the card refreshes. Nothing
-    /// in the API clears that. The honest move is to notice, say so, and offer
-    /// the relaunch, rather than leave a card quietly lying.
     private(set) var needsRelaunch = false
 
     init() {
@@ -56,11 +47,6 @@ final class ScreenAccess {
             needsRelaunch = false
             return
         }
-        // The preflight says no, and it may be a stale no. Only worth a second
-        // opinion once this process has actually asked: `SCShareableContent`
-        // raises the system prompt when no decision exists, so calling it
-        // before somebody pressed Allow would make merely opening the screen
-        // ask for a permission nobody requested.
         guard askedScreenRecording else {
             screenRecording = false
             needsRelaunch = false
@@ -68,17 +54,9 @@ final class ScreenAccess {
         }
         let real = await Self.canActuallyCapture()
         screenRecording = real
-        // Granted in reality but not according to the cached preflight: the
-        // grant landed while this process was running, and capture code that
-        // preflights will keep refusing until the app is restarted.
         needsRelaunch = real
     }
 
-    /// Whether a capture could actually start right now.
-    ///
-    /// `SCShareableContent` is refused outright without the permission, so it
-    /// answers the real question. It is the heavier call, which is why it is
-    /// only used to double-check a negative.
     private static func canActuallyCapture() async -> Bool {
         do {
             _ = try await SCShareableContent.excludingDesktopWindows(
@@ -91,17 +69,8 @@ final class ScreenAccess {
         }
     }
 
-    /// What happened when we asked.
-    ///
-    /// Three answers, not two, and the third is the one that matters. Both
-    /// system calls return the *current* state and raise their prompt
-    /// asynchronously, so a first-ever request returns false while the dialog
-    /// is on screen. Treating that as "refused" and opening System Settings
-    /// slams a window over the prompt the person was about to answer.
     enum Ask {
-        /// Already granted, nothing was shown.
         case granted
-        /// The system prompt is now on screen. Leave them to it.
         case asked
         /// macOS already holds a decision and will not ask again, so the only
         /// remaining route is the Settings pane.
@@ -147,11 +116,6 @@ final class ScreenAccess {
         return alreadyAsked ? .alreadyDecided : .asked
     }
 
-    /// Open the pane a person has to switch the row on in themselves.
-    ///
-    /// Only useful alongside a sentence naming the row: the pane is a list of
-    /// applications with no indication of which one to look for, which is where
-    /// the confusion came from.
     func openSettings(_ kind: Kind) {
         let pane = switch kind {
         case .screenRecording: "Privacy_ScreenCapture"
@@ -161,7 +125,6 @@ final class ScreenAccess {
         NSWorkspace.shared.open(url)
     }
 
-    /// Quit and come back, because a cached preflight cannot be cleared.
     func relaunch() {
         let url = Bundle.main.bundleURL
         let configuration = NSWorkspace.OpenConfiguration()
@@ -190,8 +153,6 @@ final class ScreenAccess {
             }
         }
 
-        /// What to say when the prompt will not appear again. Naming the row is
-        /// the whole point: the pane does not say which application to find.
         var settingsHint: String {
             switch self {
             case .screenRecording:

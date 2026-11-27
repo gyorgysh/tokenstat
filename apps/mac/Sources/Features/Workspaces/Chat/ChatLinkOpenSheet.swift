@@ -2,9 +2,6 @@
 import SwiftUI
 
 #if os(macOS)
-/// No navigation happens until a destination is chosen. The full URL stays
-/// selectable, including paths and query strings, so the host is not the only
-/// information available before opening a link.
 struct ChatLinkOpenSheet: View {
     let url: URL
     let preferred: ChatBrowserPreferences.Destination

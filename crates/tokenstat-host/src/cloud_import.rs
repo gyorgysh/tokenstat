@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
-
 //! Read-only cloud inventory import into the shared SSH host library.
 
 use std::io::Read;
@@ -81,8 +80,7 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
         if remaining.is_zero() {
             return Err("DigitalOcean inventory timed out; no hosts were imported".into());
         }
-        // Follow pagination only on the fixed provider endpoint. A returned
-        // link must never redirect the bearer credential to another server.
+
         let response = client
             .get("https://api.digitalocean.com/v2/droplets")
             .timeout(remaining.min(Duration::from_secs(20)))
@@ -184,8 +182,6 @@ fn import_aws(params: &str) -> Result<Value, String> {
     save_hosts(aws_hosts(&value, &p).into_iter())
 }
 
-/// Bound both the process lifetime and its two pipes. AWS configuration can
-/// invoke credential helpers, so retire descendants as well on timeout.
 #[cfg(feature = "local-host")]
 fn aws_output(command: &mut Command, timeout: Duration) -> Result<std::process::Output, String> {
     command

@@ -50,11 +50,6 @@ struct LabFrameMeter: View {
     }
 }
 
-/// A straight measurement of the simulation on its own, with no drawing in it.
-///
-/// The honest number for "is this resource heavy": how long it takes to step
-/// N bodies for one second of animation. Drawing is measured by the frame
-/// meter above, running against the stress grid.
 enum LabBench {
     struct Result {
         var bodies: Int
@@ -62,7 +57,6 @@ enum LabBench {
         var milliseconds: Double
 
         var perBodyFrame: Double {
-            // One simulated second is 120 fixed steps, presented as 60 frames.
             milliseconds / Double(max(1, bodies)) / Double(max(1, Int(seconds * 60)))
         }
 
@@ -83,14 +77,10 @@ enum LabBench {
         for index in 0..<bodies {
             engines.append(PersonaEngine(seed: UInt64(index &* 2_654_435_761 &+ 7), mood: mood))
         }
-        // Prime, so the first frame's settle is not in the measurement.
         for engine in engines {
             engine.advance(to: 0, mood: mood, moving: true)
         }
 
-        // At least one frame: `1...frames` traps on an empty range when
-        // seconds is zero or negative, and a benchmark that runs nothing is
-        // better than one that crashes.
         let frames = max(1, Int(seconds * 60))
         let started = DispatchTime.now().uptimeNanoseconds
         for frame in 1...frames {

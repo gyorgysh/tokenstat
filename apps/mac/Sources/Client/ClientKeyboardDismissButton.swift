@@ -25,7 +25,6 @@ final class ClientKeyboardPresence {
     }
 }
 
-/// Hide input without clearing a query, submitting a form or closing its sheet.
 struct ClientKeyboardDismissButton: View {
     var body: some View {
         if ClientKeyboardPresence.shared.isVisible {

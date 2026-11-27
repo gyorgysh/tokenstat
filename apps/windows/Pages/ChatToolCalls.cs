@@ -3,11 +3,6 @@ namespace Tokenstat.Pages;
 
 internal readonly record struct ChatToolOwner(int Index, string Scope, string Backend);
 
-/// <summary>
-/// Tool starts own their backend metadata. Older archives sometimes stamp an
-/// end with the selected backend instead; accept that only when the call has
-/// one original owner in this user turn. Clear at every ordinary user message.
-/// </summary>
 internal sealed class ChatToolCalls
 {
     private readonly Dictionary<(string Scope, string Call), List<ChatToolOwner>> _owners = new();

@@ -60,12 +60,6 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-/// Previous commits in this folder, newest first.
-///
-/// Ports `ClientWorkspaceHistoryView`: read-only browsing of what landed.
-/// `workspace.log` is empty both when the folder is not a repository and
-/// when it has no commits yet, so status is asked as well and each draws a
-/// different picture.
 @Composable
 fun HistorySection(
     model: AppViewModel,

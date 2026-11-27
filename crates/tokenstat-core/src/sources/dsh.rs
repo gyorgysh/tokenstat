@@ -96,7 +96,6 @@ struct Row {
     #[serde(rename = "type")]
     kind: Option<String>,
     time: Option<i64>,
-    /// Only on the session header.
     cwd: Option<String>,
     #[serde(rename = "createdAt")]
     created_at: Option<i64>,
@@ -132,15 +131,8 @@ struct Usage {
     reasoning: Option<u64>,
 }
 
-/// Cap on the decompressed size of one session transcript.
-///
-/// The file is untrusted input: a small compressed frame can expand to
-/// gigabytes, and `zstd::decode_all` would allocate all of it. The decoder is
-/// wrapped in a read limit instead. 64 MiB is far above any real session (the
-/// one this reader was built against is a few hundred kilobytes).
 const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Decode a whole zstd stream, refusing output past [`MAX_DECOMPRESSED_BYTES`].
 fn decode_zstd_bounded(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
     let mut out = Vec::new();
@@ -245,8 +237,6 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             .and_then(|s| s.model.clone())
             .filter(|m| !m.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
-        // The harness's own id for the message. A re-read lands on the same
-        // row rather than adding a second one.
         let (id, confidence) = match message.as_ref().and_then(|m| m.id.as_deref()) {
             Some(id) if !id.is_empty() => (EventId::derive(&["dsh", id]), Confidence::Exact),
             _ => (
@@ -266,8 +256,6 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
             counters: Counters {
                 input_fresh: usage.input,
                 cache_read: usage.cache_read,
-                // No such counter in this vendor's accounting. `None` says the
-                // source does not report it, where a zero would claim it does.
                 cache_write_5m: None,
                 cache_write_1h: None,
                 output: usage.output,
@@ -280,8 +268,6 @@ pub fn parse_text(path: &Path, sessions_root: &Path, contents: &str) -> ParseOut
                 web_search_requests: None,
                 web_fetch_requests: None,
             },
-            // The log carries no cost and no plan marker, so this stays
-            // unknown rather than being guessed from the provider's name.
             billing: BillingMode::Unknown,
             confidence,
         });
@@ -298,8 +284,6 @@ fn session_id(path: &Path) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Project from the encoded folder name, for a file whose header we did not
-/// read. `--Users-x-git-demo--` is the folder `/Users/x/git/demo`.
 fn folder_label(path: &Path, sessions_root: &Path) -> String {
     let dir = path
         .strip_prefix(sessions_root)
@@ -333,8 +317,6 @@ mod tests {
             .join("session.jsonl.zstd")
     }
 
-    /// The two turns quoted in the module comment, plus the chunk that repeats
-    /// the second one's counters.
     const SESSION: &str = r#"
 {"type":"session","version":0,"id":"session-4a549fa4","createdAt":1787182615856,"cwd":"/Users/x/git/demo"}
 {"type":"user/message","seq":3,"time":1787182616000,"data":{"text":"hello"}}
@@ -376,8 +358,6 @@ mod tests {
         assert_eq!(first.extras.reasoning_within_output, Some(35));
     }
 
-    /// The bug this reader is most likely to grow: `assistant/chunk` repeats
-    /// the message's counters, so counting both doubles every session.
     #[test]
     fn the_streaming_chunk_is_not_counted_twice() {
         let out = parse_text(&path(), Path::new(ROOT), SESSION);
@@ -394,7 +374,6 @@ mod tests {
         assert_eq!(out.rows_seen, 2);
     }
 
-    /// Fresh input, not a total. A turn that read 7,808 from cache spent 32.
     #[test]
     fn cache_read_is_disjoint_from_input() {
         let out = parse_text(&path(), Path::new(ROOT), SESSION);
@@ -407,8 +386,6 @@ mod tests {
         );
     }
 
-    /// A vendor with no cache-write counter must not be given a zero, which
-    /// would read as "it wrote nothing" rather than "it does not say".
     #[test]
     fn a_missing_counter_is_absent_not_zero() {
         let out = parse_text(&path(), Path::new(ROOT), SESSION);
@@ -423,9 +400,6 @@ mod tests {
         assert_eq!(first.events[0].id, again.events[0].id);
     }
 
-    /// The whole reader rests on this: the harness appends a frame per record,
-    /// so a session is many frames and reading only the first would stop at
-    /// the header.
     #[test]
     fn every_appended_frame_is_read() {
         let dir = std::env::temp_dir().join(format!("tokenstat-dsh-{}", std::process::id()));
@@ -434,7 +408,6 @@ mod tests {
         std::fs::create_dir_all(&session_dir).unwrap();
         let file = session_dir.join("session.jsonl.zstd");
 
-        // One frame per line, the way the harness writes them.
         let mut bytes = Vec::new();
         for line in SESSION.lines().filter(|l| !l.trim().is_empty()) {
             let framed = format!("{line}\n");

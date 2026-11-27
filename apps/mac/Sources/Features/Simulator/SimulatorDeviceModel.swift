@@ -59,8 +59,6 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
         guard let state = try? device.makeRenderPipelineState(descriptor: descriptor),
               let test = device.makeDepthStencilState(descriptor: depth) else { return nil }
         let pixel = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1, height: 1, mipmapped: false)
-        // Let Metal select shared or managed memory for this CPU-populated
-        // texture on Apple silicon and Intel GPUs respectively.
         pixel.usage = .shaderRead
         guard let blank = device.makeTexture(descriptor: pixel) else { return nil }
         [UInt8(0), 0, 0, 255].withUnsafeBytes { bytes in
@@ -199,8 +197,6 @@ final class SimulatorDeviceModelView: MTKView, MTKViewDelegate, SimulatorFrameSi
         guard let pass = currentRenderPassDescriptor, let drawable = currentDrawable,
               let command = pipeline.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { capacity.signal(); return }
         let aspect = Float(max(1, drawableSize.width) / max(1, drawableSize.height))
-        // A fixed bounding sphere fits every angle. Orbit never changes the
-        // camera distance or clips the device when its long edge turns sideways.
         let distance = radius / (sin(Float.pi / 8) * min(1, aspect)) * 1.06 / zoom
         var translation = matrix_identity_float4x4; translation.columns.3.z = -distance
         let near: Float = 0.05, far: Float = 30, scale: Float = 1 / tan(.pi / 8)

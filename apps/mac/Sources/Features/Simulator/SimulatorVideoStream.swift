@@ -4,7 +4,6 @@ import AVFoundation
 import VideoToolbox
 import Darwin
 
-/// Incremental Annex B framing tolerates start codes split across pipe reads.
 struct SimulatorAnnexBReader {
     private var buffer = Data()
     mutating func append(_ data: Data) -> [Data] {
@@ -31,9 +30,6 @@ struct SimulatorAnnexBReader {
         return result
     }
 
-    /// Local screenrecord writes can pause indefinitely after a still frame.
-    /// Finish its last NAL at a quiet boundary instead of waiting for another
-    /// frame's start code. A later chunk starts a fresh access unit.
     mutating func drain() -> [Data] {
         defer { buffer.removeAll(keepingCapacity: true) }
         return append(Data([0, 0, 1]))
@@ -54,7 +50,6 @@ final class SimulatorVideoDecoder {
     private final class Output: @unchecked Sendable {
         var receive: (@Sendable (CVPixelBuffer) -> Void)?
     }
-    /// The decoder has finished writing this retained buffer before delivery.
     private struct DecodedPixels: @unchecked Sendable { let value: CVPixelBuffer }
     init() { configureOutput() }
     private func configureOutput() {
@@ -95,7 +90,6 @@ final class SimulatorVideoDecoder {
         picture.append(unit)
     }
     private static func startsPicture(_ unit: Data) -> Bool {
-        // first_mb_in_slice is unsigned Exp-Golomb; zero is the leading '1'.
         unit.count > 1 && unit[unit.startIndex + 1] & 0x80 != 0
     }
     private func updateFormat() {
@@ -152,8 +146,6 @@ final class SimulatorVideoDecoder {
     }
 }
 
-/// Android's screenrecord supplies an H.264 pipe, decoded by native media
-/// layers. Hiding the inspector closes the pipe; the emulator remains running.
 @MainActor
 final class AndroidSimulatorStream {
     private var process: Process?
@@ -178,9 +170,6 @@ final class AndroidSimulatorStream {
         process.executableURL = URL(fileURLWithPath: tools.adb)
         let scale = min(1, 1280 / max(pixels.width, pixels.height))
         let width = max(16, Int(pixels.width * scale) / 2 * 2), height = max(16, Int(pixels.height * scale) / 2 * 2)
-        // Shell v2 without a PTY keeps binary stdout intact and terminates
-        // the remote recording when the client disconnects. exec-out can
-        // leave a still recording running until its time limit.
         process.arguments = AndroidSimulatorTools.targetArguments(serial, transportID: transportID) + ["shell", "-T", "screenrecord", "--output-format=h264", "--bit-rate", "6000000", "--size", "\(width)x\(height)", "--time-limit", "180", "-"]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
@@ -204,18 +193,12 @@ final class AndroidSimulatorStream {
             }
         }
         readQueue.async {
-            // Foundation's sized read may wait for the requested byte count.
-            // A still screen can stay below it indefinitely; consume each
-            // available pipe fragment with one unbuffered read instead.
             let descriptor = pipe.fileHandleForReading.fileDescriptor
             defer { try? pipe.fileHandleForReading.close() }
             var bytes = [UInt8](repeating: 0, count: 65536)
             var reader = SimulatorAnnexBReader()
             var readiness = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
             while true {
-                // Flush a still frame only after the reader has caught up.
-                // A timer on another queue can cut a NAL while unread bytes
-                // remain in the pipe during decoder backpressure.
                 let ready = Darwin.poll(&readiness, 1, 120)
                 if ready < 0 && errno == EINTR { continue }
                 guard ready >= 0 else { break }

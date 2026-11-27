@@ -3,12 +3,7 @@ package ai.tokenstat.tokenstat.ui.terminal
 
 import ai.tokenstat.tokenstat.ui.localization.L10n
 
-/// Pure key-bar rules shared by the agent and SSH terminals, ported from
-/// Apple `ClientTerminalKeys` (`TerminalControlCode.fold` and `spoken`).
-/// Kept free of Android imports so unit tests pin the same answers.
 object TerminalKeysLogic {
-    /// Fold a printable byte under Ctrl the way a keyboard does.
-    /// Shift+Tab is CSI Z, not a shifted tab byte.
     fun controlCode(byte: Int): Int? = when (byte) {
         in 0x61..0x7A -> byte - 0x60
         in 0x41..0x5A -> byte - 0x40
@@ -25,8 +20,6 @@ object TerminalKeysLogic {
         return (if (modifier == 1) "\u001B[$direction" else "\u001B[1;$modifier$direction").toByteArray(Charsets.UTF_8)
     }
 
-    /// What a screen reader says for a glyph face. "Right arrow", not
-    /// "greater than".
     fun spoken(label: String): String = when (label) {
         "⇥" -> L10n.text("android.terminalkeyslogic.tab.90ddf196")
         "⇧⇥" -> L10n.text("android.terminalkeyslogic.shift_tab.f3fa2578")
@@ -41,20 +34,12 @@ object TerminalKeysLogic {
         else -> label
     }
 
-    /// A basename is a label. Never hand a working directory or command to a
-    /// persistence boundary; this stays on the header line only.
     fun basename(path: String): String =
         path.trimEnd('/').substringAfterLast('/').ifBlank { path }
 
-    /// CSS pixels for a measured view size, which is what the xterm page
-    /// sizes its terminal box to. One CSS pixel is one dp at the page's
-    /// default text zoom, so this is the view pixels over the density,
-    /// floored. Zero means unmeasured: the page keeps its last good box
-    /// rather than fitting against nothing.
     fun cssPx(viewPx: Int, density: Float): Int =
         if (viewPx <= 0 || density <= 0f) 0 else (viewPx / density).toInt().coerceAtLeast(1)
 }
 
-/** Choose a shell that exists on the destination, not on this phone. */
 internal fun terminalShell(platform: String?): String =
     if (platform?.contains("windows", ignoreCase = true) == true) "powershell.exe" else "/bin/bash"

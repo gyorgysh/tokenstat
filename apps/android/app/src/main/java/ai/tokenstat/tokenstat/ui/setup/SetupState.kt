@@ -7,14 +7,7 @@ import ai.tokenstat.tokenstat.core.CoreFailure
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 
-/// Setup journey state, ported from `ClientSetupState.swift`.
-///
-/// The wizard pairs a machine by hand, from the cloud door, or watched from
-/// the Mac door, then ends inside a project. Every failure names what failed,
-/// what changed if anything, and one concrete next action, chosen from the
-/// host's error code rather than its words.
 object SetupIdentity {
-    /// A public identity is 64 hex characters. Anything else is not a key.
     fun normalize(key: String): String? {
         val value = key.trim()
         if (value.length != 64) return null
@@ -28,8 +21,6 @@ object SetupIdentity {
         return a == b
     }
 
-    /// Whose setup this is. An empty answer means the draft goes unpersisted:
-    /// one account must never resume another's.
     fun accountIdentity(handle: String?, id: String?): String =
         ai.tokenstat.tokenstat.ui.logic.AccountIdentityPins.identity(handle, id).orEmpty()
 }
@@ -37,10 +28,6 @@ object SetupIdentity {
 enum class SetupMilestone {
     TRUSTED, CHECKED, INSTALL_REQUESTED, VERIFYING, HOST_READY;
 
-    /** What happened, in the words somebody would use about their own
-     *  server. The installing states say what setup will do next, because
-     *  the honest answer after an interruption is that nobody knows how far
-     *  it got. */
     fun summary(): String = when (this) {
         TRUSTED -> L10n.text("android.setupstate.its_fingerprint_is_verified_setup_carries.85d90f26")
         CHECKED -> L10n.text("android.setupstate.it_is_checked_and_ready_to_install.8f2e0902")
@@ -87,10 +74,6 @@ data class SetupFailure(
     val details: String? = null,
 ) {
     companion object {
-        /** Read a failure from whatever was thrown. Codes come from
-         *  `tokenstat-host::error`. Anything unrecognised keeps its own
-         *  message and offers a retry: an unknown failure is not evidence
-         *  that nothing can be done. */
         fun from(error: Throwable): SetupFailure {
             if (error !is CoreFailure) {
                 return SetupFailure(
@@ -178,20 +161,13 @@ data class SetupFailure(
             }
         }
 
-        /** A readable sentence for an error that never became a SetupFailure. */
         fun readable(error: Throwable): String =
             (error as? CoreFailure)?.message ?: error.message ?: L10n.text("android.setupstate.something_went_wrong.0c953ab3")
     }
 }
 
-/** A first task that reads the project and changes nothing. Deliberately
- *  not "fix" or "add": the first thing somebody sends should not be a
- *  change they have to review before they have seen the place. */
 val SETUP_FIRST_TASK = L10n.text("android.setupstate.give_me_a_short_tour_of_this_project_what.bd63b9e4")
 
-/** How the wizard will sign in to the server it is setting up. Ported from
- *  `SetupCredential`: a key already in the vault, or a password typed once,
- *  used for the connection, and never written down. */
 sealed interface SetupCredential {
     data object None : SetupCredential
     data class Key(val id: String) : SetupCredential
@@ -204,11 +180,6 @@ sealed interface SetupCredential {
     }
 }
 
-/** Whether an agent on a machine can actually start work. Ported from
- *  `AgentReadiness`: `unknown` is a real answer and the default for anything
- *  unestablished, including every host too old to have been asked. Sending
- *  somebody to redo a sign-in that was fine is as bad as letting them send a
- *  prompt into an auth error. */
 enum class AgentReadiness {
     NOT_INSTALLED, NEEDS_SIGN_IN, SIGNED_IN, EXPIRED, UNKNOWN;
 
@@ -221,8 +192,6 @@ enum class AgentReadiness {
     }
 
     companion object {
-        /** A state never heard of decodes as unknown rather than failing the
-         *  whole machine's status. */
         fun parse(raw: String?): AgentReadiness = when (raw) {
             "notInstalled" -> NOT_INSTALLED
             "needsSignIn" -> NEEDS_SIGN_IN
@@ -233,7 +202,6 @@ enum class AgentReadiness {
     }
 }
 
-/** One agent on the machine, as `launcher.catalog` reports it. */
 data class SetupAgent(
     val id: String,
     val name: String,
@@ -257,23 +225,16 @@ data class SetupAgent(
         }
     }
 
-    /** Whether tapping Sign in can do anything: the agent wants one, the
-     *  host offers the terminal handoff, and the host speaks it. */
     fun canSignIn(protocol: Long?): Boolean =
         installed && (readiness == AgentReadiness.NEEDS_SIGN_IN || readiness == AgentReadiness.EXPIRED) &&
             signInSupported && (protocol == null || protocol >= AGENT_SIGN_IN_MIN_PROTOCOL)
 }
 
-/** Version 9 added agent readiness on `launcher.catalog` and the
- *  `launcher.signIn` terminal handoff. Mirrors `RemoteHostFeature.agentSignIn`
- *  alongside the `HostContracts` minimums. */
 const val AGENT_SIGN_IN_MIN_PROTOCOL = 9L
 
 private fun kotlinx.serialization.json.JsonObject.stringOrNull(key: String): String? =
     (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
 
-/** Offer a distinct name when the account already has a server with it.
- *  Ported from `chooseAvailableMachineName`. */
 fun availableMachineName(want: String, labels: Set<String>): String {
     val stem = want.trim().ifEmpty { "server" }
     var candidate = stem

@@ -93,8 +93,6 @@ struct WorkFolderCacheSettings: View {
         message = nil
         defer { busy = false }
         do {
-            // Refresh before deletion so copies saved while the sheet was open
-            // are included. Every operation remains bound to this folder/scope.
             guard await load() else { return }
             for record in records {
                 guard current, !Task.isCancelled else { return }

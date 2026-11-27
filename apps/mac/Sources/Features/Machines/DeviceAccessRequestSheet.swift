@@ -8,15 +8,6 @@
 
 import SwiftUI
 
-/// A device is asking for something. Say yes, yes to less, or no.
-///
-/// Opened when a request arrives, from the sidebar card, from a notification,
-/// or from Devices. Once it is open it is a sheet, because the answer decides
-/// whether another machine can watch this screen or open every file on it.
-///
-/// The whole surface is painted in the app's own colours. A sheet that leaves
-/// its background to the system draws the platform's grey, which is the one
-/// tone this product never uses.
 struct DeviceAccessRequestSheet: View {
     let request: DeviceAccessPending
     let model: DeviceAccessRequests
@@ -56,8 +47,6 @@ struct DeviceAccessRequestSheet: View {
         } actions: {
             answers
         }
-        // Every choice fits at the normal type size; larger text scrolls in
-        // the body while the decision buttons remain fixed and visible.
         .modalFrame(width: 600, height: 560)
         .task(id: "\(request.id):\(request.askedAt)") { await loadSelection() }
     }

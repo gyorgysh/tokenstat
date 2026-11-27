@@ -2,9 +2,6 @@
 import Foundation
 import Darwin
 
-/// A live store may hold unsaved references. Deletion is allowed only when this
-/// process is the sole participant, then performs its live-reference check while
-/// a short gate prevents another process from joining. No lock crosses an await.
 enum OriginalFileCoordination {
     enum Failure: LocalizedError {
         case unavailable, anotherInstance, busy
@@ -16,8 +13,6 @@ enum OriginalFileCoordination {
             }
         }
     }
-    /// Retry a failed registration when storage becomes available again, while
-    /// retaining successful participation for the entire store lifetime.
     final class Registration: @unchecked Sendable {
         private let directory: URL
         private var participant: Participant?
@@ -65,9 +60,6 @@ enum OriginalFileCoordination {
         weak var value: Participant?
         init(_ value: Participant) { self.value = value }
     }
-    // POSIX record locks are process-scoped, so serialize handles within this
-    // process too. Nested work on an already-held gate must not open/close a
-    // second descriptor, which would release the outer record lock.
     private static let mutex = NSRecursiveLock()
     private static var participants: [String: WeakParticipant] = [:]
     private static var gates: Set<String> = []
@@ -106,8 +98,6 @@ enum OriginalFileCoordination {
                     Darwin.close(descriptor)
                     throw Failure.anotherInstance
                 }
-                // No participant can join while this gate is held. Dead-process
-                // lease files can be pruned without replacing a live lock inode.
                 defer { Darwin.close(descriptor) }
                 try FileManager.default.removeItem(at: file)
             }

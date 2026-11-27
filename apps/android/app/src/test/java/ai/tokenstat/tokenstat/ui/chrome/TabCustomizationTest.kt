@@ -18,9 +18,6 @@ private class FakePrefs(
     }
 }
 
-/// The tab policy, ported with the regression suite iOS keeps beside it: a
-/// hidden tab appears while selected, the last visible tab refuses to hide,
-/// and tabs from later builds join at the end.
 class TabCustomizationTest {
     private val all = listOf("home", "workspaces", "insights", "machines", "ssh")
 

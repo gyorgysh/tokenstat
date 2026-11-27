@@ -75,9 +75,6 @@ data class EditorKey(val peer: String, val workspace: String, val path: String)
 
 data class EditorOpen(val path: String, val content: String? = null)
 
-/// One file open in the editor. A document rather than scattered state,
-/// so highlighting, the saved copy, change marks and the save cannot go
-/// out of step. Port of `EditorDocument` plus `ClientEditorTab`.
 class EditorTab(val key: EditorKey, content: String) {
     var text by mutableStateOf(content)
     var savedText by mutableStateOf(content)
@@ -100,7 +97,6 @@ class EditorTab(val key: EditorKey, content: String) {
         if (isDirty) savedTick = false
     }
 
-    /// Re-read from disk landed, or a save completed.
     fun adopt(content: String) {
         text = content
         savedText = content
@@ -108,17 +104,11 @@ class EditorTab(val key: EditorKey, content: String) {
     }
 
     fun markSaved(content: String? = null) {
-        // A save acknowledges the submitted version. Edits made while
-        // that request was in flight must remain dirty.
         savedText = content ?: text
         if (!isDirty) savedTick = true
     }
 }
 
-/// Owned by the editor dialog, so layout changes preserve buffers. Port
-/// of `ClientEditorStore`: replace a clean buffer with a fresh host read
-/// (dirty and in-flight saves keep what the person is looking at), dirty
-/// buffers need explicit discard, and an in-flight save cannot be closed.
 class EditorStore {
     private val tabsList = mutableStateListOf<EditorTab>()
     private val selections = mutableStateMapOf<Pair<String, String>, EditorKey>()
@@ -152,7 +142,6 @@ class EditorStore {
         selections.remove(peer to workspace)
     }
 
-    /// Dirty buffers need explicit discard. An in-flight save cannot close.
     fun close(tab: EditorTab, discard: Boolean = false): Boolean {
         if (tab.saving || (!discard && tab.isDirty)) return false
         val wasSelected = selected(tab.key.peer, tab.key.workspace) == tab
@@ -179,10 +168,6 @@ class EditorStore {
         tab.saving = true
         tab.error = null
         try {
-            // The host file may have moved since this buffer opened: another
-            // window, the Mac, or a run writing output. Re-read before
-            // writing so a stale draft cannot silently overwrite newer host
-            // content.
             val host = runCatching {
                 model.workspaceSection(tab.key.peer, "workspace.read", buildJsonObject {
                     put("id", tab.key.workspace)
@@ -199,8 +184,6 @@ class EditorStore {
                 return
             }
             if (host == draft) {
-                // Already there: a lost acknowledgement or a matching remote
-                // edit. Mark it saved without writing the same bytes again.
                 tab.markSaved(draft)
                 return
             }
@@ -218,8 +201,6 @@ class EditorStore {
         }
     }
 
-    /// Choose a copy after a conflict. Reloading adopts the host and
-    /// clears the draft; keeping writes the draft through explicitly.
     suspend fun resolveConflict(model: AppViewModel, tab: EditorTab, keepMine: Boolean, hostLabel: String, onSavedFile: () -> Unit) {
         if (!tabsList.contains(tab) || tab.saving) return
         val host = tab.conflictHost ?: return
@@ -249,13 +230,6 @@ class EditorStore {
     }
 }
 
-/// The tabbed code editor: syntax spans via `highlight` with the shared
-/// palette, find/replace, gutter with change marks, save states with
-/// read-before-write and conflict cards, and review-to-edit from diffs
-/// (callers open a path straight into a tab).
-///
-/// Ports the iOS editor (`IOSCodeTextView`, `EditorDocument`,
-/// `ClientEditorStore`) and the `ClientDiffView` review-to-edit flow.
 @Composable
 fun EditorDialog(
     model: AppViewModel,
@@ -380,8 +354,6 @@ private fun EditorPane(
     val find = remember(tab.key) { EditorFind() }
     var showFind by remember(tab.key) { mutableStateOf(false) }
     var field by remember(tab.key) { mutableStateOf(TextFieldValue(tab.text)) }
-    // Outside edits (find replace, adopt, conflict reload) flow back into
-    // the field, keeping the cursor when the text still contains it.
     fun syncField(next: String, cursor: Int? = null) {
         val selection = when {
             cursor != null -> TextRange(cursor.coerceIn(0, next.length))
@@ -391,11 +363,6 @@ private fun EditorPane(
         field = TextFieldValue(next, selection)
     }
 
-    // Colour the buffer once it stops changing. Debounced: highlighting
-    // is a parse of the whole file plus a tunnel round trip, and nobody
-    // sees the difference between now and a breath from now. The buffer
-    // may have moved on while this was in flight; spans measured against
-    // older text colour the wrong ranges, so they are dropped.
     LaunchedEffect(tab.text) {
         delay(300)
         val source = tab.text
@@ -413,8 +380,6 @@ private fun EditorPane(
             tab.spansVersion += 1
         }.onFailure {
             if (source != tab.text) return@LaunchedEffect
-            // Colour is not worth an error banner. The file is still
-            // editable and still saveable without it.
             tab.spans = emptyList()
             tab.highlightNote = TunnelCopy.display(it.message ?: L10n.text("android.codeeditor.the_request_failed.db4fb447"), hostLabel)
             tab.spansVersion += 1
@@ -422,9 +387,6 @@ private fun EditorPane(
     }
     LaunchedEffect(tab.text, find.query) { find.refresh(tab.text) }
 
-    // Change marks come from the same `workspace.diff` the Changes panel
-    // parsed, so the two cannot disagree. Reloads when the file opens and
-    // whenever the dirty state settles after a save.
     suspend fun reloadMarks() {
         val diff = runCatching {
             model.workspaceSection(tab.key.peer, "workspace.diff", buildJsonObject {
@@ -521,10 +483,6 @@ private fun EditorPane(
                 )
             }
         }
-        // One shared scroll for gutter and buffer, so the numbers and the
-        // change marks ride with the text. Both sides size to content, and
-        // only paragraph starts are numbered: wrapped lines share their
-        // paragraph's row, like the iOS gutter.
         Row(
             Modifier
                 .weight(1f)
@@ -599,10 +557,6 @@ private fun buildAnnotated(
     }
 }
 
-/// The in-app find bar: query, match count, previous/next, replace.
-/// Port of `EditorFindBar`: the query gets the full first row, the
-/// controls a second row of full-size targets, because four glyph buttons
-/// beside the field do not fit a phone portrait.
 @Composable
 private fun EditorFindBar(
     find: EditorFind,

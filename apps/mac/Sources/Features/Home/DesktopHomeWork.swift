@@ -2,8 +2,6 @@
 
 import SwiftUI
 
-/// Labels come from the loaded workspace directory and chat list. Home never
-/// loads a transcript or contacts a peer to describe a recent destination.
 struct DesktopHomeDestination: Identifiable {
     let reference: WorkReference
     let title: String

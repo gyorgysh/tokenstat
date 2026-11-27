@@ -8,26 +8,14 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// Everywhere in the client search can send somebody.
-///
-/// One catalogue, kept next to the destinations it names, because a place
-/// nobody can be sent to is worse than one that is missing: it reads as a
-/// search result that does nothing. Adding a screen means adding its case here
-/// and the arm that opens it in `ClientRootView.openPendingPlace`, and the
-/// compiler says so.
 enum ClientAppDestination: Hashable {
     case tab(ClientTab)
-    /// Home, with its editor open over it.
     case customizeHome
-    /// Workspaces, with its section editor open over it.
     case customizeWorkspaces
-    /// The account sheet, on one of its panes, optionally one screen deeper.
     case account(ClientAccountPane, ClientAccountDetail?)
-    /// Devices, showing one machine.
     case device(String)
 }
 
-/// A screen inside the account sheet, rather than one of its panes.
 enum ClientAccountDetail: String, Hashable {
     case tabs
     case plans
@@ -35,8 +23,6 @@ enum ClientAccountDetail: String, Hashable {
     case licenses
 }
 
-/// Where the account sheet should land when something outside it asked for a
-/// setting. Read once by the sheet, which clears it.
 struct ClientAccountRequest: Hashable {
     let pane: ClientAccountPane
     let detail: ClientAccountDetail?
@@ -44,19 +30,10 @@ struct ClientAccountRequest: Hashable {
 
 @MainActor
 enum ClientAppPlaces {
-    /// The places matching what somebody typed, best first.
     static func matches(_ query: String, machines: [Machine]) -> [WorkSearchPlace] {
         WorkSearchPlaceMatch.rank(query, in: all(machines: machines))
     }
 
-    /// Where a place goes. The identifier carries it, so the shared sheet can
-    /// hand a place back without knowing what a tab is.
-    ///
-    /// The last segment of an account identifier names a screen inside the
-    /// pane when there is one, and otherwise only tells two places on the same
-    /// pane apart, which is what keeps the list's identifiers unique. A word
-    /// that names no screen lands on the pane, which is where those settings
-    /// are.
     static func destination(of place: WorkSearchPlace) -> ClientAppDestination? {
         let parts = place.id.split(separator: ":", maxSplits: 2).map(String.init)
         switch parts.first {
@@ -82,8 +59,6 @@ enum ClientAppPlaces {
         tabs + screens + devices(machines)
     }
 
-    /// The tabs, whether or not this device shows them in the bar. A hidden
-    /// tab is still in the app, and the bar makes room for the open one.
     private static var tabs: [WorkSearchPlace] {
         ClientTab.allCases.map { tab in
             WorkSearchPlace(
@@ -96,8 +71,6 @@ enum ClientAppPlaces {
         }
     }
 
-    /// Every machine on the account, so a name somebody knows finds the device
-    /// rather than making them count rows on Devices.
     private static func devices(_ machines: [Machine]) -> [WorkSearchPlace] {
         machines.compactMap { machine in
             guard let id = machine.machineID, !id.isEmpty else { return nil }
@@ -111,9 +84,6 @@ enum ClientAppPlaces {
         }
     }
 
-    /// The screens and settings that are not tabs. Written out rather than
-    /// derived, because what somebody would type for a setting is rarely its
-    /// heading: nobody searches for "This device", they search for "traffic".
     private static var screens: [WorkSearchPlace] {
         [
             .init(id: "home:editor", title: L10n.text("apple.clientappplaces.customize_home.642cec6e"), detail: L10n.text("common.home"),

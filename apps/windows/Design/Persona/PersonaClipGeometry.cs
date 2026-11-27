@@ -6,7 +6,6 @@ using Windows.Foundation;
 
 namespace Tokenstat.Design.Persona;
 
-/// <summary>Preserve the actual curved silhouette when passing it to Direct2D.</summary>
 internal static class PersonaClipGeometry
 {
     private static Vector2 Point(Point p) => new((float)p.X, (float)p.Y);
@@ -55,8 +54,6 @@ internal static class PersonaClipGeometry
         else throw new NotSupportedException(L10n.Text("windows.personaclipgeometry.unsupported_persona_clip_0.07a77db1", $"{source.GetType().Name}"));
 
         if (source.Transform is null) return result;
-        // TransformGroup can combine translation, yaw compression and roll.
-        // Read its affine basis instead of assuming any one transform type.
         var zero = source.Transform.TransformPoint(new Point(0, 0));
         var x = source.Transform.TransformPoint(new Point(1, 0));
         var y = source.Transform.TransformPoint(new Point(0, 1));

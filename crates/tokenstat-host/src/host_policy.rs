@@ -4,14 +4,7 @@
 // Store and commercial distribution of builds is reserved. See LICENSE.
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
-
 //! Whether this machine stays a host after the app quits.
-//!
-//! Always-on selects launchd `KeepAlive` and `RunAtLoad` on macOS, and
-//! logon-start plus restart on the per-user scheduled task on Windows.
-//! Off by default when this machine has an internal battery, on when it
-//! does not. ProcessType stays Interactive on macOS either way.
-//! Background throttles terminals and is not a sleep lock.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,7 +18,6 @@ use serde_json::{Value, json};
 
 use crate::keep_awake;
 
-/// How long hostd waits after the last app lock disappears before exiting.
 #[cfg(not(test))]
 const OWNER_GRACE: Duration = Duration::from_secs(5);
 
@@ -104,8 +96,6 @@ fn save(settings: &HostSettings) -> Result<(), String> {
 fn cached() -> &'static Mutex<HostSettings> {
     static CACHED: OnceLock<Mutex<HostSettings>> = OnceLock::new();
     CACHED.get_or_init(|| {
-        // Tests never write the developer's host.json as a side effect of
-        // asking whether inbound work is allowed.
         Mutex::new(if cfg!(test) {
             HostSettings { always_on: false }
         } else {
@@ -336,9 +326,6 @@ pub(crate) fn this_process_can_self_restart() -> bool {
     restarts
 }
 
-/// A loaded launch agent with KeepAlive on is the only launchd arrangement
-/// that starts this again by itself. With Always-on off the app owns the
-/// helper's lifetime and starts one when somebody opens it.
 #[cfg(target_os = "macos")]
 fn platform_would_restart() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
@@ -355,8 +342,6 @@ fn platform_would_restart() -> bool {
     systemd_unit_restarts_always()
 }
 
-/// The per-user task carries a restart count only where Always-on is on.
-/// See scripts/install-host-task.ps1.
 #[cfg(windows)]
 fn platform_would_restart() -> bool {
     always_on()
@@ -421,10 +406,6 @@ pub(crate) fn this_process_is_the_host_unit() -> Option<LinuxHostUnit> {
     None
 }
 
-/// Whether an installed unit says systemd will bring this back.
-///
-/// The user unit first, because that is what `tokenstat host install` writes
-/// for an ordinary account, then the system one.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn systemd_unit_restarts_always() -> bool {
     let user = std::env::var_os("HOME")
@@ -457,8 +438,6 @@ pub(crate) fn unit_restarts_always(text: &str) -> bool {
         })
 }
 
-/// True when the installed supervisor would start this process again
-/// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
 #[cfg(all(target_os = "macos", not(test)))]
 fn supervisor_restarts_on_clean_exit() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
@@ -471,8 +450,6 @@ fn supervisor_restarts_on_clean_exit() -> bool {
     }
 }
 
-/// On systemd, `Restart=always` is the same promise, and an absent or
-/// unreadable unit is the same as no supervisor at all.
 #[cfg(all(unix, not(target_os = "macos"), not(test)))]
 fn supervisor_restarts_on_clean_exit() -> bool {
     systemd_unit_restarts_always()
@@ -486,8 +463,6 @@ pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
     rest.trim_start().starts_with("<true")
 }
 
-/// Task Scheduler only restarts the helper when Always-on is on, and the
-/// watch thread does not exit in that case. Exiting is therefore safe.
 #[cfg(all(windows, not(test)))]
 fn supervisor_restarts_on_clean_exit() -> bool {
     false
@@ -527,8 +502,6 @@ fn watch() {
             None => gone_since = Some(Instant::now()),
             Some(started) if started.elapsed() >= OWNER_GRACE => {
                 if supervisor_restarts_on_clean_exit() {
-                    // KeepAlive is still true. exit(0) would bounce us.
-                    // Stay up, hosting already inactive.
                     gone_since = None;
                     continue;
                 }
@@ -636,9 +609,6 @@ fn set_policy(params: &str) -> Result<Value, String> {
     policy()
 }
 
-/// Keep the logon trigger in step with `alwaysOn`, the way the Mac app
-/// rewrites the launch agent after `host.setPolicy`. Missing script is
-/// fine: a cargo-built hostd has no installer next to it.
 #[cfg(windows)]
 fn reregister_windows_task() {
     let Ok(exe) = std::env::current_exe() else {
@@ -838,13 +808,8 @@ mod tests {
         assert!(!owner_present_at(&path));
     }
 
-    /// The two supervisor questions need opposite answers when nothing is
-    /// known, and both of those answers mean "stay up". Reading one as the
-    /// other is how a daemon updates itself into being gone.
     #[test]
     fn an_unknown_supervisor_is_never_taken_as_permission_to_exit() {
-        // Under test the answer is always no, whatever this machine has
-        // installed, because a test binary has no supervisor at all.
         assert!(!supervisor_would_restart_this_process());
         assert!(!this_process_can_self_restart());
     }

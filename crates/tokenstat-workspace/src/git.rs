@@ -154,8 +154,6 @@ fn parse_remote(raw: &str) -> Option<Remote> {
             .next()?;
         (host, authority_and_path.1)
     } else {
-        // `git@github.com:owner/repo.git`. Requiring an `@` keeps a Windows
-        // drive (`C:\\work`) from being mistaken for a network remote.
         let (authority, path) = raw.split_once(':')?;
         if !authority.contains('@') {
             return None;
@@ -268,7 +266,6 @@ fn safe_rev(id: &str) -> bool {
     if id.is_empty() || id.starts_with('-') {
         return false;
     }
-    // Allow hex hashes, HEAD, and common relative forms without shell metachars.
     id.chars().all(|c| {
         c.is_ascii_alphanumeric()
             || matches!(c, '/' | '_' | '-' | '.' | '~' | '^' | '@' | '{' | '}')
@@ -333,7 +330,6 @@ pub(crate) fn parse_diff(raw: &str) -> Vec<DiffHunk> {
             continue;
         }
         let Some(hunk) = hunks.last_mut() else {
-            // Everything before the first `@@` is the file header.
             continue;
         };
         // "\ No newline at end of file" is a note about the previous line, not
@@ -543,8 +539,6 @@ fn hunk_starts(header: &str) -> (u32, u32) {
                 .next()
                 .and_then(|n| n.parse::<u32>().ok())
                 .unwrap_or(1)
-                // The header names the first line; the parser counts up from
-                // the one before it.
                 .saturating_sub(1)
         };
         if let Some(rest) = field.strip_prefix('-') {
@@ -615,11 +609,6 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
         ..CommitDetail::default()
     };
 
-    // Names and statuses, then counts, the same two-command split `status` uses
-    // and for the same reason: neither command reports both.
-    // Bind all detail reads to the resolved commit, even if HEAD moves while
-    // the request runs. Root commits compare against the empty tree; merge
-    // commits compare against their first parent.
     let diff_args = if let Some(parent) = detail.parents.first() {
         vec!["diff", "-M", parent.as_str(), detail.id.as_str()]
     } else {
@@ -643,8 +632,6 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
             let (Some(status), Some(first)) = (parts.next(), parts.next()) else {
                 continue;
             };
-            // A rename prints `R100<tab>old<tab>new`. The new name is the one a
-            // reader is looking for, and the one the diff is keyed by.
             let path = unquote_path(parts.next().unwrap_or(first));
             detail.files.push(FileChange {
                 path,
@@ -681,9 +668,6 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
         })
         .collect();
 
-    // One read-only call for the detail screen's tag line. `log --decorate`
-    // would answer too, but it walks history; `--points-at` asks about this
-    // commit only.
     if let Some(raw) = git(dir, &["tag", "--points-at", &detail.id]) {
         detail.tags = raw
             .lines()
@@ -706,12 +690,6 @@ pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
         return Vec::new();
     }
 
-    // Unit separator between fields and record separator between commits, so a
-    // subject containing a newline or a tab cannot shift the parse. `%x1f` and
-    // `%x1e` are exactly what those two ASCII controls are for. `%D` carries
-    // the decorations (`tag: v0.9.2, origin/main`), from which the tags are
-    // read; explicit `--decorate` because outside a terminal git may print
-    // none at all.
     let format = format!("--format=%H{US}%s{US}%an{US}%ae{US}%at{US}%D{RS}");
     let raw = match git(
         dir,
@@ -727,17 +705,10 @@ pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
         None => return Vec::new(),
     };
 
-    // Which commits are not upstream yet. A separate command because deriving
-    // it from the ahead count assumes a linear history, and a merge breaks that
-    // assumption silently.
     let unpushed: std::collections::HashSet<String> = git(dir, &["rev-list", "@{upstream}..HEAD"])
         .map(|s| s.lines().map(|l| l.trim().to_string()).collect())
         .unwrap_or_default();
 
-    // Who this repository thinks you are. Read once per history rather than
-    // per commit, and left empty when git has no answer: an empty identity
-    // matches nobody, which is the right outcome for a repository with no
-    // `user.email` set.
     let me = configured_email(dir);
 
     parse_log(&raw, &unpushed, me.as_deref())
@@ -769,9 +740,6 @@ fn parse_log(
             let email = fields.next()?.to_string();
             let timestamp = fields.next()?.trim().parse().ok()?;
             let tags = fields.next().map(parse_tags).unwrap_or_default();
-            // Addresses are case insensitive in practice and git does not
-            // normalise them, so a repository configured with `Ada@Example.com`
-            // still recognises its own commits.
             let mine = me.is_some_and(|me| me == email.trim().to_ascii_lowercase());
             Some(Commit {
                 unpushed: unpushed.contains(&id),
@@ -808,8 +776,6 @@ fn parse_tags(decorations: &str) -> Vec<String> {
 pub fn indexed_text(file: &Path, max_bytes: usize) -> Option<String> {
     let dir = file.parent()?;
     let name = file.file_name()?.to_str()?;
-    // `:./name` is the index entry for this name relative to `-C`, so the
-    // repository root never has to be worked out.
     let blob = git(dir, &["rev-parse", "--verify", &format!(":./{name}")])?;
     blob_text(dir, blob.trim(), max_bytes)
 }
@@ -868,12 +834,9 @@ fn changed_files_at(top: &Path) -> Option<Vec<PathBuf>> {
         let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
             continue;
         };
-        // A rename or copy carries its old name as the next entry.
         if code.contains(['R', 'C']) {
             entries.next();
         }
-        // The second column is the work tree against the index. A file
-        // staged and untouched since is in the index as it is on disk.
         if !code.ends_with(' ') && !path.is_empty() && !path.ends_with('/') {
             files.push(top.join(path));
         }
@@ -1016,17 +979,10 @@ pub fn status(dir: &Path) -> GitStatus {
             "status",
             "--porcelain=v2",
             "--branch",
-            // `normal` lists untracked files but does not recurse into
-            // untracked directories. `all` did, and on a build tree or a
-            // monorepo that walk dominated `workspace.list`. The sidebar
-            // needs to know something is dirty, not every file under
-            // `target/` or `node_modules/` that was never gitignored.
             "--untracked-files=normal",
         ],
     ) {
         Some(s) => s,
-        // Not a repository, or git is missing. A plain folder is a valid
-        // workspace with no branch.
         None => return GitStatus::default(),
     };
 
@@ -1358,9 +1314,6 @@ fn git_command(dir: &Path, args: &[&str]) -> Command {
     command
         .arg("-C")
         .arg(dir)
-        // A repository with a pager or an alias configured must not change what
-        // these commands print, and must never open an interactive prompt in a
-        // process nobody can type into.
         .env("GIT_PAGER", "cat")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -1369,9 +1322,6 @@ fn git_command(dir: &Path, args: &[&str]) -> Command {
         // to the whole repository, and a name holding `*` matches more than the
         // file it names.
         .env("GIT_LITERAL_PATHSPECS", "1")
-        // `-C` names the repository, but these variables outrank it. A daemon
-        // started from a wrapper that exports one would otherwise read a
-        // different repository than the folder the user chose.
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
@@ -1509,10 +1459,6 @@ fn unquote_path(raw: &str) -> String {
                         _ => break,
                     }
                 }
-                // Three octal digits reach 511, but a byte holds 255. Git
-                // never emits such an escape, so a value above 255 is a
-                // corrupt or hostile input, not a character: emit the
-                // replacement character rather than truncate it silently.
                 if value > 255 {
                     out.extend_from_slice("\u{fffd}".as_bytes());
                 } else {
@@ -1539,7 +1485,6 @@ fn unquote_path(raw: &str) -> String {
 fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
     for line in raw.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
-            // A repository with no commits yet reports this literally.
             status.branch = (rest != "(detached)").then(|| rest.to_string());
         } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
             status.upstream = Some(rest.to_string());
@@ -1572,8 +1517,6 @@ fn parse_porcelain_v2(raw: &str, status: &mut GitStatus) {
                 });
             }
         } else if let Some(rest) = line.strip_prefix("2 ") {
-            // Rename: the path field is `new<tab>old`. The new name is what a
-            // reader is looking for.
             if let Some((_, path)) = entry(rest, 7) {
                 let new = unquote_path(path.split('\t').next().unwrap_or(&path));
                 status.files.push(FileChange {
@@ -1621,7 +1564,6 @@ fn entry(rest: &str, skip: usize) -> Option<(&str, String)> {
 fn numstat_new_path(field: &str) -> String {
     let (open, arrow) = match (field.find('{'), field.find(" => ")) {
         (_, None) => return field.to_string(),
-        // No braces: the whole path was replaced, so the tail is the new path.
         (None, Some(a)) => return field[a + 4..].to_string(),
         (Some(o), Some(a)) => (o, a),
     };
@@ -1664,8 +1606,6 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
             (Some(a), Some(r), Some(p)) => (a, r, p),
             _ => continue,
         };
-        // A rename prints `docs/{old => new}` here but the plain new name in
-        // status, so rebuild it before matching.
         let path = unquote_path(path);
         let path = if status.files.iter().any(|file| file.path == path) {
             path
@@ -1891,7 +1831,6 @@ mod tests {
         assert_eq!(tracked.kind, ChangeKind::Modified);
         assert_eq!(tracked.added, Some(1));
 
-        // A path with a space survives, and a rename keeps its directory.
         assert!(
             by_path.contains_key("docs/renamed.md"),
             "rename should be reported at its new path, got {:?}",
@@ -1908,9 +1847,6 @@ mod tests {
 
     #[test]
     fn a_subject_with_control_characters_does_not_shift_the_parse() {
-        // The whole reason for the unit and record separators: a subject can
-        // contain a newline or a tab, and splitting on either would turn one
-        // commit into two and misattribute every field after it.
         let raw = format!(
             "aaa{US}fix: a subject\nwith a newline{US}Ada{US}ada@example.com{US}1700000000{RS}\
              bbb{US}feat: plain{US}Grace{US}grace@example.com{US}1700000100{RS}"
@@ -1956,7 +1892,6 @@ mod tests {
 
     #[test]
     fn a_log_without_decorations_still_parses() {
-        // Records written before `%D` joined the format have five fields.
         let raw = format!("aaa{US}fix: old{US}Ada{US}ada@example.com{US}1700000000{RS}");
         let commits = parse_log(&raw, &std::collections::HashSet::new(), None);
 
@@ -1966,9 +1901,6 @@ mod tests {
 
     #[test]
     fn the_configured_identity_claims_its_own_commits() {
-        // Case is not part of an address in practice, and git stores whatever
-        // was typed, so a repository set up as `Ada@Example.com` still has to
-        // recognise a commit authored as `ada@example.com`.
         let raw = format!(
             "aaa{US}fix: mine{US}Ada{US}Ada@Example.com{US}1700000000{RS}\
              bbb{US}fix: theirs{US}Grace{US}grace@example.com{US}1700000100{RS}"
@@ -1979,7 +1911,6 @@ mod tests {
         assert!(commits[0].mine, "the configured address is this person");
         assert!(!commits[1].mine, "somebody else's commit is not theirs");
 
-        // No identity configured: nothing is claimed, rather than everything.
         let anonymous = parse_log(&raw, &unpushed, None);
         assert!(anonymous.iter().all(|commit| !commit.mine));
     }
@@ -2012,10 +1943,6 @@ mod tests {
                 (DiffLineKind::Removed, Some(11), None, "gone"),
                 (DiffLineKind::Added, None, Some(11), "new one"),
                 (DiffLineKind::Added, None, Some(12), "new two"),
-                // The removed line advanced only the left gutter and the added
-                // lines only the right, so the trailing context has to land on
-                // 12 and 13. Getting this wrong is invisible until someone
-                // reads a line number.
                 (DiffLineKind::Context, Some(12), Some(13), "context two"),
             ]
         );
@@ -2133,8 +2060,6 @@ mod tests {
         run(&["add", "."]);
         run(&["commit", "-qm", "Initial scripts"]);
 
-        // Godot scripts have no special extension filter. UTF-8, CRLF and
-        // tabs must remain text, alongside an actual binary resource.
         std::fs::write(
             dir.join("player.gd"),
             "extends Node\r\nvar speed = 2\r\n\t# Árvíztűrő 日本語\r\n",
@@ -2233,7 +2158,6 @@ mod tests {
                 .any(|l| l.kind == DiffLineKind::Added && l.text == "two")
         );
 
-        // The first commit has no parent, and `id^!` still has to work there.
         let first = show(&dir, "HEAD~1").expect("the root commit resolves");
         assert!(first.parents.is_empty());
         assert_eq!(first.subject, "init");
