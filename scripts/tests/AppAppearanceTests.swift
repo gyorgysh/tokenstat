@@ -1,4 +1,4 @@
-// Compile with AppAppearance.swift.
+// Compile with AppAppearance.swift AsciiKit.swift AsciiScene.swift AsciiScenes.swift ChatThemeEntry.swift.
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
