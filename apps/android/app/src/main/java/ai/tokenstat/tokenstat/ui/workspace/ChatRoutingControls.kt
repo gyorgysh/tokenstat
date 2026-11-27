@@ -589,6 +589,7 @@ private fun ChatRoutingDialog(
                                         failures = shared.bol("failoverOnFailures") == true
                                         notifies = shared["notify"] != JsonPrimitive(false)
                                         routes = (shared["routes"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+                                        preferred = shared["preferred"] as? JsonObject
                                         defaults = true
                                     },
                                 )

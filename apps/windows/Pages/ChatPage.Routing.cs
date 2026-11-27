@@ -378,6 +378,7 @@ internal sealed partial class ChatPage
                         throttles.IsChecked = Format.Flag(sharedPolicy, "failoverOnThrottle"); outages.IsChecked = Format.Flag(sharedPolicy, "failoverOnErrors"); auth.IsChecked = Format.Flag(sharedPolicy, "failoverOnAuth"); failures.IsChecked = Format.Flag(sharedPolicy, "failoverOnFailures");
                         notifies.IsChecked = sharedPolicy["notify"]?.GetValue<bool>() != false;
                         routes = (sharedPolicy["routes"] as JsonArray)?.Select(r => (JsonObject)r!.DeepClone()).ToList() ?? [];
+                        preferredRoute = sharedPolicy["preferred"]?.DeepClone() as JsonObject;
                         PaintRoutes();
                         everywhere.IsChecked = true;
                     }));
