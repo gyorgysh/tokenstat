@@ -40,7 +40,7 @@ pub(super) const COMMANDS: &[CommandDef] = &[
     CommandDef {
         name: "auth",
         aliases: &[],
-        about: "Vendor tokens: auth cursor|antigravity (auto keychain)",
+        about: "Vendor tokens: auth cursor (auto keychain)",
     },
     CommandDef {
         name: "filter",

@@ -65,7 +65,7 @@ pub fn session_path(vendor: Vendor) -> Result<PathBuf, CredsError> {
 pub fn env_token(vendor: Vendor) -> Option<String> {
     let key = match vendor {
         Vendor::Cursor => "TOKENSTAT_CURSOR_SESSION",
-        Vendor::Antigravity => "TOKENSTAT_ANTIGRAVITY_TOKEN",
+        Vendor::Antigravity => return None,
     };
     std::env::var(key).ok().filter(|s| !s.trim().is_empty())
 }
@@ -151,10 +151,7 @@ pub fn has_token(vendor: Vendor) -> bool {
 }
 
 pub fn status() -> Result<Vec<AuthStatus>, CredsError> {
-    Ok(vec![
-        status_one(Vendor::Cursor)?,
-        status_one(Vendor::Antigravity)?,
-    ])
+    Ok(vec![status_one(Vendor::Cursor)?])
 }
 
 fn status_one(vendor: Vendor) -> Result<AuthStatus, CredsError> {

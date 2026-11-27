@@ -65,7 +65,7 @@ pub fn fetch_reports(reports: &[tokenstat_sync::FetchReport], json: bool) -> Res
     Ok(())
 }
 
-/// `tokenstat auth` for Cursor / Antigravity session tokens.
+/// `tokenstat auth` for the Cursor session token.
 pub fn auth(
     vendor: Option<&str>,
     token: Option<&str>,
@@ -114,27 +114,25 @@ pub fn auth(
         }
         println!();
         println!(
-            "  {DIM}Cursor / Antigravity: check the app sign-in and Keychain access, then run tokenstat fetch.{DIM:#}"
+            "  {DIM}Cursor: check the app sign-in and Keychain access, then run tokenstat fetch.{DIM:#}"
         );
         println!("  {DIM}Optional paste still works: tokenstat auth cursor --token …{DIM:#}");
         println!();
         return Ok(());
     }
 
-    let vendor_name = vendor.ok_or_else(|| {
-        anyhow::anyhow!("vendor required: cursor or antigravity (or pass --status)")
-    })?;
+    let vendor_name =
+        vendor.ok_or_else(|| anyhow::anyhow!("vendor required: cursor (or pass --status)"))?;
     let vendor = match vendor_name.to_ascii_lowercase().as_str() {
         "cursor" => tokenstat_sync::Vendor::Cursor,
-        "antigravity" | "anti" => tokenstat_sync::Vendor::Antigravity,
-        other => anyhow::bail!("unknown vendor {other:?}, use cursor or antigravity"),
+        "antigravity" | "anti" => anyhow::bail!(
+            "antigravity needs no token. tokenstat reads its limits from the running app or agy."
+        ),
+        other => anyhow::bail!("unknown vendor {other:?}, use cursor"),
     };
 
     if logout {
-        match vendor {
-            tokenstat_sync::Vendor::Cursor => tokenstat_sync::cursor::logout()?,
-            tokenstat_sync::Vendor::Antigravity => tokenstat_sync::antigravity::logout()?,
-        }
+        tokenstat_sync::cursor::logout()?;
         if json {
             println!(
                 "{}",
@@ -148,18 +146,12 @@ pub fn auth(
 
     let (path, how) = match token {
         Some(t) if !t.trim().is_empty() => {
-            let path = match vendor {
-                tokenstat_sync::Vendor::Cursor => tokenstat_sync::cursor::auth(t)?,
-                tokenstat_sync::Vendor::Antigravity => tokenstat_sync::antigravity::auth(t)?,
-            };
+            let path = tokenstat_sync::cursor::auth(t)?;
             (path, "stored")
         }
         Some(_) => anyhow::bail!("empty token"),
         None => {
-            let (path, source) = match vendor {
-                tokenstat_sync::Vendor::Cursor => tokenstat_sync::cursor::auth_auto()?,
-                tokenstat_sync::Vendor::Antigravity => tokenstat_sync::antigravity::auth_auto()?,
-            };
+            let (path, source) = tokenstat_sync::cursor::auth_auto()?;
             let how = match source {
                 tokenstat_sync::creds::TokenSource::Discovered => "discovered from app keychain",
                 tokenstat_sync::creds::TokenSource::Env => "env",

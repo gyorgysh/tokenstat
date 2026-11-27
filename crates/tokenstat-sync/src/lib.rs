@@ -9,8 +9,8 @@
 //!
 //! This is the only crate allowed to link a network stack. `tokenstat-core`
 //! reads local logs and must stay offline. Cursor keeps usage on its servers.
-//! Antigravity CLI DBs are offline; the IDE needs a local language-server RPC
-//! (loopback) plus optional Cloud Code quota over the network.
+//! Antigravity CLI DBs are offline, and the IDE needs a local language-server
+//! RPC over loopback. Nothing for Antigravity goes over the network.
 //!
 //! # Privacy
 //!

@@ -387,21 +387,6 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
             println!("  {DIM}auth {}{DIM:#}  {state}", s.vendor);
         }
     }
-    if let Some(q) = tokenstat_sync::antigravity::stored_quota(store) {
-        println!();
-        println!(
-            "  {BOLD}Antigravity quota{BOLD:#}  {DIM}plan remaining, separate from token events{DIM:#}"
-        );
-        println!("  {DIM}status{DIM:#}   {}", q.summary_line());
-        for m in q.models.iter().take(8) {
-            let pct = match m.remaining_fraction {
-                Some(f) => format!("{:>3}% left", (f * 100.0).round() as i64),
-                None => "  n/a      ".into(),
-            };
-            let reset = m.reset_time.as_deref().unwrap_or("-");
-            println!("  {DIM}{:<22}{DIM:#} {pct}  reset {reset}", m.display_name);
-        }
-    }
     let cli_home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
     if let Some(home) = cli_home {
         let cli = home

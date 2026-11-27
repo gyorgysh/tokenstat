@@ -64,9 +64,8 @@ pub struct IdeSyncReport {
 
 /// Read per-model quota windows from the running Antigravity IDE language server.
 ///
-/// Keyless: the hub file and process CSRF are enough. Prefer this over any
-/// Cloud Code call that needs a login. Callers that also try the network should
-/// use [`crate::antigravity::limits`].
+/// Keyless: the hub file and process CSRF are enough. Callers that also want
+/// the `agy` fallback should use [`crate::antigravity::limits`].
 pub fn limits() -> ProviderLimits {
     let connections = match detect_connections() {
         Ok(connections) => connections,
@@ -161,8 +160,8 @@ pub fn limits() -> ProviderLimits {
 /// is spent, not unknown. A disabled bucket is left out: it is not what
 /// limits the account while it is switched off.
 ///
-/// Accepts the IDE Connect envelope (`{ "response": { "groups": … } }`), the
-/// bare Cloud Code JSON body, or `agy -p /usage --output-format json`'s
+/// Accepts the IDE Connect envelope (`{ "response": { "groups": … } }`), a
+/// bare body, or `agy -p /usage --output-format json`'s
 /// `command.data` (snake_case `name` / `remaining_fraction` / `reset_time`).
 pub(crate) fn quota_summary_windows(response: &Value) -> Vec<UsageWindow> {
     let root = response.get("response").unwrap_or(response);

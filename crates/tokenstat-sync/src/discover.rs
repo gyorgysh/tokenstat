@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 pub fn local_token(vendor: Vendor) -> Option<String> {
     match vendor {
         Vendor::Cursor => cursor_access_token(),
-        Vendor::Antigravity => antigravity_token(),
+        // Antigravity limits come from the app or agy, which hold their own
+        // login. tokenstat never reads it.
+        Vendor::Antigravity => None,
     }
 }
 
@@ -240,95 +242,6 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-fn antigravity_token() -> Option<String> {
-    // Prefer a still-valid OAuth access token the Gemini / Antigravity tools
-    // already wrote, then the macOS keychain item.
-    gemini_oauth_access_token().or_else(antigravity_keychain_access_token)
-}
-
-/// Antigravity's own keychain login, without the Gemini `oauth_creds.json` file.
-///
-/// A Gemini CLI refresh can succeed while Cloud Code quota still returns 403.
-/// Callers that already tried the file should fall through here rather than
-/// treating that refusal as the final answer.
-pub fn antigravity_keychain_access_token() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        keychain_password("gemini", "antigravity")
-            .and_then(|value| antigravity_keychain_token(&value, now_ms()))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
-    }
-}
-
-/// The access token inside the Antigravity keychain item.
-///
-/// Newer versions store a `go-keyring-base64:` envelope around a JSON login
-/// (`token.access_token`, `token.expiry`) rather than the bare token. An
-/// expired access token is no token: the app renews the item while it runs,
-/// and sending a spent one only earns a 401. A bare value is used as is.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn antigravity_keychain_token(value: &str, now_ms: i64) -> Option<String> {
-    use base64::Engine as _;
-    let value = value.trim();
-    let Some(encoded) = value.strip_prefix("go-keyring-base64:") else {
-        return (!value.is_empty() && !value.starts_with('{')).then(|| value.to_string());
-    };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded.trim())
-        .ok()?;
-    let login: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let token = login.get("token").unwrap_or(&login);
-    let access = token.get("access_token")?.as_str()?.trim();
-    if access.is_empty() {
-        return None;
-    }
-    if let Some(expiry) = token
-        .get("expiry")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
-        && now_ms + 60_000 >= expiry.as_millisecond()
-    {
-        return None;
-    }
-    Some(access.to_string())
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-/// Read `~/.gemini/oauth_creds.json` when the access token is still fresh.
-fn gemini_oauth_access_token() -> Option<String> {
-    let path = directories::BaseDirs::new()?
-        .home_dir()
-        .join(".gemini")
-        .join("oauth_creds.json");
-    let text = std::fs::read_to_string(path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let token = v.get("access_token")?.as_str()?.trim();
-    if token.is_empty() {
-        return None;
-    }
-    // expiry_date is epoch milliseconds when present.
-    if let Some(exp_ms) = v.get("expiry_date").and_then(|x| x.as_i64()) {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_millis() as i64;
-        if now_ms + 60_000 >= exp_ms {
-            return None;
-        }
-    }
-    Some(token.to_string())
-}
-
 /// One keychain item read without presenting an authentication dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeychainItem {
@@ -367,42 +280,6 @@ fn keychain_password(service: &str, account: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn antigravity_keychain_envelope_yields_a_fresh_access_token() {
-        use base64::Engine as _;
-        let login = serde_json::json!({
-            "token": {"access_token": "ya29.live", "token_type": "Bearer", "refresh_token": "1//r",
-                      "expiry": "2026-11-23T15:23:00.768116+01:00", "expires_in": 3599},
-            "auth_method": "consumer"
-        });
-        let value = format!(
-            "go-keyring-base64:{}",
-            base64::engine::general_purpose::STANDARD.encode(login.to_string())
-        );
-        let before = "2026-11-23T14:00:00Z"
-            .parse::<jiff::Timestamp>()
-            .unwrap()
-            .as_millisecond();
-        let after = "2026-11-23T14:30:00Z"
-            .parse::<jiff::Timestamp>()
-            .unwrap()
-            .as_millisecond();
-        assert_eq!(
-            antigravity_keychain_token(&value, before).as_deref(),
-            Some("ya29.live")
-        );
-        assert_eq!(antigravity_keychain_token(&value, after), None, "expired");
-        assert_eq!(
-            antigravity_keychain_token("ya29.bare", after).as_deref(),
-            Some("ya29.bare")
-        );
-        assert_eq!(
-            antigravity_keychain_token("go-keyring-base64:!!", before),
-            None
-        );
-        assert_eq!(antigravity_keychain_token("{\"token\":{}}", before), None);
-    }
 
     fn jwt(exp: i64) -> String {
         let claims = serde_json::json!({"exp": exp}).to_string();

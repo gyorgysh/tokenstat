@@ -171,7 +171,7 @@ enum Command {
     },
     /// MCP server over stdio (local archive only)
     Mcp,
-    /// Discover or store a vendor token for Cursor / Antigravity fetches
+    /// Discover or store the vendor token for Cursor fetches
     ///
     /// This is not tokenstat.ai login. With no `--token`, tokenstat reads the
     /// credential the vendor app already left in the OS keychain (local only).
