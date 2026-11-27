@@ -210,6 +210,8 @@ private fun ChatRoutingDialog(
     var wait by remember { mutableStateOf(false) }
     var returns by remember { mutableStateOf(false) }
     var defaults by remember { mutableStateOf(false) }
+    var follows by remember { mutableStateOf<Boolean?>(null) }
+    var defaultPolicy by remember { mutableStateOf<JsonObject?>(null) }
     var throttles by remember { mutableStateOf(false) }
     var outages by remember { mutableStateOf(false) }
     var auth by remember { mutableStateOf(false) }
@@ -234,10 +236,12 @@ private fun ChatRoutingDialog(
         }
             .onSuccess {
                 val policy = it["policy"] as? JsonObject
+                follows = (it["followsDefault"] as? JsonPrimitive)?.booleanOrNull
+                defaultPolicy = it["defaultPolicy"] as? JsonObject
                 enabled = policy?.bol("enabled") == true
                 wait = policy?.bol("waitForReset") == true
                 returns = policy?.bol("returnPreferred") == true
-                defaults = policy?.bol("useAsDefault") == true
+                defaults = follows ?: (policy?.bol("useAsDefault") == true)
                 throttles = policy?.bol("failoverOnThrottle") == true
                 outages = policy?.bol("failoverOnErrors") == true
                 auth = policy?.bol("failoverOnAuth") == true
@@ -555,11 +559,54 @@ private fun ChatRoutingDialog(
                         )
 
                     HorizontalDivider(color = colors.border)
-                    BrandCheckbox(
-                        defaults,
-                        { if (!saving) defaults = !defaults },
-                        L10n.text("common.chat_route_default"),
-                    )
+                    Text(L10n.text("common.chat_route_step_scope_title"), style = TsType.headline)
+                    val current = follows
+                    val shared = defaultPolicy
+                    if (current != null && shared != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        ) {
+                            Text(
+                                L10n.text(if (current) "common.chat_route_follows_default" else "common.chat_route_own_routing"),
+                                style = TsType.footnote,
+                                color = colors.textSecondary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (!current) {
+                                TsSecondaryButton(
+                                    label = L10n.text("common.chat_route_use_default"),
+                                    icon = ActionIcon.Refresh.vector,
+                                    small = true,
+                                    enabled = !saving,
+                                    onClick = {
+                                        enabled = shared.bol("enabled") == true
+                                        wait = shared.bol("waitForReset") == true
+                                        returns = shared.bol("returnPreferred") == true
+                                        throttles = shared.bol("failoverOnThrottle") == true
+                                        outages = shared.bol("failoverOnErrors") == true
+                                        auth = shared.bol("failoverOnAuth") == true
+                                        failures = shared.bol("failoverOnFailures") == true
+                                        notifies = shared["notify"] != JsonPrimitive(false)
+                                        routes = (shared["routes"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+                                        defaults = true
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    RouteScopeChoice(
+                        selected = defaults,
+                        title = L10n.text("common.chat_route_scope_all"),
+                        detail = L10n.text("common.chat_route_scope_all_detail"),
+                        enabled = !saving,
+                    ) { defaults = true }
+                    RouteScopeChoice(
+                        selected = !defaults,
+                        title = L10n.text("common.chat_route_scope_chat"),
+                        detail = L10n.text("common.chat_route_scope_chat_detail"),
+                        enabled = !saving,
+                    ) { defaults = false }
                     TsSecondaryButton(
                         label = L10n.text("common.settings"),
                         modifier = Modifier.fillMaxWidth(),
@@ -673,7 +720,7 @@ private fun ChatRoutingDialog(
                     onClick = dismiss,
                 )
                 TsAccentButton(
-                    label = L10n.text("common.save"),
+                    label = L10n.text(if (defaults) "common.chat_route_save_default" else "common.chat_route_save_chat"),
                     icon = ActionIcon.Save.vector,
                     modifier = Modifier.weight(1f),
                     enabled = loaded && !saving,
@@ -720,6 +767,36 @@ private fun ChatRoutingDialog(
     }
 }
 
+
+@Composable
+private fun RouteScopeChoice(
+    selected: Boolean,
+    title: String,
+    detail: String,
+    enabled: Boolean,
+    onSelect: () -> Unit,
+) {
+    val colors = LocalTsColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) colors.accentSoft else Color.Transparent)
+            .border(if (selected) 2.dp else 1.dp, if (selected) colors.accent else colors.border, shape)
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onSelect)
+            .semantics { stateDescription = if (selected) L10n.text("common.appearance.selected") else "" }
+            .padding(Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TsType.body, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+            Text(detail, style = TsType.footnote, color = colors.textSecondary)
+        }
+    }
+}
 
 @Composable
 private fun RoutingLimitCard(
