@@ -14,7 +14,7 @@ namespace Tokenstat.Host;
 
 internal static class HostProcess
 {
-    private const string ExpectedProtocolVersion = "57";
+    private const string ExpectedProtocolVersion = "58";
 
     public static void EnsureRunning() => EnsureRunning(replaceOld: true);
 

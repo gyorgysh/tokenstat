@@ -161,7 +161,7 @@ def main():
             host = subprocess.Popen([str(args.host.resolve()), "--socket", str(address)], env=env,
                                     stdout=log, stderr=log)
             try:
-                wait_for(lambda: str(call("protocol")["protocolVersion"]) == "57")
+                wait_for(lambda: str(call("protocol")["protocolVersion"]) == "58")
                 workspace = call("workspace.add", {"path": str(project)})["id"]
                 assert call("profiles.list")["default"] == "system"
                 work = call("profiles.create", {"name": "Work"})["id"]

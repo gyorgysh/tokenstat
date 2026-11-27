@@ -20,7 +20,11 @@ object HostContracts {
     fun supportsAgentProfiles(protocol: Long?): Boolean =
         protocol != null && protocol >= AGENT_PROFILES_MIN_PROTOCOL
 
-    const val PROTOCOL_VERSION = "57"
+    const val ROUTING_DEFAULTS_MIN_PROTOCOL = 58
+    fun supportsRoutingDefaults(protocol: Long?): Boolean =
+        protocol != null && protocol >= ROUTING_DEFAULTS_MIN_PROTOCOL
+
+    const val PROTOCOL_VERSION = "58"
     const val WORKTREES_MIN_PROTOCOL = 24
     const val CHAT_MIN_PROTOCOL = 4
     const val CHAT_FORK_MIN_PROTOCOL = 26

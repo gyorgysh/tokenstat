@@ -52,6 +52,7 @@ enum RemoteHostFeature: Hashable {
     case teamProjectSetup
     case teamChatSelection
     case generalFolder
+    case routingDefaults
 
     var title: String {
         switch self {
@@ -91,6 +92,7 @@ enum RemoteHostFeature: Hashable {
         case .teamChats, .teamSessions, .teamChatSharing: L10n.text("common.teams.chats")
         case .teamCheckouts, .teamConnections, .teamCheckoutUpdates, .teamProjectSetup, .teamChatSelection: L10n.text("common.teams.checkouts")
         case .generalFolder: L10n.text("common.new_chat.no_repository")
+        case .routingDefaults: L10n.text("common.chat_routing")
         }
     }
 
@@ -144,6 +146,7 @@ enum RemoteHostFeature: Hashable {
         case .teamProjectSetup: 50
         case .teamChatSelection: 51
         case .generalFolder: 56
+        case .routingDefaults: 58
         }
     }
 
@@ -185,6 +188,7 @@ enum RemoteHostFeature: Hashable {
         case .chatRecovery: "arrow.clockwise"
         case .teamChats, .teamSessions, .teamCheckouts, .teamConnections, .teamChatSharing, .teamCheckoutUpdates, .teamProjectSetup, .teamChatSelection: "person.2"
         case .generalFolder: "bubble.left.and.bubble.right"
+        case .routingDefaults: "arrow.triangle.branch"
         }
     }
 

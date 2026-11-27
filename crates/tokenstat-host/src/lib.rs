@@ -301,4 +301,4 @@ pub use tokenstat_pty::warm_shell_pool;
 /// Version 56 adds the general folder: `workspace.list` with `includeGeneral`
 /// returns it, marked `general`, for chats that belong to no repository.
 /// Version 57 exposes agent profile choices to trusted clients.
-pub const PROTOCOL_VERSION: &str = "57";
+pub const PROTOCOL_VERSION: &str = "58";

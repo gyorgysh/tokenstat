@@ -2189,6 +2189,13 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 store.routing(&id).envelope()
             }
         }
+        "chat.routingDefaults" => {
+            if let Some(policy) = p.routing {
+                store.save_routing_defaults(policy).envelope()
+            } else {
+                store.routing_defaults().envelope()
+            }
+        }
         "chat.routingHistory" => store
             .routing_history(
                 &p.id.ok_or("chat.routingHistory needs id")?,

@@ -96,8 +96,12 @@ struct State {
     attachments: Vec<String>,
     activity: Vec<Activity>,
     resets: Vec<ResetDestination>,
+    custom: Option<bool>,
 }
 impl State {
+    fn is_custom(&self) -> bool {
+        self.custom.unwrap_or(true)
+    }
     fn can_wait(&self) -> bool {
         self.policy.wait_for_reset
             && (!self.resets.is_empty()
@@ -207,13 +211,67 @@ impl State {
             }
         })
     }
-    fn view(&self) -> Value {
-        json!({"policy":self.policy,"limit":self.limit,"waiting":self.pending.as_ref().is_some_and(|p|!p.claimed),
+    fn view(&self, defaults: Option<&Policy>) -> Value {
+        let follows = !self.is_custom();
+        let mut policy = self.policy.clone();
+        policy.use_as_default = follows && defaults.is_some();
+        json!({"policy":policy,"followsDefault":follows,"defaultPolicy":defaults,"limit":self.limit,"waiting":self.pending.as_ref().is_some_and(|p|!p.claimed),
             "needsDeliveryCheck":self.pending.as_ref().is_some_and(|p|p.claimed),"note":self.note,
             "tried":self.tried,"preferred":self.preferred,"activity":self.activity,
             "nextReset":if self.can_wait() && self.pending.is_some() { self.resets.iter().min_by_key(|reset|reset.at_ms) } else { None }})
     }
 }
+fn validate_policy(policy: &mut Policy) -> Result<(), String> {
+    for destination in policy.routes.iter_mut().chain(policy.preferred.iter_mut()) {
+        if destination.model.as_deref() == Some("") {
+            destination.model = None;
+        }
+        if destination.effort.as_deref() == Some("") {
+            destination.effort = None;
+        }
+    }
+    if policy.routes.len() > 8 {
+        return Err("Choose up to eight routing destinations.".into());
+    }
+    let known = crate::automations::backends(false);
+    let mut unique = Vec::new();
+    for (index, destination) in policy
+        .routes
+        .iter()
+        .chain(policy.preferred.iter())
+        .enumerate()
+    {
+        if !known
+            .iter()
+            .any(|b| b["id"].as_str() == Some(&destination.backend))
+            || destination.backend == "sh"
+        {
+            return Err("Choose a supported chat agent.".into());
+        }
+        if destination
+            .model
+            .as_ref()
+            .is_some_and(|m| m.len() > 256 || m.contains(['\n', '\r', '\0']))
+            || (index < policy.routes.len() && unique.contains(destination))
+        {
+            return Err("Choose distinct valid routing destinations.".into());
+        }
+        if let Some(effort) = &destination.effort
+            && (effort.is_empty()
+                || !known.iter().any(|backend| {
+                    backend["id"].as_str() == Some(&destination.backend)
+                        && backend["efforts"].as_array().is_some_and(|values| {
+                            values.iter().any(|value| value.as_str() == Some(effort))
+                        })
+                }))
+        {
+            return Err("Choose an effort supported by this chat agent.".into());
+        }
+        unique.push(destination.clone());
+    }
+    Ok(())
+}
+
 fn owner() -> Result<String, String> {
     if crate::vault::SIGNOUTS.load(Ordering::SeqCst) != 0 {
         return Err("The signed-in account is changing.".into());
@@ -417,29 +475,68 @@ impl Store {
         let path = directory.join("routing.json");
         match fs::symlink_metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let default = self.root.join("routing-defaults.json");
-                let mut state = State::default();
-                match fs::symlink_metadata(&default) {
-                    Ok(_) => {
-                        let defaults: State =
-                            serde_json::from_slice(&read_fork_file(&default, 64 * 1024, false)?)
-                                .map_err(|e| e.to_string())?;
-                        if defaults.owner == self.router_owner()? {
-                            state.policy = defaults.policy;
-                        }
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.to_string()),
+                let mut state = State {
+                    custom: Some(false),
+                    ..State::default()
+                };
+                if let Some(policy) = self.router_defaults()? {
+                    state.policy = policy;
                 }
                 Ok(state)
             }
             Err(e) => Err(e.to_string()),
             Ok(meta) if meta.file_type().is_file() && meta.len() <= 64 * 1024 => {
-                serde_json::from_slice(&read_fork_file(&path, 64 * 1024, false)?)
-                    .map_err(|e| e.to_string())
+                let mut state: State =
+                    serde_json::from_slice(&read_fork_file(&path, 64 * 1024, false)?)
+                        .map_err(|e| e.to_string())?;
+                if !state.is_custom()
+                    && state.pending.is_none()
+                    && let Some(policy) = self.router_defaults()?
+                {
+                    state.policy = policy;
+                }
+                Ok(state)
             }
             Ok(_) => Err("Chat routing could not be read safely.".into()),
         }
+    }
+    fn router_defaults(&self) -> Result<Option<Policy>, String> {
+        let path = self.root.join("routing-defaults.json");
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.to_string()),
+            Ok(meta) if meta.file_type().is_file() && meta.len() <= 64 * 1024 => {
+                let defaults: State =
+                    serde_json::from_slice(&read_fork_file(&path, 64 * 1024, false)?)
+                        .map_err(|e| e.to_string())?;
+                Ok((defaults.owner == self.router_owner()?).then_some(defaults.policy))
+            }
+            Ok(_) => Err("Routing defaults could not be read safely.".into()),
+        }
+    }
+    fn router_view(&self, state: &State) -> Value {
+        state.view(self.router_defaults().ok().flatten().as_ref())
+    }
+    fn write_router_defaults(&self, policy: &Policy) -> Result<Policy, String> {
+        let mut defaults = State {
+            policy: policy.clone(),
+            owner: self.router_owner()?,
+            ..State::default()
+        };
+        defaults.policy.use_as_default = false;
+        let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
+        save_document(&self.root, "routing-defaults.json", &defaults)?;
+        Ok(defaults.policy)
+    }
+    pub fn routing_defaults(&self) -> Result<Value, String> {
+        crate::workspace_policy::require_current_access().map_err(|e| e.to_string())?;
+        Ok(json!({ "policy": self.router_defaults()? }))
+    }
+    pub fn save_routing_defaults(&self, mut policy: Policy) -> Result<Value, String> {
+        validate_policy(&mut policy)?;
+        crate::workspace_policy::require_current_access().map_err(|e| e.to_string())?;
+        let policy = self.write_router_defaults(&policy)?;
+        Ok(json!({ "policy": policy }))
     }
     fn router_save(&self, id: &str, state: &State) -> Result<(), String> {
         let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
@@ -510,7 +607,7 @@ impl Store {
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|e| e.to_string())?;
         self.current_send_conversation(id)?;
-        self.router_load(id).map(|s| s.view())
+        self.router_load(id).map(|s| self.router_view(&s))
     }
     pub fn attach_routing(&self, rows: &mut Value) {
         if let Some(rows) = rows.as_array_mut() {
@@ -530,53 +627,7 @@ impl Store {
         mut policy: Policy,
     ) -> Result<Value, String> {
         validate_record_id(id)?;
-        for destination in policy.routes.iter_mut().chain(policy.preferred.iter_mut()) {
-            if destination.model.as_deref() == Some("") {
-                destination.model = None;
-            }
-            if destination.effort.as_deref() == Some("") {
-                destination.effort = None;
-            }
-        }
-        if policy.routes.len() > 8 {
-            return Err("Choose up to eight routing destinations.".into());
-        }
-        let known = crate::automations::backends(false);
-        let mut unique = Vec::new();
-        for (index, destination) in policy
-            .routes
-            .iter()
-            .chain(policy.preferred.iter())
-            .enumerate()
-        {
-            if !known
-                .iter()
-                .any(|b| b["id"].as_str() == Some(&destination.backend))
-                || destination.backend == "sh"
-            {
-                return Err("Choose a supported chat agent.".into());
-            }
-            if destination
-                .model
-                .as_ref()
-                .is_some_and(|m| m.len() > 256 || m.contains(['\n', '\r', '\0']))
-                || (index < policy.routes.len() && unique.contains(destination))
-            {
-                return Err("Choose distinct valid routing destinations.".into());
-            }
-            if let Some(effort) = &destination.effort
-                && (effort.is_empty()
-                    || !known.iter().any(|backend| {
-                        backend["id"].as_str() == Some(&destination.backend)
-                            && backend["efforts"].as_array().is_some_and(|values| {
-                                values.iter().any(|value| value.as_str() == Some(effort))
-                            })
-                    }))
-            {
-                return Err("Choose an effort supported by this chat agent.".into());
-            }
-            unique.push(destination.clone());
-        }
+        validate_policy(&mut policy)?;
         let _acceptance = crate::chat_receipts::Operation::conversation(&self.root, id)?;
         crate::workspace_policy::require_current_access().map_err(|e| e.to_string())?;
         let chat = self.current_send_conversation(id)?;
@@ -584,7 +635,10 @@ impl Store {
             return Err("The conversation changed. Refresh it before saving routing.".into());
         }
         let mut state = self.router_load(id)?;
+        let shared = policy.use_as_default;
         state.policy = policy;
+        state.policy.use_as_default = false;
+        state.custom = Some(!shared);
         state.record("settings", None, None, "Routing settings saved.", None);
         let claimed = state.pending.as_ref().is_some_and(|p| p.claimed);
         if !claimed {
@@ -621,18 +675,11 @@ impl Store {
                 attachments: state.attachments.clone(),
             });
         }
-        self.router_save(id, &state)?;
-        if state.policy.use_as_default {
-            let mut defaults = State {
-                policy: state.policy.clone(),
-                owner: self.router_owner()?,
-                ..State::default()
-            };
-            defaults.policy.use_as_default = false;
-            let _lifecycle = crate::work_handoff_store::lifecycle_lock(&self.root)?;
-            save_document(&self.root, "routing-defaults.json", &defaults)?;
+        if shared {
+            self.write_router_defaults(&state.policy)?;
         }
-        Ok(state.view())
+        self.router_save(id, &state)?;
+        Ok(self.router_view(&state))
     }
     pub fn routing_action(
         self: &Arc<Self>,
@@ -686,7 +733,7 @@ impl Store {
             _ => return Err("Choose resume or cancel.".into()),
         }
         self.router_save(id, &state)?;
-        Ok(state.view())
+        Ok(self.router_view(&state))
     }
     pub(super) fn router_cancel_locked(&self, id: &str) -> Result<(), String> {
         let mut state = self.router_load(id)?;
@@ -1811,6 +1858,52 @@ mod retirement_tests {
         store.routing_cancel_all().unwrap();
         assert!(!store.router_load("fresh").unwrap().policy.enabled);
         assert!(store.router_load("original").unwrap().policy.enabled);
+    }
+    #[test]
+    fn chats_on_the_default_follow_it_and_own_routing_stays_put() {
+        let (_temp, store) = fixture();
+        let fallback = |backend: &str| Policy {
+            enabled: true,
+            routes: vec![Destination {
+                backend: backend.into(),
+                model: None,
+                effort: None,
+            }],
+            ..Policy::default()
+        };
+        let mut shared = fallback("claude");
+        shared.use_as_default = true;
+        store.routing_update("original", 1, shared).unwrap();
+        let view = store.routing("fresh").unwrap();
+        assert_eq!(view["followsDefault"], true);
+        assert_eq!(view["defaultPolicy"]["routes"][0]["backend"], "claude");
+        assert_eq!(view["policy"]["useAsDefault"], true);
+
+        store.save_routing_defaults(fallback("muse")).unwrap();
+        for id in ["original", "fresh"] {
+            assert_eq!(
+                store.router_load(id).unwrap().policy.routes[0].backend,
+                "muse"
+            );
+        }
+
+        store.routing_update("fresh", 1, fallback("grok")).unwrap();
+        store.save_routing_defaults(fallback("claude")).unwrap();
+        assert_eq!(
+            store.router_load("fresh").unwrap().policy.routes[0].backend,
+            "grok"
+        );
+        assert_eq!(store.routing("fresh").unwrap()["followsDefault"], false);
+        assert_eq!(
+            store.router_load("original").unwrap().policy.routes[0].backend,
+            "claude"
+        );
+        assert_eq!(
+            store.routing_defaults().unwrap()["policy"]["routes"][0]["backend"],
+            "claude"
+        );
+        assert!(store.save_routing_defaults(fallback("sh")).is_err());
+        assert!(store.save_routing_defaults(fallback("unknown")).is_err());
     }
     #[test]
     fn disabling_or_cancelling_policy_does_not_discard_uncertain_delivery() {
