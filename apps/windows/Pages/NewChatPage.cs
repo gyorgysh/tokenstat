@@ -378,7 +378,8 @@ internal sealed partial class NewChatPage : Page
                 _setup["profileId"] = id;
                 RememberDraft();
                 return Task.CompletedTask;
-            }, LimitsWorkspace: _selected?.Id), locked);
+            }, LimitsWorkspace: _selected?.Id,
+            ReloadProfiles: ReloadProfilesAsync), locked);
         AutomationProperties.SetAutomationId(_agentSlot.Child, "newChat.agent");
     }
 
@@ -422,6 +423,21 @@ internal sealed partial class NewChatPage : Page
         if (_agentSlot.Child is Control agent) agent.IsEnabled = !_sending && current && _available.Length > 0;
         _copyProgress.IsActive = _stagingFiles; _copyProgress.Visibility = _cancelStaging.Visibility = _stagingFiles ? Visibility.Visible : Visibility.Collapsed;
         RefreshFastMode();
+    }
+
+    private async Task ReloadProfilesAsync()
+    {
+        if (_selected is not NewChatRepository repository) return;
+        var account = _account;
+        try
+        {
+            var profiles = await AgentProfiles.ReadAsync(repository.Id);
+            if (account != AppServices.AccountGeneration || !IsLoaded || _selected?.Id != repository.Id) return;
+            _profiles = profiles;
+            var workspace = RemoteWorkspaces.TrySplit(repository.Id, out _, out var inner) ? inner : repository.Id;
+            _profileLock = profiles?.Lock(workspace);
+        }
+        catch { /* The list stays as it was read. */ }
     }
 
     private async Task LoadAgentsAsync()

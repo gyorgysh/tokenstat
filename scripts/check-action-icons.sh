@@ -42,6 +42,9 @@ SKIP_STARTERS = (
 # Buttons whose whole surface is the label (rows, tiles, chips, links).
 # Snippet must uniquely identify that one button, not every Button in the file.
 ALLOWED = [
+    # The profile row in the agent picker, a whole-surface row led by its own
+    # icon seat, offering to continue on a repository's locked profile.
+    ("Features/Workspaces/Chat/ChatSetupHeader.swift", "Button { continuingProfile = profile } label: {"),
     # The name in Account, a whole-surface row led by the person's picture.
     ("Features/Account/ProfileSheet.swift", "Button { showing = true } label: {"),
     # The handle's row in the profile window, led by its own ActionSeat.

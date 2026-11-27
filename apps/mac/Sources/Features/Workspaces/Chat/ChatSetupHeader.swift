@@ -887,6 +887,8 @@ struct ChatAgentPanel: View {
     var onDone: () -> Void = {}
 
     @State private var continuingProfile: AgentProfile?
+    @State private var addingProfile = false
+    @State private var newProfileName = ""
     @State private var showingSetup = false
     @State private var installing: String?
     @State private var signInBackend: ChatBackend?
@@ -924,7 +926,7 @@ struct ChatAgentPanel: View {
                     prompt: L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da"),
                     emptyMessage: L10n.text("apple.chatsetupheader.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                     caption: model.peer == nil ? L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5") : L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971"),
-                    captionAccessory: profileMenu,
+                    header: profileRow,
                     refresh: nil,
                     sectionValue: choices.currentValue,
                     sectionTabs: choices.selectableSections,
@@ -1027,6 +1029,18 @@ struct ChatAgentPanel: View {
                 return status?.outcome ?? .unconfirmed
             }
         }
+        .alert(L10n.text("common.profiles.add"), isPresented: $addingProfile) {
+            if model.peer == nil {
+                TextField(L10n.text("apple.profiles.name"), text: $newProfileName)
+                Button(L10n.text("common.cancel"), role: .cancel) {}
+                Button(L10n.text("common.profiles.add")) { createProfile() }
+                    .disabled(newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } else {
+                Button(L10n.text("common.done"), role: .cancel) {}
+            }
+        } message: {
+            Text(model.peer == nil ? L10n.text("common.profiles.add_message") : L10n.text("common.profiles.add_on_host"))
+        }
         .alert(L10n.text("apple.profiles.continue", continuingProfile?.title ?? ""), isPresented: Binding(
             get: { continuingProfile != nil }, set: { if !$0 { continuingProfile = nil } }
         ), presenting: continuingProfile) { profile in
@@ -1080,59 +1094,82 @@ struct ChatAgentPanel: View {
 
     /// Which login the listed agents run as, at the end of the caption line.
     /// Nil, and nothing drawn, until there is more than the machine's own.
-    private var profileMenu: AnyView? {
-        guard let profiles = model.agentProfiles, !profiles.named.isEmpty || chat.profileId != nil else { return nil }
+    /// Which logins the agents use, as one row a finger can hit. It shows as
+    /// soon as the host lists profiles, even before there is a second one,
+    /// because the menu is also where somebody finds out profiles exist.
+    private var profileRow: AnyView? {
+        guard let profiles = model.agentProfiles else { return nil }
         let selected = model.profileID(for: chat) ?? AgentProfiles.system
+        let current = profiles.profile(selected)?.title ?? L10n.text("apple.profiles.unavailable")
         if let lock = model.workspaceProfileLock, let profile = profiles.profile(lock) {
             if selected != lock && !locked {
                 return AnyView(
-                    Button(L10n.text("apple.profiles.continue", profile.title), .next) { continuingProfile = profile }
-                        .buttonStyle(QuietLinkStyle())
-                        .font(Theme.caption)
+                    Button { continuingProfile = profile } label: {
+                        ProfileRowLabel(title: current, detail: L10n.text("apple.profiles.continue", profile.title),
+                                        symbol: "arrow.turn.down.right")
+                    }
+                    .buttonStyle(.plain)
                 )
             }
             return AnyView(
-                Label(profile.title, systemImage: "lock.fill")
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                ProfileRowLabel(title: profile.title, detail: L10n.text("apple.profiles.locked", profile.title),
+                                symbol: "lock.fill")
                     .help(L10n.text("apple.profiles.locked", profile.title))
             )
         }
         return AnyView(
             Menu {
-                ForEach(profiles.profiles) { profile in
-                    Button {
-                        if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
-                            continuingProfile = profile
-                        } else {
-                            performSetupChange(model: model, chat: chat) { await model.update(profileID: profile.id) }
+                Section(L10n.text("common.profiles.explain")) {
+                    ForEach(profiles.profiles) { profile in
+                        Button {
+                            if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
+                                continuingProfile = profile
+                            } else {
+                                performSetupChange(model: model, chat: chat) { await model.update(profileID: profile.id) }
+                            }
+                        } label: {
+                            if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
+                            else { Text(profile.title) }
                         }
-                    } label: {
-                        if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
-                        else { Text(profile.title) }
+                        .disabled(selected == profile.id)
                     }
-                    .disabled(selected == profile.id)
+                }
+                Section {
+                    Button(L10n.text("common.profiles.add_ellipsis"), .create) {
+                        newProfileName = ""
+                        addingProfile = true
+                    }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.crop.circle")
-                    Text(profiles.profile(selected)?.title ?? L10n.text("apple.profiles.unavailable"))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down").font(Theme.font(9, weight: .semibold))
-                }
-                .font(Theme.caption.weight(.medium))
-                .foregroundStyle(Theme.accent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Theme.accentSoft))
+                ProfileRowLabel(title: current,
+                                detail: L10n.text(selected == AgentProfiles.system ? "common.profiles.main_detail" : "common.profiles.row_detail"),
+                                chevron: true)
             }
             .modifier(BorderlessMenu())
             .menuIndicator(.hidden)
-            .fixedSize()
             .disabled(locked || updating)
-            .help(L10n.text("apple.profiles.profile"))
             .accessibilityLabel(L10n.text("apple.profiles.profile"))
+            .accessibilityValue(current)
         )
+    }
+
+    /// Make a profile and pick it for this chat. Profiles belong to the
+    /// computer the agents run on, and the host takes profile changes only
+    /// from its own app, so a phone says where to go instead.
+    private func createProfile() {
+        let name = newProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, model.peer == nil else { return }
+        Task {
+            do {
+                let created = try await Bridge.createAgentProfile(name: name)
+                AgentProfileCatalog.shared.replace(created.profiles)
+                if chat.lastMessageAtMs == nil && chat.resumeToken == nil {
+                    performSetupChange(model: model, chat: chat) { await model.update(profileID: created.id) }
+                }
+            } catch {
+                setupError = error.localizedDescription
+            }
+        }
     }
 
     private var setupList: some View {
@@ -1613,4 +1650,64 @@ private struct BorderlessMenu: ViewModifier {
         content
         #endif
     }
+}
+
+/// The profile row in the agent picker: which logins the agents use, and a
+/// line saying what that means. Tall enough for a finger on the phone.
+private struct ProfileRowLabel: View {
+    let title: String
+    let detail: String
+    var symbol = "person.crop.circle"
+    var chevron = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(Theme.font(rowIcon, weight: .medium))
+                .foregroundStyle(Theme.accent)
+                .frame(width: rowIcon * 2, height: rowIcon * 2)
+                .background(Circle().fill(Theme.accentSoft))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(Self.label)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(Theme.caption)
+                    .foregroundStyle(Self.secondaryLabel)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: Theme.Space.xs)
+            if chevron {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Theme.font(11, weight: .semibold))
+                    .foregroundStyle(Self.secondaryLabel)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, rowPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.hairline))
+        .contentShape(Rectangle())
+    }
+
+    // A menu tints its label with the accent. The row is a setting, so its
+    // text keeps the ordinary label colours.
+    #if os(macOS)
+    private static let label = Color(nsColor: .labelColor)
+    private static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
+    #else
+    private static let label = Color(uiColor: .label)
+    private static let secondaryLabel = Color(uiColor: .secondaryLabel)
+    #endif
+
+    #if os(macOS)
+    private let rowIcon: CGFloat = 11
+    private let rowPadding: CGFloat = 6
+    #else
+    private let rowIcon: CGFloat = 14
+    private let rowPadding: CGFloat = 10
+    #endif
 }

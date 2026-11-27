@@ -856,7 +856,7 @@ internal sealed class InsightsPage : Page, IInspectorContent, IToolbarItems, ISc
     }
 
     private string ProfileTitle(string id) => _agentProfiles?.Title(id) ??
-        (id == AgentProfiles.SystemId ? L10n.Text("common.profiles.this_pc") : L10n.Text("common.profiles.removed"));
+        (id == AgentProfiles.SystemId ? L10n.Text("common.profiles.main") : L10n.Text("common.profiles.removed"));
 
     private JsonArray TabRows(string tab)
     {

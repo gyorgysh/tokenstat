@@ -2192,7 +2192,8 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
         SelectedProfile: () => ChatProfileId,
         ProfileLock: () => WorkspaceProfileLock,
         PickProfile: PickChatProfileAsync,
-        LimitsWorkspace: _workspaceId), locked);
+        LimitsWorkspace: _workspaceId,
+        ReloadProfiles: () => RefreshAgentProfilesAsync(_openGeneration)), locked);
 
     private void RebuildAttachStrip()
     {
@@ -3297,7 +3298,7 @@ internal sealed partial class ChatPage : Page, IInspectorContent, IToolbarItems
                     {
                         var updated = await CallChatAsync("profiles.setWorkspaceLock", request);
                         if (!Current()) return;
-                        _agentProfiles = new AgentProfiles(updated, true);
+                        _agentProfiles = new AgentProfiles(updated);
                         PaintConversation();
                     }
                     catch (Exception failure) { if (Current()) Banner(failure.Message); }

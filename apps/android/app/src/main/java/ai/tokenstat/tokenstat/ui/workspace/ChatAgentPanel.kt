@@ -567,8 +567,8 @@ internal fun ChatAgentSheet(
                     prompt = L10n.text("android.chatagentpanel.filter_agents_models_and_efforts.315032da"),
                     emptyMessage = L10n.text("android.chatagentpanel.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
                     caption = L10n.text("android.chatagentpanel.agents_on_0.ebf316db", "${hostLabel.ifBlank { L10n.text("android.chatagentpanel.this_computer.058bf37c") }}"),
-                    captionAccessory = profiles?.let { list ->
-                        { AgentProfileChip(list, profileId, profileLock, enabled = !locked && !updating, onChange = ::changeProfile) }
+                    header = profiles?.let { list ->
+                        { AgentProfileRow(list, profileId, profileLock, enabled = !locked && !updating, onChange = ::changeProfile) }
                     },
                     onRefresh = if (HostContracts.supportsModelRefresh(protocol)) {
                         { load(refresh = true) }

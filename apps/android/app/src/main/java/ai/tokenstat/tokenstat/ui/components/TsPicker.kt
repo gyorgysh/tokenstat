@@ -203,6 +203,9 @@ fun <T> TsPickerOptionList(
     /// A control at the end of the caption line, such as which login the
     /// listed agents run as.
     captionAccessory: (@Composable () -> Unit)? = null,
+    /// A full-width control under the caption, such as which profile the
+    /// agents sign in with. Sized for a finger, unlike the caption line.
+    header: (@Composable () -> Unit)? = null,
     onRefresh: (suspend () -> Unit)? = null,
     /// What a section is currently set to, shown beside its heading.
     sectionValue: ((String) -> String?)? = null,
@@ -300,6 +303,7 @@ fun <T> TsPickerOptionList(
             } else if (!caption.isNullOrEmpty()) {
                 Text(caption, style = TsType.caption, color = colors.textSecondary)
             }
+            header?.invoke()
             if (selectionSummary != null && !tabbed) {
                 Text(
                     selectionSummary,

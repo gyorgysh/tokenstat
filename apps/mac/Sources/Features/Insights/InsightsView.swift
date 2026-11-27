@@ -272,7 +272,7 @@ struct InsightsView: View {
 @MainActor
 private func profileTitle(_ id: String) -> String {
     if let title = AgentProfileCatalog.shared.value?.profile(id)?.title { return title }
-    return id == AgentProfiles.system ? L10n.text("common.profiles.this_mac") : L10n.text("apple.profiles.unavailable")
+    return id == AgentProfiles.system ? L10n.text("common.profiles.main") : L10n.text("apple.profiles.unavailable")
 }
 
 private struct BreakdownTable: View {

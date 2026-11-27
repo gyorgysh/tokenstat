@@ -1424,7 +1424,7 @@ struct AgentProfiles: Codable, Sendable, Hashable {
 
 struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     var id: String
-    /// Nil for the machine's own, which the app names for the platform.
+    /// Nil for the machine's own, which every client calls Main.
     var name: String?
     var system: Bool
     var platform: String? = nil
@@ -1432,13 +1432,7 @@ struct AgentProfile: Codable, Sendable, Hashable, Identifiable {
     var own: [String]
 
     var title: String {
-        if system {
-            switch platform {
-            case "macos": return L10n.text("common.profiles.this_mac")
-            case "windows": return L10n.text("common.profiles.this_pc")
-            default: return L10n.text("common.profiles.this_computer")
-            }
-        }
+        if system { return L10n.text("common.profiles.main") }
         return name ?? id
     }
 }

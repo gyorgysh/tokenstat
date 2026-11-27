@@ -29,7 +29,9 @@ internal sealed record ChatAgentPickerSource(
     Func<string>? SelectedProfile = null,
     Func<string?>? ProfileLock = null,
     Func<string, Task>? PickProfile = null,
-    string? LimitsWorkspace = null);
+    string? LimitsWorkspace = null,
+    /// <summary>Read the profiles again after somebody manages them from the menu.</summary>
+    Func<Task>? ReloadProfiles = null);
 
 /// <summary>
 /// The composer's agent field, as on the Mac: the harness mark, the model
@@ -173,6 +175,11 @@ internal static class ChatAgentPicker
             {
                 await pickProfile(id);
                 flyout.Hide();
+                source.Repaint();
+            }, async () =>
+            {
+                flyout.Hide();
+                if (source.ReloadProfiles is { } reload) await reload();
                 source.Repaint();
             }) is FrameworkElement picker)
         {

@@ -314,6 +314,9 @@ struct PickerOptionList<Value: Hashable>: View {
     /// agents in the list run as. Shown on the phone too, with the caption,
     /// because it is a setting rather than a title.
     var captionAccessory: AnyView? = nil
+    /// A full-width control above the tabs, such as which profile the agents
+    /// sign in with. Sized for a finger, unlike the caption line.
+    var header: AnyView? = nil
     var refresh: (() async -> Void)?
     var sectionValue: ((String) -> String?)?
     /// Tabs for a picker that holds several independent settings, one per
@@ -369,6 +372,7 @@ struct PickerOptionList<Value: Hashable>: View {
                     }
                     #endif
                 }
+                if let header { header }
                 if let selectionSummary, !tabbed {
                     Text(selectionSummary)
                         .font(Theme.callout)

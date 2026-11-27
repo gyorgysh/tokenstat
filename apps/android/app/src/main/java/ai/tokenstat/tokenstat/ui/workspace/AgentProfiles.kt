@@ -10,9 +10,17 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -26,11 +34,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 
 internal data class AgentProfile(val id: String, val name: String, val own: Set<String>, val platform: String?) {
-    val title: String get() = if (id != "system") name else when (platform) {
-        "macos" -> L10n.text("common.profiles.this_mac")
-        "windows" -> L10n.text("common.profiles.this_pc")
-        else -> L10n.text("common.profiles.this_computer")
-    }
+    val title: String get() = if (id != "system") name else L10n.text("common.profiles.main")
 }
 
 internal class AgentProfiles(value: JsonObject) {
@@ -103,50 +107,94 @@ internal fun AgentProfilePicker(profiles: AgentProfiles, selected: String?, lock
     }
 }
 
-/// Which login the listed agents run as, as a small chip on the picker's
-/// caption line. A locked repository shows its profile with a lock and no
-/// menu. Port of the Apple `profileMenu`.
+/// Which logins the listed agents use, as one full-width row a finger can
+/// hit. It shows as soon as the host lists profiles, even with only Main,
+/// because the menu is also where somebody finds out profiles exist. A
+/// locked repository shows its profile with a lock and no menu. Port of the
+/// Apple `profileRow`.
 @Composable
-internal fun AgentProfileChip(profiles: AgentProfiles, selected: String?, lock: String?,
+internal fun AgentProfileRow(profiles: AgentProfiles, selected: String?, lock: String?,
     enabled: Boolean, onChange: (String) -> Unit,
 ) {
-    if (profiles.profiles.size < 2 && (selected == null || selected == "system") && lock == null) return
     val colors = ai.tokenstat.tokenstat.ui.theme.LocalTsColors.current
     val active = lock ?: selected ?: profiles.defaultId
     var open by remember { mutableStateOf(false) }
+    var explaining by remember { mutableStateOf(false) }
+    val detail = when {
+        lock != null -> L10n.text("common.profiles.locked", profiles.title(lock))
+        active == "system" -> L10n.text("common.profiles.main_detail")
+        else -> L10n.text("common.profiles.row_detail")
+    }
     Box {
         androidx.compose.foundation.layout.Row(
             androidx.compose.ui.Modifier
-                .clip(androidx.compose.foundation.shape.CircleShape)
-                .background(if (lock != null) colors.panel else colors.accentSoft)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .border(1.dp, colors.border, RoundedCornerShape(12.dp))
                 .clickable(enabled = enabled && lock == null, role = androidx.compose.ui.semantics.Role.Button) { open = true }
-                .semantics { contentDescription = L10n.text("common.profiles.label") + ", " + profiles.title(active) }
-                .heightIn(min = 32.dp)
-                .padding(horizontal = 10.dp, vertical = 4.dp),
+                .semantics(mergeDescendants = true) {
+                    contentDescription = L10n.text("common.profiles.label") + ", " + profiles.title(active) + ", " + detail
+                }
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
         ) {
-            androidx.compose.material3.Icon(
-                if (lock != null) androidx.compose.material.icons.Icons.Default.Lock
-                else androidx.compose.material.icons.Icons.Default.AccountCircle,
-                null, tint = if (lock != null) colors.textSecondary else colors.accent,
-                modifier = androidx.compose.ui.Modifier.size(14.dp),
-            )
-            Text(profiles.title(active), style = ai.tokenstat.tokenstat.ui.components.TsType.caption,
-                color = if (lock != null) colors.textSecondary else colors.accent, maxLines = 1)
+            Box(
+                androidx.compose.ui.Modifier.size(32.dp).clip(CircleShape).background(colors.accentSoft),
+                contentAlignment = androidx.compose.ui.Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    if (lock != null) androidx.compose.material.icons.Icons.Default.Lock
+                    else androidx.compose.material.icons.Icons.Default.AccountCircle,
+                    null, tint = colors.accent, modifier = androidx.compose.ui.Modifier.size(18.dp),
+                )
+            }
+            androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.weight(1f)) {
+                Text(profiles.title(active), style = ai.tokenstat.tokenstat.ui.components.TsType.callout,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(detail, style = ai.tokenstat.tokenstat.ui.components.TsType.caption,
+                    color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (lock == null) androidx.compose.material3.Icon(
-                androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null,
-                tint = colors.accent, modifier = androidx.compose.ui.Modifier.size(14.dp),
+                androidx.compose.material.icons.Icons.Default.UnfoldMore, null,
+                tint = colors.textSecondary, modifier = androidx.compose.ui.Modifier.size(20.dp),
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                L10n.text("common.profiles.explain"),
+                style = ai.tokenstat.tokenstat.ui.components.TsType.caption,
+                color = colors.textSecondary,
+                modifier = androidx.compose.ui.Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            )
             profiles.profiles.forEach { profile ->
                 DropdownMenuItem(
                     text = { Text(profile.title) },
+                    trailingIcon = if (profile.id == active) {
+                        { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Check, null, tint = colors.accent) }
+                    } else null,
                     enabled = profile.id != active,
                     onClick = { open = false; onChange(profile.id) },
                 )
             }
+            androidx.compose.material3.HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text(L10n.text("common.profiles.add_ellipsis")) },
+                leadingIcon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Add, null) },
+                onClick = { open = false; explaining = true },
+            )
         }
     }
+    // Profiles belong to the computer the agents run on, and its host takes
+    // profile changes only from its own app, so the phone says where to go.
+    if (explaining) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { explaining = false },
+        title = { Text(L10n.text("common.profiles.add")) },
+        text = { Text(L10n.text("common.profiles.add_on_host")) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { explaining = false }) { Text(L10n.text("common.done")) }
+        },
+    )
 }

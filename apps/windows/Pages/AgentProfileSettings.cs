@@ -55,7 +55,7 @@ internal sealed class AgentProfileSettings : StackPanel
             _selected = Format.Text(result, "id", AgentProfiles.SystemId);
             result = result["profiles"] ?? throw new InvalidOperationException();
         }
-        _profiles = new AgentProfiles(result, true);
+        _profiles = new AgentProfiles(result);
         if (_profiles.Find(_selected) is null) _selected = AgentProfiles.SystemId;
         if (method is "create" or "delete" or "setAgent") await RefreshStatusAsync();
     }
