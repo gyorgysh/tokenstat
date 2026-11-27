@@ -859,7 +859,7 @@ struct ChatAgentPanel: View {
                     isSelected: choices.isSelected,
                     prompt: L10n.text("apple.chatsetupheader.filter_agents_models_and_efforts.315032da"),
                     emptyMessage: L10n.text("apple.chatsetupheader.no_agents_installed_set_up_an_agent_to_sta.2f73b57f"),
-                    caption: model.peer == nil ? L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5") : L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971"),
+                    caption: pickerCaption,
                     header: profileRow,
                     refresh: nil,
                     sectionValue: choices.currentValue,
@@ -1021,6 +1021,14 @@ struct ChatAgentPanel: View {
         let agents: [String]
     }
 
+    private var pickerCaption: String? {
+        if model.peer != nil { return L10n.text("apple.chatsetupheader.agents_on_this_chat_s_remote_host.2c090971") }
+        #if os(macOS)
+        if model.agentProfiles != nil { return nil }
+        #endif
+        return L10n.text("apple.chatsetupheader.agents_on_this_computer.133ab3d5")
+    }
+
     private var profileRow: AnyView? {
         guard let profiles = model.agentProfiles else { return nil }
         let selected = model.profileID(for: chat) ?? AgentProfiles.system
@@ -1043,9 +1051,10 @@ struct ChatAgentPanel: View {
         }
         return AnyView(
             Menu {
-                Section(L10n.text("common.profiles.explain")) {
+                Section {
                     ForEach(profiles.profiles) { profile in
                         Button {
+                            guard selected != profile.id else { return }
                             if chat.lastMessageAtMs != nil || chat.resumeToken != nil {
                                 continuingProfile = profile
                             } else {
@@ -1055,8 +1064,9 @@ struct ChatAgentPanel: View {
                             if selected == profile.id { Label(profile.title, systemImage: "checkmark") }
                             else { Text(profile.title) }
                         }
-                        .disabled(selected == profile.id)
                     }
+                } header: {
+                    ProfileMenuHeader()
                 }
                 Section {
                     Button(L10n.text("common.profiles.add_ellipsis"), .create) {
@@ -1066,16 +1076,24 @@ struct ChatAgentPanel: View {
                 }
             } label: {
                 ProfileRowLabel(title: current,
-                                detail: L10n.text(selected == AgentProfiles.system ? "common.profiles.main_detail" : "common.profiles.row_detail"),
+                                detail: Self.profileRowDetail(main: selected == AgentProfiles.system),
                                 chevron: true)
             }
-            .modifier(BorderlessMenu())
+            .modifier(ProfileMenuStyle())
             .menuIndicator(.hidden)
             .disabled(locked || updating)
             .accessibilityLabel(L10n.text("apple.profiles.profile"))
             .accessibilityValue(current)
         )
     }
+
+    #if os(macOS)
+    private static func profileRowDetail(main: Bool) -> String { L10n.text("apple.profiles.profile") }
+    #else
+    private static func profileRowDetail(main: Bool) -> String {
+        L10n.text(main ? "common.profiles.main_detail" : "common.profiles.row_detail")
+    }
+    #endif
 
     private func createProfile() {
         let name = newProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1532,10 +1550,18 @@ extension EnvironmentValues {
     }
 }
 
-private struct BorderlessMenu: ViewModifier {
+private struct ProfileMenuHeader: View {
+    var body: some View {
+        #if !os(macOS)
+        Text(L10n.text("common.profiles.explain"))
+        #endif
+    }
+}
+
+private struct ProfileMenuStyle: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
-        content.menuStyle(.borderlessButton)
+        content.menuStyle(.button).buttonStyle(.plain)
         #else
         content
         #endif
@@ -1549,6 +1575,38 @@ private struct ProfileRowLabel: View {
     var chevron = false
 
     var body: some View {
+        #if os(macOS)
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Theme.accentSoft))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(Theme.callout.weight(.semibold))
+                .foregroundStyle(Self.label)
+                .lineLimit(1)
+            Spacer(minLength: Theme.Space.s)
+            Text(detail)
+                .font(Theme.caption)
+                .foregroundStyle(Self.secondaryLabel)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if chevron {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Theme.font(10, weight: .semibold))
+                    .foregroundStyle(Self.secondaryLabel)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, Theme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+        .contentShape(Rectangle())
+        #else
         HStack(spacing: Theme.Space.s) {
             Image(systemName: symbol)
                 .font(Theme.font(rowIcon, weight: .medium))
@@ -1579,6 +1637,7 @@ private struct ProfileRowLabel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.hairline))
         .contentShape(Rectangle())
+        #endif
     }
 
     #if os(macOS)
