@@ -121,6 +121,7 @@ struct ClientChatMenu: View {
                 Divider()
                 Button(L10n.text("apple.clientchatview.setup.7013af4c"), .settings, action: onSetup)
                     .disabled(conversation.teamShare != nil)
+                ChatBackdropMenu()
             }
             Section {
                 ChatDetailMenuPicker()

@@ -1111,6 +1111,8 @@ struct ClientChatThread: View {
                             .padding(.top, Theme.Space.s)
                     }
                         }
+                        .chatBackdrop(active: isActive && scenePhase == .active, working: model.busy,
+                                      lane: ReadingRoom.laneWidth)
                         .modifier(ClientChatResizeFrame(resize: chatResize,
                             fraction: chatPaneFraction, totalWidth: chatWidth,
                             isSplit: isActive && wideBrowser && companion != nil && browserFocus == .split))

@@ -255,6 +255,7 @@ struct ChatView: View {
                             showingHandoff = true
                         }
                     }
+                    ChatBackdropMenu()
                 }
                 if showsConversationToolbarActions, !showingOverview, model.selected != nil, let reference = model.currentReference {
                     let pinned = pins.isPinned(reference)
@@ -415,6 +416,8 @@ struct ChatView: View {
             }
             }
             .transformEnvironment(\.personaMotionAllowed) { $0 = $0 && !showingOverview && isActive }
+            .chatBackdrop(active: isActive && !showingOverview && model.selected != nil, working: model.busy,
+                          lane: ReadingRoom.laneWidth)
             .opacity(showingOverview ? 0 : 1)
             .allowsHitTesting(!showingOverview)
             .accessibilityHidden(showingOverview)

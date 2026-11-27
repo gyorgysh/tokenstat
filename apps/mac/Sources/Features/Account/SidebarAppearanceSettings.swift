@@ -70,6 +70,8 @@ struct SidebarAppearanceSettings: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                ThemeRule()
+                ChatBackdropPicker()
                 if #available(macOS 26, *) {
                     ThemeRule()
                     glassControls

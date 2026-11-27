@@ -8,6 +8,7 @@ struct ClientAppearanceCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             ClientSectionTitle(title: L10n.text("apple.sidebarappearance.title"), mark: "mark_device")
             AppearancePicker(comfortable: true)
+            ChatBackdropPicker(comfortable: true)
             Button(L10n.text("apple.setuptour.run_again"), .theme) {
                 SetupTourPreferences.requestShow()
             }

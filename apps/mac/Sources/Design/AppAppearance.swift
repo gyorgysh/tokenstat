@@ -54,7 +54,7 @@ struct AppearanceColors: Codable, Equatable {
         return UInt32(hex.dropFirst(), radix: 16)
     }
 
-    private static func luminance(_ value: UInt32) -> Double {
+    static func luminance(_ value: UInt32) -> Double {
         [16, 8, 0].map { shift -> Double in
             let channel = Double((value >> shift) & 255) / 255
             return channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
@@ -130,6 +130,7 @@ final class AppAppearance {
     private static let modeKey = "appearance.mode"
     private static let paletteKey = "appearance.palette"
     private static let themesKey = "appearance.customThemes"
+    private static let backdropKey = "appearance.chatBackdrop"
 
     struct Custom: Codable, Identifiable {
         let id: UUID
@@ -159,6 +160,9 @@ final class AppAppearance {
         didSet { defaults.set(paletteID, forKey: Self.paletteKey) }
     }
     private(set) var custom: [Custom]
+    private(set) var chatBackdrop: String? {
+        didSet { defaults.set(chatBackdrop, forKey: Self.backdropKey) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -170,6 +174,13 @@ final class AppAppearance {
         paletteID = saved.flatMap { id in
             Self.builtIn.contains { $0.id == id } || themes.contains { $0.id.uuidString == id } ? id : nil
         } ?? "default"
+        chatBackdrop = defaults.string(forKey: Self.backdropKey).flatMap { AsciiScene.named($0)?.id }
+    }
+
+    var backdropScene: AsciiScene? { chatBackdrop.flatMap(AsciiScene.named) }
+
+    func selectBackdrop(_ id: String?) {
+        chatBackdrop = id.flatMap { AsciiScene.named($0)?.id }
     }
 
     var theme: AppearanceTheme {
@@ -192,7 +203,26 @@ final class AppAppearance {
 
     func importTheme(_ data: Data) throws {
         guard data.count <= Self.maximumImportBytes else { throw AppearanceImportError.tooLarge }
-        let theme = try JSONDecoder().decode(AppearanceTheme.self, from: data).validated()
+        let decoder = JSONDecoder()
+        if let theme = try? decoder.decode(AppearanceTheme.self, from: data) {
+            paletteID = try add(theme.validated()).uuidString
+            return
+        }
+        let entries = try ChatThemeEntry.decode(data)
+        var last: UUID?
+        var failure: Error?
+        for entry in entries {
+            do {
+                last = try add(entry.theme())
+            } catch {
+                failure = failure ?? error
+            }
+        }
+        guard let last else { throw failure ?? AppearanceImportError.color }
+        paletteID = last.uuidString
+    }
+
+    private func add(_ theme: AppearanceTheme) throws -> UUID {
         let id: UUID
         if let index = custom.firstIndex(where: { $0.theme.name.caseInsensitiveCompare(theme.name) == .orderedSame }) {
             id = custom[index].id
@@ -203,7 +233,7 @@ final class AppAppearance {
             custom.append(.init(id: id, theme: theme))
         }
         saveCustom()
-        paletteID = id.uuidString
+        return id
     }
 
     func remove(_ id: UUID) {
