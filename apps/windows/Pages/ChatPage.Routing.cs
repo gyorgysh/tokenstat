@@ -212,6 +212,16 @@ internal sealed partial class ChatPage
         else _draft.Focus(FocusState.Programmatic);
     }
 
+    private static string SaveTitle(bool everywhere) => L10n.Text(everywhere ? "common.chat_route_save_default" : "common.chat_route_save_chat");
+
+    private static StackPanel ScopeChoice(string title, string detail)
+    {
+        var stack = new StackPanel { Spacing = 2 };
+        stack.Children.Add(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        stack.Children.Add(new TextBlock { Text = detail, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
+        return stack;
+    }
+
     private async Task ShowRoutingAsync()
     {
         if (_openId is not string chat) return;
@@ -231,7 +241,10 @@ internal sealed partial class ChatPage
             var enabled = new CheckBox { Content = L10n.Text("common.chat_routing_enabled"), IsChecked = Format.Flag(policy, "enabled") };
             var wait = new CheckBox { Content = L10n.Text("common.chat_wait_reset"), IsChecked = Format.Flag(policy, "waitForReset") };
             var returns = new CheckBox { Content = L10n.Text("common.chat_return_preferred"), IsChecked = Format.Flag(policy, "returnPreferred") };
-            var defaults = new CheckBox { Content = L10n.Text("common.chat_route_default"), IsChecked = Format.Flag(policy, "useAsDefault") };
+            var follows = state["followsDefault"] is JsonValue followsValue && followsValue.TryGetValue<bool>(out var followsFlag) ? followsFlag : (bool?)null;
+            var sharedPolicy = state["defaultPolicy"] as JsonObject;
+            var everywhere = new RadioButton { GroupName = "routeScope", Content = ScopeChoice(L10n.Text("common.chat_route_scope_all"), L10n.Text("common.chat_route_scope_all_detail")), IsChecked = follows ?? Format.Flag(policy, "useAsDefault") };
+            var thisChat = new RadioButton { GroupName = "routeScope", Content = ScopeChoice(L10n.Text("common.chat_route_scope_chat"), L10n.Text("common.chat_route_scope_chat_detail")), IsChecked = !(follows ?? Format.Flag(policy, "useAsDefault")) };
             var throttles = new CheckBox { Content = L10n.Text("common.chat_route_throttle"), IsChecked = Format.Flag(policy, "failoverOnThrottle") };
             var outages = new CheckBox { Content = L10n.Text("common.chat_route_errors"), IsChecked = Format.Flag(policy, "failoverOnErrors") };
             var auth = new CheckBox { Content = L10n.Text("common.chat_route_auth"), IsChecked = Format.Flag(policy, "failoverOnAuth") };
@@ -239,7 +252,7 @@ internal sealed partial class ChatPage
             var notifies = new CheckBox { Content = L10n.Text("common.chat_route_notify"), IsChecked = policy["notify"]?.GetValue<bool>() != false };
             var body = new StackPanel { Spacing = Theme.SpaceM, MaxWidth = 560 };
             body.Children.Add(Muted(L10n.Text("common.chat_route_explanation")));
-            body.Children.Add(enabled); body.Children.Add(wait); body.Children.Add(returns); body.Children.Add(defaults);
+            body.Children.Add(enabled); body.Children.Add(wait); body.Children.Add(returns);
             var advanced = new StackPanel { Spacing = Theme.SpaceS };
             advanced.Children.Add(throttles); advanced.Children.Add(outages); advanced.Children.Add(auth); advanced.Children.Add(failures); advanced.Children.Add(notifies);
             body.Children.Add(new Expander { Header = L10n.Text("common.settings"), Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
@@ -352,10 +365,32 @@ internal sealed partial class ChatPage
             PaintHistory(state["activity"] as JsonArray);
             var historyExpander = new Expander { Header = L10n.Text("common.chat_route_history"), Content = history, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
             historyExpander.Expanding += async (_, _) => await LoadHistory(null);
+            body.Children.Add(Chrome.SectionLabel(L10n.Text("common.chat_route_step_scope_title")));
+            if (follows is bool current && sharedPolicy is not null)
+            {
+                var status = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+                status.Children.Add(Muted(L10n.Text(current ? "common.chat_route_follows_default" : "common.chat_route_own_routing")));
+                if (!current)
+                {
+                    status.Children.Add(ActionIconGlyph.Button(L10n.Text("common.chat_route_use_default"), ActionIcon.Refresh, (_, _) =>
+                    {
+                        enabled.IsChecked = Format.Flag(sharedPolicy, "enabled"); wait.IsChecked = Format.Flag(sharedPolicy, "waitForReset"); returns.IsChecked = Format.Flag(sharedPolicy, "returnPreferred");
+                        throttles.IsChecked = Format.Flag(sharedPolicy, "failoverOnThrottle"); outages.IsChecked = Format.Flag(sharedPolicy, "failoverOnErrors"); auth.IsChecked = Format.Flag(sharedPolicy, "failoverOnAuth"); failures.IsChecked = Format.Flag(sharedPolicy, "failoverOnFailures");
+                        notifies.IsChecked = sharedPolicy["notify"]?.GetValue<bool>() != false;
+                        routes = (sharedPolicy["routes"] as JsonArray)?.Select(r => (JsonObject)r!.DeepClone()).ToList() ?? [];
+                        PaintRoutes();
+                        everywhere.IsChecked = true;
+                    }));
+                }
+                body.Children.Add(status);
+            }
+            body.Children.Add(everywhere); body.Children.Add(thisChat);
             body.Children.Add(historyExpander);
-            var dialog = new ContentDialog { Title = L10n.Text("common.chat_routing"), Content = new ScrollViewer { Content = body, MaxHeight = 500 }, PrimaryButtonText = L10n.Text("common.save"), CloseButtonText = L10n.Text("common.cancel") };
+            var dialog = new ContentDialog { Title = L10n.Text("common.chat_routing"), Content = new ScrollViewer { Content = body, MaxHeight = 500 }, PrimaryButtonText = SaveTitle(everywhere.IsChecked == true), CloseButtonText = L10n.Text("common.cancel") };
+            everywhere.Checked += (_, _) => dialog.PrimaryButtonText = SaveTitle(true);
+            thisChat.Checked += (_, _) => dialog.PrimaryButtonText = SaveTitle(false);
             if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary || !Current() || revision is null) return;
-            policy["enabled"] = enabled.IsChecked == true; policy["waitForReset"] = wait.IsChecked == true; policy["returnPreferred"] = returns.IsChecked == true; policy["useAsDefault"] = defaults.IsChecked == true; policy["failoverOnThrottle"] = throttles.IsChecked == true; policy["failoverOnErrors"] = outages.IsChecked == true; policy["failoverOnAuth"] = auth.IsChecked == true; policy["failoverOnFailures"] = failures.IsChecked == true; policy["notify"] = notifies.IsChecked == true; policy["preferred"] = preferredRoute?.DeepClone();
+            policy["enabled"] = enabled.IsChecked == true; policy["waitForReset"] = wait.IsChecked == true; policy["returnPreferred"] = returns.IsChecked == true; policy["useAsDefault"] = everywhere.IsChecked == true; policy["failoverOnThrottle"] = throttles.IsChecked == true; policy["failoverOnErrors"] = outages.IsChecked == true; policy["failoverOnAuth"] = auth.IsChecked == true; policy["failoverOnFailures"] = failures.IsChecked == true; policy["notify"] = notifies.IsChecked == true; policy["preferred"] = preferredRoute?.DeepClone();
             policy["routes"] = new JsonArray(routes.Select(r => (JsonNode)r.DeepClone()).ToArray());
             await CallChatAsync("chat.routing", new JsonObject { ["id"] = chat, ["expectedRevision"] = revision, ["routing"] = policy });
             if (!Current()) return;
