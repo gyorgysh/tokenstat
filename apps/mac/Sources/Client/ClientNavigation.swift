@@ -443,6 +443,13 @@ final class ClientNavigationModel {
     }
 }
 
+/// One folder's section, pushed on the Workspaces tab's stack.
+///
+/// Identity is the folder, not its snapshot: equality and hashing use only
+/// peer, folder id and section, so a folder refresh that changes its name,
+/// branch or counts neither duplicates the entry nor breaks pop semantics.
+/// The held `folder` is the push-time snapshot for the destination's initial
+/// draw; detail screens reload on appear.
 struct ClientFolderPush: Hashable {
     let peerKey: String
     let hostName: String

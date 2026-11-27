@@ -157,6 +157,12 @@ final class WorkspacesModel {
                  isLoading: isLoading, error: directoryError)
     }
 
+    /// Which inspector tab is open.
+    ///
+    /// Here rather than in the view, because the view is rebuilt every time the
+    /// file watcher refreshes the folder list, which during a build is several
+    /// times a second. As view state the tab was reset on the next build and
+    /// the picker looked like it did nothing at all.
     var inspectorTab: InspectorTab = .files
     var chatInspectorShowsSettings = true
 

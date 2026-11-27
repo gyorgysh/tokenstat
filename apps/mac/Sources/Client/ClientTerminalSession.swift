@@ -670,6 +670,8 @@ struct ClientTerminalScreen: View {
             }
         }
         .onDisappear {
+            // Full-screen dismiss: stop draining when nobody is watching.
+            // Re-open attaches a fresh session from pty.list.
             session.stop()
             navigation.leaveTerminal(owner: session.id)
         }

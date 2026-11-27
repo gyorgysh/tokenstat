@@ -945,6 +945,8 @@ final class TranscriptScrollDelivery {
     deinit { pending?.cancel() }
 }
 
+/// Report where the transcript is scrolled, by whichever route this system
+/// offers, and name the space its rows measure themselves in.
 private struct TranscriptScrollMetrics: ViewModifier {
     @MainActor
     final class Interaction {
@@ -1667,6 +1669,13 @@ final class TranscriptWindow {
     }
 }
 
+/// What the top of a transcript says about what is before it.
+///
+/// Three states and no spinner that never resolves: there is more and it can
+/// be asked for, more is on its way, or this is where the conversation
+/// begins. The last of those only appears once somebody has actually read
+/// back to it, because announcing the start of a short chat is announcing
+/// that it is short.
 struct TranscriptEarlierHeader: View {
     let model: ChatModel
     let load: () -> Void

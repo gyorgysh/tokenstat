@@ -634,6 +634,9 @@ private struct ClientChatContent: View {
     }
 }
 
+/// The slim strip both chat screens show while a foreground refresh is in
+/// flight, or while the connection is down. A spinner while working, plain
+/// words while waiting: the two states ask for different patience.
 private struct ClientReconnectBanner: View {
     var offline: Bool = false
 

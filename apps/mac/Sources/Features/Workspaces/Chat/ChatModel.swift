@@ -3158,6 +3158,8 @@ final class ChatModel {
             self.pollCadence.note(success: success, changed: self.eventsRevision != revision,
                                   now: ProcessInfo.processInfo.systemUptime)
         }
+        // A held event read must not hold the watcher's metadata clock.
+        // The lane keeps that read bounded while later ticks share it.
         if forceStatus {
             await events?.value
             guard pollIsCurrent(owner) else { return }

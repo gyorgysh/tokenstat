@@ -346,6 +346,9 @@ struct DesktopDetailLayout: Layout {
     }
 }
 
+/// The sidebar floated over the content on a window too narrow for the
+/// column: the same glass as the docked panel, with a hairline and the flat
+/// colour where glass does not exist.
 struct FloatingSidebarSurface: ViewModifier {
     var isFullScreen: Bool = false
 
