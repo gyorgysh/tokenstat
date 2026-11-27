@@ -169,6 +169,8 @@ final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
         return state.label
     }
 
+    /// Smoothed CPU of the session's process subtree, percent of one core,
+    /// as measured by the host. `nil` until the sampler has a reading.
     private(set) var cpuPercent: Double?
 
     private(set) var memoryMb: Double?
