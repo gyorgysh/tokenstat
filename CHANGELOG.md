@@ -16,11 +16,12 @@ desktop is a review build. Newest first.
 
 ### Changed
 
-- Dot Waves no longer has floating white dots. Over either dot background, tool steps, reasoning and the working line sit on a frosted strip so they stay readable.
+- Dot Waves no longer has floating white dots. Over either dot background, tool steps, reasoning and the working line sit on a strip of the page colour so they stay readable.
 
 ### Fixed
 
 - On Mac, moving between chats with the arrow keys shows each chat at once instead of a loading screen. The Chats list also prepares the next few chats ahead, across repositories.
+- On Mac, iPhone and iPad, turning a chat background on or off no longer reloads the open chat, and a chat that cannot load while offline keeps showing its last cached messages instead of going blank.
 
 ## [1.27.0] - 2026-11-27
 

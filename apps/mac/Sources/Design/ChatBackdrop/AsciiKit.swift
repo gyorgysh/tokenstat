@@ -74,7 +74,9 @@ enum AsciiKit {
     }
 
     static func pick<T>(_ items: [T], _ seed: Double) -> T {
-        items[min(items.count - 1, max(0, Int(seed * Double(items.count))))]
+        let scaled = seed * Double(items.count)
+        let index = scaled.isFinite ? Int(max(0, min(scaled, Double(items.count - 1)))) : 0
+        return items[index]
     }
 
     static func rgb(_ c: UInt32) -> (Double, Double, Double) {

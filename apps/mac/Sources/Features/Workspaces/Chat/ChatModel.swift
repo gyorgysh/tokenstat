@@ -200,6 +200,7 @@ final class ChatModel {
     private(set) var events: [ChatTimelineEvent] = [] {
         didSet {
             eventsRevision &+= 1
+            if !events.isEmpty, holdsPreviewOffline { holdsPreviewOffline = false }
             if events.isEmpty {
                 displayCache = []
                 displayKey = nil
@@ -919,6 +920,9 @@ final class ChatModel {
     private(set) var recentMessagePreview: [ChatDisplayItem] = [] {
         didSet { previewRevision &+= 1 }
     }
+    /// The last rows seen stay up, read-only, when opening fails with nothing
+    /// live or saved to replace them, rather than the chat going blank.
+    private(set) var holdsPreviewOffline = false
     @ObservationIgnored private var previewRevision: UInt64 = 0
     private struct PreviewFoldKey: Equatable {
         var revision: UInt64
@@ -1121,7 +1125,9 @@ final class ChatModel {
         #endif
     }
 
-    var isShowingCachedTranscript: Bool { openingConversation && !recentMessagePreview.isEmpty }
+    var isShowingCachedTranscript: Bool {
+        (openingConversation || holdsPreviewOffline) && !recentMessagePreview.isEmpty
+    }
     var transcriptItems: [ChatDisplayItem] {
         let detail = ChatDetailPreference.shared.level
         let open = groupsOpen
@@ -1709,6 +1715,7 @@ final class ChatModel {
             return
         }
         rememberRecentMessages()
+        holdsPreviewOffline = false
         advanceSelection("select")
         discardSteerReservations()
         let generation = selectionGeneration
@@ -1787,6 +1794,7 @@ final class ChatModel {
             await openSavedCopy(id: chat.id, generation: generation)
         }
         if selectionMatches(id: chat.id, generation: generation) {
+            holdsPreviewOffline = events.isEmpty && savedCopy == nil && !recentMessagePreview.isEmpty
             openingConversation = false
         }
         if savedCopy == nil {
@@ -1825,6 +1833,9 @@ final class ChatModel {
             let openedLive = await openEvents(id: id, generation: generation, quiet: wasSavedCopy)
             if !openedLive, events.isEmpty, selectionMatches(id: id, generation: generation) {
                 await openSavedCopy(id: id, generation: generation)
+            }
+            if selectionMatches(id: id, generation: generation) {
+                holdsPreviewOffline = events.isEmpty && savedCopy == nil && !recentMessagePreview.isEmpty
             }
         } else {
             await loadEvents(id: id, reset: false, generation: generation)

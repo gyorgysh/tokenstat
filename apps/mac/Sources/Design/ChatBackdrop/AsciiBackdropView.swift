@@ -154,6 +154,8 @@ enum AsciiRenderer {
     static func draw<Sink: AsciiSink>(_ scene: AsciiScene, palette: AsciiPalette, into sink: inout Sink, size: CGSize,
                                       time: Double, cell: CGFloat, veil: Double, lane: CGFloat?) {
         let w = size.width, h = size.height
+        guard w.isFinite, h.isFinite, cell.isFinite, cell >= 1, time.isFinite, w > 0, h > 0,
+              w / cell < 2000, h / cell < 2000 else { return }
         let cols = Int((w / cell).rounded(.up)), rows = Int((h / cell).rounded(.up))
         guard cols > 0, rows > 0 else { return }
 
@@ -193,7 +195,7 @@ enum AsciiRenderer {
         if let lane, veil > 0 {
             let width = min(lane, w)
             let l = (w - width) / 2 - cell * 2, r = (w + width) / 2 + cell * 2
-            sink.veil(left: l, right: r, height: h, color: palette.bg, edge: cell / (r - l), alpha: veil)
+            sink.veil(left: l, right: r, height: h, color: palette.bg, edge: min(0.45, cell / (r - l)), alpha: veil)
         }
     }
 }

@@ -107,17 +107,19 @@ struct ChatBackdropLayer: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
-        if let scene = appearance.backdropScene {
-            content
-                .background {
+        // One structure whatever the setting: a branch here would give the
+        // whole chat pane a new identity on every toggle and throw away its
+        // scroll position, opening state and focus.
+        let scene = appearance.backdropScene
+        content
+            .background {
+                if let scene {
                     AsciiBackdropView(scene: scene, palette: .current(scheme), working: working, paused: !active,
                                       lane: lane)
                         .ignoresSafeArea()
                 }
-                .environment(\.chatBackdropOn, true)
-        } else {
-            content
-        }
+            }
+            .environment(\.chatBackdropOn, scene != nil)
     }
 }
 
@@ -126,7 +128,9 @@ extension EnvironmentValues {
 }
 
 /// Steps and the working line have no card of their own, so over a moving
-/// background they get a frosted strip that keeps them readable.
+/// background they get a strip of the page colour that keeps them readable.
+/// A plain fill rather than a material: a blur would be recomputed for every
+/// visible row on every frame of the animation.
 struct ChatStepBacking: ViewModifier {
     var enabled: Bool
     @Environment(\.chatBackdropOn) private var backdrop
@@ -138,10 +142,7 @@ struct ChatStepBacking: ViewModifier {
                 .padding(.horizontal, Theme.Space.s)
                 .padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    shape.fill(Theme.background.opacity(0.55))
-                        .background(.ultraThinMaterial, in: shape)
-                }
+                .background(Theme.background.opacity(0.8), in: shape)
                 .padding(.horizontal, -Theme.Space.s)
         } else {
             content
