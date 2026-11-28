@@ -36,6 +36,7 @@ struct ClientChatEventRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             content
+                .chatStepBacking(item.isPlainStep)
             if !galleryResources.isEmpty {
                 ChatImageGallery(resources: galleryResources, compact: compactGallery)
             }

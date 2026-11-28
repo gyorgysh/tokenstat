@@ -60,6 +60,7 @@ struct ChatEventRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             content
+                .chatStepBacking(item.isPlainStep)
             if !galleryResources.isEmpty {
                 ChatImageGallery(resources: galleryResources, compact: compactGallery)
             }
@@ -554,6 +555,7 @@ struct ChatWorkingIndicator: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .chatStepBacking()
         }
         .padding(.horizontal, Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

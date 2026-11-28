@@ -16,20 +16,7 @@ enum AsciiScenes {
             guard v > 0.42 else { return nil }
             let level = (v - 0.42) / 0.58
             let color = K.pick(palette.ramp, level)
-            if level > 0.93, K.noise(x, y, 7) < 0.5 {
-                return AsciiCell("+", palette.light ? palette.bg : 0xFFFFFF, a: 0.85, dot: color)
-            }
             return .dot(color, a: (palette.light ? 0.18 : 0.12) + level * (palette.light ? 0.55 : 0.7))
-        },
-        sprites: { cols, rows, t, palette in
-            (0..<3).map { i in
-                let speed = 0.6 + K.noise(i, 3) * 0.5
-                let x = K.wrap(K.noise(i, 1) * Double(cols) + t * speed * 4, Double(cols + 20)) - 10
-                let y = Double(rows) * (0.2 + 0.6 * K.noise(i, 2)) + sin(t * 0.4 + Double(i)) * 3
-                let core: UInt32 = palette.light ? palette.accent : 0xFFFFFF
-                return AsciiSprite(art: AsciiArt(["o"]), pal: ["o": .dot(core, a: 0.9)], x: x, y: y,
-                                   glow: AsciiGlow(r: 6, color: palette.accent, a: palette.light ? 0.18 : 0.35))
-            }
         }
     )
 

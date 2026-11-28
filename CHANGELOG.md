@@ -12,6 +12,10 @@ desktop is a review build. Newest first.
 - On Mac, Account shows your plan and where to manage it: the App Store, Google Play, or tokenstat.ai in your browser.
 - Plans show limited-time discounts. On Android, a discounted Google Play offer applies at checkout. On iPhone and iPad, the plan shows the introductory price before you buy.
 
+### Changed
+
+- Dot Waves no longer has floating white dots. Over either dot background, tool steps, reasoning and the working line sit on a frosted strip so they stay readable.
+
 ## [1.27.0] - 2026-11-27
 
 ### Added

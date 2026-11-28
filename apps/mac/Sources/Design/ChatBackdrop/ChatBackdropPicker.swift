@@ -114,13 +114,55 @@ struct ChatBackdropLayer: ViewModifier {
                                       lane: lane)
                         .ignoresSafeArea()
                 }
+                .environment(\.chatBackdropOn, true)
         } else {
             content
         }
     }
 }
 
+extension EnvironmentValues {
+    @Entry var chatBackdropOn = false
+}
+
+/// Steps and the working line have no card of their own, so over a moving
+/// background they get a frosted strip that keeps them readable.
+struct ChatStepBacking: ViewModifier {
+    var enabled: Bool
+    @Environment(\.chatBackdropOn) private var backdrop
+
+    func body(content: Content) -> some View {
+        if enabled, backdrop {
+            let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+            content
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    shape.fill(Theme.background.opacity(0.55))
+                        .background(.ultraThinMaterial, in: shape)
+                }
+                .padding(.horizontal, -Theme.Space.s)
+        } else {
+            content
+        }
+    }
+}
+
+extension ChatDisplayItem {
+    var isPlainStep: Bool {
+        switch kind {
+        case .thinking, .tool, .edit, .group, .usage, .handoff, .failed: true
+        default: false
+        }
+    }
+}
+
 extension View {
+    func chatStepBacking(_ enabled: Bool = true) -> some View {
+        modifier(ChatStepBacking(enabled: enabled))
+    }
+
     func chatBackdrop(active: Bool, working: Bool, lane: CGFloat) -> some View {
         modifier(ChatBackdropLayer(active: active, working: working, lane: lane))
     }
