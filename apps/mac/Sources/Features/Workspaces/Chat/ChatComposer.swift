@@ -128,6 +128,8 @@ struct ChatComposer: View {
 
     @State private var importOwner: WorkReference?
     @State private var importing = false
+    @State private var importTypes: [UTType] = [.item]
+    @State private var choosingAttachment = false
     @State private var dropTargeted = false
     @State private var nativeDropTargeted = false
     @State private var dictation = ChatDictation()
@@ -155,7 +157,7 @@ struct ChatComposer: View {
         .onChange(of: model.currentReference) { _, _ in importing = false; importOwner = nil; dictation.stop() }
         .fileImporter(
             isPresented: $importing,
-            allowedContentTypes: [.item],
+            allowedContentTypes: importTypes,
             allowsMultipleSelection: true
         ) { result in
             if case let .success(urls) = result, let owner = importOwner {
@@ -262,12 +264,35 @@ struct ChatComposer: View {
         .padding(.bottom, 2)
     }
 
+    #if os(macOS)
+    private var attachControl: some View {
+        Button { choosingAttachment.toggle() } label: {
+            ActionIcon.attach.label(L10n.text("apple.chatcomposer.attach.d406ade2"))
+                .environment(\.compactActions, true)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .hoverSeat()
+        .popover(isPresented: $choosingAttachment, arrowEdge: .bottom) {
+            ChatAttachChooser(canPaste: ChatInbox.pasteboardHasAttachment()) { choice in
+                choosingAttachment = false
+                switch choice {
+                case .images: chooseFiles([.image, .movie])
+                case .files: chooseFiles([.item])
+                case .paste: ingest(items: ChatInbox.pasteboardItems())
+                }
+            }
+        }
+        .disabled(model.landingDraft != nil && model.currentReference == nil)
+        .help(L10n.text("apple.chatcomposer.attach_files_or_images.b548dd44"))
+        .accessibilityLabel(L10n.text("apple.chatcomposer.attach.d406ade2"))
+    }
+    #else
     private var attachControl: some View {
         Menu {
-            Button(L10n.text("apple.chatcomposer.choose_files.1157defa"), .attach) {
-                importOwner = model.currentReference
-                importing = true
-            }
+            Button(L10n.text("apple.chatcomposer.choose_files.1157defa"), .attach) { chooseFiles([.item]) }
             if ChatInbox.pasteboardHasAttachment() {
                 Button(L10n.text("apple.chatcomposer.paste_from_clipboard.dc2d6f20"), .attach) {
                     ingest(items: ChatInbox.pasteboardItems())
@@ -280,14 +305,15 @@ struct ChatComposer: View {
                 .frame(width: 28, height: 28)
                 .contentShape(.rect)
         }
-        #if os(macOS)
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .hoverSeat()
-        #endif
         .disabled(model.landingDraft != nil && model.currentReference == nil)
-        .help(L10n.text("apple.chatcomposer.attach_files_or_images.b548dd44"))
         .accessibilityLabel(L10n.text("apple.chatcomposer.attach.d406ade2"))
+    }
+    #endif
+
+    private func chooseFiles(_ types: [UTType]) {
+        importTypes = types
+        importOwner = model.currentReference
+        importing = true
     }
 
     private var turnStatus: some View {
@@ -545,3 +571,63 @@ struct ChatAttachmentTile: View {
         return ActionIcon.attach.symbol
     }
 }
+
+#if os(macOS)
+/// The attach popover: what kind of thing to add, each with its own picture,
+/// rather than one bare menu item.
+struct ChatAttachChooser: View {
+    enum Choice { case images, files, paste }
+
+    let canPaste: Bool
+    let choose: (Choice) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            row(.images, symbol: "photo.on.rectangle.angled",
+                title: L10n.text("apple.chatcomposer.attach_images"),
+                detail: L10n.text("apple.chatcomposer.attach_images_detail"))
+            row(.files, symbol: "doc.text",
+                title: L10n.text("apple.chatcomposer.attach_files"),
+                detail: L10n.text("apple.chatcomposer.attach_files_detail"))
+            if canPaste {
+                row(.paste, symbol: "doc.on.clipboard",
+                    title: L10n.text("apple.chatcomposer.paste_from_clipboard.dc2d6f20"),
+                    detail: L10n.text("apple.chatcomposer.attach_paste_detail"))
+            }
+            Rectangle().fill(Theme.border).frame(height: 1).padding(.vertical, 4)
+            Label(L10n.text("apple.chatcomposer.attach_drop_hint"), systemImage: "arrow.down.doc")
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+        }
+        .padding(6)
+        .frame(width: 290)
+    }
+
+    private func row(_ choice: Choice, symbol: String, title: String, detail: String) -> some View {
+        Button { choose(choice) } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Theme.accent.opacity(0.14))
+                    Image(systemName: symbol)
+                        .font(Theme.font(15, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                }
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(Theme.callout.weight(.medium))
+                    Text(detail).font(Theme.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(.rect)
+        }
+        .buttonStyle(RowFeedbackStyle(bleed: 0, radius: 8))
+    }
+}
+#endif
