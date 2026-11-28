@@ -81,6 +81,7 @@ struct WorkspaceInspector: View {
     var onOpenAutomation: ((String, String?) -> Void)? = nil
     var onReviewWorkingTree: ((String?) -> Void)? = nil
     #endif
+    var onOpenPull: ((ChatPull) -> Void)? = nil
     var onReviewCommit: ((String) -> Void)? = nil
 
     private var tab: Binding<InspectorTab> {
@@ -169,7 +170,7 @@ struct WorkspaceInspector: View {
     private var content: some View {
         if showingChatSettings, let chat {
             if !showsChatOverview, chat.selected != nil, chat.folderID == folder?.id {
-                ChatInspector(model: chat, folder: folder, onClose: onClose, showsHeader: false)
+                ChatInspector(model: chat, folder: folder, onClose: onClose, showsHeader: false, openPull: onOpenPull)
             } else {
                 InspectorEmptyState(title: L10n.text("apple.workspaceinspector.open_a_conversation.6de86c4a"), subtitle: L10n.text("apple.workspaceinspector.chat_settings_appear_here_when_a_conversat.258869ce"))
             }

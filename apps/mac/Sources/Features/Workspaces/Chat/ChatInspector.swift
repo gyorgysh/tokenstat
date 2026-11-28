@@ -7,6 +7,8 @@ struct ChatInspector: View {
     var folder: WorkspaceFolder?
     var onClose: () -> Void
     var showsHeader = true
+    var openPull: ((ChatPull) -> Void)? = nil
+    @Environment(\.openURL) private var openURL
     @State private var showingPersonas = false
     @State private var savingProfileLock = false
     @State private var pendingDelete = false
@@ -36,6 +38,8 @@ struct ChatInspector: View {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             identity(chat)
                             ChatContextCard(model: model)
+                            pullsCard(chat)
+                            changesCard
                             ChatActivityCard(model: model)
                             ChatDetailSettings(model: model)
                             ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false)
@@ -138,6 +142,47 @@ struct ChatInspector: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .environment(\.compactActions, true)
                 .help(L10n.text("apple.chatinspector.personas.fa2ea3fb"))
+        }
+    }
+
+    @ViewBuilder
+    private func pullsCard(_ chat: ChatConversation) -> some View {
+        if !chat.pulls.isEmpty {
+            ChatSetupSection(title: L10n.text("apple.chatinspector.pulls.title"), icon: .merge,
+                             summary: L10n.text("apple.chatinspector.pulls.count", "\(chat.pulls.count)"),
+                             primary: ChatPullList(pulls: Array(chat.pulls.prefix(Self.pullsAtGlance)), open: open)
+                                .padding(.horizontal, -Theme.Space.m)) {
+                if chat.pulls.count > Self.pullsAtGlance {
+                    ChatPullList(pulls: Array(chat.pulls.dropFirst(Self.pullsAtGlance)), open: open)
+                        .padding(.horizontal, -Theme.Space.m)
+                }
+            }
+        }
+    }
+
+    private static let pullsAtGlance = 3
+
+    private func open(_ pull: ChatPull) {
+        if let openPull {
+            openPull(pull)
+        } else if let url = pull.webURL {
+            openURL(url)
+        }
+    }
+
+    @ViewBuilder
+    private var changesCard: some View {
+        if let changes = ChatTurnChanges.merged(model.transcriptItems) {
+            ChatSetupSection(title: L10n.text("apple.chatinspector.changes.title"), icon: .compare,
+                             summary: L10n.text("apple.chatinspector.changes.summary", "\(changes.files.count)"),
+                             primary: HStack(spacing: 6) {
+                                 if changes.added + changes.removed > 0 {
+                                     Text(verbatim: "+\(changes.added)").foregroundStyle(Theme.diffAdded)
+                                     Text(verbatim: "−\(changes.removed)").foregroundStyle(Theme.diffRemoved)
+                                 }
+                             }.font(Theme.numeric(12))) {
+                ChatTurnChangesCard(changes: changes)
+            }
         }
     }
 

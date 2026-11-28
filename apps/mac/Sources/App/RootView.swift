@@ -1526,7 +1526,14 @@ struct RootView: View {
                     account: account.account, onClose: { closeInspector() },
                     chat: chat, workspace: workspaces.folders.first { $0.id == route.workspaceID },
                     showsChatOverview: showingChatOverview,
-                    onOpenAutomation: { jobID, runID in openAutomation(jobID: jobID, runID: runID) })
+                    onOpenAutomation: { jobID, runID in openAutomation(jobID: jobID, runID: runID) },
+                    onOpenPull: { pull in
+                        if let folder = workspaces.folders.first(where: { $0.id == route.workspaceID }) {
+                            openPull(pull, from: folder)
+                        } else if let url = pull.webURL {
+                            openURL(url)
+                        }
+                    })
                 #else
                 ChatInspector(
                     model: chat,

@@ -267,6 +267,28 @@ struct ChatTurnChanges: Equatable, Sendable {
 
     var added: UInt64 { files.reduce(0) { $0 + $1.added } }
     var removed: UInt64 { files.reduce(0) { $0 + $1.removed } }
+
+    /// Every file the loaded turns changed, one row per path with its totals.
+    static func merged(_ items: [ChatDisplayItem]) -> ChatTurnChanges? {
+        var order: [String] = []
+        var byPath: [String: File] = [:]
+        for item in items {
+            guard case let .changes(turn) = item.kind else { continue }
+            for file in turn.files {
+                if var known = byPath[file.path] {
+                    known.added += file.added
+                    known.removed += file.removed
+                    known.patches += file.patches
+                    byPath[file.path] = known
+                } else {
+                    order.append(file.path)
+                    byPath[file.path] = file
+                }
+            }
+        }
+        guard !order.isEmpty else { return nil }
+        return ChatTurnChanges(id: "chat", files: order.compactMap { byPath[$0] })
+    }
 }
 
 extension ChatDisplayItem {

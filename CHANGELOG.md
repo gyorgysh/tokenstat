@@ -10,6 +10,7 @@ desktop is a review build. Newest first.
 ### Added
 
 - On Mac, Account shows your plan and where to manage it: the App Store, Google Play, or tokenstat.ai in your browser.
+- On Mac, the chat inspector lists the pull requests a chat mentions and the files it changed, so you can see both at a glance.
 - Plans show limited-time discounts. On Android, a discounted Google Play offer applies at checkout. On iPhone and iPad, the plan shows the introductory price before you buy.
 
 ### Changed
