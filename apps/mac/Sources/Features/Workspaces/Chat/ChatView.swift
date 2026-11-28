@@ -922,6 +922,8 @@ struct ChatView: View {
                     }
                 }
                 while model.openingConversation {
+                    if model.isShowingCachedTranscript,
+                       !(model.currentReference.map(ChatReadingStore.shared.hasRequest(for:)) ?? false) { break }
                     try? await Task.sleep(for: .milliseconds(50))
                     guard !Task.isCancelled, settleTaskID == ticket,
                           presentation.reading == model.readingIdentity else { return }

@@ -2531,6 +2531,14 @@ struct RootView: View {
             next = step > 0 ? 0 : rows.count - 1
         }
         openChatEntry(rows[next])
+        let count = rows.count
+        let nearby = [step, 2 * step, 3 * step, -step].map { rows[((next + $0) % count + count) % count] }
+            .filter { $0.conversation.id != rows[next].conversation.id }
+        Task {
+            for entry in nearby {
+                await chat.warmConversationPreview(entry.conversation, in: entry.folder.id)
+            }
+        }
         return true
     }
 

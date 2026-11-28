@@ -84,6 +84,11 @@ final class ChatReadingStore {
         forget(for: reference)
     }
 
+    func hasRequest(for reference: WorkReference) -> Bool {
+        guard let key = WorkReferenceKey.conversation(reference) else { return false }
+        return requested?.key == key
+    }
+
     func takeRequest(for reference: WorkReference) -> ChatReadingMark? {
         guard let key = WorkReferenceKey.conversation(reference), requested?.key == key else { return nil }
         defer { requested = nil }
